@@ -14,13 +14,16 @@ l!
 
 \ **Now we can use single-line comments!**
 
-\ planckforth -
-\ Copyright (C) 2021 nineties
+\ plancklisp -
+\ Copyright (C) 2025 nineties
 
-\ This project aims to bootstrap a Forth interpreter
-\ from hand-written tiny ELF binary.
+\ This file implements a Lisp interpreter (PlanckLISP) using a Forth interpreter
+\ (PlanckForth) that is written entirely by hand in machine code.
 
-\ In the 1st stage, only single character words are registered
+\ The process begins by bootstrapping a very minimal version of PlanckForth through
+\ self-extension, gradually growing it into a usable Forth system.
+
+\ In the 1st phase only single character words are registered
 \ in the dictionary.
 \ List of builtin words:
 \ 'Q' ( n -- )          Exit the process
@@ -62,7 +65,7 @@ l!
 \ 'v' ( -- a-addr u )   argv and argc
 \ 'V' ( -- c-addr )     Runtime information string
 
-\ The 1st stage interpreter repeats execution of k, f and x.
+\ The 1st phase interpreter repeats execution of k, f and x.
 \ The following line is an example program of planckforth
 \ which prints "Hello World!\n"
 \ --
@@ -128,7 +131,7 @@ l!
 \ '\'' ( "c" -- xt )    Get execution token of following character
 \ NB: This definition is different from the usual definition of tick
 \ because it does not skip leading spaces and can read only a single
-\ character. It will be redefined in later stage.
+\ character. It will be redefined in later phase
 h@l@, k1k0-h@$ k'h@k1k0-+$ h@C+h!
     i, kkf, kff, kef,
 l!
@@ -326,7 +329,7 @@ h@ k0k0-,   \ allocate 1 cell and fill 0
 cM~ i, 'L, , 'e, l!
 
 \ 'I'
-\ The 2nd Stage Interpreter
+\ The 2nd Phase Interpreter
 cI i,
 \ <loop>
     'W,                 \ read name from input
@@ -345,11 +348,11 @@ cI i,
         'j, k0kI-C*,    \ goto <loop>
 l!
 
-I \ Enter 2nd Stage
+I \ Enter 2nd Phase
 
-\ === 2nd Stage Interpreter ===
+\ === 2nd Phase Interpreter ===
 
-} _     \ Drop 1st stage interpreter from call stack
+} _     \ Drop 1st phase interpreter from call stack
 
 \ '\'' ( "name" -- xt )
 \ Redefine existing '\'' which uses 'k' and 'f'
@@ -1420,7 +1423,7 @@ s" -256" >number drop next-user-error !
     1 next-user-error -!
 ;
 
-( === 3rd Stage Interpreter === )
+( === 3rd Phase Interpreter === )
 
 s" -13" >number drop s" Undefined word" def-error UNDEFINED-WORD-ERROR
 :noname
@@ -1463,7 +1466,7 @@ create word-buffer s" 64" >number drop cell+ allot
 ;
 
 :noname
-    rp0 rp! \ drop 2nd stage
+    rp0 rp! \ drop 2nd phase
     begin
         ['] interpret catch
         ?dup if
@@ -2052,7 +2055,7 @@ variable source-buffer-end 0 source-buffer-end !
     ]
 ;
 
-( === 4th Stage Interpreter === )
+( === 4th Phase Interpreter === )
 
 -56 s" Bye" def-error QUIT
 
@@ -2126,7 +2129,7 @@ variable source-buffer-end 0 source-buffer-end !
 ;
 
 :noname
-    rp0 rp! \ drop 3rd stage
+    rp0 rp! \ drop 3rd phase
     ['] new-key &key !
 
     ['] interpret-outer catch bye
