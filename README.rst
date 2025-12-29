@@ -21,6 +21,28 @@ assemblers, compilers, runtimes, and code generators.
 Many parts are exploratory, incomplete, or subject to change. Documentation and
 structure may lag behind the actual experiments.
 
+Bootstrapping Process
+---------------------
+
+The system is built in explicit stages, each providing the minimum functionality
+required for the next stage.
+
+Stage0
+~~~~~~
+
+Stage0 begins with a minimal Forth interpreter written by hand in machine code.
+Using Forth’s self-extensibility, this interpreter is grown into a more capable
+language environment, eventually producing a simple Lisp interpreter.
+
+Starting from hand-written machine code imposes strong constraints, but these can
+be addressed by leveraging core features of Forth. Lisp is chosen as the output of
+Stage0 because later stages require direct manipulation of syntax trees.
+
+Stage1
+~~~~~~
+
+TBD
+
 Status
 ------
 
