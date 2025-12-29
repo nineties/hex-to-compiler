@@ -1047,7 +1047,7 @@ decimal \ set default to decimal
         'a' 'z' rangeof 'a' - 10 + endof
         'A' 'Z' rangeof 'A' - 10 + endof
             \ failed to convert
-            2drop r> r> nip false
+            2drop r> r> nip nip false
             exit
         endcase
         2dup
