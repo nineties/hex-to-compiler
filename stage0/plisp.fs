@@ -851,7 +851,11 @@ alias-builtin key k
 : -! ( n a-addr -- ) tuck @ swap - swap ! ;
 
 \ allocate n bytes
-: allot ( n -- ) &here +!  ;
+: allot ( n -- ) aligned &here +!  ;
+
+\ allocate user memory
+: %allot ( size -- addr ) aligned here swap allot ;
+
 
 ( === create and does> === )
 
@@ -1447,67 +1451,30 @@ do-stack 16 cells + do-sp !
     cr
 ;
 
-( === Data Structure === )
-
-\ align n1 to u-byte boundary
-: aligned-by ( n1 u -- n2 )
-    1- dup invert   \ ( n1 u-1 ~(u-1) )
-    -rot + and
-;
-
-\ align here to u-byte boundary
-: align-by ( u -- )
-    here swap aligned-by &here !
-;
-
-: struct ( -- offset )
-    0
-;
-
-\ struct ... end-struct new-word
-\ defines new-word as an operator
-\ that returns alignment and size of the struct.
-\ new-word: ( -- align size )
-: end-struct ( offset "name" -- )
-    create , does> @ cell swap
-;
-
-: cell% ( -- align size ) cell cell ;
-: char% ( -- align size ) 1 1 ;
-: byte% 1 1 ;
-: ptr% cell% ;
-: int% cell% ;
-: i32% 4 4 ;
-: u32% 4 4 ;
-: i16% 2 2 ;
-: u16% 2 2 ;
-
-\ allocate user memory
-: %allot ( align size -- addr )
-    here -rot swap align-by allot
-;
-
-: field ( offset1 align size "name" -- offset2 )
-    \ align offset with 'align'
-    -rot aligned-by \ ( size offset )
-    create
-        dup ,   \ fill offset
-        +       \ return new offset
-    does> @ +
-;
-
 ( === End of bootstrap of PlanckForth === )
 ( === Implementation of PlanckLISP === )
 
 : is-blank ( c -- bool )
     case
-        10   of true endof
+        0    of true endof \ EOF
+        bl   of true endof
         '\t' of true endof
         '\n' of true endof
         drop false
     endcase
 ;
 
+0 constant Node_Int
+1 constant Node_Symbol
+
+: make-tup1 ( arg0 type -- value )
+    2 cells %allot ( arg0 type ptr )
+    tuck !
+    tuck 1 cells + !
+;
+
+: make-int Node_Int make-tup1 ;
+: make-symbol     ." Not implemented: make-symbol" cr quit ;
 : make-quote      ." Not implemented: make-quote" cr quit ;
 : make-quasiquote ." Not implemented: make-quasiquote" cr quit ;
 : make-unquote    ." Not implemented: make-unquote" cr quit ;
@@ -1516,8 +1483,28 @@ do-stack 16 cells + do-sp !
     ." Parse Error" cr quit
 ;
 
-: parse-atom
-    ." Not implemented: parse-atom" cr quit
+: parse-str ." Not implemented: parse-str" cr quit ;
+: parse-char ." Not implemented: parse-char" cr quit ;
+
+\ Allocate a buffer for atom tokens
+create tokbuf 1024 allot
+
+: parse-atom ( c -- sexp )
+    case
+        '"'  of parse-string-literal endof
+        '\'' of parse-character-literal endof
+        \ read characters to tokbuf
+        tokbuf tuck c! 1+
+        begin key dup is-blank not while
+            over c! 1+
+        repeat drop
+        0 over c! \ null
+        drop tokbuf >number if
+            make-int
+        else
+            drop tokbuf make-symbol
+        then
+    endcase
 ;
 
 : parse-sexp-list
@@ -1539,6 +1526,9 @@ do-stack 16 cells + do-sp !
 
 :noname
     parse-sexp
+    .s
+    quit
 ; execute
 
-test
+
+abcd
