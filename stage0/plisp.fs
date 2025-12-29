@@ -2156,7 +2156,6 @@ end-struct file%
 
 : is-blank ( c -- bool )
     case
-        0    of true endof \ EOF
         bl   of true endof
         '\t' of true endof
         '\n' of true endof
@@ -2302,7 +2301,23 @@ defer parse-sexp
     endcase
 ; is parse-sexp
 
+\ 0x100000 constant MAX_PLISP_FILE_SIZE
+0x100000 constant MAX_PLISP_FILE_SIZE
+:noname
+    argc @ 1 <= if ." no input file" cr 1 quit then
+    \ open program file
+    1 arg R/O open-file throw >r ( R: file )
+    MAX_PLISP_FILE_SIZE dup allocate throw tuck ( mem size mem R: file )
+    swap r> read-file throw ( mem read-size )
+    MAX_PLISP_FILE_SIZE >= if ." too large file" cr 1 quit then
 
-s"     (def x 0)" parse-sexp
-drop print-sexp
+    ( c-addr )
+    begin
+        skip-spaces
+        dup c@ unless ( EOF ) 0 quit then
+        parse-sexp
+        swap print-sexp cr
+    again
+; execute
+
 0 quit
