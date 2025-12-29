@@ -812,7 +812,6 @@ alias-builtin key k
 ; immediate
 
 : endcase
-    compile drop
     begin ?dup while
         [compile] then
     repeat
@@ -836,6 +835,7 @@ alias-builtin key k
         key case
         '(' of 1+ endof \ increment depth
         ')' of 1- endof \ decrement depth
+        drop
         endcase
     repeat
 ; immediate
@@ -1144,7 +1144,6 @@ decimal \ set default to decimal
         \ default case
         \ ( addr base )
         drop base @ swap parse-uint
-        dup \ need this because endcase drops top of stack
     endcase
 ;
 
