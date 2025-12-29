@@ -1499,10 +1499,35 @@ do-stack 16 cells + do-sp !
 ( === End of bootstrap of PlanckForth === )
 ( === Implementation of PlanckLISP === )
 
-\ :noname
-\    begin
-\        parse-sexp
-\        eval-sexp
-\        drop
-\    again
-\ ; execute
+: is-blank ( c -- bool )
+    case
+        10   of true endof
+        '\t' of true endof
+        '\n' of true endof
+        drop false
+    endcase
+;
+
+: parse-error
+    ." Parse Error\n"
+    quit
+;
+
+: parse-sexp ( -- sexp )
+    key
+    \ strip learding spaces
+    begin dup is-blank while drop key repeat
+    case
+        '('  of parse-sexp-list endof
+        '\'' of parse-sexp make-quote endof
+        '`'  of parse-sexp make-quasiquote endof
+        ','  of parse-sexp make-unquote endof
+        parse-atom dup unless parse-error then
+    endcase
+;
+
+:noname
+    parse-sexp
+; execute
+
+test
