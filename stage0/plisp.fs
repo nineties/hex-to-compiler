@@ -1508,9 +1508,20 @@ do-stack 16 cells + do-sp !
     endcase
 ;
 
+: make-quote      ." Not implemented: make-quote" cr quit ;
+: make-quasiquote ." Not implemented: make-quasiquote" cr quit ;
+: make-unquote    ." Not implemented: make-unquote" cr quit ;
+
 : parse-error
-    ." Parse Error\n"
-    quit
+    ." Parse Error" cr quit
+;
+
+: parse-atom
+    ." Not implemented: parse-atom" cr quit
+;
+
+: parse-sexp-list
+    ." Not implemented: parse-sexp-list" cr quit
 ;
 
 : parse-sexp ( -- sexp )
@@ -1519,9 +1530,9 @@ do-stack 16 cells + do-sp !
     begin dup is-blank while drop key repeat
     case
         '('  of parse-sexp-list endof
-        '\'' of parse-sexp make-quote endof
-        '`'  of parse-sexp make-quasiquote endof
-        ','  of parse-sexp make-unquote endof
+        '\'' of recurse make-quote endof
+        '`'  of recurse make-quasiquote endof
+        ','  of recurse make-unquote endof
         parse-atom dup unless parse-error then
     endcase
 ;

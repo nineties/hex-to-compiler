@@ -27,8 +27,8 @@ Bootstrapping Process
 The system is built in explicit stages, each providing the minimum functionality
 required for the next stage.
 
-Stage0
-~~~~~~
+Stage0: From Hex to Forth to LISP
+~~~~~~~~~~~~~~~~~~~~~
 
 Stage0 begins with a minimal Forth interpreter written by hand in machine code.
 Using Forth’s self-extensibility, this interpreter is grown into a more capable
