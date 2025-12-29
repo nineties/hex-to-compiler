@@ -1,14 +1,14 @@
 # zero-to-compiler -
 # Copyright (C) 2025 nineties
 
-default: planckforth
+default: pforth
 
-planckforth: planckforth.xxd
-	xxd -r -c 8 $< > planckforth
-	chmod +x planckforth
+pforth: pforth.xxd
+	xxd -r -c 8 $< > pforth
+	chmod +x pforth
 
 .PHONY: clean test
 clean:
-	rm -f planckforth
+	rm -f pforth
 
-test: planckforth
+test: pforth
