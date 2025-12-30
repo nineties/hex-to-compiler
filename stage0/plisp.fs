@@ -2240,7 +2240,7 @@ variable symlist
 ;
 
 : make-quote ( atom -- atom ) Nquote make-node1 ;
-: make-quasiquote ( atom -- atom ) Nqquote make-node1 ;
+: make-qquote ( atom -- atom ) Nqquote make-node1 ;
 : make-unquote ( atom -- atom ) Nunquote make-node1 ;
 
 : int? node>type @ Nint = ;
@@ -2248,7 +2248,7 @@ variable symlist
 : sym>name node>arg0 @ ; 
 
 ( === Builtin Symbols === )
-s" var" make-symbol constant varS
+s" var" make-symbol constant Svar
 
 ( === Parser and Printer === )
 
@@ -2350,7 +2350,7 @@ defer parse-sexp
     dup c@ case
         '('  of 1+ parse-sexp-list endof
         '\'' of 1+ recurse swap make-quote swap endof
-        '`'  of 1+ recurse swap make-quasiquote swap endof
+        '`'  of 1+ recurse swap make-qquote swap endof
         ','  of 1+ recurse swap make-unquote swap endof
         drop parse-atom over unless parse-error then
     endcase
@@ -2407,7 +2407,7 @@ defer eval-unquote
 
 :noname ( sexp -- sexp )
     dup car case
-    varS of \ (var sym sexp): define new variable
+    Svar of \ (var sym sexp): define new variable
         dup cons-len 3 <> if ." malformed 'var' expr" cr 1 quit then
         cdr
         dup car dup sym? unless ." malformed 'var' expr" cr 1 quit then
@@ -2433,7 +2433,7 @@ defer eval-unquote
     Nqquote of
         dup node>arg0 @ r> 1+ recurse
         ( node arg' 1 )
-        over node>arg0 @ over = if drop else nip make-quasiquote then
+        over node>arg0 @ over = if drop else nip make-qquote then
     endof
     Nunquote of
         .s
