@@ -2372,7 +2372,7 @@ end-struct env%
 ;
 
 : env-update ( env sym node -- )
-    rot @ begin dup while
+    rot begin dup while
         over over env>sym @ = if
             ( node sym env )
             nip env>value ! exit
@@ -2432,9 +2432,10 @@ defer eval-qquote
         dup cons-len 3 <> if ." malformed 'set' expr" cr 1 quit then
         cdr
         dup car dup sym? unless ." malformed 'set' expr" cr 1 quit then
-        swap cadr eval-sexp
-        env-update
-        nil
+        ( env args sym )
+        >r cadr eval-sexp r>
+        ( env val sym )
+        2 pick >r env-update r> nil
     endof
     ( default case )
         not-implemented
