@@ -2189,6 +2189,7 @@ end-struct node%
 5 constant Nnil
 6 constant Ncons
 7 constant Nlambda
+8 constant Nmacro
 
 : make-node0 ( type -- node )
     1 cells allocate throw
@@ -2221,9 +2222,8 @@ Nnil make-node0 constant nil
     Ncons make-node2
 ;
 
-: make-lambda ( body params env -- node )
-    Nlambda make-node3
-;
+: make-lambda ( body params env -- node ) Nlambda make-node3 ;
+: make-macro ( body params env -- node ) Nmacro make-node3 ;
 
 : car ( node -- node ) node>arg0 @ ;
 : cdr ( node -- node ) node>arg1 @ ;
@@ -2268,6 +2268,7 @@ s" set" make-symbol constant Sset
 s" if" make-symbol constant Sif
 s" do" make-symbol constant Sdo
 s" lambda" make-symbol constant Slambda
+s" macro" make-symbol constant Smacro
 
 ( === Parser and Printer === )
 
@@ -2326,6 +2327,13 @@ s" lambda" make-symbol constant Slambda
     endof
     Nlambda of
         ." (lambda "
+        dup node>arg1 @ recurse
+        bl emit
+        node>arg2 @ recurse
+        ')' emit
+    endof
+    Nmacro of
+        ." (macro "
         dup node>arg1 @ recurse
         bl emit
         node>arg2 @ recurse
@@ -2439,6 +2447,8 @@ defer eval-qquote
     Nqquote of node>arg0 @ 0 eval-qquote endof
     Nnil of ( do nothing ) endof
     Ncons of eval-cons endof
+    Nlambda of endof
+    Nmacro of endof
         not-reachable
     endcase
 ; is eval-sexp
@@ -2453,6 +2463,35 @@ defer eval-qquote
 ;
 
 : eval-apply-lambda ( env args fn -- env value )
+    rot drop \ outer env is not used
+    ( args fn )
+    dup node>arg2 @ >r
+    dup node>arg1 @ >r
+    node>arg0 @
+    ( args env R: body params )
+    swap r> swap
+    ( env params args ; R: body )
+    2dup cons-len swap cons-len <> if
+        ." incorrect number of arguments: " 
+        swap print-sexp
+        ."  <-> "
+        print-sexp
+        cr 1 quit
+    then
+    
+    \ update env
+    begin dup nil <> while
+        2dup >r >r
+        car >r car r> env-push
+        r> cdr r> cdr
+    repeat 2drop
+    r>
+
+    ( env' body )
+    eval-sexp
+;
+
+: eval-apply-macro ( env args fn -- env value )
     rot drop \ outer env is not used
     ( args fn )
     dup node>arg2 @ >r
@@ -2538,13 +2577,33 @@ defer eval-qquote
         ( env body params env)
         make-lambda
     endof
+    Smacro of \ (macro params body)
+        ( env node )
+        cdr over >r
+        dup cadr swap car
+        \ check that every params are symbol
+        dup begin dup nil <> while
+            dup car sym? unless ." malformed 'macro' expr" cr 1 quit then
+            cdr
+        repeat drop
+        r>
+        ( env body params env)
+        make-macro
+    endof
         ( env sexp car )
         >r over r> eval-sexp nip
         ( env sexp fn )
-        >r 2dup cdr eval-list nip >r drop r> r>
+        >r cdr r>
         ( env args fn )
+
+        \ If fn is not 'macro', evaluate args before application
+        dup node>type @ Nmacro <> if
+            >r eval-list r>
+        then
+            
         dup node>type @ case
             Nlambda of eval-apply-lambda endof
+            Nmacro of eval-apply-macro endof
             ( default case )
             drop
             print-sexp ."  is not a function" cr 1 quit
