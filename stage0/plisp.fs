@@ -2443,6 +2443,44 @@ defer eval-qquote
     endcase
 ; is eval-sexp
 
+: eval-list ( env cons -- env cons )
+    dup nil = if drop nil else
+        over >r
+        2dup car eval-sexp nip >r
+        ( env cons R: env car' )
+        cdr recurse nip r> make-cons r> swap
+    then
+;
+
+: eval-apply-lambda ( env args fn -- env value )
+    rot drop \ outer env is not used
+    ( args fn )
+    dup node>arg2 @ >r
+    dup node>arg1 @ >r
+    node>arg0 @
+    ( args env R: body params )
+    swap r> swap
+    ( env params args ; R: body )
+    2dup cons-len swap cons-len <> if
+        ." incorrect number of arguments: " 
+        swap print-sexp
+        ."  <-> "
+        print-sexp
+        cr 1 quit
+    then
+    
+    \ update env
+    begin dup nil <> while
+        2dup >r >r
+        car >r car r> env-push
+        r> cdr r> cdr
+    repeat 2drop
+    r>
+
+    ( env' body )
+    eval-sexp
+;
+
 :noname ( env sexp -- env sexp )
     dup car case
     Svar of \ (var sym sexp): define new variable
@@ -2490,12 +2528,27 @@ defer eval-qquote
     Slambda of \ (lambda params body)
         ( env node )
         cdr over >r
-        dup cadr swap car r>
+        dup cadr swap car
+        \ check that every params are symbol
+        dup begin dup nil <> while
+            dup car sym? unless ." malformed 'lambda' expr" cr 1 quit then
+            cdr
+        repeat drop
+        r>
         ( env body params env)
         make-lambda
     endof
-    ( default case )
-        not-implemented
+        ( env sexp car )
+        >r over r> eval-sexp nip
+        ( env sexp fn )
+        >r 2dup cdr eval-list nip >r drop r> r>
+        ( env args fn )
+        dup node>type @ case
+            Nlambda of eval-apply-lambda endof
+            ( default case )
+            drop
+            print-sexp ."  is not a function" cr 1 quit
+        endcase
     endcase
 ; is eval-cons
 
