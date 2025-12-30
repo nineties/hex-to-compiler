@@ -2384,6 +2384,8 @@ end-struct env%
 
 defer eval-sexp
 defer eval-cons
+defer eval-qquote
+defer eval-unquote
 
 :noname ( sexp -- sexp )
     dup @ case
@@ -2395,8 +2397,8 @@ defer eval-cons
         then
         nip
     endof
-    Nquote  of not-implemented endof
-    Nqquote of not-implemented endof
+    Nquote  of node>arg0 @ endof
+    Nqquote of node>arg0 @ 0 eval-qquote endof
     Nnil of ( do nothing ) endof
     Ncons of eval-cons endof
         not-reachable
@@ -2417,6 +2419,36 @@ defer eval-cons
         not-implemented
     endcase
 ; is eval-cons
+
+:noname ( sexp nestlevel - sexp )
+    >r
+    dup node>type @ case
+    Nint of r> drop endof
+    Nsymbol of r> drop endof
+    Nquote of
+        dup node>arg0 @ r> recurse
+        ( node arg' 1 )
+        over node>arg0 @ over = if drop else nip make-quote then
+    endof
+    Nqquote of
+        dup node>arg0 @ r> 1+ recurse
+        ( node arg' 1 )
+        over node>arg0 @ over = if drop else nip make-quasiquote then
+    endof
+    Nunquote of
+        .s
+        \ eval arg if level = 0
+        r> ?dup unless
+            node>arg0 @ eval-sexp
+        else
+            >r dup node>arg0 @ r> 1- recurse
+            ( node arg' 1 )
+            over node>arg0 @ over = if drop else nip make-unquote then
+        then
+    endof
+    not-implemented
+    endcase
+; is eval-qquote
 
 \ 0x100000 constant MAX_PLISP_FILE_SIZE
 0x100000 constant MAX_PLISP_FILE_SIZE
