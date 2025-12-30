@@ -2358,33 +2358,21 @@ defer parse-sexp
 ; is parse-sexp
 
 ( === Eval === )
-variable env \ list of (sym node)
-
 struct
     cell% field env>sym
     cell% field env>value
     cell% field env>next
 end-struct env%
 
-: env-push ( sym node -- )
+: env-push ( env sym node -- env' )
     env% %allocate throw
     tuck env>value !
     tuck env>sym !
-    env !
+    tuck env>next !
 ;
 
-: env-find ( sym -- node )
-    env @ begin dup while
-        over over env>sym @ = if
-            env>value @ nip exit
-        then
-        env>next @
-    repeat
-    2drop 0
-;
-
-: env-update ( sym node -- )
-    swap env @ begin dup while
+: env-update ( env sym node -- )
+    rot @ begin dup while
         over over env>sym @ = if
             ( node sym env )
             nip env>value ! exit
@@ -2394,20 +2382,31 @@ end-struct env%
     ." variable " sym>name type ." is not found" cr 1 quit
 ;
 
+: env-find ( env sym -- node )
+    swap begin dup while
+        over over env>sym @ = if
+            env>value @ nip exit
+        then
+        env>next @
+    repeat
+    2drop 0
+;
+
 defer eval-sexp
 defer eval-cons
 defer eval-qquote
-defer eval-unquote
 
-:noname ( sexp -- sexp )
+:noname ( env sexp -- env sexp )
     dup @ case
     Nint of ( do nothing ) endof
     Nsymbol of
-        dup env-find ?dup unless
+        ( env sexp )
+        over >r
+        env-find ?dup unless
             ." undefined variable: " sym>name type cr
             1 quit
         then
-        nip
+        r> swap
     endof
     Nquote  of node>arg0 @ endof
     Nqquote of node>arg0 @ 0 eval-qquote endof
@@ -2417,14 +2416,16 @@ defer eval-unquote
     endcase
 ; is eval-sexp
 
-:noname ( sexp -- sexp )
+:noname ( env sexp -- env sexp )
     dup car case
     Svar of \ (var sym sexp): define new variable
         dup cons-len 3 <> if ." malformed 'var' expr" cr 1 quit then
         cdr
         dup car dup sym? unless ." malformed 'var' expr" cr 1 quit then
-        swap cadr eval-sexp
-        env-push
+        ( env args sym )
+        >r cadr eval-sexp r>
+        ( env val sym )
+        swap env-push
         nil
     endof
     Sset of \ (set sym sexp): update the variable
@@ -2440,7 +2441,7 @@ defer eval-unquote
     endcase
 ; is eval-cons
 
-:noname ( sexp nestlevel - sexp )
+:noname ( env sexp nestlevel - env sexp )
     >r
     dup node>type @ case
     Nint of r> drop endof
@@ -2457,12 +2458,16 @@ defer eval-unquote
     endof
     Nnil of r> drop endof
     Ncons of
-        ( cons R: nest )
-        dup car r> dup >r eval-qquote
-        ( cons car' R: nest )
-        swap cdr r> eval-qquote
-        ( car' cdr' )
-        swap make-cons
+        tuck ( cons env cons ; R: nest )
+        car r> dup >r eval-qquote
+        ( cons env' car' ; R: nest )
+        -rot swap cdr r>
+        ( car' env' cdr nest )
+        eval-qquote
+        ( car' env' cdr' )
+        rot
+        ( env' cdr' car' )
+        make-cons
     endof
     not-reachable
     endcase
@@ -2479,12 +2484,14 @@ defer eval-unquote
     MAX_PLISP_FILE_SIZE >= if ." too large file" cr 1 quit then
 
     ( c-addr )
+    0 >r \ env
     begin
         skip-spaces
         dup c@ unless ( EOF ) 0 quit then
-        parse-sexp
-        swap eval-sexp print-sexp cr
+        parse-sexp swap
+        r> swap eval-sexp print-sexp cr >r
     again
+    r> drop
 ; execute
 
 0 quit
