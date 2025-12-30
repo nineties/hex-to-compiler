@@ -2462,7 +2462,7 @@ defer eval-qquote
     then
 ;
 
-: eval-apply-lambda ( env args fn -- env value )
+: apply-lambda ( env args fn -- env value )
     rot drop \ outer env is not used
     ( args fn )
     dup node>arg2 @ >r
@@ -2491,7 +2491,7 @@ defer eval-qquote
     eval-sexp
 ;
 
-: eval-apply-macro ( env args fn -- env value )
+: apply-macro ( env args fn -- env value )
     rot drop \ outer env is not used
     ( args fn )
     dup node>arg2 @ >r
@@ -2602,8 +2602,8 @@ defer eval-qquote
         then
             
         dup node>type @ case
-            Nlambda of eval-apply-lambda endof
-            Nmacro of eval-apply-macro endof
+            Nlambda of apply-lambda endof
+            Nmacro of apply-macro endof
             ( default case )
             drop
             print-sexp ."  is not a function" cr 1 quit
