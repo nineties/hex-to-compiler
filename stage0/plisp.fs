@@ -2211,8 +2211,15 @@ Nnil make-node0 constant nil
 : make-cons ( cdr car -- cons )
     Ncons make-node3
 ;
-: car ( cons -- car ) node>arg0 @ ;
-: cdr ( cons -- cdr ) node>arg1 @ ;
+: car ( node -- node ) node>arg0 @ ;
+: cdr ( node -- node ) node>arg1 @ ;
+: caar car car ;
+: cadr cdr car ;
+: cdar car cdr ;
+: cddr cdr cdr ; 
+: cons-len ( cons -- int )
+    dup nil = if drop 0 else cdr recurse 1+ then
+;
 
 : make-int ( n -- atom ) Nint make-node1 ;
 
@@ -2235,6 +2242,13 @@ variable symlist
 : make-quote ( atom -- atom ) Nquote make-node1 ;
 : make-quasiquote ( atom -- atom ) Nqquote make-node1 ;
 : make-unquote ( atom -- atom ) Nunquote make-node1 ;
+
+: int? node>type @ Nint = ;
+: sym? node>type @ Nsymbol = ;
+: sym>name node>arg0 @ ; 
+
+( === Builtin Symbols === )
+s" var" make-symbol constant varS
 
 ( === Parser and Printer === )
 
@@ -2343,7 +2357,30 @@ defer parse-sexp
 ; is parse-sexp
 
 ( === Eval === )
-variable varlist \ variable list
+variable env \ list of (sym node)
+
+struct
+    cell% field env>sym
+    cell% field env>value
+    cell% field env>next
+end-struct env%
+
+: env-push ( sym node -- )
+    env% %allocate throw
+    tuck env>value !
+    tuck env>sym !
+    env !
+;
+
+: env-find ( sym -- node )
+    env @ begin dup while
+        over over env>sym @ = if
+            env>value @ nip exit
+        then
+        env>next @
+    repeat
+    2drop 0
+;
 
 defer eval-sexp
 defer eval-cons
@@ -2351,7 +2388,13 @@ defer eval-cons
 :noname ( sexp -- sexp )
     dup @ case
     Nint of ( do nothing ) endof
-    Nsymbol of not-implemented endof
+    Nsymbol of
+        dup env-find ?dup unless
+            ." undefined variable: " sym>name type cr
+            1 quit
+        then
+        nip
+    endof
     Nquote  of not-implemented endof
     Nqquote of not-implemented endof
     Nnil of ( do nothing ) endof
@@ -2361,7 +2404,18 @@ defer eval-cons
 ; is eval-sexp
 
 :noname ( sexp -- sexp )
-    not-implemented
+    dup car case
+    varS of \ (var sym sexp): define new variable
+        dup cons-len 3 <> if ." malformed 'var' expr" cr 1 quit then
+        cdr
+        dup car dup sym? unless ." malformed 'var' expr" cr 1 quit then
+        swap cadr eval-sexp
+        env-push
+        nil
+    endof
+    ( default case )
+        not-implemented
+    endcase
 ; is eval-cons
 
 \ 0x100000 constant MAX_PLISP_FILE_SIZE
