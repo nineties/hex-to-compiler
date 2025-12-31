@@ -2662,6 +2662,7 @@ defer eval-qquote
 ;
 
 :noname
+    s" init.l" eval-file
     argc @ 1 <= if ." no input file" cr 1 quit then
     1 arg eval-file
 ; execute
