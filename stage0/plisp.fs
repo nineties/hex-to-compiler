@@ -2645,10 +2645,11 @@ defer eval-qquote
 
 0x100000 constant MAX_PLISP_FILE_SIZE
 : eval-file ( c-str -- )
-    R/O open-file throw >r ( R: file )
-    MAX_PLISP_FILE_SIZE dup allocate throw tuck ( mem size mem R: file )
+    R/O open-file throw dup >r >r ( R: file file )
+    MAX_PLISP_FILE_SIZE dup allocate throw tuck ( mem size mem R: file file )
     swap r> read-file throw ( mem read-size )
     MAX_PLISP_FILE_SIZE >= if ." too large file" cr 1 quit then
+    r> close-file throw
 
     ( c-addr )
     0 >r \ env
