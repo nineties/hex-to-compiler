@@ -2367,14 +2367,22 @@ create tokbuf 1024 allot
     endcase
 ;
 
-: skip-spaces ( c-addr -- c-addr )
-    begin dup c@ is-blank while 1+ repeat
+: skip-spaces-and-comments ( c-addr -- c-addr )
+    begin
+        dup c@ is-blank if
+            1+
+        else dup c@ ';' = if
+            begin dup c@ '\n' <> while 1+ repeat
+        else
+            exit
+        then then
+    again
 ;
 
 defer parse-sexp
 
 : parse-sexp-list ( c-addr -- sexp c-addr )
-    skip-spaces
+    skip-spaces-and-comments
     dup c@ ')' = if 1+ nil swap exit then
     parse-sexp ( car c-addr )
     recurse    ( car cdr c-addr )
@@ -2382,7 +2390,7 @@ defer parse-sexp
 ;
 
 :noname ( c-addr -- sexp c-addr )
-    skip-spaces
+    skip-spaces-and-comments
     dup c@ case
         '('  of 1+ parse-sexp-list endof
         '\'' of 1+ recurse swap make-quote swap endof
@@ -2654,7 +2662,7 @@ defer eval-qquote
     ( c-addr )
     0 >r \ env
     begin
-        skip-spaces
+        skip-spaces-and-comments
         dup c@ unless ( EOF ) r> 2drop exit then
         parse-sexp swap
         r> swap eval-sexp print-sexp cr >r
