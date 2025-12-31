@@ -2470,7 +2470,7 @@ defer eval-qquote
     then
 ;
 
-: apply-lambda ( env args fn -- env value )
+: apply ( env args fn -- env value )
     rot drop \ outer env is not used
     ( args fn )
     dup node>arg2 @ >r
@@ -2479,49 +2479,25 @@ defer eval-qquote
     ( args env R: body params )
     swap r> swap
     ( env params args ; R: body )
-    2dup cons-len swap cons-len <> if
-        ." incorrect number of arguments: " 
-        swap print-sexp
-        ."  <-> "
-        print-sexp
-        cr 1 quit
+    \ bind args to params
+    over sym? if
+        env-push
+    else
+        2dup cons-len swap cons-len <> if
+            ." incorrect number of arguments: " 
+            swap print-sexp
+            ."  <-> "
+            print-sexp
+            cr 1 quit
+        then
+        
+        \ update env
+        begin dup nil <> while
+            2dup >r >r
+            car >r car r> env-push
+            r> cdr r> cdr
+        repeat 2drop
     then
-    
-    \ update env
-    begin dup nil <> while
-        2dup >r >r
-        car >r car r> env-push
-        r> cdr r> cdr
-    repeat 2drop
-    r>
-
-    ( env' body )
-    eval-sexp
-;
-
-: apply-macro ( env args fn -- env value )
-    rot drop \ outer env is not used
-    ( args fn )
-    dup node>arg2 @ >r
-    dup node>arg1 @ >r
-    node>arg0 @
-    ( args env R: body params )
-    swap r> swap
-    ( env params args ; R: body )
-    2dup cons-len swap cons-len <> if
-        ." incorrect number of arguments: " 
-        swap print-sexp
-        ."  <-> "
-        print-sexp
-        cr 1 quit
-    then
-    
-    \ update env
-    begin dup nil <> while
-        2dup >r >r
-        car >r car r> env-push
-        r> cdr r> cdr
-    repeat 2drop
     r>
 
     ( env' body )
@@ -2575,26 +2551,14 @@ defer eval-qquote
     Slambda of \ (lambda params body)
         ( env node )
         cdr over >r
-        dup cadr swap car
-        \ check that every params are symbol
-        dup begin dup nil <> while
-            dup car sym? unless ." malformed 'lambda' expr" cr 1 quit then
-            cdr
-        repeat drop
-        r>
+        dup cadr swap car r>
         ( env body params env)
         make-lambda
     endof
     Smacro of \ (macro params body)
         ( env node )
         cdr over >r
-        dup cadr swap car
-        \ check that every params are symbol
-        dup begin dup nil <> while
-            dup car sym? unless ." malformed 'macro' expr" cr 1 quit then
-            cdr
-        repeat drop
-        r>
+        dup cadr swap car r>
         ( env body params env)
         make-macro
     endof
@@ -2610,8 +2574,8 @@ defer eval-qquote
         then
             
         dup node>type @ case
-            Nlambda of apply-lambda endof
-            Nmacro of apply-macro endof
+            Nlambda of apply endof
+            Nmacro of apply endof
             ( default case )
             drop
             print-sexp ."  is not a function" cr 1 quit
