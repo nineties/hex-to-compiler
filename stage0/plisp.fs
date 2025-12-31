@@ -2643,12 +2643,9 @@ defer eval-qquote
     endcase
 ; is eval-qquote
 
-\ 0x100000 constant MAX_PLISP_FILE_SIZE
 0x100000 constant MAX_PLISP_FILE_SIZE
-:noname
-    argc @ 1 <= if ." no input file" cr 1 quit then
-    \ open program file
-    1 arg R/O open-file throw >r ( R: file )
+: eval-file ( c-str -- )
+    R/O open-file throw >r ( R: file )
     MAX_PLISP_FILE_SIZE dup allocate throw tuck ( mem size mem R: file )
     swap r> read-file throw ( mem read-size )
     MAX_PLISP_FILE_SIZE >= if ." too large file" cr 1 quit then
@@ -2657,11 +2654,15 @@ defer eval-qquote
     0 >r \ env
     begin
         skip-spaces
-        dup c@ unless ( EOF ) 0 quit then
+        dup c@ unless ( EOF ) r> 2drop exit then
         parse-sexp swap
         r> swap eval-sexp print-sexp cr >r
     again
-    r> drop
+;
+
+:noname
+    argc @ 1 <= if ." no input file" cr 1 quit then
+    1 arg eval-file
 ; execute
 
 0 quit
