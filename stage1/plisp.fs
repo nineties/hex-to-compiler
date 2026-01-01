@@ -1818,9 +1818,6 @@ s" Not reachable here. may be a bug" exception constant NOT-REACHABLE
     swap 1- tuck + swap invert and
 ;
 
-\ Bootstrapping version of free do nothing.
-: (free) ( addr -- ) drop ;
-
 ( === File I/O === )
 
 -1 constant EOF
@@ -1962,6 +1959,7 @@ end-struct file%
 
 \ Read u1-bytes at most from file, write it to c-addr.
 \ Return number of bytes read and error-code.
+A
 : read-file ( c-addr u1 file -- u2 e )
     dup readable? unless READ-FILE-ERROR exit then
     over 0<= if 3drop 0 success exit then
@@ -2084,14 +2082,7 @@ end-struct file%
 ;
 
 : close-file ( file -- e )
-    dup file>fd @ swap
-    ( fd file )
-    \ release heap objects
-    dup file>rbuf @ (free)
-    dup file>wbuf @ (free)
-    (free)
-    \ close file object
-    (close) 0= if success else CLOSE-FILE-ERROR then
+    file>fd @ (close) 0= if success else CLOSE-FILE-ERROR then
 ;
 
 ( === End of bootstrap of PlanckForth === )
