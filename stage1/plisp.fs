@@ -1584,11 +1584,6 @@ do-stack 16 cells + do-sp !
 : i16% 2 2 ;
 : u16% 2 2 ;
 
-\ allocate user memory
-: %allot ( align size -- addr )
-    here -rot swap align-by allot
-;
-
 : field ( offset1 align size "name" -- offset2 )
     \ align offset with 'align'
     -rot aligned-by \ ( size offset )
@@ -1812,67 +1807,15 @@ s" Not reachable here. may be a bug" exception constant NOT-REACHABLE
     next
 ;asm
 
-( === Heap Memory === )
-
-192 constant SYS-MMAP2
-
-0x0 constant PROT-NONE
-0x1 constant PROT-READ
-0x2 constant PROT-WRITE
-0x4 constant PROT-EXEC
-0x8 constant PROT-SEM
-
-0x01 constant MAP-SHARED
-0x02 constant MAP-PRIVATE
-0x0f constant MAP-TYPE
-0x10 constant MAP-FIXED
-0x20 constant MAP-ANONYMOUS
-
-: mmap2 ( addr1 u -- addr2 e )
-    >r >r                                   \ ( R: u addr1 )
-    0                                       \ offset
-    -1                                      \ fd
-    MAP-ANONYMOUS MAP-PRIVATE or            \ flags
-    PROT-READ PROT-WRITE or PROT-EXEC or    \ prot
-    r> r> swap                              \ u addr1
-    SYS-MMAP2
-    syscall6
-    dup -1 = if
-        ALLOCATE-ERROR
-    else
-        success
-    then
+\ Allocate u bytes of user memory
+: allocate ( u -- addr )
+    here swap allot
 ;
 
-\ Secure a large heap memory block and cut memories from the block.
-\ The allocated memories are never released until the program exit.
-0x8000000 constant BLOCK-SIZE ( 128MB )
-variable block-addr
-variable next-addr
-variable remaining-size
-
-0 BLOCK-SIZE mmap2 throw block-addr !
-block-addr @ next-addr !
-BLOCK-SIZE remaining-size  !
-
-\ Allocate u bytes of heap memory
-\ The region must be zero cleared.
-: allocate ( u -- addr e )
-    dup remaining-size @ <= if
-        ( u addr )
-        next-addr @
-        swap aligned dup next-addr +! remaining-size -!
-        success
-    else
-        drop 0 ALLOCATE-ERROR
-    then
-;
-
-\ allocate heap memory
-: %allocate ( align size -- addr e )
-    over 1- + allocate ?dup unless
-        swap 1- tuck + swap invert and success
-    then
+\ allocate user memory
+: %allocate ( align size -- addr )
+    over 1- + allocate 
+    swap 1- tuck + swap invert and
 ;
 
 \ Bootstrapping version of free do nothing.
@@ -2121,19 +2064,19 @@ end-struct file%
         ( c-addr fam fd )
         3drop 0 OPEN-FILE-ERROR exit
     then
-    file% %allocate throw
+    file% %allocate
     tuck file>fd !
     tuck file>fam !
     tuck file>name FILENAME-MAX strncpy
     ['] (read) over file>read !
     ['] (write) over file>write !
     dup file>fam @ W/O <> if
-        BUFSIZE allocate throw over file>rbuf !
+        BUFSIZE allocate over file>rbuf !
         dup file>rbuf @ over file>rbeg !
         dup file>rbuf @ over file>rend !
     then
     dup file>fam @ R/O <> if
-        BUFSIZE allocate throw over file>wbuf !
+        BUFSIZE allocate over file>wbuf !
         dup file>wbuf @ over file>wbeg !
         dup file>wbuf @ BUFSIZE + over file>wend !
     then
@@ -2161,7 +2104,7 @@ struct
 end-struct list%
 
 : list-push ( v list -- new-list )
-    list% %allocate throw
+    list% %allocate
     tuck list>next !
     tuck list>val !
 ;
@@ -2194,25 +2137,25 @@ end-struct node%
 10 constant Nprim
 
 : make-node0 ( type -- node )
-    1 cells allocate throw
+    1 cells allocate
     tuck node>type !
 ;
 
 : make-node1 ( arg0 type -- node )
-    2 cells allocate throw
+    2 cells allocate
     tuck node>type !
     tuck node>arg0 !
 ;
 
 : make-node2 ( arg1 arg0 type -- node )
-    3 cells allocate throw
+    3 cells allocate
     tuck node>type !
     tuck node>arg0 !
     tuck node>arg1 !
 ;
 
 : make-node3 ( arg2 arg1 arg0 type -- node )
-    4 cells allocate throw
+    4 cells allocate
     tuck node>type !
     tuck node>arg0 !
     tuck node>arg1 !
@@ -2249,7 +2192,7 @@ variable symlist
 0 symlist !
 
 : strdup ( c-addr -- c-addr )
-    dup strlen 1+ allocate throw tuck strcpy
+    dup strlen 1+ allocate tuck strcpy
 ;
 
 : make-symbol ( c-addr -- atom )
@@ -2433,7 +2376,7 @@ struct
 end-struct env%
 
 : env-push ( env sym node -- env' )
-    env% %allocate throw
+    env% %allocate
     tuck env>value !
     tuck env>sym !
     tuck env>next !
@@ -2707,7 +2650,7 @@ defer eval-qquote
 0x100000 constant MAX_PLISP_FILE_SIZE
 : eval-file ( env c-str -- env' )
     R/O open-file throw dup >r >r ( env R: file file )
-    MAX_PLISP_FILE_SIZE dup allocate throw tuck ( env mem size mem R: file file )
+    MAX_PLISP_FILE_SIZE dup allocate tuck ( env mem size mem R: file file )
     swap r> read-file throw ( env mem read-size )
     MAX_PLISP_FILE_SIZE >= if ." too large file" cr 1 quit then
     r> close-file throw
