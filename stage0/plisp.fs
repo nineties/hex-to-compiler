@@ -2593,13 +2593,13 @@ defer eval-qquote
         then
     endof
     Sdo of \ (do e0 e1 ...)
-        cdr over swap ( env env args )
+        cdr nil swap ( env nil args )
         begin dup nil <> while
-            dup >r
-            car eval-sexp drop r> cdr
+            nip dup >r ( env args R: args )
+            car eval-sexp r> cdr
         repeat
-        ( env env' nil )
-        nip \ returns outer env
+        ( env last nil )
+        drop
     endof
     Slambda of \ (lambda params body)
         ( env node )
