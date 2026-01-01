@@ -2252,7 +2252,7 @@ defer eval-qquote
 :noname
     root-env @
 
-    s" init.lisp" eval-file
+    s" plisp/init.lisp" eval-file
     argc @ 1 <= if ." no input file" cr 1 quit then
     1 arg eval-file
 

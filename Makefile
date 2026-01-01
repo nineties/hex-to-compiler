@@ -1,12 +1,12 @@
 # zero-to-compiler -
 # Copyright (C) 2025 nineties
 
-default:
-	$(MAKE) -C stage1
+default: pforth
 
-.PHONY: clean test
+pforth: pforth.xxd
+	xxd -r -c 8 $< > pforth
+	chmod +x pforth
+
+.PHONY: clean
 clean:
-	$(MAKE) clean -C stage1
-
-test: default
-	$(MAKE) test -C stage1
+	rm -f pforth
