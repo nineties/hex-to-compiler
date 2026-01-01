@@ -29,3 +29,9 @@
 (defmacro when (cond body)
     `(if ,cond ,body ())
     )
+
+(defmacro define (name params body)
+    `(do
+        (def ,name ())
+        (set ,name (lambda ,params ,body))
+    ))
