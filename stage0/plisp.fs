@@ -2628,7 +2628,7 @@ defer eval-qquote
             
         dup node>type @ case
             Nlambda of apply endof
-            Nmacro of apply endof
+            Nmacro of apply eval-sexp endof
             Nprim of call-prim endof
             ( default case )
             drop
