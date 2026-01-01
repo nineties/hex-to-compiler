@@ -1,6 +1,7 @@
 ; init script for plancklisp
 ; Copyright (C) 2026 nineties
 
+; # Primitive Functions
 (def + prim:add)
 (def - prim:sub)
 (def * prim:mul)
@@ -23,6 +24,8 @@
 (def cadr (lambda (x) (car (cdr x))))
 (def caddr (lambda (x) (car (cdr (cdr x)))))
 
+; # Syntax Sugars
+
 (def defmacro (macro args
     `(do
         (def ,(car args) ())
@@ -39,3 +42,5 @@
     `(if ,cond ,body ())
     )
 
+; # Utility Functions
+(define println (x) (do (print x) (print "\n")))

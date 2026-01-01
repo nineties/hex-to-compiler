@@ -2183,14 +2183,15 @@ end-struct node%
 
 0 constant Nint
 1 constant Nsymbol
-2 constant Nquote
-3 constant Nqquote
-4 constant Nunquote
-5 constant Nnil
-6 constant Ncons
-7 constant Nlambda
-8 constant Nmacro
-9 constant Nprim
+2 constant Nstr
+3 constant Nquote
+4 constant Nqquote
+5 constant Nunquote
+6 constant Nnil
+7 constant Ncons
+8 constant Nlambda
+9 constant Nmacro
+10 constant Nprim
 
 : make-node0 ( type -- node )
     1 cells allocate throw
@@ -2241,8 +2242,15 @@ Nnil make-node0 constant nil
 : make-int ( n -- atom ) Nint make-node1 ;
 : to-int ( atom -- n ) node>arg0 @ ;
 
+: make-str ( c-addr -- atom ) Nstr make-node1 ;
+: to-str ( atom -- n ) node>arg0 @ ;
+
 variable symlist
 0 symlist !
+
+: strdup ( c-addr -- c-addr )
+    dup strlen 1+ allocate throw tuck strcpy
+;
 
 : make-symbol ( c-addr -- atom )
     \ lookup existing symbols
@@ -2251,9 +2259,7 @@ variable symlist
         list>next @
     repeat drop
 
-    \ duplicate given string
-    dup strlen 1+ allocate throw tuck strcpy
-    Nsymbol make-node1
+    strdup Nsymbol make-node1
     dup symlist list-push!
 ;
 
@@ -2314,8 +2320,9 @@ s" macro" make-symbol constant Smacro
 
 : print-sexp ( sexp -- )
     dup @ case
-    Nint of node>arg0 @ 10 swap print-int endof
-    Nsymbol of node>arg0 @ type endof
+    Nint of to-int 10 swap print-int endof
+    Nstr of to-str type endof
+    Nsymbol of sym>name type endof
     Nquote of '\'' emit node>arg0 @ recurse endof
     Nqquote of '`' emit node>arg0 @ recurse endof
     Nunquote of ',' emit node>arg0 @ recurse endof
@@ -2350,18 +2357,29 @@ s" macro" make-symbol constant Smacro
 ;
 
 : parse-error
-    ." Parse Error" cr quit
+    ." Parse Error" cr 1 quit
 ;
 
-: parse-str ." Not implemented: parse-str" cr quit ;
-: parse-char ." Not implemented: parse-char" cr quit ;
+create strbuf 1024 allot
+: parse-str ( c-addr -- node c-addr )
+    strbuf swap ( buf str )
+    begin dup c@ '"' <> while
+        dup c@ '\\' = if
+            1+ dup >r c@ escaped-char dup 0< if ." invalid escaped char" cr 1 quit then
+            over c!
+            1+ r> 1+
+        else
+            dup >r c@ over c! 1+ r> 1+
+        then
+    repeat
+    1+ >r 1+ 0 swap c! strbuf strdup make-str r>
+;
 
 create tokbuf 1024 allot
 
 : parse-atom ( c-addr -- sexp c-addr )
     dup c@ case
         '"'  of 1+ parse-str endof
-        '\'' of 1+ parse-char endof
         drop tokbuf ( from to )
         begin over c@ is-atom-char while
             over c@ over c!
@@ -2484,6 +2502,7 @@ defer eval-qquote
 :noname ( env sexp -- env sexp )
     dup @ case
     Nint of ( do nothing ) endof
+    Nstr of ( do nothing ) endof
     Nsymbol of
         2dup
         ( env sym env sym )
@@ -2642,6 +2661,7 @@ defer eval-qquote
     >r
     dup node>type @ case
     Nint of r> drop endof
+    Nstr of r> drop endof
     Nsymbol of r> drop endof
     Nquote of node>arg0 @ r> recurse make-quote endof
     Nqquote of node>arg0 @ r> 1+ recurse make-qquote endof
