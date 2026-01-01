@@ -46,6 +46,23 @@ Stage2
 
 TBD
 
+Hot to Run
+----------
+
+For x86 Linux
+~~~~~~~~~~~~~
+
+::
+
+   $ git clone https://github.com/nineties/hex-to-compiler.git
+   $ cd hex-to-compiler
+   $ make
+
+For Other Environments
+~~~~~~~~~~~~~~~~~~~~~~
+
+TBD
+
 Status
 ------
 
