@@ -2683,7 +2683,7 @@ defer eval-qquote
         skip-spaces-and-comments
         dup c@ unless ( EOF ) drop r> exit then
         parse-sexp swap
-        r> swap eval-sexp print-sexp cr dup print-env >r
+        r> swap eval-sexp print-sexp cr >r
     again
 ;
 
