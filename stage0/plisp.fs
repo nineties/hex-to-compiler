@@ -2276,6 +2276,7 @@ s" true" make-symbol constant Strue
 s" def" make-symbol constant Sdef
 s" set" make-symbol constant Sset
 s" if" make-symbol constant Sif
+s" while" make-symbol constant Swhile
 s" do" make-symbol constant Sdo
 s" lambda" make-symbol constant Slambda
 s" macro" make-symbol constant Smacro
@@ -2611,6 +2612,17 @@ defer eval-qquote
             swap caddr eval-sexp
             nip \ returns outer env
         then
+    endof
+    Swhile of \ (while condition body)
+        dup cons-len 3 <> if ." malformed 'while' expr" cr 1 quit then
+        ( env args )
+        swap >r
+        cdr dup car swap cadr
+        ( cond body R: env )
+        begin r> dup >r 2 pick eval-sexp nil <> while
+            over eval-sexp 2drop
+        repeat drop
+        2drop r> nil
     endof
     Sdo of \ (do e0 e1 ...)
         cdr nil swap ( env nil args )
