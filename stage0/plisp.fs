@@ -2304,6 +2304,7 @@ s" macro" make-symbol constant Smacro
         '$' of true endof
         '%' of true endof
         '&' of true endof
+        '|' of true endof
         '^' of true endof
         '~' of true endof
         '@' of true endof
@@ -2448,14 +2449,14 @@ variable root-env
     root-env @ -rot env-push root-env !
 ;
 
-s" prim:iadd"    :noname to-int swap to-int + make-int ; add-prim
-s" prim:isub"    :noname to-int swap to-int - make-int ; add-prim
-s" prim:imul"    :noname to-int swap to-int * make-int ; add-prim
-s" prim:idiv"    :noname to-int swap to-int / make-int ; add-prim
-s" prim:imod"    :noname to-int swap to-int % make-int ; add-prim
-s" prim:iand"    :noname to-int swap to-int & make-int ; add-prim
-s" prim:ior"     :noname to-int swap to-int | make-int ; add-prim
-s" prim:ixor"    :noname to-int swap to-int ^ make-int ; add-prim
+s" prim:add"    :noname to-int swap to-int + make-int ; add-prim
+s" prim:sub"    :noname to-int swap to-int - make-int ; add-prim
+s" prim:mul"    :noname to-int swap to-int * make-int ; add-prim
+s" prim:div"    :noname to-int swap to-int / make-int ; add-prim
+s" prim:mod"    :noname to-int swap to-int % make-int ; add-prim
+s" prim:and"    :noname to-int swap to-int & make-int ; add-prim
+s" prim:or"     :noname to-int swap to-int | make-int ; add-prim
+s" prim:xor"    :noname to-int swap to-int ^ make-int ; add-prim
 s" prim:less"    :noname to-int swap to-int < if Strue else nil then ; add-prim
 s" prim:uless"   :noname to-int swap to-int u if Strue else nil then ; add-prim
 s" prim:equal"   :noname to-int swap to-int = if Strue else nil then ; add-prim
