@@ -2190,6 +2190,7 @@ end-struct node%
 6 constant Ncons
 7 constant Nlambda
 8 constant Nmacro
+9 constant Nprim
 
 : make-node0 ( type -- node )
     1 cells allocate throw
@@ -2224,6 +2225,7 @@ Nnil make-node0 constant nil
 
 : make-lambda ( body params env -- node ) Nlambda make-node3 ;
 : make-macro ( body params env -- node ) Nmacro make-node3 ;
+: make-prim ( xt sym -- node ) Nprim make-node2 ;
 
 : car ( node -- node ) node>arg0 @ ;
 : cdr ( node -- node ) node>arg1 @ ;
@@ -2237,6 +2239,7 @@ Nnil make-node0 constant nil
 ;
 
 : make-int ( n -- atom ) Nint make-node1 ;
+: to-int ( atom -- n ) node>arg0 @ ;
 
 variable symlist
 0 symlist !
@@ -2262,7 +2265,8 @@ variable symlist
 : sym? node>type @ Nsymbol = ;
 : sym>name node>arg0 @ ; 
 
-( === Builtin Symbols === )
+( === Builtin symbols === )
+s" true" make-symbol constant Strue
 s" def" make-symbol constant Sdef
 s" set" make-symbol constant Sset
 s" if" make-symbol constant Sif
@@ -2339,6 +2343,7 @@ s" macro" make-symbol constant Smacro
         node>arg2 @ recurse
         ')' emit
     endof
+    Nprim of node>arg0 @ recurse endof
         not-reachable
     endcase
 ;
@@ -2435,6 +2440,29 @@ end-struct env%
     2drop 0
 ;
 
+variable root-env
+
+\ add primitive function
+: add-prim ( c-addr xt -- )
+    swap make-symbol tuck make-prim
+    root-env @ -rot env-push root-env !
+;
+
+s" prim:iadd"    :noname to-int swap to-int + make-int ; add-prim
+s" prim:isub"    :noname to-int swap to-int - make-int ; add-prim
+s" prim:imul"    :noname to-int swap to-int * make-int ; add-prim
+s" prim:idiv"    :noname to-int swap to-int / make-int ; add-prim
+s" prim:imod"    :noname to-int swap to-int % make-int ; add-prim
+s" prim:iand"    :noname to-int swap to-int & make-int ; add-prim
+s" prim:ior"     :noname to-int swap to-int | make-int ; add-prim
+s" prim:ixor"    :noname to-int swap to-int ^ make-int ; add-prim
+s" prim:less"    :noname to-int swap to-int < if Strue else nil then ; add-prim
+s" prim:uless"   :noname to-int swap to-int u if Strue else nil then ; add-prim
+s" prim:equal"   :noname to-int swap to-int = if Strue else nil then ; add-prim
+s" prim:lshift"  :noname to-int swap to-int lshift make-int ; add-prim
+s" prim:rshift"  :noname to-int swap to-int rshift make-int ; add-prim
+s" prim:arshift" :noname to-int swap to-int arshift make-int ; add-prim
+
 defer eval-sexp
 defer eval-cons
 defer eval-qquote
@@ -2457,6 +2485,7 @@ defer eval-qquote
     Ncons of eval-cons endof
     Nlambda of endof
     Nmacro of endof
+    Nprim of endof
         not-reachable
     endcase
 ; is eval-sexp
@@ -2502,6 +2531,16 @@ defer eval-qquote
 
     ( env' body )
     eval-sexp
+;
+
+: flatten-args ( args -- argn-1 ... arg0 )
+    dup nil = if drop else dup >r cdr recurse r> car then
+;
+
+: call-prim ( env args fn -- env value )
+    node>arg1 @ >r ( env args R: xt )
+    flatten-args r> ( env argn-1 ... arg0 xt )
+    execute
 ;
 
 :noname ( env sexp -- env sexp )
@@ -2576,6 +2615,7 @@ defer eval-qquote
         dup node>type @ case
             Nlambda of apply endof
             Nmacro of apply endof
+            Nprim of call-prim endof
             ( default case )
             drop
             print-sexp ."  is not a function" cr 1 quit
@@ -2616,27 +2656,31 @@ defer eval-qquote
 ; is eval-qquote
 
 0x100000 constant MAX_PLISP_FILE_SIZE
-: eval-file ( c-str -- )
-    R/O open-file throw dup >r >r ( R: file file )
-    MAX_PLISP_FILE_SIZE dup allocate throw tuck ( mem size mem R: file file )
-    swap r> read-file throw ( mem read-size )
+: eval-file ( env c-str -- env' )
+    R/O open-file throw dup >r >r ( env R: file file )
+    MAX_PLISP_FILE_SIZE dup allocate throw tuck ( env mem size mem R: file file )
+    swap r> read-file throw ( env mem read-size )
     MAX_PLISP_FILE_SIZE >= if ." too large file" cr 1 quit then
     r> close-file throw
 
-    ( c-addr )
-    0 >r \ env
+    ( env c-addr )
+    swap >r
     begin
         skip-spaces-and-comments
-        dup c@ unless ( EOF ) r> 2drop exit then
+        dup c@ unless ( EOF ) drop r> exit then
         parse-sexp swap
         r> swap eval-sexp print-sexp cr >r
     again
 ;
 
 :noname
+    root-env @
+
     s" init.l" eval-file
     argc @ 1 <= if ." no input file" cr 1 quit then
     1 arg eval-file
+
+    drop
 ; execute
 
 0 quit
