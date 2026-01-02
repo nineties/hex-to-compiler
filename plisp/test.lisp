@@ -36,6 +36,16 @@
 
 (expect (when true 1) 1)
 (expect (when () 1) ())
+(expect (cond
+    ((= 1 2)    0)
+    ((= 2 2)    1)
+    (true       2)
+    ) 1)
+(expect (cond
+    ((= 1 2)    0)
+    ((= 2 3)    1)
+    (true       2)
+    ) 2)
 
 (expect (do
     (def sum 0)
