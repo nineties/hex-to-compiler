@@ -110,6 +110,14 @@
     (true       (nth (- i 1) (cdr ls)))
     ))
 
+; # Assoc List
+(define acons (k v ls) (cons (list k v) ls))
+(define assoc (k ls) (cond
+    ((nil? ls)          'error)
+    ((= k (caar ls))    (cadar ls))
+    (true               (assoc k (cdr ls)))
+    ))
+
 ; # S-expression parser
 (define parse-sexp-list (str) (do
     (def r (parse str))

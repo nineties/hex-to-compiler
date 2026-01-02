@@ -12,15 +12,16 @@
       (+= passed 1)
       (do
         (type "Test failed: expected ")
-        (print v1)
-        (type " but got ")
         (print v2)
+        (type " but got ")
+        (print v1)
         (type " for ")
         (println e)
         (+= failed 1)
       ))))
 (defmacro expect-true (e) `(expect ,e true))
 (defmacro expect-nil (e) `(expect ,e ()))
+(defmacro expect-error (e) `(expect ,e 'error))
 
 ; === Tests ===
 
@@ -65,6 +66,19 @@
 (expect-nil  (member? 4 '(1 2 3)))
 (expect (map (lambda (n) (+ n 1)) '(1 2 3)) '(2 3 4))
 (expect (nth 1 '(1 2 3)) 2)
+
+(expect (do
+    (def ls ())
+    (set ls (acons 0 "zero" ls))
+    (set ls (acons 1 "one" ls))
+    (set ls (acons 2 "two" ls))
+    (assoc 1 ls)) "one")
+(expect-error (do
+    (def ls ())
+    (set ls (acons 0 "zero" ls))
+    (set ls (acons 1 "one" ls))
+    (set ls (acons 2 "two" ls))
+    (assoc 3 ls)))
 
 (expect-true (= 123 123))
 (expect-nil  (= 100 123))
