@@ -1665,6 +1665,8 @@ s" Not reachable here. may be a bug" exception constant NOT-REACHABLE
     here swap allot
 ;
 
+here constant here_bottom
+
 \ allocate user memory
 : %allocate ( align size -- addr )
     over 1- + allocate 
@@ -2330,5 +2332,7 @@ s" print-env" :noname dup print-env ; add-prim
 
     drop
 ; execute
+
+\ ." total memory used: " here here_bottom - 0x100000 / . ." MB" cr
 
 0 quit
