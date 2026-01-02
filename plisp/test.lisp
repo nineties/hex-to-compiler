@@ -53,6 +53,10 @@
     sum)
     15)
 
+(expect (do (defvar x 1) x) 1)
+(expect (do (defvar (x y) '(1 2)) x) 1)
+(expect (do (defvar (x y) '(1 2)) y) 2)
+
 (expect (length ()) 0)
 (expect (length '(1 2 3)) 3)
 (expect (list 1 2 3) '(1 2 3))

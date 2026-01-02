@@ -61,6 +61,20 @@
             (set ,v (cdr ,v))
         ))))))
 
+(defmacro defvar (lhs rhs) (do
+    (define iter (lhs v n) (cond
+        ((nil? lhs)     ())
+        (true           (cons
+            `(def ,(car lhs) (nth ,n ,v))
+            (iter (cdr lhs) v (+ n 1))
+            ))))
+    (cond
+        ((sym? lhs)     `(def ,lhs ,rhs))
+        ((cons? lhs)    (do
+            (def v (fresh-sym))
+            (cons 'do (cons `(def ,v ,rhs) (iter lhs v 0)))
+            )))))
+
 ; # Utility Functions
 (define println (e) (do (print e) (type "\n")))
 (define puts (s) (do (type s) (type "\n")))
