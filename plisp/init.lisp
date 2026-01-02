@@ -90,6 +90,12 @@
     (true           (cons (f (car ls)) (map f (cdr ls))))
     ))
 
+(define nth (i ls) (cond
+    ((nil? ls)  (abort "not enough length"))
+    ((= i 0)    (car ls))
+    (true       (nth (- i 1) (cdr ls)))
+    ))
+
 ; # S-expression parser
 (define parse-sexp-list (str) (do
     (def r (parse str))

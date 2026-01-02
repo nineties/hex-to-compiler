@@ -59,6 +59,7 @@
 (expect-true (member? 1 '(1 2 3)))
 (expect-nil  (member? 4 '(1 2 3)))
 (expect (map (lambda (n) (+ n 1)) '(1 2 3)) '(2 3 4))
+(expect (nth 1 '(1 2 3)) 2)
 
 (expect-true (= 123 123))
 (expect-nil  (= 100 123))
