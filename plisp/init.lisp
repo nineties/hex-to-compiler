@@ -63,5 +63,11 @@
 (defmacro /= (x v) `(set ,x (/ ,x ,v)))
 (defmacro %= (x v) `(set ,x (% ,x ,v)))
 
-; # List Functions
+(define error (text) (do (puts text) (exit 1)))
 
+; # List Functions
+(define length (e) (cond
+    ((nil? e)   0)
+    ((cons? e)  (+ 1 (length (cdr e))))
+    (true       (error "cons is expected"))
+    ))

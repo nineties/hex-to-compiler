@@ -2093,6 +2093,7 @@ s" parse" :noname ( str -- sexp str )
     then
 ; add-prim
 s" eval" :noname ( env sexp -- env sexp ) eval-sexp ; add-prim
+s" exit" :noname ( int -- ) to-int quit ; add-prim
 
 0x100000 constant MAX_PLISP_FILE_SIZE
 : read-file ( path -- c-str nbytes )

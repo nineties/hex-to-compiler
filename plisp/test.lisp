@@ -34,6 +34,9 @@
 (expect (cadr '(1 2)) 2)
 (expect (cdar '((1 2) 3)) '(2))
 
+(expect (length ()) 0)
+(expect (length '(1 2 3)) 3)
+
 (expect-true (= 123 123))
 (expect-nil  (= 100 123))
 (expect-nil  (= 123 "foo"))
