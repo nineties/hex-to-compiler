@@ -1,6 +1,8 @@
 ; init script for plancklisp
 ; Copyright (C) 2026 nineties
 
+(def true 'true)
+
 (def caar (lambda (x) (car (car x))))
 (def cadr (lambda (x) (car (cdr x))))
 (def cdar (lambda (x) (cdr (car x))))
@@ -48,8 +50,18 @@
     ))
 
 ; # Utility Functions
+(define println (e) (do (print e) (type "\n")))
 (define puts (s) (do (type s) (type "\n")))
 (define not (x) (= x ()))
 (define > (a b) (< b a))
 (define <= (a b) (not (> a b)))
 (define >= (a b) (not (< a b)))
+
+(defmacro += (x v) `(set ,x (+ ,x ,v)))
+(defmacro -= (x v) `(set ,x (- ,x ,v)))
+(defmacro *= (x v) `(set ,x (* ,x ,v)))
+(defmacro /= (x v) `(set ,x (/ ,x ,v)))
+(defmacro %= (x v) `(set ,x (% ,x ,v)))
+
+; # List Functions
+

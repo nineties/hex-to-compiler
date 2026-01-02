@@ -2078,7 +2078,7 @@ s" cons" :noname make-cons ; add-prim
 s" car"  :noname car ; add-prim
 s" cdr"  :noname cdr ; add-prim
 s" nil?" :noname nil = if Strue else nil then ; add-prim
-s" print" :noname print-sexp cr nil ; add-prim
+s" print" :noname print-sexp nil ; add-prim
 s" type"  :noname to-str type nil ; add-prim
 s" parse" :noname ( str -- sexp str )
     skip-spaces-and-comments

@@ -12,6 +12,4 @@ clean:
 	rm -f pforth
 
 test: pforth plisp.fs $(shell find plisp -name "*.lisp")
-	./pforth < plisp.fs plisp/examples/hello.lisp
-	./pforth < plisp.fs plisp/examples/fib.lisp
-	./pforth < plisp.fs plisp/examples/counter.lisp
+	./pforth < plisp.fs plisp/test.lisp
