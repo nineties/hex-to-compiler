@@ -1829,6 +1829,24 @@ s" unquote" make-symbol constant Sunquote
 : make-qquote ( atom -- atom ) Squasiquote make-list2 ;
 : make-unquote ( atom -- atom ) Sunquote make-list2 ;
 
+defer equal-sexp
+:noname ( e0 e2 -- atom )
+    2dup = if 2drop Strue exit then
+    2dup node>type @ swap node>type @ <> if 2drop nil exit then
+    dup node>type @ case
+        Nint of to-int swap to-int = if Strue else nil then endof
+        Nsymbol of = if Strue else nil then endof
+        Nstr of to-str swap to-str streq if Strue else nil then endof
+        Ncons of
+            2dup car swap car equal-sexp nil = if 2drop nil exit then
+            cdr swap cdr equal-sexp
+        endof
+        Nlambda of 2drop nil endof
+        Nmacro of 2drop nil endof
+        not-reachable
+    endcase
+; is equal-sexp
+
 ( === Parser and Printer === )
 
 : is-blank ( c -- bool )
@@ -2052,7 +2070,7 @@ s" |"   :noname to-int swap to-int | make-int ; add-prim
 s" ^"   :noname to-int swap to-int ^ make-int ; add-prim
 s" <"   :noname to-int swap to-int < if Strue else nil then ; add-prim
 s" u<"  :noname to-int swap to-int u if Strue else nil then ; add-prim
-s" ="   :noname to-int swap to-int = if Strue else nil then ; add-prim
+s" ="   :noname equal-sexp ; add-prim
 s" <<"  :noname to-int swap to-int lshift make-int ; add-prim
 s" >>"  :noname to-int swap to-int rshift make-int ; add-prim
 s" asr" :noname to-int swap to-int arshift make-int ; add-prim
