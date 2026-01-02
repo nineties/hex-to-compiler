@@ -30,9 +30,20 @@
         (set ,name (lambda ,params ,body))
     ))
 
+(defmacro with-scope (body) `(if true ,body ()))
+
 (defmacro when (cond body)
     `(if ,cond ,body ())
     )
+
+(defmacro for (x ls body)
+    `(with-scope (do
+        (def r ,ls)
+        (while (not (nil? r)) (do
+            (def ,x (car r))
+            ,body
+            (set r (cdr r))
+        )))))
 
 ; (cond
 ;   (condition0 body0)
@@ -63,11 +74,35 @@
 (defmacro /= (x v) `(set ,x (/ ,x ,v)))
 (defmacro %= (x v) `(set ,x (% ,x ,v)))
 
-(define error (text) (do (puts text) (exit 1)))
+(define abort (msg) (do (puts msg) (exit 1)))
 
 ; # List Functions
-(define length (e) (cond
-    ((nil? e)   0)
-    ((cons? e)  (+ 1 (length (cdr e))))
-    (true       (error "cons is expected"))
+(define list args args)
+(define length (e) (if (nil? e) 0 (+ 1 (length (cdr e)))))
+(define member? (v ls) (cond
+    ((nil? ls)      ())
+    ((= (car ls) v) true)
+    (true           (member? v (cdr ls)))
     ))
+(define map (f ls) (cond
+    ((nil? ls)      ())
+    (true           (cons (f (car ls)) (map f (cdr ls))))
+    ))
+
+; # S-expression parser
+(define parse-sexp-list (str) (do
+    (def r (parse str))
+    (cond
+      ((= 'error r)     'error)
+      ((nil? r)         ())
+      (true             (cons (car r) (parse-sexp-list (cadr r))))
+    )))
+
+; # Import
+(def imported-paths ())
+(defmacro import (path) (when (not (member? path imported-paths)) (do
+        (set imported-paths (cons path imported-paths))
+        (def r (read-file path))
+        (when (< (car r) 0) (abort "file not found"))
+        (cons 'do (map (lambda (e) `(eval ',e)) (parse-sexp-list (cadr r))))
+        )))

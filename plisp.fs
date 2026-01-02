@@ -1824,6 +1824,7 @@ s" macro" make-symbol constant Smacro
 s" quote" make-symbol constant Squote
 s" quasiquote" make-symbol constant Squasiquote
 s" unquote" make-symbol constant Sunquote
+s" error" make-symbol constant Serror
 
 : make-quote ( atom -- atom ) Squote make-list2 ;
 : make-qquote ( atom -- atom ) Squasiquote make-list2 ;
@@ -1899,7 +1900,9 @@ defer equal-sexp
     dup @ case
     Nint of to-int 10 swap print-int endof
     Nstr of '"' emit to-str print-str '"' emit endof
-    Nsymbol of sym>name type endof
+    Nsymbol of sym>name
+        dup if type else drop s" <anon>" type then
+    endof
     Nnil of drop ." ()" endof
     Ncons of 
         dup car case
@@ -1918,17 +1921,13 @@ defer equal-sexp
     endof
     Nlambda of
         ." (lambda "
-        dup node>arg1 @ recurse
-        bl emit
-        node>arg2 @ recurse
-        ')' emit
+        node>arg1 @ recurse
+        ."  ...)"
     endof
     Nmacro of
         ." (macro "
-        dup node>arg1 @ recurse
-        bl emit
-        node>arg2 @ recurse
-        ')' emit
+        node>arg1 @ recurse
+        ."  ...)"
     endof
     Nprim of node>arg0 @ recurse endof
         not-reachable
@@ -2080,20 +2079,22 @@ s" nil?" :noname nil = if Strue else nil then ; add-prim
 s" cons?" :noname node>type @ Ncons = if Strue else nil then ; add-prim
 s" print" :noname print-sexp nil ; add-prim
 s" type"  :noname to-str type nil ; add-prim
-s" parse" :noname ( str -- sexp str )
+s" parse" :noname ( str -- sexp )
     to-str skip-spaces-and-comments
     dup c@ unless
-        nil
+        drop nil
     else
         ['] parse-sexp catch unless
             skip-spaces-and-comments make-str nil swap make-cons swap make-cons
         else
-            drop nil
+            drop Serror
         then
     then
 ; add-prim
 s" eval" :noname ( env sexp -- env sexp ) eval-sexp ; add-prim
 s" exit" :noname ( int -- ) to-int quit ; add-prim
+
+s" unique-sym" :noname 0 Nsymbol make-node1 ; add-prim
 
 0x100000 constant MAX_PLISP_FILE_SIZE
 : read-file ( path -- c-str nbytes )
@@ -2115,6 +2116,7 @@ s" write-file" :noname ( nbytes data path -- nbytes )
     r> close
     make-int
 ; add-prim
+s" print-env" :noname dup print-env ; add-prim
 
 :noname ( env sexp -- env sexp )
     dup @ case

@@ -36,6 +36,9 @@
 
 (expect (length ()) 0)
 (expect (length '(1 2 3)) 3)
+(expect (list 1 2 3) '(1 2 3))
+(expect-true (member? 1 '(1 2 3)))
+(expect-nil  (member? 4 '(1 2 3)))
 
 (expect-true (= 123 123))
 (expect-nil  (= 100 123))
@@ -52,8 +55,8 @@
 (expect (parse "(+ 1 2 3)abc") '((+ 1 2 3) "abc"))
 ; skip leading spaces and eliminates following spaces
 (expect (parse "    (+ 1 2 3)   ") '((+ 1 2 3) ""))
-; returns () for broken s-expr
-(expect (parse "(+ 1 2") ())
+; returns 'error for broken s-expr
+(expect (parse "(+ 1 2") 'error)
 
 (expect '(1 2 ,(+ 1 2)) '(1 2 ,(+ 1 2)))
 (expect `(1 2 ,(+ 1 2)) '(1 2 3))
