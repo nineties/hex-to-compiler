@@ -135,6 +135,13 @@
     ((= k (caar ls))    (cadar ls))
     (true               (assoc k (cdr ls)))
     ))
+
+(define assoc-find (f ls) (cond
+    ((nil? ls)     'error)
+    ((f (caar ls))  (cadar ls))
+    (true          (assoc-find f (cdr ls)))
+    ))
+
 (defmacro acons! (k v ls) `(set ,ls (acons ,k ,v ,ls)))
 (define assoc-set (k v ls) (cond
     ((nil? ls)          'error)

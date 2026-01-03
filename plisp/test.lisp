@@ -93,12 +93,9 @@
 (expect (third '(1 2 3)) 3)
 (expect (nth 1 '(1 2 3)) 2)
 
-(expect (do
-    (def ls '((0 "zero") (1 "one") (2 "two")))
-    (assoc 1 ls)) "one")
-(expect-error (do
-    (def ls '((0 "zero") (1 "one") (2 "two")))
-    (assoc 3 ls)))
+(expect       (assoc 1 '((0 "zero") (1 "one") (2 "two"))) "one")
+(expect-error (assoc 3 '((0 "zero") (1 "one") (2 "two"))))
+(expect (assoc-find (lambda (k) (> k 0)) '((0 0) (1 1) (-1 -1))) 1)
 (expect (do
     (def ls '((0 "zero") (1 "one") (2 "two")))
     (assoc-set 0 "z" ls)
