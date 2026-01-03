@@ -2062,6 +2062,7 @@ s" car"  :noname car ; add-prim
 s" cdr"  :noname cdr ; add-prim
 s" setcar" :noname swap node>arg0 ! nil ; add-prim
 s" setcdr" :noname swap node>arg1 ! nil ; add-prim
+s" int?" :noname node>type @ Nint = if Strue else nil then ; add-prim
 s" nil?" :noname nil = if Strue else nil then ; add-prim
 s" cons?" :noname node>type @ Ncons = if Strue else nil then ; add-prim
 s" sym?"  :noname node>type @ Nsymbol = if Strue else nil then ; add-prim
