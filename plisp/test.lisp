@@ -94,17 +94,17 @@
 (expect (nth 1 '(1 2 3)) 2)
 
 (expect (do
-    (def ls (make-assoc '((0 "zero") (1 "one") (2 "two"))))
+    (def ls '((0 "zero") (1 "one") (2 "two")))
     (assoc 1 ls)) "one")
 (expect-error (do
-    (def ls (make-assoc '((0 "zero") (1 "one") (2 "two"))))
+    (def ls '((0 "zero") (1 "one") (2 "two")))
     (assoc 3 ls)))
 (expect (do
-    (def ls (make-assoc '((0 "zero") (1 "one") (2 "two"))))
+    (def ls '((0 "zero") (1 "one") (2 "two")))
     (assoc-set 0 "z" ls)
     ls) '((0 "z") (1 "one") (2 "two")))
 (expect-error (do
-    (def ls (make-assoc '((0 "zero") (1 "one") (2 "two"))))
+    (def ls '((0 "zero") (1 "one") (2 "two")))
     (assoc-set 3 "z" ls)
     ))
 

@@ -140,10 +140,6 @@
     ((= k (caar ls))    (setcar v (cdar ls)))
     (true               (assoc-set k v (cdr ls)))
     ))
-(define make-assoc (ls)
-    (if (nil? ls)
-        ()
-        (acons (first (car ls)) (second (car ls)) (make-assoc (cdr ls)))))
 
 ; # S-expression parser
 (define parse-sexp-list (str) (do
