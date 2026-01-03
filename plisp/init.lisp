@@ -121,6 +121,7 @@
     ((= k (caar ls))    (cadar ls))
     (true               (assoc k (cdr ls)))
     ))
+(defmacro acons! (k v ls) `(set ,ls (acons ,k ,v ,ls)))
 (define assoc-set (k v ls) (cond
     ((nil? ls)          'error)
     ((= k (caar ls))    (setcar v (cdar ls)))

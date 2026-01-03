@@ -1,16 +1,15 @@
 ; hello.s
 
-(global _start)
+(entry start)
 
 (section data)
-(label msg
+(label msg)
     (ascii "Hello World!\n")
-    )
 
-(def len (- here msg))
+(const len (- here msg))
 
 (section text)
-(label _start
+(label start)
     (mov 1 %rax)                ; SYS_WRITE
     (mov 1 %rdi)                ; stdout
     (lea (mem msg %rip) %rsi)   ; addr
@@ -20,4 +19,3 @@
     (mov 60 %rax)   ; SYS_EXIT
     (xor %rdi %rdi) ; exit code 0
     (syscall)
-    )
