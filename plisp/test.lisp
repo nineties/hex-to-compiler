@@ -88,6 +88,8 @@
 (expect-true (member? 1 '(1 2 3)))
 (expect-nil  (member? 4 '(1 2 3)))
 (expect (map (lambda (n) (+ n 1)) '(1 2 3)) '(2 3 4))
+(expect (find (lambda (n) (> n 0)) '(-1 0 1)) 1)
+(expect-error (find (lambda (n) (> n 0)) '(-1 0 0)))
 (expect (first '(1 2 3)) 1)
 (expect (second '(1 2 3)) 2)
 (expect (third '(1 2 3)) 3)

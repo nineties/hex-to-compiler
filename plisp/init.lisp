@@ -115,6 +115,11 @@
     ((= (car ls) v) true)
     (true           (member? v (cdr ls)))
     ))
+(define find (f ls) (cond
+    ((nil? ls)      'error)
+    ((f (car ls))   (car ls))
+    (true           (find f (cdr ls)))
+    ))
 (define map (f ls) (cond
     ((nil? ls)      ())
     (true           (cons (f (car ls)) (map f (cdr ls))))
