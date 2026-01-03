@@ -1,4 +1,4 @@
-; hello.s
+; hello.s in x86
 
 (entry start)
 
@@ -10,12 +10,12 @@
 
 (section text)
 (label start)
-    (mov %eax 1)                ; SYS_WRITE
-    (mov %rdi 1)                ; stdout
-    (lea %rsi (mem msg %rip))   ; addr
-    (mov %rdx len)              ; length
-    (syscall)
+    (mov %eax 4)   ; SYS_WRITE
+    (mov %ebx 1)   ; stdout
+    (mov %ecx msg) ; addr
+    (mov %edx len) ; length
+    (int 0x80)
 
-    (mov %rax 60)   ; SYS_EXIT
-    (xor %rdi %rdi) ; exit code 0
-    (syscall)
+    (mov %eax 1)    ; SYS_EXIT
+    (xor %ebx %ebx) ; status = 0
+    (int 0x80)
