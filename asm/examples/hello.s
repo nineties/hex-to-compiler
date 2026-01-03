@@ -2,13 +2,11 @@
 
 (entry start)
 
-(section data)
 (label msg)
     (ascii "Hello World!\n")
 
 (const len (- here msg))
 
-(section text)
 (label start)
     (mov %eax 4)   ; SYS_WRITE
     (mov %ebx 1)   ; stdout

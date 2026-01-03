@@ -60,7 +60,7 @@
         )
     ))
 
-(define compute-bytes (line) (switch (car line)
+(define compute-insn-len (line) (switch (car line)
     ('ascii (strlen (cadr line)))
     ('asciz (+ 1 (strlen (cadr line))))
     ('byte  (length (cdr line)))
@@ -77,12 +77,12 @@
             ((= opd "id") (+= bytes 4))
             ((= opd "/r") (+= bytes 1))
             ((&& (cons? opd) (= '+ (car opd)))   (+= bytes 1))
-            (true (not-implemented "compute-bytes"))
+            (true (not-implemented "compute-insn-len"))
             ))
         bytes
         ))
     ; default case
-    (not-reachable "compute-bytes")
+    (not-reachable "compute-insn-len")
     ))
 
 (define assemble (asm-code) (do
@@ -90,49 +90,88 @@
     (def page_size 0x1000)
 
     (def entry ())
-    (def current_section 'text)
-    (def current_locs '(
-        (text 0)
-        (data 0)
-        (rodata 0)
-        (bss 0)
-        ))
-    (def sections '(
-        (text ())
-        (data ())
-        (rodata ())
-        (bss ())
-        ))
-    (def label_offsets ())    ; label -> (section offs)
+    (def current_loc 0)
+    (def insns ())
+    (def label_offsets ())    ; label -> offs
 
     ; pass1: scan asm code to compute address of labels
     (for line asm-code (do
         (def head (car line))
         (switch head
           ('entry   (set entry (cadr line)))
-          ('section (set current_section (cadr line)))
-          ('label   (do
-                (def addr (assoc current_section current_locs))
-                (acons! (cadr line) (list current_section addr) label_offsets)
-                ))
+          ('label   (acons! (cadr line) current_loc label_offsets))
           ('const   ())  ; do notthing
           (do
-                (def insn-def (lookup-instruction line))
+                (def insn (lookup-instruction line))
 
-                ; increment location counter
-                (def len (compute-bytes insn-def))
-                (def loc (assoc current_section current_locs))
-                (assoc-set current_section (+ loc len) current_locs)
-
-                ; append new line to corresponding section
-                (def lines (assoc current_section sections))
-                (assoc-set current_section (cons insn-def lines) sections)
+                (+= current_loc (compute-insn-len insn))
+                (set insns (cons insn insns))
                 )
           )))
-    (println entry)
-    (println label_offsets)
-    (println current_locs)
+    (set insns (reverse insns)) ; here, insns are stored in reversed order
+
     (when (nil? entry) (abort "entry point is not defined"))
 
-    (not-implemented "assemble")
+    (def elf_hdr_size 52)
+    (def phent_size 32)     ; program header entry size
+    (def segment_size current_loc)
+    (def filesize (+ elf_hdr_size (+ phent_size segment_size)))
+    (def entry_addr (+ load_base (assoc entry label_offsets)))
+
+    (def buf (allocate filesize))
+    (def buf_pos 0)
+
+    (define emit (i) (do (setb buf buf_pos i) (+= buf_pos 1)))
+    (define emit_i16 (i) (do
+        (emit (& 0xff i))
+        (emit (& 0xff (>> i 8)))
+        ))
+    (define emit_i32 (i) (do
+        (emit (& 0xff i))
+        (emit (& 0xff (>> i 8)))
+        (emit (& 0xff (>> i 16)))
+        (emit (& 0xff (>> i 24)))
+        ))
+    (define emit_bytes bytes (while bytes (do (emit (car bytes)) (set bytes (cdr bytes)))))
+
+    ; === write ELF header ===
+    ; e_ident
+    (emit_bytes
+      0x7f (char "E") (char "L") (char "F")
+      1 ; EI_CLASS=32bit
+      1 ; EI_DATA=little endian
+      1 ; EI_VERSION=EV_CURRENT
+      0 ; EI_OSABI=unspecified
+      0 ; EI_ABIVERSION=0
+      0 0 0 0 0 0 0 ; pad
+      )
+    (emit_i16 2) ; e_type=ET_EXEC
+    (emit_i16 3) ; e_machine=EM_386
+    (emit_i32 1) ; e_version=EV_CURRENT
+    (emit_i32 entry_addr)   ; e_entry
+    (emit_i32 elf_hdr_size) ; e_phoff
+    (emit_i32 0)            ; e_shoff (no section header)
+    (emit_i32 0)            ; e_flags
+    (emit_i16 elf_hdr_size) ; e_ehsize
+    (emit_i16 phent_size)   ; e_phentsize
+    (emit_i16 1)            ; e_phnum (use single program header)
+    (emit_i16 0)            ; e_shentsize
+    (emit_i16 0)            ; e_shnum
+    (emit_i16 0)            ; e_shstrndx
+
+    (assert (= buf_pos elf_hdr_size))
+
+    ; === write Program header ===
+    (emit_i32 1)    ; p_type=PT_LOAD
+    (emit_i32 (+ elf_hdr_size phent_size)) ; p_offset
+    (emit_i32 load_base)    ; p_vaddr
+    (emit_i32 0)            ; p_paddr
+    (emit_i32 segment_size) ; p_filesz
+    (emit_i32 segment_size) ; p_memsz (XXX: bss should supported)
+    (emit_i32 0x7)          ; p_flags=RWX
+    (emit_i32 page_size)    ; p_align
+
+    (assert (= buf_pos (+ elf_hdr_size phent_size)))
+
+    (list buf filesize)
     ))

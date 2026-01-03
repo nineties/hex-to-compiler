@@ -124,10 +124,10 @@
 (expect-nil  (= '(1 2 3) '(1 2 4)))
 
 (expect (strlen "hello") 5)
-(expect (getb "abc" 1) 0x62)
+(expect (getb "abc" 1) (char "b"))
 (expect (do
     (def s "abc")
-    (setb s 1 0x42) ; 'B'
+    (setb s 1 (char "B"))
     s) "aBc")
 
 ; parser for S-expression

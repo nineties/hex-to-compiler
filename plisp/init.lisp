@@ -107,6 +107,12 @@
 (defmacro || (a b) `(if ,a true (if ,b true ())))
 
 (define abort (msg) (do (put "abort: ") (puts msg) (exit 1)))
+(defmacro assert (cond)
+    `(when (not ,cond) (do
+        (put "assertion failed: ")
+        (println ',cond)
+        (exit 1)
+        )))
 (define not-implemented (msg) (do (put "not implemented: ") (puts msg) (exit 1)))
 (define not-reachable (msg) (do (put "not reachable: ") (puts msg) (exit 1)))
 
@@ -175,6 +181,9 @@
     ((= k (caar ls))    (setcar v (cdar ls)))
     (true               (assoc-set k v (cdr ls)))
     ))
+
+; # String and chars
+(define char (str) (getb 0 str))
 
 ; # S-expression parser
 (define parse-sexp-list (str) (do

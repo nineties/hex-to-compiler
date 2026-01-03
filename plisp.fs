@@ -2113,10 +2113,11 @@ s" read-file" :noname ( path -- (nbytes data) )
 s" write-file" :noname ( nbytes data path -- nbytes )
     to-str W/O open dup >r >r
     ( nbytes data R: fd fd )
-    to-str dup swap to-int r> write
+    to-str swap to-int r> write
     r> close
     make-int
 ; add-prim
+s" allocate" :noname to-int allocate make-str ; add-prim
 s" print-env" :noname dup print-env ; add-prim
 
 :noname ( env sexp -- env sexp )
