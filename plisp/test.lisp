@@ -65,19 +65,16 @@
 (expect-true (member? 1 '(1 2 3)))
 (expect-nil  (member? 4 '(1 2 3)))
 (expect (map (lambda (n) (+ n 1)) '(1 2 3)) '(2 3 4))
+(expect (first '(1 2 3)) 1)
+(expect (second '(1 2 3)) 2)
+(expect (third '(1 2 3)) 3)
 (expect (nth 1 '(1 2 3)) 2)
 
 (expect (do
-    (def ls ())
-    (set ls (acons 0 "zero" ls))
-    (set ls (acons 1 "one" ls))
-    (set ls (acons 2 "two" ls))
+    (def ls (make-assoc '((0 "zero") (1 "one") (2 "two"))))
     (assoc 1 ls)) "one")
 (expect-error (do
-    (def ls ())
-    (set ls (acons 0 "zero" ls))
-    (set ls (acons 1 "one" ls))
-    (set ls (acons 2 "two" ls))
+    (def ls (make-assoc '((0 "zero") (1 "one") (2 "two"))))
     (assoc 3 ls)))
 
 (expect-true (= 123 123))

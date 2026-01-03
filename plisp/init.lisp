@@ -105,7 +105,9 @@
     ((nil? ls)      ())
     (true           (cons (f (car ls)) (map f (cdr ls))))
     ))
-
+(def first car)
+(def second cadr)
+(def third caddr)
 (define nth (i ls) (cond
     ((nil? ls)  (abort "not enough length"))
     ((= i 0)    (car ls))
@@ -119,6 +121,10 @@
     ((= k (caar ls))    (cadar ls))
     (true               (assoc k (cdr ls)))
     ))
+(define make-assoc (ls)
+    (if (nil? ls)
+        ()
+        (acons (first (car ls)) (second (car ls)) (make-assoc (cdr ls)))))
 
 ; # S-expression parser
 (define parse-sexp-list (str) (do
