@@ -123,6 +123,13 @@
 (expect-true (= '(1 2 3) '(1 2 3)))
 (expect-nil  (= '(1 2 3) '(1 2 4)))
 
+(expect (strlen "hello") 5)
+(expect (getb "abc" 1) 0x62)
+(expect (do
+    (def s "abc")
+    (setb s 1 0x42) ; 'B'
+    s) "aBc")
+
 ; parser for S-expression
 ; returns s-expr and remaining string
 (expect (parse "(+ 1 2 3)abc") '((+ 1 2 3) "abc"))
