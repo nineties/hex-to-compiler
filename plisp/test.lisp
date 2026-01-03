@@ -11,11 +11,11 @@
     (if (= v1 v2)
       (+= passed 1)
       (do
-        (type "Test failed: expected ")
+        (put "Test failed: expected ")
         (print v2)
-        (type " but got ")
+        (put " but got ")
         (print v1)
-        (type " for ")
+        (put " for ")
         (println e)
         (+= failed 1)
       ))))
@@ -135,4 +135,4 @@
 
 ; === End of Tests ===
 
-(type "Tests passed ") (print passed) (type "/") (print (+ passed failed)) (type "\n")
+(put "Tests passed ") (print passed) (put "/") (print (+ passed failed)) (put "\n")
