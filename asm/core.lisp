@@ -3,89 +3,91 @@
 
 ; This assembler generates directly executable ELF files.
 
-(def reg8 '(%al %cl %dl %bl %ah %ch %dh %bh %bpl %spl %dil %sil))
-(def reg16 '(%ax %cx %dx %bx %sp %bp %si %di))
-(def reg32 '(%eax %ecx %edx %ebx %esp %ebp %esi %edi))
-
-(def x86-instructions '(
-    ((int "imm8")           (0xcd "ib"))
-    ((mov "r32" "imm32")    ((+ 0xb8 reg) "id"))
-    ((xor "r/m32" "r32")    (0x31 "/r"))
-    ))
-
-(define match-operand (opd pat) (cond
-    ((= opd pat)   true)
-    ((= "r8" opd)  (member? pat '("r8" "r16" "r32" "r/m8" "r/m16" "r/m32")))
-    ((= "r16" opd) (member? pat '("r16" "r32" "r/m16" "r/m32")))
-    ((= "r32" opd) (member? pat '("r32" "r/m32")))
-    ((= "imm" opd) (member? pat '("imm8" "imm16" "imm32")))
-    ((= "sym" opd) (member? pat '("imm8" "imm16" "imm32" "rel8" "rel16" "rel32")))
-    (true ())
-    ))
-
-(define match-insn (insn pat) (cond
-    ((!= (car insn) (car pat))       ())
-    ((!= (length insn) (length pat)) ())
-    (true (do
-        (define iter (ts ps) (cond
-            ((nil? ts) true)
-            ((match-operand (car ts) (car ps))  (iter (cdr ts) (cdr ps)))
-            (true ())
-            ))
-        (iter (cdr insn) (cdr pat))
-    ))))
-
-(define to-operand-type (opd) (cond
-    ((int? opd) "imm")
-    ((member? opd reg8)  "r8")
-    ((member? opd reg16) "r16")
-    ((member? opd reg32) "r32")
-    ((sym? opd) "sym") ; addr or offset or const
-    ((&& (cons? opd) (= (car opd) '+))  "m")
-    (true   (not-implemented "to-operand-type"))
-    ))
-
-(define lookup-instruction (insn)
-    (if (member? (car insn) '(ascii asciz byte short long quad octa))
-        insn
-        (do
-            (def type (cons (car insn) (map to-operand-type (cdr insn))))
-            (def encoding (assoc-find (lambda (pat) (match-insn type pat)) x86-instructions))
-            (when (= encoding 'error) (do
-                (put "invalid or unsupported instruction: ")
-                (println insn)
-                (exit 1)
-                ))
-            (list 'insn insn encoding)
-        )
-    ))
-
-(define compute-insn-len (line) (switch (car line)
-    ('ascii (strlen (cadr line)))
-    ('asciz (+ 1 (strlen (cadr line))))
-    ('byte  (length (cdr line)))
-    ('short (* 2 (length (cdr line))))
-    ('long  (* 4 (length (cdr line))))
-    ('quad  (* 8 (length (cdr line))))
-    ('insn  (do
-        (def bytes 0)
-        (defvar (insn operands) (cdr line))
-        (for opd operands (cond
-            ((int? opd)   (+= bytes 1))
-            ((= opd "ib") (+= bytes 1))
-            ((= opd "iw") (+= bytes 2))
-            ((= opd "id") (+= bytes 4))
-            ((= opd "/r") (+= bytes 1))
-            ((&& (cons? opd) (= '+ (car opd)))   (+= bytes 1))
-            (true (not-implemented "compute-insn-len"))
-            ))
-        bytes
-        ))
-    ; default case
-    (not-reachable "compute-insn-len")
-    ))
-
 (define assemble (asm-code) (do
+    (def reg8 '(%al %cl %dl %bl %ah %ch %dh %bh %bpl %spl %dil %sil))
+    (def reg16 '(%ax %cx %dx %bx %sp %bp %si %di))
+    (def reg32 '(%eax %ecx %edx %ebx %esp %ebp %esi %edi))
+
+    (def x86_instructions '(
+        ((int "imm8")           ("I"  0xcd "ib"))
+        ((mov "r32" "imm32")    ("OI" 0xb8 "id"))
+        ((xor "r/m32" "r32")    ("MR" 0x31 "/r"))
+        ))
+
+    (define match_operand (opd pat) (cond
+        ((= opd pat)   true)
+        ((= "r8" opd)  (member? pat '("r8" "r16" "r32" "r/m8" "r/m16" "r/m32")))
+        ((= "r16" opd) (member? pat '("r16" "r32" "r/m16" "r/m32")))
+        ((= "r32" opd) (member? pat '("r32" "r/m32")))
+        ((= "imm" opd) (member? pat '("imm8" "imm16" "imm32")))
+        ((= "sym" opd) (member? pat '("imm8" "imm16" "imm32" "rel8" "rel16" "rel32")))
+        (true ())
+        ))
+
+    (define match_insn (insn pat) (cond
+        ((!= (car insn) (car pat))       ())
+        ((!= (length insn) (length pat)) ())
+        (true (do
+            (define iter (ts ps) (cond
+                ((nil? ts) true)
+                ((match_operand (car ts) (car ps))  (iter (cdr ts) (cdr ps)))
+                (true ())
+                ))
+            (iter (cdr insn) (cdr pat))
+        ))))
+
+    (define to_operand_type (opd) (cond
+        ((int? opd) "imm")
+        ((member? opd reg8)  "r8")
+        ((member? opd reg16) "r16")
+        ((member? opd reg32) "r32")
+        ((sym? opd) "sym") ; addr or offset or const
+        ((&& (cons? opd) (= (car opd) '+))  "m")
+        (true   (not-implemented "to_operand_type"))
+        ))
+
+    (define lookup_insn (insn)
+        (if (member? (car insn) '(ascii asciz byte short long))
+            insn
+            (do
+                (def type (cons (car insn) (map to_operand_type (cdr insn))))
+                (def fmt (assoc-find (lambda (pat) (match_insn type pat)) x86_instructions))
+                (when (= fmt 'error) (do
+                    (put "invalid or unsupported instruction: ")
+                    (println insn)
+                    (exit 1)
+                    ))
+                (list 'insn insn fmt)
+            )
+        ))
+
+    (define compute_insn_len (line) (switch (car line)
+        ('ascii (strlen (cadr line)))
+        ('asciz (+ 1 (strlen (cadr line))))
+        ('byte  (length (cdr line)))
+        ('short (* 2 (length (cdr line))))
+        ('long  (* 4 (length (cdr line))))
+        ('quad  (* 8 (length (cdr line))))
+        ('insn  (do
+            (def bytes 0)
+            (defvar (insn fmt) (cdr line))
+            (def operands (cdr fmt))
+            (for opd operands (cond
+                ((int? opd)   (+= bytes 1))
+                ((= opd "ib") (+= bytes 1))
+                ((= opd "iw") (+= bytes 2))
+                ((= opd "id") (+= bytes 4))
+                ((= opd "/r") (+= bytes 1))
+                ((&& (cons? opd) (= '+ (car opd)))   (+= bytes 1))
+                (true (not-implemented "compute_insn_len"))
+                ))
+            bytes
+            ))
+        ; default case
+        (not-reachable "compute_insn_len")
+        ))
+
+    ; assembler main
     (def load_base 0x400000)
     (def page_size 0x1000)
 
@@ -100,11 +102,11 @@
         (switch head
           ('entry   (set entry (cadr line)))
           ('label   (acons! (cadr line) current_loc label_offsets))
-          ('const   ())  ; do notthing
+          ('const   (set insns (cons line insns)))
           (do
-                (def insn (lookup-instruction line))
+                (def insn (lookup_insn line))
 
-                (+= current_loc (compute-insn-len insn))
+                (+= current_loc (compute_insn_len insn))
                 (set insns (cons insn insns))
                 )
           )))
@@ -133,6 +135,13 @@
         (emit (& 0xff (>> i 24)))
         ))
     (define emit_bytes bytes (while bytes (do (emit (car bytes)) (set bytes (cdr bytes)))))
+    (define emit_ascii (str) (do
+        (def i 0)
+        (while (!= (getb str i) 0) (do
+            (emit (getb str i))
+            (+= i 1)
+            ))
+        ))
 
     ; === write ELF header ===
     ; e_ident
@@ -172,6 +181,88 @@
     (emit_i32 page_size)    ; p_align
 
     (assert (= buf_pos (+ elf_hdr_size phent_size)))
+
+    ; === pass2: write the segment ===
+    (def segment_offset (+ elf_hdr_size phent_size))
+    (define here () (+ load_base (- buf_pos segment_offset)))
+    (def consts ())
+
+    (define eval (e) (cond
+        ((int? e)           e)
+        ((= e 'here)        (here))
+        ((member? e reg8)   e)
+        ((member? e reg16)  e)
+        ((member? e reg32)  e)
+        ((sym? e)        (do
+            (def off (assoc e label_offsets))
+            (def val (assoc e consts))
+            (when (&& (= off 'error) (= val 'error)) (do
+                (put "undefined label or const: ")
+                (println e)
+                (exit 1)
+                ))
+            (if (!= off 'error)
+                (+ off load_base)
+                val
+                )
+            ))
+        ((= (car e) '+) (+ (eval (cadr e)) (eval (caddr e))))
+        ((= (car e) '-) (- (eval (cadr e)) (eval (caddr e))))
+        (true               (not-implemented "eval"))
+        ))
+
+    (define encode_reg (r) (cond
+        ((member? r '(%al %ax %eax))    0)
+        ((member? r '(%cl %cx %ecx))    1)
+        ((member? r '(%dl %dx %edx))    2)
+        ((member? r '(%bl %bx %ebx))    3)
+        ((member? r '(%ah %sp %esp))    4)
+        ((member? r '(%ch %bp %ebp))    5)
+        ((member? r '(%dh %si %esi))    6)
+        ((member? r '(%bh %di %edi))    7)
+        (true   (not-reachable "encode_reg"))
+        ))
+
+    (define encode_modrm (r rm) (cond
+        ))
+
+    (define emit_imm (ty v) (switch ty
+        ("ib" (emit v))
+        ("iw" (emit_i16 v))
+        ("id" (emit_i32 v))
+        (not-reachable "emit_imm")
+        ))
+
+    (define emit_insn (insn fmt) (do (println fmt) (switch (car fmt)
+        ("I"    (do
+            (emit (nth 1 fmt))
+            (emit_imm (nth 2 fmt) (caddr insn))
+            ))
+        ("OI"   (do
+            (emit (+ (nth 1 fmt) (encode_reg (cadr insn)))) ; opcode + reg
+            (emit_imm (nth 2 fmt) (caddr insn)) ; imm
+            ))
+        ("MR"   (do
+            (emit (nth 1 fmt))
+            (emit (encode_modrm (nth 2 insn) (nth 1 insn)))
+            ))
+        (not-implemented "emit_insn")
+        )))
+
+    (for insn insns (switch (car insn)
+        ('const (acons! (cadr insn) (eval (caddr insn)) consts))
+        ('ascii (emit_ascii (cadr insn)))
+        ('asciz (do (emit_ascii (cadr insn)) (emit 0)))
+        ('byte  (emit (eval (cadr insn))))
+        ('short (emit_i16 (eval (cadr insn))))
+        ('long  (emit_i32 (eval (cadr insn))))
+        ('insn (do
+            (defvar (code fmt) (cdr insn))
+            (set code (cons (car code) (map eval (cdr code))))
+            (emit_insn code fmt)
+            ))
+        ()
+        ))
 
     (list buf filesize)
     ))
