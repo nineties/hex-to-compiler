@@ -88,11 +88,19 @@
         ))
 
     ; assembler main
-    (def load_base 0x400000)
+    ;(def load_base 0x400000)
+    (def load_base 0x8048000)
     (def page_size 0x1000)
+    (def elf_hdr_size 52)
+    (def phent_size 32)     ; program header entry size
 
     (def entry ())
-    (def current_loc 0)
+
+    ; This program loads the entire file, including headers,
+    ; as a single segment. Since the program body follows
+    ; immediately after the headers, current_loc starts from the header size.
+    (def current_loc (+ elf_hdr_size phent_size))
+
     (def insns ())
     (def label_offsets ())    ; label -> offs
 
@@ -114,13 +122,13 @@
 
     (when (nil? entry) (abort "entry point is not defined"))
 
-    (def elf_hdr_size 52)
-    (def phent_size 32)     ; program header entry size
     (def segment_size current_loc)
-    (def filesize (+ elf_hdr_size (+ phent_size segment_size)))
-    (def entry_addr (+ load_base (assoc entry label_offsets)))
 
-    (def buf (allocate filesize))
+    (define compute_addr (label)
+        (+ load_base (assoc label label_offsets)))
+    (def entry_addr (compute_addr entry))
+
+    (def buf (allocate segment_size))
     (def buf_pos 0)
 
     (define emit (i) (do (setb buf buf_pos i) (+= buf_pos 1)))
@@ -172,7 +180,8 @@
 
     ; === write Program header ===
     (emit_i32 1)    ; p_type=PT_LOAD
-    (emit_i32 (+ elf_hdr_size phent_size)) ; p_offset
+    ; (emit_i32 (+ elf_hdr_size phent_size)) ; p_offset
+    (emit_i32 0)
     (emit_i32 load_base)    ; p_vaddr
     (emit_i32 0)            ; p_paddr
     (emit_i32 segment_size) ; p_filesz
@@ -183,8 +192,7 @@
     (assert (= buf_pos (+ elf_hdr_size phent_size)))
 
     ; === pass2: write the segment ===
-    (def segment_offset (+ elf_hdr_size phent_size))
-    (define here () (+ load_base (- buf_pos segment_offset)))
+    (define here () (+ load_base buf_pos))
     (def consts ())
 
     (define eval (e) (cond
@@ -202,7 +210,7 @@
                 (exit 1)
                 ))
             (if (!= off 'error)
-                (+ off load_base)
+                (compute_addr e)
                 val
                 )
             ))
@@ -210,6 +218,11 @@
         ((= (car e) '-) (- (eval (cadr e)) (eval (caddr e))))
         (true               (not-implemented "eval"))
         ))
+
+    (define reg? (r)
+      (|| (member? r reg32)
+      (|| (member? r reg8)
+          (member? r reg16))))
 
     (define encode_reg (r) (cond
         ((member? r '(%al %ax %eax))    0)
@@ -223,9 +236,6 @@
         (true   (not-reachable "encode_reg"))
         ))
 
-    (define encode_modrm (r rm) (cond
-        ))
-
     (define emit_imm (ty v) (switch ty
         ("ib" (emit v))
         ("iw" (emit_i16 v))
@@ -233,10 +243,26 @@
         (not-reachable "emit_imm")
         ))
 
-    (define emit_insn (insn fmt) (do (println fmt) (switch (car fmt)
+    (define emit_modrm (reg r/m) (do
+        (define enc (mod reg r/m)
+            (| (<< mod 6) (| (<< reg 3) r/m))
+               )
+        (cond
+            ((reg? r/m)  (do
+                (def r1 (encode_reg reg))
+                (def r2 (encode_reg r/m))
+                (emit (enc 0x3 r1 r2))
+                ))
+            (true   (do
+                (not-implemented "ncode_modrm")
+                ))
+        )))
+
+
+    (define emit_insn (insn fmt) (switch (car fmt)
         ("I"    (do
             (emit (nth 1 fmt))
-            (emit_imm (nth 2 fmt) (caddr insn))
+            (emit_imm (nth 2 fmt) (cadr insn))
             ))
         ("OI"   (do
             (emit (+ (nth 1 fmt) (encode_reg (cadr insn)))) ; opcode + reg
@@ -244,10 +270,10 @@
             ))
         ("MR"   (do
             (emit (nth 1 fmt))
-            (emit (encode_modrm (nth 2 insn) (nth 1 insn)))
+            (emit_modrm (nth 2 insn) (nth 1 insn))
             ))
         (not-implemented "emit_insn")
-        )))
+        ))
 
     (for insn insns (switch (car insn)
         ('const (acons! (cadr insn) (eval (caddr insn)) consts))
@@ -264,5 +290,5 @@
         ()
         ))
 
-    (list buf filesize)
+    (list buf segment_size)
     ))
