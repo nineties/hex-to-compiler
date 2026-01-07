@@ -4,20 +4,18 @@
 ; This assembler generates directly executable ELF files.
 
 (define assemble (asm-code) (do
-    (def reg8 '(%al %cl %dl %bl %ah %ch %dh %bh %bpl %spl %dil %sil))
-    (def reg16 '(%ax %cx %dx %bx %sp %bp %si %di))
     (def reg32 '(%eax %ecx %edx %ebx %esp %ebp %esi %edi))
 
     (def x86_instructions '(
+        ((call "rel32")         ("D"  0xe8 "cd"))
         ((int "imm8")           ("I"  0xcd "ib"))
         ((mov "r32" "imm32")    ("OI" 0xb8 "id"))
+        ((ret)                  ("ZO" 0xc3))
         ((xor "r/m32" "r32")    ("MR" 0x31 "/r"))
         ))
 
     (define match_operand (opd pat) (cond
         ((= opd pat)   true)
-        ((= "r8" opd)  (member? pat '("r8" "r16" "r32" "r/m8" "r/m16" "r/m32")))
-        ((= "r16" opd) (member? pat '("r16" "r32" "r/m16" "r/m32")))
         ((= "r32" opd) (member? pat '("r32" "r/m32")))
         ((= "imm" opd) (member? pat '("imm8" "imm16" "imm32")))
         ((= "sym" opd) (member? pat '("imm8" "imm16" "imm32" "rel8" "rel16" "rel32")))
@@ -38,8 +36,6 @@
 
     (define to_operand_type (opd) (cond
         ((int? opd) "imm")
-        ((member? opd reg8)  "r8")
-        ((member? opd reg16) "r16")
         ((member? opd reg32) "r32")
         ((sym? opd) "sym") ; addr or offset or const
         ((&& (cons? opd) (= (car opd) '+))  "m")
@@ -75,9 +71,9 @@
             (for opd operands (cond
                 ((int? opd)   (+= bytes 1))
                 ((= opd "ib") (+= bytes 1))
-                ((= opd "iw") (+= bytes 2))
                 ((= opd "id") (+= bytes 4))
                 ((= opd "/r") (+= bytes 1))
+                ((= opd "cd") (+= bytes 4))
                 ((&& (cons? opd) (= '+ (car opd)))   (+= bytes 1))
                 (true (not-implemented "compute_insn_len"))
                 ))
@@ -198,8 +194,6 @@
     (define eval (e) (cond
         ((int? e)           e)
         ((= e 'here)        (here))
-        ((member? e reg8)   e)
-        ((member? e reg16)  e)
         ((member? e reg32)  e)
         ((sym? e)        (do
             (def off (assoc e label_offsets))
@@ -219,20 +213,17 @@
         (true               (not-implemented "eval"))
         ))
 
-    (define reg? (r)
-      (|| (member? r reg32)
-      (|| (member? r reg8)
-          (member? r reg16))))
+    (define reg? (r) (member? r reg32))
 
     (define encode_reg (r) (cond
-        ((member? r '(%al %ax %eax))    0)
-        ((member? r '(%cl %cx %ecx))    1)
-        ((member? r '(%dl %dx %edx))    2)
-        ((member? r '(%bl %bx %ebx))    3)
-        ((member? r '(%ah %sp %esp))    4)
-        ((member? r '(%ch %bp %ebp))    5)
-        ((member? r '(%dh %si %esi))    6)
-        ((member? r '(%bh %di %edi))    7)
+        ((= r '%eax) 0)
+        ((= r '%ecx) 1)
+        ((= r '%edx) 2)
+        ((= r '%ebx) 3)
+        ((= r '%esp) 4)
+        ((= r '%ebp) 5)
+        ((= r '%esi) 6)
+        ((= r '%edi) 7)
         (true   (not-reachable "encode_reg"))
         ))
 
@@ -260,6 +251,7 @@
 
 
     (define emit_insn (insn fmt) (switch (car fmt)
+        ("ZO"   (emit (nth 1 fmt)))
         ("I"    (do
             (emit (nth 1 fmt))
             (emit_imm (nth 2 fmt) (cadr insn))
@@ -271,6 +263,14 @@
         ("MR"   (do
             (emit (nth 1 fmt))
             (emit_modrm (nth 2 insn) (nth 1 insn))
+            ))
+        ("D"    (do
+            (emit (nth 1 fmt))
+            (def faddr (nth 1 insn))
+            (def offset (- faddr
+                   (+ (here) 4) ; + 2 for cd
+                   ))
+            (emit_i32 offset)
             ))
         (not-implemented "emit_insn")
         ))

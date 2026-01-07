@@ -5,32 +5,34 @@ ASM_SOURCES := asm.lisp $(wildcard asm/*.lisp)
 ASM_EXAMPLE_SOURCES := $(wildcard asm/examples/*.s)
 ASM_EXAMPLE_TARGETS := $(ASM_EXAMPLE_SOURCES:%.s=%)
 
-VASM_SOURCES := vasm.lisp $(wildcard vasm/*.lisp)
-VASM_EXAMPLE_SOURCES := $(wildcard vasm/examples/*.v)
-VASM_EXAMPLE_TARGETS := $(VASM_EXAMPLE_SOURCES:%.v=%)
+PCC_SOURCES := pcc.lisp $(wildcard pcc/*.lisp)
+PCC_EXAMPLE_SOURCES := $(wildcard pcc/examples/*.pc)
+PCC_EXAMPLE_TARGETS := $(PCC_EXAMPLE_SOURCES:%.pc=%)
 
 default:\
 	pforth\
 	$(ASM_EXAMPLE_TARGETS)\
-	$(VASM_EXAMPLE_TARGETS)
+	$(PCC_EXAMPLE_TARGETS)
 
 pforth: pforth.xxd
 	xxd -r -c 8 $< > pforth
 	chmod +x pforth
 
 %: %.s pforth plisp.fs $(ASM_SOURCES)
-	./pforth < plisp.fs asm.lisp $< $@
-	chmod +x $@
+	-./pforth < plisp.fs asm.lisp $< $@
+	-chmod +x $@
+	-./$@
 
-%: %.v pforth plisp.fs $(VASM_SOURCES)
-	./pforth < plisp.fs vasm.lisp $< $@
-	chmod +x $@
+%: %.pc pforth plisp.fs $(PCC_SOURCES) $(ASM_SOURCES)
+	-./pforth < plisp.fs pcc.lisp $< $@
+	-chmod +x $@
+	-./$@
 
 .PHONY: clean test
 clean:
 	rm -f pforth
 	rm -f $(ASM_EXAMPLE_TARGETS)
-	rm -f $(VASM_EXAMPLE_TARGETS)
+	rm -f $(PCC_EXAMPLE_TARGETS)
 
 test: pforth plisp.fs $(shell find plisp -name "*.lisp")
 	./pforth < plisp.fs plisp/test.lisp
