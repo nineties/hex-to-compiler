@@ -30,6 +30,11 @@
         (set ,name (lambda ,params ,body))
     ))
 
+(defmacro define! (name params body)
+    `(do
+        (set ,name (lambda ,params ,body))
+    ))
+
 (defmacro with-scope (body) `(if true ,body ()))
 
 (defmacro when (cond body)

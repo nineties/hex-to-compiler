@@ -7,10 +7,17 @@
     (def reg32 '(%eax %ecx %edx %ebx %esp %ebp %esi %edi))
 
     (def x86_instructions '(
+        ((add "r/m32" "r32")    ("MR" 0x01 "/r"))
         ((call "rel32")         ("D"  0xe8 "cd"))
+        ((idiv "r/m32")         ("M"  0xf7 "/7"))
+        ((imul "r32" "r/m32")   ("RM" 0x0f 0xaf "/r"))
         ((int "imm8")           ("I"  0xcd "ib"))
         ((mov "r32" "imm32")    ("OI" 0xb8 "id"))
+        ((pop "r32")            ("O"  0x58))
+        ((push "r32")           ("O"  0x50))
+        ((push "imm32")         ("I"  0x68 "id"))
         ((ret)                  ("ZO" 0xc3))
+        ((sub "r/m32" "r32")    ("MR" 0x29 "/r"))
         ((xor "r/m32" "r32")    ("MR" 0x31 "/r"))
         ))
 
@@ -73,6 +80,7 @@
                 ((= opd "ib") (+= bytes 1))
                 ((= opd "id") (+= bytes 4))
                 ((= opd "/r") (+= bytes 1))
+                ((member? opd (list "/0" "/1" "/2" "/3" "/4" "/5" "/6" "/7")) (+= bytes 1))
                 ((= opd "cd") (+= bytes 4))
                 ((&& (cons? opd) (= '+ (car opd)))   (+= bytes 1))
                 (true (not-implemented "compute_insn_len"))
@@ -216,14 +224,14 @@
     (define reg? (r) (member? r reg32))
 
     (define encode_reg (r) (cond
-        ((= r '%eax) 0)
-        ((= r '%ecx) 1)
-        ((= r '%edx) 2)
-        ((= r '%ebx) 3)
-        ((= r '%esp) 4)
-        ((= r '%ebp) 5)
-        ((= r '%esi) 6)
-        ((= r '%edi) 7)
+        ((member? r (list '%eax "/0")) 0)
+        ((member? r (list '%ecx "/1")) 1)
+        ((member? r (list '%edx "/2")) 2)
+        ((member? r (list '%ebx "/3")) 3)
+        ((member? r (list '%esp "/4")) 4)
+        ((member? r (list '%ebp "/5")) 5)
+        ((member? r (list '%esi "/6")) 6)
+        ((member? r (list '%edi "/7")) 7)
         (true   (not-reachable "encode_reg"))
         ))
 
@@ -260,9 +268,21 @@
             (emit (+ (nth 1 fmt) (encode_reg (cadr insn)))) ; opcode + reg
             (emit_imm (nth 2 fmt) (caddr insn)) ; imm
             ))
+        ("O"    (do
+            (emit (+ (nth 1 fmt) (encode_reg (cadr insn)))) ; opcode + reg
+            ))
+        ("M"    (do
+            (emit (nth 1 fmt))
+            (emit_modrm (nth 2 fmt) (nth 1 insn))
+            ))
         ("MR"   (do
             (emit (nth 1 fmt))
             (emit_modrm (nth 2 insn) (nth 1 insn))
+            ))
+        ("RM"   (do
+            (emit (nth 1 fmt))
+            (emit (nth 2 fmt))
+            (emit_modrm (nth 1 insn) (nth 2 insn))
             ))
         ("D"    (do
             (emit (nth 1 fmt))
