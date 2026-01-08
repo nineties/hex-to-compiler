@@ -80,6 +80,10 @@
 
     (define compile-stmt (stmt env) (switch (car stmt)
         ('return    (do
+            (when (cdr stmt) (do
+                (compile-expr (cadr stmt) env)
+                (pop '%eax)
+                ))
             (when (> nlocal 0)
                 (emit-asm `(add %esp ,(* 4 nlocal))))
             (emit-asm '(ret))
@@ -129,8 +133,7 @@
     (emit-asm '(entry _start))
     (compile-fundecl '(fun _start ()
         (asm (mov %ebp %esp))   ; initialize %ebp
-        (var x 0)
-        (syscall 1 x)
+        (syscall 1 (main))
         ))
 
     ; compile declarations
