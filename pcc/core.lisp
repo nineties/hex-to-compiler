@@ -150,10 +150,20 @@
         ))
 
     ; compile declarations
-    (for decl decls (switch (car decl)
-        ('fun   (compile-fundecl decl))
-        (not-implemented "compile")
-        ))
+    (def included ())
+    (define compile-topdecls (decls)
+        (for decl decls (switch (car decl)
+            ('fun   (compile-fundecl decl))
+            ('include (do
+                (def path (strcat "pcc/lib/" (cadr decl)))
+                (when (not (member? path included)) (do
+                    (compile-topdecls (read-sexp-list path))
+                    (set included (cons path included))
+                    ))
+                ))
+            (not-implemented "compile")
+            )))
+    (compile-topdecls decls)
 
     (set asm-code (reverse asm-code))
     (set asm-pre  (reverse asm-pre))
