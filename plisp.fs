@@ -2068,6 +2068,35 @@ s" nil?" :noname nil = if Strue else nil then ; add-prim
 s" cons?" :noname node>type @ Ncons = if Strue else nil then ; add-prim
 s" sym?"  :noname node>type @ Nsymbol = if Strue else nil then ; add-prim
 s" strlen" :noname to-str strlen make-int ; add-prim
+s" str2sym" :noname to-str make-symbol ; add-prim
+s" strcat" :noname
+    to-str swap to-str swap ( s2 s1 )
+    2dup strlen swap strlen ( s2 s1 l1 l2 )
+    over + 1+ allocate ( s2 s1 l1 buf )
+    swap >r dup >r ( s2 s1 buf R: l1 buf )
+    strcpy r> r> ( s2 buf l1 )
+    over >r + strcpy r>
+    make-str
+; add-prim
+
+create int2strbuf 128 allot
+
+: int2str ( c-addr base u -- c-addr )
+    over /mod    ( c-addr base mod quot )
+    ?dup if
+        swap >r over dup >r ( c-addr base quot R: mod base )
+        recurse ( c-addr R: mod base )
+        r> r>   ( c-addr base mod )
+    then
+    nip ( c-addr mod )
+    dup 10 < if '0' + over c! else 10 - 'a' + over c! then
+    1+ 0 over c!
+;
+s" int2str" :noname ( n base -- str )
+    to-int swap to-int int2strbuf -rot int2str
+    drop int2strbuf make-str
+; add-prim
+
 s" getb" :noname ( idx str -- byte )
     to-str swap to-int + c@ make-int
 ; add-prim

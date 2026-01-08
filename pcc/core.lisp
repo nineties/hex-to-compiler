@@ -5,8 +5,15 @@
 
 (define compile (decls) (do
     (def asm-code ())
+    (def asm-pre ())
     (def env ())    ; variable table
     (def nlocal 0)  ; number of local variables
+
+    (def fresh_label_cnt 0)
+    (define fresh-label () (do
+        (+= fresh_label_cnt 1)
+        (str2sym (strcat ".L." (int2str 10 fresh_label_cnt)))
+        ))
 
     (define emit-asm (line)
         (set asm-code (cons line asm-code)))
@@ -36,6 +43,12 @@
 
     (define! compile-expr (expr env) (cond
         ((int? expr)    (push expr))
+        ((str? expr) (do
+            (def label (fresh-label))
+            (set asm-pre (cons `(label ,label) asm-pre))
+            (set asm-pre (cons `(ascii ,expr) asm-pre))
+            (push label)
+            ))
         ((sym? expr)    (do
             (def pos (assoc expr env))
             (when (= pos 'error) (do
@@ -143,7 +156,7 @@
         ))
 
     (set asm-code (reverse asm-code))
+    (set asm-pre  (reverse asm-pre))
 
-    (println asm-code)
-    (assemble asm-code)
+    (assemble (append asm-pre asm-code))
     ))

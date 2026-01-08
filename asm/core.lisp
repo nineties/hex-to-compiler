@@ -7,6 +7,7 @@
     (def reg32 '(%eax %ecx %edx %ebx %esp %ebp %esi %edi))
 
     (def x86_instructions '(
+        ((add "r/m32" "imm32")  ("MI" 0x81 "/0" "id"))
         ((add "r/m32" "r32")    ("MR" 0x01 "/r"))
         ((call "rel32")         ("D"  0xe8 "cd"))
         ((idiv "r/m32")         ("M"  0xf7 "/7"))
@@ -135,6 +136,7 @@
             ("M"    (encode_modrm (nth 2 fmt) (nth 1 insn)))
             ("MR"   (encode_modrm (nth 2 insn) (nth 1 insn)))
             ("RM"   (encode_modrm (nth 1 insn) (nth 2 insn)))
+            ("MI"   (encode_modrm (nth 2 fmt) (nth 1 insn)))
             (not-reachable "compute_modrm_len")
             ))
         (def len 0)
@@ -348,6 +350,11 @@
             (emit (nth 1 fmt))
             (emit (nth 2 fmt))
             (emit_modrm (nth 1 insn) (nth 2 insn))
+            ))
+        ("MI"   (do
+            (emit (nth 1 fmt))
+            (emit_modrm (nth 2 fmt) (nth 1 insn))
+            (emit_i32 (nth 2 insn))
             ))
         ("D"    (do
             (emit (nth 1 fmt))

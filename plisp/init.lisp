@@ -154,6 +154,9 @@
         (set ls (cdr ls))
         ))
     r))
+(define append (ls1 ls2) (if (nil? ls1) 
+    ls2 (cons (car ls1) (append (cdr ls1) ls2))
+    ))
 
 (define all? (f ls) (cond
     ((nil? ls)      true)
