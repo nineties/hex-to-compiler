@@ -13,7 +13,9 @@
         ((imul "r32" "r/m32")   ("RM" 0x0f 0xaf "/r"))
         ((int "imm8")           ("I"  0xcd "ib"))
         ((mov "r32" "imm32")    ("OI" 0xb8 "id"))
+        ((mov "r/m32" "r32")    ("MR" 0x89 "/r"))
         ((pop "r32")            ("O"  0x58))
+        ((push "r/m32")         ("M"  0xff "/6"))
         ((push "r32")           ("O"  0x50))
         ((push "imm32")         ("I"  0x68 "id"))
         ((ret)                  ("ZO" 0xc3))
@@ -24,8 +26,9 @@
     (define match_operand (opd pat) (cond
         ((= opd pat)   true)
         ((= "r32" opd) (member? pat '("r32" "r/m32")))
-        ((= "imm" opd) (member? pat '("imm8" "imm16" "imm32")))
-        ((= "sym" opd) (member? pat '("imm8" "imm16" "imm32" "rel8" "rel16" "rel32")))
+        ((= "imm" opd) (member? pat '("imm8" "imm32")))
+        ((= "sym" opd) (member? pat '("imm8" "imm32" "rel32")))
+        ((= "m" opd) (member? pat '("r/m32")))
         (true ())
         ))
 
@@ -45,7 +48,7 @@
         ((int? opd) "imm")
         ((member? opd reg32) "r32")
         ((sym? opd) "sym") ; addr or offset or const
-        ((&& (cons? opd) (= (car opd) '+))  "m")
+        ((&& (cons? opd) (= (car opd) 'mem))  "m")
         (true   (not-implemented "to_operand_type"))
         ))
 
@@ -64,6 +67,85 @@
             )
         ))
 
+    (define reg? (r) (member? r reg32))
+    (define encode_reg (r) (cond
+        ((member? r (list '%eax "/0")) 0)
+        ((member? r (list '%ecx "/1")) 1)
+        ((member? r (list '%edx "/2")) 2)
+        ((member? r (list '%ebx "/3")) 3)
+        ((member? r (list '%esp "/4")) 4)
+        ((member? r (list '%ebp "/5")) 5)
+        ((member? r (list '%esi "/6")) 6)
+        ((member? r (list '%edi "/7")) 7)
+        (true   (not-reachable "encode_reg"))
+        ))
+
+    (define encode_modrm (reg r/m) (do
+        (define enc (mod reg r/m)
+            (| (<< mod 6) (| (<< reg 3) r/m))
+               )
+        (cond
+            ((reg? r/m)  (do
+                (def r1 (encode_reg reg))
+                (def r2 (encode_reg r/m))
+                (list (list 'i8 (enc 0x3 r1 r2)))
+                ))
+            ((&& (cons? r/m) (= (car r/m) 'mem)) (do
+                (def base (cadr r/m))
+                (def scale 0)
+                (def index ())
+                (def disp 0)
+
+                (def args (cddr r/m))
+                (while args (do
+                    (cond
+                        ((int? (car args))  (set disp (car args)))
+                        (true (not-implemented "encode_modrm:mem"))
+                        )
+                    (set args (cdr args))
+                    ))
+
+                (def bytes ())
+                (set bytes (cons (list 'i8 (enc
+                    (cond
+                        ((= disp 0) 0x0)
+                        ((&& (<= disp 128) (<= -127 disp)) 0x01)
+                        (true   0x10)
+                        )
+                    (encode_reg reg)
+                    (if index 0x4 (encode_reg base))
+                    )) bytes))
+                (cond
+                    ((= disp 0) ())
+                    ((&& (<= disp 128) (<= -127 disp))
+                        (set bytes (cons (list 'i8 disp) bytes)))
+                    (true (set bytes (cons (list 'i32 disp) bytes)))
+                    )
+                (when index
+                    (not-implemented "modrm"))
+                (reverse bytes)
+                ))
+            (true   (not-implemented "encode_modrm"))
+            )
+        ))
+
+
+    (define compute_modrm_len (insn fmt) (do
+        (def data (switch (car fmt)
+            ("M"    (encode_modrm (nth 2 fmt) (nth 1 insn)))
+            ("MR"   (encode_modrm (nth 2 insn) (nth 1 insn)))
+            ("RM"   (encode_modrm (nth 1 insn) (nth 2 insn)))
+            (not-reachable "compute_modrm_len")
+            ))
+        (def len 0)
+        (for d data (switch (car d)
+            ('i8    (+= len 1))
+            ('i32   (+= len 4))
+            (not-reachable "compute_modrm_len")
+            ))
+        len
+        ))
+
     (define compute_insn_len (line) (switch (car line)
         ('ascii (strlen (cadr line)))
         ('asciz (+ 1 (strlen (cadr line))))
@@ -79,8 +161,12 @@
                 ((int? opd)   (+= bytes 1))
                 ((= opd "ib") (+= bytes 1))
                 ((= opd "id") (+= bytes 4))
-                ((= opd "/r") (+= bytes 1))
-                ((member? opd (list "/0" "/1" "/2" "/3" "/4" "/5" "/6" "/7")) (+= bytes 1))
+                ((= opd "/r")
+                    (+= bytes (compute_modrm_len insn fmt)
+                    ))
+                ((member? opd (list "/0" "/1" "/2" "/3" "/4" "/5" "/6" "/7"))
+                    (+= bytes (compute_modrm_len insn fmt))
+                    )
                 ((= opd "cd") (+= bytes 4))
                 ((&& (cons? opd) (= '+ (car opd)))   (+= bytes 1))
                 (true (not-implemented "compute_insn_len"))
@@ -92,8 +178,7 @@
         ))
 
     ; assembler main
-    ;(def load_base 0x400000)
-    (def load_base 0x8048000)
+    (def load_base 0x08048000)
     (def page_size 0x1000)
     (def elf_hdr_size 52)
     (def phent_size 32)     ; program header entry size
@@ -117,7 +202,6 @@
           ('const   (set insns (cons line insns)))
           (do
                 (def insn (lookup_insn line))
-
                 (+= current_loc (compute_insn_len insn))
                 (set insns (cons insn insns))
                 )
@@ -218,21 +302,9 @@
             ))
         ((= (car e) '+) (+ (eval (cadr e)) (eval (caddr e))))
         ((= (car e) '-) (- (eval (cadr e)) (eval (caddr e))))
+        ((= (car e) 'mem)
+            (cons 'mem (map eval (cdr e))))
         (true               (not-implemented "eval"))
-        ))
-
-    (define reg? (r) (member? r reg32))
-
-    (define encode_reg (r) (cond
-        ((member? r (list '%eax "/0")) 0)
-        ((member? r (list '%ecx "/1")) 1)
-        ((member? r (list '%edx "/2")) 2)
-        ((member? r (list '%ebx "/3")) 3)
-        ((member? r (list '%esp "/4")) 4)
-        ((member? r (list '%ebp "/5")) 5)
-        ((member? r (list '%esi "/6")) 6)
-        ((member? r (list '%edi "/7")) 7)
-        (true   (not-reachable "encode_reg"))
         ))
 
     (define emit_imm (ty v) (switch ty
@@ -242,20 +314,13 @@
         (not-reachable "emit_imm")
         ))
 
-    (define emit_modrm (reg r/m) (do
-        (define enc (mod reg r/m)
-            (| (<< mod 6) (| (<< reg 3) r/m))
-               )
-        (cond
-            ((reg? r/m)  (do
-                (def r1 (encode_reg reg))
-                (def r2 (encode_reg r/m))
-                (emit (enc 0x3 r1 r2))
-                ))
-            (true   (do
-                (not-implemented "ncode_modrm")
-                ))
-        )))
+    (define emit_modrm (reg r/m)
+        (for data (encode_modrm reg r/m) (switch (car data)
+            ('i8    (emit (cadr data)))
+            ('i32   (emit_i32 (cadr data)))
+            (not-reachable "emit_modrm")
+            ))
+        )
 
 
     (define emit_insn (insn fmt) (switch (car fmt)
@@ -309,6 +374,7 @@
             ))
         ()
         ))
+
 
     (list buf segment_size)
     ))

@@ -97,6 +97,7 @@
 (define println (e) (do (print e) (put "\n")))
 (define puts (s) (do (put s) (put "\n")))
 (define not (x) (= x ()))
+(define negate (x) (- 0 x))
 (define != (a b) (not (= a b)))
 (define > (a b) (< b a))
 (define <= (a b) (not (> a b)))

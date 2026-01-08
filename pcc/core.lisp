@@ -5,6 +5,9 @@
 
 (define compile (decls) (do
     (def asm-code ())
+    (def env ())    ; variable table
+    (def nlocal 0)  ; number of local variables
+
     (define emit-asm (line)
         (set asm-code (cons line asm-code)))
 
@@ -13,33 +16,47 @@
 
     (def compile-expr ())
 
-    (define compile-call (expr) (do
+    (define compile-call (expr env) (do
         (def fun (car expr))
         (def args (cdr expr))
-        (for arg (reverse args) (compile-expr push arg))
+        (for arg (reverse args) (compile-expr arg env))
         (emit-asm `(call ,fun))
         (when args (emit-asm `(add %esp ,(* 4 (length args)))))
         (push '%eax)
         ))
 
-    (define compile-binop (op expr) (do
-        (compile-expr (cadr expr))  ; lhs
-        (compile-expr (caddr expr)) ; rhs
+    (define compile-binop (op expr env) (do
+        (compile-expr (cadr expr) env)  ; lhs
+        (compile-expr (caddr expr) env) ; rhs
         (pop '%ecx) ; rhs 
         (pop '%eax) ; lhs
         (emit-asm `(,op %eax %ecx))
         (push '%eax)
         ))
 
-    (define! compile-expr (expr) (cond
+    (define! compile-expr (expr env) (cond
         ((int? expr)    (push expr))
+        ((sym? expr)    (do
+            (def pos (assoc expr env))
+            (when (= pos 'error) (do
+                (put "undefined variable: ")
+                (println expr)
+                (exit 1)))
+            (switch (car pos)
+                ('local     (do
+                    (def offs (cadr pos))
+                    (push `(mem %ebp ,(negate (* 4 (+ offs 1)))))
+                    ))
+                (not-implemented "compile-car:var")
+                )
+            ))
         ((cons? expr)   (switch (car expr)
-            ('+     (compile-binop 'add expr))
-            ('-     (compile-binop 'sub expr))
-            ('*     (compile-binop 'imul expr))
+            ('+     (compile-binop 'add expr env))
+            ('-     (compile-binop 'sub expr env))
+            ('*     (compile-binop 'imul expr env))
             ('/     (do
-                (compile-expr (cadr expr))
-                (compile-expr (caddr expr))
+                (compile-expr (cadr expr) env)
+                (compile-expr (caddr expr) env)
                 (emit-asm '(xor %edx %edx))
                 (pop '%ecx)
                 (pop '%eax)
@@ -47,34 +64,54 @@
                 (push '%eax)
                 ))
             ('%     (do
-                (compile-expr (cadr expr))
-                (compile-expr (caddr expr))
+                (compile-expr (cadr expr) env)
+                (compile-expr (caddr expr) env)
                 (emit-asm '(xor %edx %edx))
                 (pop '%ecx)
                 (pop '%eax)
                 (emit-asm '(idiv %ecx))
                 (push '%edx)
                 ))
-            (compile-call expr)
+            (compile-call expr env)
             ))
+        (true
+            (not-implemented "compile-expr"))
         ))
 
-    (define compile-stmt (stmt) (switch (car stmt)
-        ('return    (emit-asm '(ret)))
+    (define compile-stmt (stmt env) (switch (car stmt)
+        ('return    (do
+            (when (> nlocal 0)
+                (emit-asm `(add %esp ,(* 4 nlocal))))
+            (emit-asm '(ret))
+            env))
         ('syscall   (do
             (def regs '(%eax %ebx %ecx %edx %esi %edi %ebp))
             (def args (cdr stmt))
-            (for arg (reverse args) (compile-expr arg))
+            (for arg (reverse args) (compile-expr arg env))
             (while args (do
                 (pop (car regs))
                 (set regs (cdr regs))
                 (set args (cdr args))
                 ))
             (emit-asm '(int 0x80))
+            env
+            ))
+        ('var   (do
+            (def x (cadr stmt))
+            (def e (caddr stmt))
+            (compile-expr e env)
+            (set env (acons x `(local ,nlocal) env))
+            (+= nlocal 1)
+            env
+            ))
+        ('asm   (do
+            (emit-asm (cadr stmt))
+            env
             ))
         (do
-            (compile-expr '%eax stmt)
+            (compile-expr stmt env)
             (emit-asm '(add %esp 4))
+            env
             )
         ))
 
@@ -84,13 +121,16 @@
         (def body (cdddr decl))
 
         (emit-asm `(label ,label))
-        (for stmt body (compile-stmt stmt))
+        (set nlocal 0)
+        (for stmt body (set env (compile-stmt stmt env)))
         ))
 
     ; entry point
     (emit-asm '(entry _start))
     (compile-fundecl '(fun _start ()
-        (syscall 1 (% 7 4))
+        (asm (mov %ebp %esp))   ; initialize %ebp
+        (var x 0)
+        (syscall 1 x)
         ))
 
     ; compile declarations
