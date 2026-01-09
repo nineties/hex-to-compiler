@@ -167,7 +167,8 @@
     (emit-asm '(entry _start))
     (compile-fundecl '(fun _start ()
         (asm (mov %ebp %esp))   ; initialize %ebp
-        (syscall 1 (main))
+        (main)
+        (syscall 1 0)   ; exit(0)
         ))
 
     ; compile declarations
