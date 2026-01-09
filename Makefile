@@ -11,6 +11,9 @@ PCC_EXAMPLE_TARGETS := $(PCC_EXAMPLE_SOURCES:%.pc=%)
 
 default:\
 	pforth\
+	plisp2
+
+example:\
 	$(ASM_EXAMPLE_TARGETS)\
 	$(PCC_EXAMPLE_TARGETS)
 

@@ -105,6 +105,15 @@
             ('>=    (not-implemented ">="))
             ('==    (not-implemented "=="))
             ('!=    (not-implemented "!="))
+            ('load  (do
+                (compile-expr (cadr expr) env)
+                (compile-expr `(* 4 ,(caddr expr)) env)
+                (pop '%ecx)
+                (pop '%eax)
+                (emit-asm '(add %eax %ecx))
+                (emit-asm '(mov %eax (mem %eax)))
+                (push '%eax)
+                ))
             (compile-call expr env)
             ))
         (true
@@ -204,8 +213,12 @@
     ; entry point
     (emit-asm '(entry _start))
     (compile-fundecl '(fun _start ()
-        (asm (mov %ebp %esp))   ; initialize %ebp
+        (asm (add %eax %esp))
+        (asm (add %eax 8))
+        (asm (push %eax))   ; argv
+        (asm (push (mem %esp 8))) ; argc
         (main)
+        (asm (add %esp 8))
         (syscall 1 0)   ; exit(0)
         ))
 
