@@ -18,6 +18,7 @@
         ((jge "rel32")          ("D"  0x0f 0x8d "cd"))
         ((mov "r32" "imm32")    ("OI" 0xb8 "id"))
         ((mov "r/m32" "r32")    ("MR" 0x89 "/r"))
+        ((mov "r32" "r/m32")    ("RM" 0x8b "/r"))
         ((pop "r32")            ("O"  0x58))
         ((push "r/m32")         ("M"  0xff "/6"))
         ((push "r32")           ("O"  0x50))
@@ -113,21 +114,28 @@
                 (def bytes ())
                 (set bytes (cons (list 'i8 (enc
                     (cond
-                        ((= disp 0) 0x0)
+                        ((&& (!= base '%ebp) (= disp 0)) 0x0)
                         ((&& (<= disp 128) (<= -127 disp)) 0x01)
                         (true   0x10)
                         )
                     (encode_reg reg)
-                    (if index 0x4 (encode_reg base))
+                    (if (= index 0) 0x4 (encode_reg base))
                     )) bytes))
+
+                (when (= base '%esp) (do
+                    ; SIB byte is necessary
+                    (set bytes (cons (list 'i8 0x24) bytes))
+                    ))
+
+                (when index
+                    (not-implemented "modrm"))
+
                 (cond
-                    ((= disp 0) ())
+                    ((&& (!= base '%ebp) (= disp 0)) ())
                     ((&& (<= disp 128) (<= -127 disp))
                         (set bytes (cons (list 'i8 disp) bytes)))
                     (true (set bytes (cons (list 'i32 disp) bytes)))
                     )
-                (when index
-                    (not-implemented "modrm"))
                 (reverse bytes)
                 ))
             (true   (not-implemented "encode_modrm"))
@@ -351,8 +359,11 @@
             (emit_modrm (nth 2 insn) (nth 1 insn))
             ))
         ("RM"   (do
-            (emit (nth 1 fmt))
-            (emit (nth 2 fmt))
+            (def opds (cdr fmt))
+            (while (int? (car opds)) (do
+                (emit (car opds))
+                (set opds (cdr opds))
+                ))
             (emit_modrm (nth 1 insn) (nth 2 insn))
             ))
         ("MI"   (do

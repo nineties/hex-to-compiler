@@ -153,7 +153,6 @@
                     (def e (nth 3 stmt))
                     (def Le (fresh-label))
                     (def Ljoin (fresh-label))
-                    (println (list op lhs rhs))
                     (compile-expr lhs env)
                     (compile-expr rhs env)
                     (pop '%ecx)
