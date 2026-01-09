@@ -60,7 +60,12 @@
                     (def offs (cadr pos))
                     (push `(mem %ebp ,(negate (* 4 (+ offs 1)))))
                     ))
-                (not-implemented "compile-car:var")
+                ('param (do
+                    (def offs (cadr pos))
+                    (push `(mem %ebp ,(+ 8 (* 4 offs))))
+                    ))
+                ('const (push (cadr pos)))
+                (not-implemented "compile-expr:var")
                 )
             ))
         ((cons? expr)   (switch (car expr)
@@ -97,8 +102,11 @@
                 (compile-expr (cadr stmt) env)
                 (pop '%eax)
                 ))
-            (when (> nlocal 0)
-                (emit-asm `(add %esp ,(* 4 nlocal))))
+
+            ; function epilogue
+            (emit-asm '(mov %esp %ebp))
+            (emit-asm '(pop %ebp))
+
             (emit-asm '(ret))
             env))
         ('syscall   (do
@@ -137,9 +145,22 @@
         (def params (caddr decl))
         (def body (cdddr decl))
 
+        (def newenv env)
+        (def i 0)
+        (for param params (do
+            (set newenv (acons param `(param ,i) newenv))
+            (+= i 1)
+            ))
+
         (emit-asm `(label ,label))
+
+        ; function prologue
+        (emit-asm '(push %ebp))
+        (emit-asm '(mov %ebp %esp))
+
         (set nlocal 0)
-        (for stmt body (set env (compile-stmt stmt env)))
+        (for stmt body (set newenv (compile-stmt stmt newenv)))
+        (compile-stmt '(return) newenv)
         ))
 
     ; entry point
@@ -161,12 +182,18 @@
                     (set included (cons path included))
                     ))
                 ))
+            ('def   (do
+                (def x (cadr decl))
+                (def val (caddr decl))
+                (set env (acons x `(const ,val) env))
+                ))
             (not-implemented "compile")
             )))
     (compile-topdecls decls)
 
     (set asm-code (reverse asm-code))
     (set asm-pre  (reverse asm-pre))
+    (println asm-code)
 
     (assemble (append asm-pre asm-code))
     ))

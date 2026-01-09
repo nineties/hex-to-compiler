@@ -2376,6 +2376,6 @@ s" print-env" :noname dup print-env ; add-prim
     drop
 ; execute
 
-\ ." total memory used: " here here_bottom - 0x100000 / . ." MB" cr
+." total memory used: " here here_bottom - 0x100000 / . ." MB" cr
 
 0 quit
