@@ -1882,7 +1882,7 @@ defer equal-sexp
 
 : print-sexp ( sexp -- )
     dup @ case
-    Nint of to-int 16 swap print-int endof
+    Nint of to-int 10 swap print-int endof
     Nstr of '"' emit to-str print-str '"' emit endof
     Nsymbol of sym>name
         dup if type else drop s" <anon>" type then

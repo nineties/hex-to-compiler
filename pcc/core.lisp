@@ -41,6 +41,15 @@
         (push '%eax)
         ))
 
+    (define to-ifnot-jump (op) (switch op
+        ('<     'jge)
+        ('>     'jle)
+        ('<=    'jg)
+        ('>=    'jl)
+        ('==    'jne)
+        ('!=    'je)
+        ))
+
     (define! compile-expr (expr env) (cond
         ((int? expr)    (push expr))
         ((str? expr) (do
@@ -90,6 +99,12 @@
                 (emit-asm '(idiv %ecx))
                 (push '%edx)
                 ))
+            ('<     (not-implemented "<"))
+            ('>     (not-implemented ">"))
+            ('<=    (not-implemented "<="))
+            ('>=    (not-implemented ">="))
+            ('==    (not-implemented "=="))
+            ('!=    (not-implemented "!="))
             (compile-call expr env)
             ))
         (true
@@ -128,6 +143,30 @@
             (set env (acons x `(local ,nlocal) env))
             (+= nlocal 1)
             env
+            ))
+        ('if    (cond
+            ((= (length stmt) 3)    (compile-stmt `(if ,(nth 1 stmt) ,(nth 2 stmt), (do) env)))
+            (true
+                (do
+                    (defvar (op lhs rhs) (nth 1 stmt))
+                    (def t (nth 2 stmt))
+                    (def e (nth 3 stmt))
+                    (def Le (fresh-label))
+                    (def Ljoin (fresh-label))
+                    (println (list op lhs rhs))
+                    (compile-expr lhs env)
+                    (compile-expr rhs env)
+                    (pop '%ecx)
+                    (pop '%eax)
+                    (emit-asm '(cmp %eax %ecx))
+                    (emit-asm `(,(to-ifnot-jump op) ,Le))
+                    (compile-stmt t env)
+                    (emit-asm  `(jmp ,Ljoin))
+                    (emit-asm `(label ,Le))
+                    (compile-stmt e env)
+                    (emit-asm `(label ,Ljoin))
+                    env
+                ))
             ))
         ('asm   (do
             (emit-asm (cadr stmt))

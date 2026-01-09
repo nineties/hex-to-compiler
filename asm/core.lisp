@@ -10,9 +10,12 @@
         ((add "r/m32" "imm32")  ("MI" 0x81 "/0" "id"))
         ((add "r/m32" "r32")    ("MR" 0x01 "/r"))
         ((call "rel32")         ("D"  0xe8 "cd"))
+        ((cmp "r/m32" "r32")    ("MR" 0x39 "/r"))
         ((idiv "r/m32")         ("M"  0xf7 "/7"))
         ((imul "r32" "r/m32")   ("RM" 0x0f 0xaf "/r"))
         ((int "imm8")           ("I"  0xcd "ib"))
+        ((jmp "rel32")          ("D"  0xe9 "cd"))
+        ((jge "rel32")          ("D"  0x0f 0x8d "cd"))
         ((mov "r32" "imm32")    ("OI" 0xb8 "id"))
         ((mov "r/m32" "r32")    ("MR" 0x89 "/r"))
         ((pop "r32")            ("O"  0x58))
@@ -358,7 +361,11 @@
             (emit_i32 (nth 2 insn))
             ))
         ("D"    (do
-            (emit (nth 1 fmt))
+            (def opds (cdr fmt))
+            (while (int? (car opds)) (do
+                (emit (car opds))
+                (set opds (cdr opds))
+                ))
             (def faddr (nth 1 insn))
             (def offset (- faddr
                    (+ (here) 4) ; + 2 for cd
