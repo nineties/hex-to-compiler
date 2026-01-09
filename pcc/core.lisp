@@ -41,6 +41,9 @@
         (push '%eax)
         ))
 
+    (define comp-expr? (e) (&& (cons? e)
+        (member? (car e) '(< > <= >= >> !=))))
+
     (define to-ifnot-jump (op) (switch op
         ('<     'jge)
         ('>     'jle)
@@ -48,6 +51,7 @@
         ('>=    'jl)
         ('==    'jne)
         ('!=    'je)
+        (not-reachable "to-ifnot-jump")
         ))
 
     (define! compile-expr (expr env) (cond
@@ -55,7 +59,7 @@
         ((str? expr) (do
             (def label (fresh-label))
             (set asm-pre (cons `(label ,label) asm-pre))
-            (set asm-pre (cons `(ascii ,expr) asm-pre))
+            (set asm-pre (cons `(asciz ,expr) asm-pre))
             (push label)
             ))
         ((sym? expr)    (do
@@ -105,16 +109,17 @@
             ('>=    (not-implemented ">="))
             ('==    (not-implemented "=="))
             ('!=    (not-implemented "!="))
-            ('load  (do
+            ('get  (do
+                (def idx (if (cddr expr) (caddr expr) 0))
                 (compile-expr (cadr expr) env)
-                (compile-expr `(* 4 ,(caddr expr)) env)
+                (compile-expr `(* 4 ,idx) env)
                 (pop '%ecx)
                 (pop '%eax)
                 (emit-asm '(add %eax %ecx))
                 (emit-asm '(mov %eax (mem %eax)))
                 (push '%eax)
                 ))
-            ('store (do
+            ('set (do
                 (compile-expr (nth 3 expr) env)         ; val
                 (compile-expr `(* 4 ,(nth 2 expr)) env) ; offs
                 (compile-expr (nth 1 expr) env)         ; arr
@@ -125,13 +130,27 @@
                 (emit-asm '(mov (mem %eax) %ecx))
                 (push '%ecx)
                 ))
+            ('getb (do
+                (def idx (if (cddr expr) (caddr expr) 0))
+                (compile-expr (cadr expr) env)
+                (compile-expr idx env)
+                (pop '%ecx)
+                (pop '%eax)
+                (emit-asm '(add %eax %ecx))
+                (emit-asm '(movzx %eax (mem %eax)))
+                (push '%eax)
+                ))
             (compile-call expr env)
             ))
         (true
-            (not-implemented "compile-expr"))
+            (do (println expr) (not-implemented "compile-expr")))
         ))
 
     (define compile-stmt (stmt env) (switch (car stmt)
+        ('do    (do
+            (for s (cdr stmt) (set env (compile-stmt s env)))
+            env
+            ))
         ('return    (do
             (when (cdr stmt) (do
                 (compile-expr (cadr stmt) env)
@@ -164,6 +183,35 @@
             (+= nlocal 1)
             env
             ))
+        ('=     (do
+            (def x (cadr stmt))
+            (def e (caddr stmt))
+            (def pos (assoc x env))
+            (when (= pos 'error) (do
+                (put "undefined variable: ")
+                (println x)
+                (exit 1)))
+            (compile-expr e env)
+            (switch (car pos)
+                ('local (do
+                    (def offs (cadr pos))
+                    (pop '%eax)
+                    (emit-asm `(mov (mem %ebp ,(negate (* 4 (+ offs 1)))) %eax))
+                    ))
+                ('param (do
+                    (def offs (cadr pos))
+                    (pop '%eax)
+                    (emit-asm `(mov (mem %ebp ,(+ 8 (* 4 offs))) %eax))
+                    ))
+                (not-reachable "compile-stmt:=")
+                )
+            env
+            ))
+        ('+=    (compile-stmt `(= ,(cadr stmt) (+ ,(cadr stmt) ,(caddr stmt))) env))
+        ('-=    (compile-stmt `(= ,(cadr stmt) (- ,(cadr stmt) ,(caddr stmt))) env))
+        ('*=    (compile-stmt `(= ,(cadr stmt) (* ,(cadr stmt) ,(caddr stmt))) env))
+        ('/=    (compile-stmt `(= ,(cadr stmt) (/ ,(cadr stmt) ,(caddr stmt))) env))
+        ('%=    (compile-stmt `(= ,(cadr stmt) (% ,(cadr stmt) ,(caddr stmt))) env))
         ('if    (cond
             ((= (length stmt) 3)    (compile-stmt `(if ,(nth 1 stmt) ,(nth 2 stmt), (do) env)))
             (true
@@ -186,6 +234,34 @@
                     (emit-asm `(label ,Ljoin))
                     env
                 ))
+            ))
+        ('while (do
+            ; begin:
+            ;       cond
+            ;       goto exit if false
+            ;       body
+            ;       goto begin
+            ; exit:
+            (def begin (fresh-label))
+            (def exit (fresh-label))
+
+            (def e (cadr stmt))
+            (def body (caddr stmt))
+
+            (when (not (comp-expr? e)) (set e `(!= ,e 0)))
+            (defvar (op lhs rhs) e)
+
+            (emit-asm `(label ,begin))
+            (compile-expr lhs env)
+            (compile-expr rhs env)
+            (pop '%ecx)
+            (pop '%eax)
+            (emit-asm '(cmp %eax %ecx))
+            (emit-asm `(,(to-ifnot-jump op) ,exit))
+            (compile-stmt body env)
+            (emit-asm `(jmp ,begin))
+            (emit-asm `(label ,exit))
+            env
             ))
         ('asm   (do
             (emit-asm (cadr stmt))
@@ -256,7 +332,6 @@
 
     (set asm-code (reverse asm-code))
     (set asm-pre  (reverse asm-pre))
-    (println asm-code)
 
     (assemble (append asm-pre asm-code))
     ))
