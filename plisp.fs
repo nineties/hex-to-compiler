@@ -1719,6 +1719,14 @@ end-struct node%
 6 constant Nmacro
 7 constant Nprim
 
+: node-type ( node -- type )
+    dup 0x01 & if
+        drop Nint
+    else
+        node>type @
+    then
+;
+
 : make-node0 ( type -- node )
     1 cells allocate
     tuck node>type !
@@ -1768,8 +1776,8 @@ Nnil make-node0 constant nil
     dup nil = if drop 0 else cdr recurse 1+ then
 ;
 
-: make-int ( n -- atom ) Nint make-node1 ;
-: to-int ( atom -- n ) node>arg0 @ ;
+: make-int ( n -- atom ) 2 * 1+ ;
+: to-int ( atom -- n ) 1 arshift ;
 
 : make-str ( c-addr -- atom ) Nstr make-node1 ;
 : to-str ( atom -- n ) node>arg0 @ ;
@@ -1792,8 +1800,8 @@ variable symlist
     dup symlist list-push!
 ;
 
-: int? node>type @ Nint = ;
-: sym? node>type @ Nsymbol = ;
+: int? 0x1 & ;
+: sym?  node-type Nsymbol = ;
 : sym>name node>arg0 @ ; 
 
 ( === Builtin symbols === )
@@ -1817,8 +1825,8 @@ s" error" make-symbol constant Serror
 defer equal-sexp
 :noname ( e0 e2 -- atom )
     2dup = if 2drop Strue exit then
-    2dup node>type @ swap node>type @ <> if 2drop nil exit then
-    dup node>type @ case
+    2dup node-type swap node-type <> if 2drop nil exit then
+    dup node-type case
         Nint of to-int swap to-int = if Strue else nil then endof
         Nsymbol of = if Strue else nil then endof
         Nstr of to-str swap to-str streq if Strue else nil then endof
@@ -1881,7 +1889,7 @@ defer equal-sexp
 ;
 
 : print-sexp ( sexp -- )
-    dup @ case
+    dup node-type case
     Nint of to-int 10 swap print-int endof
     Nstr of '"' emit to-str print-str '"' emit endof
     Nsymbol of sym>name
@@ -2062,11 +2070,11 @@ s" car"  :noname car ; add-prim
 s" cdr"  :noname cdr ; add-prim
 s" setcar" :noname swap node>arg0 ! nil ; add-prim
 s" setcdr" :noname swap node>arg1 ! nil ; add-prim
-s" int?" :noname node>type @ Nint = if Strue else nil then ; add-prim
-s" str?" :noname node>type @ Nstr = if Strue else nil then ; add-prim
+s" int?" :noname node-type Nint = if Strue else nil then ; add-prim
+s" str?" :noname node-type Nstr = if Strue else nil then ; add-prim
 s" nil?" :noname nil = if Strue else nil then ; add-prim
-s" cons?" :noname node>type @ Ncons = if Strue else nil then ; add-prim
-s" sym?"  :noname node>type @ Nsymbol = if Strue else nil then ; add-prim
+s" cons?" :noname node-type Ncons = if Strue else nil then ; add-prim
+s" sym?"  :noname node-type Nsymbol = if Strue else nil then ; add-prim
 s" strlen" :noname to-str strlen make-int ; add-prim
 s" str2sym" :noname to-str make-symbol ; add-prim
 s" strcat" :noname
@@ -2151,7 +2159,7 @@ s" allocate" :noname to-int allocate make-str ; add-prim
 s" print-env" :noname dup print-env ; add-prim
 
 :noname ( env sexp -- env sexp )
-    dup @ case
+    dup node-type case
     Nint of ( do nothing ) endof
     Nstr of ( do nothing ) endof
     Nsymbol of
@@ -2305,11 +2313,11 @@ s" print-env" :noname dup print-env ; add-prim
         ( env args fn )
 
         \ If fn is not 'macro', evaluate args before application
-        dup node>type @ Nmacro <> if
+        dup node-type Nmacro <> if
             >r eval-list r>
         then
             
-        dup node>type @ case
+        dup node-type case
             Nlambda of apply endof
             Nmacro of apply eval-sexp endof
             Nprim of call-prim endof
@@ -2322,7 +2330,7 @@ s" print-env" :noname dup print-env ; add-prim
 
 :noname ( env sexp nestlevel - env sexp )
     >r
-    dup node>type @ case
+    dup node-type case
     Nint of r> drop endof
     Nstr of r> drop endof
     Nsymbol of r> drop endof

@@ -192,7 +192,7 @@
     ))
 
 ; # String and chars
-(define char (str) (getb 0 str))
+(define char (str) (getb str 0))
 
 ; # S-expression parser
 (define parse-sexp-list (str) (do
