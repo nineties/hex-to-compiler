@@ -114,6 +114,17 @@
                 (emit-asm '(mov %eax (mem %eax)))
                 (push '%eax)
                 ))
+            ('store (do
+                (compile-expr (nth 3 expr) env)         ; val
+                (compile-expr `(* 4 ,(nth 2 expr)) env) ; offs
+                (compile-expr (nth 1 expr) env)         ; arr
+                (pop '%eax)
+                (pop '%ecx)
+                (emit-asm '(add %eax %ecx))
+                (pop '%ecx)
+                (emit-asm '(mov (mem %eax) %ecx))
+                (push '%ecx)
+                ))
             (compile-call expr env)
             ))
         (true
