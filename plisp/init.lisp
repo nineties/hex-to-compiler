@@ -17,13 +17,6 @@
 (def cdddr (lambda (x) (cdr (cddr x))))
 
 ; # Syntax Sugars
-
-(def defmacro (macro args
-    `(do
-        (def ,(car args) ())
-        (set ,(car args) (macro ,(cadr args) ,(caddr args)))
-    )))
-
 (defmacro define (name params body)
     `(do
         (def ,name ())
@@ -113,10 +106,10 @@
 (defmacro || (a b) `(if ,a true (if ,b true ())))
 
 (define abort (msg) (do (put "abort: ") (puts msg) (exit 1)))
-(defmacro assert (cond)
-    `(when (not ,cond) (do
+(defmacro assert (e)
+    `(when (not ,e) (do
         (put "assertion failed: ")
-        (println ',cond)
+        (println ',e)
         (exit 1)
         )))
 (define not-implemented (msg) (do (put "not implemented: ") (puts msg) (exit 1)))

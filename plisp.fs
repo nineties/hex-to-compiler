@@ -1812,7 +1812,7 @@ s" if" make-symbol constant Sif
 s" while" make-symbol constant Swhile
 s" do" make-symbol constant Sdo
 s" lambda" make-symbol constant Slambda
-s" macro" make-symbol constant Smacro
+s" defmacro" make-symbol constant Sdefmacro
 s" quote" make-symbol constant Squote
 s" quasiquote" make-symbol constant Squasiquote
 s" unquote" make-symbol constant Sunquote
@@ -1835,7 +1835,6 @@ defer equal-sexp
             cdr swap cdr equal-sexp
         endof
         Nlambda of 2drop nil endof
-        Nmacro of 2drop nil endof
         not-reachable
     endcase
 ; is equal-sexp
@@ -2042,7 +2041,9 @@ end-struct env%
 defer eval-sexp
 defer eval-cons
 defer eval-qquote
+defer macroexpand
 
+variable macros
 variable root-env
 
 \ add primitive function
@@ -2125,7 +2126,9 @@ s" parse" :noname ( str -- sexp )
         then
     then
 ; add-prim
-s" eval" :noname ( env sexp -- env sexp ) eval-sexp ; add-prim
+s" eval" :noname ( env sexp -- env sexp )
+    0 macroexpand eval-sexp
+; add-prim
 s" exit" :noname ( int -- ) to-int quit ; add-prim
 s" fresh-sym" :noname 0 Nsymbol make-node1 ; add-prim
 s" commandline-args" :noname
@@ -2174,7 +2177,6 @@ s" print-env" :noname dup print-env ; add-prim
     Nnil of ( do nothing ) endof
     Ncons of eval-cons endof
     Nlambda of endof
-    Nmacro of endof
     Nprim of endof
         not-reachable
     endcase
@@ -2296,12 +2298,14 @@ s" print-env" :noname dup print-env ; add-prim
         ( env body params env)
         make-lambda
     endof
-    Smacro of \ (macro params body)
+    Sdefmacro of \ (def m params body)
         ( env node )
-        cdr over >r
-        dup cadr swap car r>
-        ( env body params env)
-        make-macro
+        cdr over >r tuck ( args env args R: env )
+        dup caddr swap cadr r> ( args env body params env )
+        make-macro ( args env macro )
+        >r swap car macros @ swap r> ( env macros sym macro )
+        env-push macros !
+        nil
     endof
     Squote of cadr endof
     Squasiquote of cadr 0 eval-qquote endof
@@ -2312,14 +2316,11 @@ s" print-env" :noname dup print-env ; add-prim
         >r cdr r>
         ( env args fn )
 
-        \ If fn is not 'macro', evaluate args before application
-        dup node-type Nmacro <> if
-            >r eval-list r>
-        then
+        \ evaluate args before application
+        >r eval-list r>
             
         dup node-type case
             Nlambda of apply endof
-            Nmacro of apply eval-sexp endof
             Nprim of call-prim endof
             ( default case )
             drop
@@ -2364,13 +2365,65 @@ s" print-env" :noname dup print-env ; add-prim
     endcase
 ; is eval-qquote
 
+defer macroexpand-list
+:noname ( env sexp nestlevel -- env sexp )
+    over nil = if drop exit then
+    2dup >r >r
+    swap car swap macroexpand
+    over r> cdr r> recurse nip
+    ( env car' cdr' )
+    swap make-cons
+; is macroexpand-list
+
+:noname ( env sexp nestlevel -- env sexp )
+    >r dup node-type case
+    Nint    of r> drop endof
+    Nstr    of r> drop endof
+    Nsymbol of r> drop endof
+    Nnil    of r> drop endof
+    Ncons of
+        dup car case
+            Squote of r> drop endof
+            Squasiquote of cadr r> 1+ recurse make-qquote endof
+            Sunquote of cadr r> 1- recurse make-unquote endof
+            \ expand macro if nestlevel = 0 and car of sexp is a macro )
+            drop r> dup unless ( nestlevel = 0)
+            over car sym? if ( car is a symbol )
+            >r macros @ over car env-find ?dup if
+                dup node-type Nmacro = if
+                    ( env sexp macro )
+                    \ \ expand macro for args, then apply the macro
+                    \ r> dup >r swap >r ( env sexp nest R: nest macro )
+                    \ swap cdr swap macroexpand-list r>
+                    \ ( env args' macro R: nest)
+                    \ apply r> recurse exit
+
+                    >r ( env sexp R: nest macro )
+                    cdr r> apply r> recurse exit
+                else
+                    drop r>
+                then
+            else
+                r>
+            then then then
+            macroexpand-list
+        endcase
+    endof
+    not-reachable
+    endcase
+; is macroexpand
+
 : eval-file ( env c-str -- env' )
     read-file drop swap >r
     begin
         skip-spaces-and-comments
         dup c@ unless ( EOF ) drop r> exit then
         parse-sexp swap
-        r> swap eval-sexp drop >r
+        r> swap
+            \ ." before: " dup print-sexp cr
+            0 macroexpand
+            \ ." after : " dup print-sexp cr
+        eval-sexp drop >r
     again
 ;
 
