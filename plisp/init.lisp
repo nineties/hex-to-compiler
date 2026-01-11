@@ -208,7 +208,7 @@
 
 (define read-sexp-list (path) (do
     (defvar (size data) (read-file path))
-    (when (< size 0) (abort "file not found"))
+    (when (< size 0) (do (println path) (abort "file not found")))
     (parse-sexp-list data)
     ))
 

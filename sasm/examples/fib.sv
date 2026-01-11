@@ -1,6 +1,6 @@
-; fib.pc
+; fib.sv
 
-(include "std.pc")
+(include "std.sv")
 
 (fun fib (n)
     (if (< n 2)

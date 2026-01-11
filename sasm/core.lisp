@@ -140,8 +140,19 @@
                 (emit-asm '(movzx %eax (mem %eax)))
                 (push '%eax)
                 ))
-            (compile-call expr env)
-            ))
+            ('syscall   (do
+                (def regs '(%eax %ebx %ecx %edx %esi %edi %ebp))
+                (def args (cdr expr))
+                (for arg (reverse args) (compile-expr arg env))
+                (while args (do
+                    (pop (car regs))
+                    (set regs (cdr regs))
+                    (set args (cdr args))
+                    ))
+                (emit-asm '(int 0x80))
+                ))
+                (compile-call expr env)
+                ))
         (true
             (do (println expr) (not-implemented "compile-expr")))
         ))
@@ -163,18 +174,6 @@
 
             (emit-asm '(ret))
             env))
-        ('syscall   (do
-            (def regs '(%eax %ebx %ecx %edx %esi %edi %ebp))
-            (def args (cdr stmt))
-            (for arg (reverse args) (compile-expr arg env))
-            (while args (do
-                (pop (car regs))
-                (set regs (cdr regs))
-                (set args (cdr args))
-                ))
-            (emit-asm '(int 0x80))
-            env
-            ))
         ('var   (do
             (def x (cadr stmt))
             (def e (caddr stmt))
@@ -213,7 +212,7 @@
         ('/=    (compile-stmt `(= ,(cadr stmt) (/ ,(cadr stmt) ,(caddr stmt))) env))
         ('%=    (compile-stmt `(= ,(cadr stmt) (% ,(cadr stmt) ,(caddr stmt))) env))
         ('if    (cond
-            ((= (length stmt) 3)    (compile-stmt `(if ,(nth 1 stmt) ,(nth 2 stmt), (do) env)))
+            ((= (length stmt) 3)    (compile-stmt `(if ,(nth 1 stmt) ,(nth 2 stmt) (do)) env))
             (true
                 (do
                     (defvar (op lhs rhs) (nth 1 stmt))
@@ -315,7 +314,7 @@
         (for decl decls (switch (car decl)
             ('fun   (compile-fundecl decl))
             ('include (do
-                (def path (strcat "pcc/lib/" (cadr decl)))
+                (def path (strcat "sasm/lib/" (cadr decl)))
                 (when (not (member? path included)) (do
                     (compile-topdecls (read-sexp-list path))
                     (set included (cons path included))

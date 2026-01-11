@@ -1,4 +1,4 @@
-; std.pc
+; std.sv
 
 ; === System Calls
 (def SYS_EXIT 1)
@@ -15,6 +15,20 @@
 
 (fun write (fd buf len)
     (syscall SYS_WRITE fd buf len)
+    )
+
+(def O_RDONLY   0)
+(def O_WRONLY   1)
+(def O_RDWR     2)
+(def O_CREAT    0x40)
+(def O_TRUNC    0x200)
+
+(fun open (path flags)
+    (return (syscall SYS_OPEN flags path 0x1a4))
+    )
+
+(fun close (fd)
+    (syscall SYS_CLOSE fd)
     )
 
 ; === String

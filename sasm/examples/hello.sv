@@ -1,6 +1,6 @@
-; hello.pc
+; hello.sv
 
-(include "std.pc")
+(include "std.sv")
 
 (fun main ()
     (puts "Hello World!")
