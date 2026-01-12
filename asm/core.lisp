@@ -64,7 +64,7 @@
         ((member? opd reg8) "r8")
         ((sym? opd) "sym") ; addr or offset or const
         ((&& (cons? opd) (= (car opd) 'mem))  "m")
-        (true   (not-implemented "to_operand_type"))
+        (true   (do (println opd) (not-implemented "to_operand_type")))
         ))
 
     (define lookup_insn (insn)

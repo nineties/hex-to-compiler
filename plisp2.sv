@@ -6,9 +6,7 @@
 (fun read_file (path)
     (var fd (open path O_RDONLY))
     (if (< fd 0) (do
-        (fputs STDERR "open failed: ")
-        (fputs STDERR path)
-        (fputs STDERR "\n")
+        (eputs "open failed: ") (eputs path) (eputs "\n")
         (exit 1)))
     (fprint_int STDOUT (fsize fd) 10)
     (close fd)

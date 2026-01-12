@@ -23,14 +23,12 @@ pforth: pforth.xxd
 	chmod +x pforth
 
 %: %.s pforth plisp.fs $(ASM_SOURCES)
-	-./pforth < plisp.fs asm.lisp $< $@
+	-time ./pforth < plisp.fs asm.lisp $< $@
 	-chmod +x $@
-	-./$@
 
 %: %.sv pforth plisp.fs $(SASM_SOURCES) $(ASM_SOURCES) $(SASM_LIBS)
-	-./pforth < plisp.fs sasm.lisp $< $@
+	-time ./pforth < plisp.fs sasm.lisp $< $@
 	-chmod +x $@
-	-./$@
 
 .PHONY: clean test
 clean:
