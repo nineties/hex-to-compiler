@@ -112,7 +112,7 @@
 (fun eputx (n) (fputx STDERR n))
 
 (fun fputi (fd n) (if (< n 0)
-    (do (fputs fd "-") (fputu fd (- 0 n)))
+    (do (fputs fd "-") (fputu fd (- n)))
     (fputu fd n)
     ))
 (fun puti (n) (fputi STDOUT n))
