@@ -15,6 +15,8 @@
         (str2sym (strcat ".L." (int2str 10 fresh_label_cnt)))
         ))
 
+    (define align (n) (& (+ n 3) 0xfffffffc))
+
     (define emit-asm (line)
         (set asm-code (cons line asm-code)))
 
@@ -72,6 +74,12 @@
                 ('local     (do
                     (def offs (cadr pos))
                     (push `(mem %ebp ,(negate (* 4 (+ offs 1)))))
+                    ))
+                ('local_addr (do
+                    (def offs (cadr pos))
+                    (emit-asm '(mov %eax %ebp))
+                    (emit-asm `(sub %eax ,(* 4 (+ offs 1))))
+                    (push '%eax)
                     ))
                 ('param (do
                     (def offs (cadr pos))
@@ -171,6 +179,7 @@
                     (set args (cdr args))
                     ))
                 (emit-asm '(int 0x80))
+                (push '%eax)
                 ))
             (compile-call expr env)
                 ))
@@ -285,6 +294,15 @@
             ))
         ('asm   (do
             (emit-asm (cadr stmt))
+            env
+            ))
+        ('char[]    (do
+            ; allocate local buffer to stack
+            (def size (align (cadr stmt)))
+            (def x (caddr stmt))
+            (emit-asm `(sub %esp ,size))
+            (+= nlocal (/ size 4))
+            (set env (acons x `(local_addr ,(- nlocal 1)) env))
             env
             ))
         (do

@@ -7,6 +7,7 @@
 (def SYS_OPEN 5)
 (def SYS_CLOSE 6)
 (def SYS_MUNMAP 91)
+(def SYS_FSTAT 108)
 (def SYS_MMAP2 192)
 
 (fun exit (n)
@@ -24,11 +25,17 @@
 (def O_TRUNC    0x200)
 
 (fun open (path flags)
-    (return (syscall SYS_OPEN flags path 0x1a4))
+    (return (syscall SYS_OPEN path flags 0x1a4))
     )
 
 (fun close (fd)
     (syscall SYS_CLOSE fd)
+    )
+
+(fun fsize (fd)
+    (char[] 64 buf) ; buf for struct stat
+    (syscall SYS_FSTAT fd buf)
+    (return (get buf 5)) ; offset of st_size
     )
 
 ; === String
@@ -47,9 +54,10 @@
 (def STDOUT 1)
 (def STDERR 2)
 
+
+
 (fun fputs (fd str)
     (write fd str (strlen str))
-    (write fd "\n" 1)
     )
 
 (fun puts (str)
