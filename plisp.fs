@@ -1873,6 +1873,8 @@ defer equal-sexp
         '^' of true endof
         '~' of true endof
         '@' of true endof
+        '[' of true endof
+        ']' of true endof
         drop false
     endcase
 ;
