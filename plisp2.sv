@@ -3,6 +3,12 @@
 
 (include "std.sv")
 
+; === Memory Allocation
+
+(fun align (n) ; align n to 4-byte boundary
+    (return (& (+ n 7) 0xfffffff8))
+    )
+
 (def HEAP_BLOCK_SIZE (* 128 (* 1024 1024))) ; 128 MB
 (long heap_root)
 (long heap_end)
@@ -17,12 +23,8 @@
         (exit 1)
         ))
     (= heap_root addr)
-    (= heap_pos addr)
+    (= heap_pos (align addr))
     (= heap_end (+ addr HEAP_BLOCK_SIZE))
-    )
-
-(fun align (n) ; align n to 4-byte boundary
-    (return (& (+ n 3) 0xfffffffe))
     )
 
 (fun allocate (size)
@@ -36,6 +38,67 @@
     (return addr)
     )
 
+; === Nodes
+
+; last 3 bit of address is used to detect node types
+; 000  : int
+; 001  : nil
+; 010  : cons
+; 011  : symbol
+; 100  : str
+; 101  : lambda
+; 110  : macro
+; 111  : prim
+
+(def Nint 0)
+(def Nnil 1)
+(def Ncons 2)
+(def Nsymbol 3)
+(def Nstr 4)
+(def Nlambda 5)
+(def Nmacro 6)
+(def Nprim 7)
+
+(def nil 1)
+
+(fun node_type (node) (return (& 0x7 node)))
+(fun make_int (n) (return (<< n 3)))
+(fun make_cons (a b)
+    (var cons (allocate 8))
+    (set cons 0 a)
+    (set cons 1 b)
+    (return (| cons Ncons))
+    )
+(fun make_symbol (s)
+    (var sym (allocate 4))
+    (set sym 0 s)
+    (return (| sym Nsymbol))
+    )
+(fun make_str (s)
+    (var str (allocate 4))
+    (set str 0 s)
+    (return (| str Nstr))
+    )
+(fun make_lambda (env params body)
+    (var lam (allocate 12))
+    (set lam 0 env)
+    (set lam 1 params)
+    (set lam 2 body)
+    (return (| lam Nlambda))
+    )
+(fun make_macro (env params body)
+    (var mac (allocate 12))
+    (set mac 0 env)
+    (set mac 1 params)
+    (set mac 2 body)
+    (return (| mac Nmacro))
+    )
+(fun make_prim (name fun)
+    (var prim (allocate 8))
+    (set prim 0 name)
+    (set prim 1 fun)
+    (return (| prim Nprim))
+    )
 
 (fun read_file (path)
     (var fd (open path O_RDONLY))
@@ -48,20 +111,39 @@
         (eputs "fstat failed: ") (eputs path) (eputs "\n")
         (exit 1)))
 
-    (var buf (allocate file_size))
+    (var buf (allocate (+ file_size 1))) ; +1 for \0
     (var r (read fd buf file_size))
     (if (< r file_size) (do
         (eputs "read failed: ") (eputs path) (eputs "\n")
         (exit 1)
         ))
+    (setb buf file_size 0)
 
     (close fd)
     (return buf)
     )
 
+(fun is_blank (c)
+    (if (|| (== c (char " ")) (|| (== c (char "\t")) (== c (char "\n")))) (return 1) (return 0))
+    )
+
+(fun skip_spaces_and_commets (addr)
+    (while (getb addr) (do
+        (var c (getb addr))
+        (if (== c (char ";"))
+            (while (&& (!= (getb addr) (char "\n")) (getb addr)) (+= addr 1))
+        (if (is_blank c)
+            (+= addr 1)
+            (return addr)
+            ))
+        ))
+    (return addr)
+    )
+
 (fun read_sexp_list (path)
-    (var text (read_file path))
-    (puts text)
+    (var text_buf (read_file path))
+    (= text_buf (skip_spaces_and_commets text_buf))
+    (puts text_buf)
     )
 
 (fun main (argc argv)

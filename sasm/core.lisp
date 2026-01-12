@@ -43,8 +43,31 @@
         (push '%eax)
         ))
 
+    (define compile-shift (op expr env) (do
+        (compile-expr (cadr expr) env)
+        (compile-expr (caddr expr) env)
+        (pop '%ecx)
+        (pop '%eax)
+        (emit-asm `(,op %eax %cl))
+        (push '%eax)
+        ))
+
     (define comp-expr? (e) (&& (cons? e)
-        (member? (car e) '(< > <= >= u< u> u<= u>= == !=))))
+        (member? (car e) '(< > <= >= u< u> u<= u>= == != && || !))))
+
+    (define to-if-jump (op) (switch op
+        ('<     'jl)
+        ('>     'jg)
+        ('<=    'jle)
+        ('>=    'jge)
+        ('u<    'jb)
+        ('u>    'ja)
+        ('u<=   'jbe)
+        ('u>=   'jae)
+        ('==    'je)
+        ('!=    'jne)
+        (not-reachable "to-ifnot-jump")
+        ))
 
     (define to-ifnot-jump (op) (switch op
         ('<     'jge)
@@ -134,6 +157,9 @@
             ('>=    (not-implemented ">="))
             ('==    (not-implemented "=="))
             ('!=    (not-implemented "!="))
+            ('<<    (compile-shift 'shl expr env))
+            ('>>    (compile-shift 'shr expr env))
+            ('asr   (compile-shift 'sar expr env))
             ('char  (push (getb (cadr expr) 0)))
             ('get  (do
                 (def idx (if (cddr expr) (caddr expr) 0))
@@ -174,7 +200,7 @@
                     (set val (caddr expr))
                     (do
                         (set idx (caddr expr))
-                        (set val (cadddr expr))
+                        (set val (nth 3 expr))
                         ))
                 (compile-expr val env)
                 (compile-expr ptr env)
@@ -207,6 +233,58 @@
                 ))
         (true
             (do (println expr) (not-implemented "compile-expr")))
+        ))
+
+    (define compile-if (expr env label) (if (comp-expr? expr)
+        (do
+            (def op (car expr))
+            (switch op
+                ('!     (compile-ifnot (cadr expr) env label))
+                ('&&    (do
+                    (def exit_label (fresh-label))
+                    (compile-ifnot (nth 1 expr) env exit_label)
+                    (compile-if (nth 2 expr) env label)
+                    (emit-asm `(label ,exit_label))
+                    ))
+                ('||    (do
+                    (compile-if (nth 1 expr) env label)
+                    (compile-if (nth 2 expr) env label)
+                    ))
+                (do
+                    (compile-expr (nth 1 expr) env)
+                    (compile-expr (nth 2 expr) env)
+                    (pop '%ecx)
+                    (pop '%eax)
+                    (emit-asm '(cmp %eax %ecx))
+                    (emit-asm `(,(to-if-jump op) ,label))
+                    )))
+        (compile-if `(!= ,expr 0) env label)
+        ))
+
+    (define compile-ifnot (expr env label) (if (comp-expr? expr)
+        (do
+            (def op (car expr))
+            (switch op
+                ('!     (compile-if (cadr expr) env label))
+                ('&&    (do
+                    (compile-ifnot (nth 1 expr) env label)
+                    (compile-ifnot (nth 2 expr) env label)
+                    ))
+                ('||    (do
+                    (def exit_label (fresh-label))
+                    (compile-if (nth 1 expr) env exit_label)
+                    (compile-ifnot (nth 2 expr) env label)
+                    (emit-asm `(label ,exit_label))
+                    ))
+                (do
+                    (compile-expr (nth 1 expr) env)
+                    (compile-expr (nth 2 expr) env)
+                    (pop '%ecx)
+                    (pop '%eax)
+                    (emit-asm '(cmp %eax %ecx))
+                    (emit-asm `(,(to-ifnot-jump op) ,label))
+                    )))
+        (compile-ifnot `(!= ,expr 0) env label)
         ))
 
     (define compile-stmt (stmt env) (switch (car stmt)
@@ -279,22 +357,16 @@
             ((= (length stmt) 3)    (compile-stmt `(if ,(nth 1 stmt) ,(nth 2 stmt) (do)) env))
             (true
                 (do
-                    (defvar (op lhs rhs) (nth 1 stmt))
-                    (def t (nth 2 stmt))
-                    (def e (nth 3 stmt))
-                    (def Le (fresh-label))
-                    (def Ljoin (fresh-label))
-                    (compile-expr lhs env)
-                    (compile-expr rhs env)
-                    (pop '%ecx)
-                    (pop '%eax)
-                    (emit-asm '(cmp %eax %ecx))
-                    (emit-asm `(,(to-ifnot-jump op) ,Le))
-                    (compile-stmt t env)
-                    (emit-asm  `(jmp ,Ljoin))
-                    (emit-asm `(label ,Le))
-                    (compile-stmt e env)
-                    (emit-asm `(label ,Ljoin))
+                    (def ifelse_label (fresh-label))
+                    (def join_label (fresh-label))
+
+                    (compile-ifnot (nth 1 stmt) env ifelse_label)
+
+                    (compile-stmt (nth 2 stmt) env)
+                    (emit-asm `(jmp ,join_label))
+                    (emit-asm `(label ,ifelse_label))
+                    (compile-stmt (nth 3 stmt) env)
+                    (emit-asm `(label ,join_label))
                     env
                 ))
             ))
@@ -312,15 +384,9 @@
             (def body (caddr stmt))
 
             (when (not (comp-expr? e)) (set e `(!= ,e 0)))
-            (defvar (op lhs rhs) e)
 
             (emit-asm `(label ,begin))
-            (compile-expr lhs env)
-            (compile-expr rhs env)
-            (pop '%ecx)
-            (pop '%eax)
-            (emit-asm '(cmp %eax %ecx))
-            (emit-asm `(,(to-ifnot-jump op) ,exit))
+            (compile-ifnot e env exit)
             (compile-stmt body env)
             (emit-asm `(jmp ,begin))
             (emit-asm `(label ,exit))

@@ -38,30 +38,32 @@
         ((push "r32")           ("O"  0x50))
         ((push "imm32")         ("I"  0x68 "id"))
         ((ret)                  ("ZO" 0xc3))
+        ((shl "r/m32" "CL")     ("MC" 0xd3 "/4"))
         ((sub "r/m32" "imm32")  ("MI" 0x81 "/5" "id"))
         ((sub "r/m32" "r32")    ("MR" 0x29 "/r"))
         ((xor "r/m32" "r32")    ("MR" 0x31 "/r"))
         ))
 
-    (define match_operand (opd pat) (cond
-        ((= opd pat)   true)
-        ((= "r32" opd) (member? pat '("r32" "r/m32")))
-        ((= "imm" opd) (member? pat '("imm8" "imm32")))
-        ((= "sym" opd) (member? pat '("imm8" "imm32" "rel32")))
-        ((= "m" opd) (member? pat '("r/m32" "r/m8")))
+    (define match_operand (opd ty pat) (cond
+        ((= ty pat)   true)
+        ((= "r32" ty) (member? pat '("r32" "r/m32")))
+        ((= "imm" ty) (member? pat '("imm8" "imm32")))
+        ((= "sym" ty) (member? pat '("imm8" "imm32" "rel32")))
+        ((= "m" ty) (member? pat '("r/m32" "r/m8")))
+        ((= opd '%cl)  (= pat "CL"))
         (true ())
         ))
 
-    (define match_insn (insn pat) (cond
-        ((!= (car insn) (car pat))       ())
-        ((!= (length insn) (length pat)) ())
+    (define match_insn (insn type pat) (cond
+        ((!= (car type) (car pat))       ())
+        ((!= (length type) (length pat)) ())
         (true (do
-            (define iter (ts ps) (cond
+            (define iter (os ts ps) (cond
                 ((nil? ts) true)
-                ((match_operand (car ts) (car ps))  (iter (cdr ts) (cdr ps)))
+                ((match_operand (car os) (car ts) (car ps))  (iter (cdr os) (cdr ts) (cdr ps)))
                 (true ())
                 ))
-            (iter (cdr insn) (cdr pat))
+            (iter (cdr insn) (cdr type) (cdr pat))
         ))))
 
     (define to_operand_type (opd) (cond
@@ -78,7 +80,7 @@
             insn
             (do
                 (def type (cons (car insn) (map to_operand_type (cdr insn))))
-                (def fmt (assoc-find (lambda (pat) (match_insn type pat)) x86_instructions))
+                (def fmt (assoc-find (lambda (pat) (match_insn insn type pat)) x86_instructions))
                 (when (= fmt 'error) (do
                     (put "invalid or unsupported instruction: ")
                     (println insn)
@@ -164,6 +166,7 @@
             ("MR"   (encode_modrm (nth 2 insn) (nth 1 insn)))
             ("RM"   (encode_modrm (nth 1 insn) (nth 2 insn)))
             ("MI"   (encode_modrm (nth 2 fmt) (nth 1 insn)))
+            ("MC"   (encode_modrm (nth 2 fmt) (nth 1 insn)))
             (not-reachable "compute_modrm_len")
             ))
         (def len 0)
@@ -388,6 +391,10 @@
             (emit (nth 1 fmt))
             (emit_modrm (nth 2 fmt) (nth 1 insn))
             (emit_i32 (nth 2 insn))
+            ))
+        ("MC"   (do
+            (emit (nth 1 fmt))
+            (emit_modrm (nth 2 fmt) (nth 1 insn))
             ))
         ("D"    (do
             (def opds (cdr fmt))

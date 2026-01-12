@@ -10,5 +10,5 @@
     )
 
 (fun main ()
-    (exit (fib 20))
+    (putu (fib 20)) (puts "\n")
     )
