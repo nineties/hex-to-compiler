@@ -405,6 +405,12 @@
                 (emit-asm `(comm ,len))
                 (set env (acons x `(label ,x) env))
                 ))
+            ('long (do
+                (def x (cadr decl))
+                (emit-asm `(label ,x))
+                (emit-asm `(long 0))
+                (set env (acons x `(label ,x) env))
+                ))
             (not-implemented "compile")
             )))
     (compile-topdecls decls)
