@@ -87,8 +87,8 @@
 
 (fun int2char (n)
     (if (< n 10)
-        (return (+ n 48))   ; 48 = '0'
-        (return (+ n 87))   ; 87 = 'a' - 10
+        (return (+ n (char "0")))
+        (return (+ n (- (char "a") 10)))
         )
     )
 

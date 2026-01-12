@@ -134,6 +134,7 @@
             ('>=    (not-implemented ">="))
             ('==    (not-implemented "=="))
             ('!=    (not-implemented "!="))
+            ('char  (push (getb (cadr expr) 0)))
             ('get  (do
                 (def idx (if (cddr expr) (caddr expr) 0))
                 (compile-expr (cadr expr) env)
