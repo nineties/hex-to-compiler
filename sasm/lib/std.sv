@@ -92,7 +92,7 @@
         )
     )
 
-(fun fprint_int (fd n base)
+(fun fput_int (fd n base)
     (char[] 11 int2str_buf) ; max length of 32bit integer + 1 for '\0'
     (var pos (+ int2str_buf 9))
     (setb pos (int2char (% n base)))
@@ -103,3 +103,17 @@
         ))
     (write fd pos (- 10 (- pos int2str_buf)))
     )
+(fun fputu (fd n) (fput_int fd n 10))
+(fun putu (n) (fputu STDOUT n))
+(fun eputu (n) (fputu STDERR n))
+
+(fun fputx (fd n) (fput_int fd n 16))
+(fun putx (n) (fputx STDOUT n))
+(fun eputx (n) (fputx STDERR n))
+
+(fun fputi (fd n) (if (< n 0)
+    (do (fputs fd "-") (fputu fd (- 0 n)))
+    (fputu fd n)
+    ))
+(fun puti (n) (fputi STDOUT n))
+(fun eputi (n) (fputi STDERR n))
