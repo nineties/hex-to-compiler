@@ -50,12 +50,18 @@
 
     (var buf (allocate file_size))
     (var r (read fd buf file_size))
+    (if (< r file_size) (do
+        (eputs "read failed: ") (eputs path) (eputs "\n")
+        (exit 1)
+        ))
 
     (close fd)
+    (return buf)
     )
 
 (fun read_sexp_list (path)
     (var text (read_file path))
+    (puts text)
     )
 
 (fun main (argc argv)

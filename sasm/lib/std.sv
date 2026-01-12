@@ -32,6 +32,14 @@
     (syscall SYS_CLOSE fd)
     )
 
+(fun read (fd buf size)
+    (return (syscall SYS_READ fd buf size))
+    )
+
+(fun write (fd buf size)
+    (return (syscall SYS_WRITE fd buf size))
+    )
+
 (fun fsize (fd)
     (char[] 64 buf) ; buf for struct stat
     (var r (syscall SYS_FSTAT fd buf))
