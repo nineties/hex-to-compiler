@@ -34,7 +34,8 @@
 
 (fun fsize (fd)
     (char[] 64 buf) ; buf for struct stat
-    (syscall SYS_FSTAT fd buf)
+    (var r (syscall SYS_FSTAT fd buf))
+    (if (< r 0) (return r))
     (return (get buf 5)) ; offset of st_size
     )
 
