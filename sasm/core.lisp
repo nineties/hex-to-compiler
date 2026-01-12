@@ -359,6 +359,28 @@
         (syscall 1 0)   ; exit(0)
         ))
 
+    (define eval (e) (cond
+        ((int? e)       e)
+        ((sym? e)   (do
+            (def pos (assoc e env))
+            (println pos)
+            (not-implemented "compile:eval")
+            ))
+        ((cons? e) (switch (car e)
+            ('+     (+ (eval (cadr e)) (eval (caddr e))))
+            ('-     (- (eval (cadr e)) (eval (caddr e))))
+            ('*     (* (eval (cadr e)) (eval (caddr e))))
+            ('/     (/ (eval (cadr e)) (eval (caddr e))))
+            ('%     (% (eval (cadr e)) (eval (caddr e))))
+            ('&     (& (eval (cadr e)) (eval (caddr e))))
+            ('|     (| (eval (cadr e)) (eval (caddr e))))
+            ('^     (^ (eval (cadr e)) (eval (caddr e))))
+            (not-reachable "compile:eval")
+            ))
+        (true   (not-reachable "compile:eval"))
+        ))
+
+
     ; compile declarations
     (def included ())
     (define compile-topdecls (decls)
@@ -373,7 +395,7 @@
                 ))
             ('def   (do
                 (def x (cadr decl))
-                (def val (caddr decl))
+                (def val (eval (caddr decl)))
                 (set env (acons x `(const ,val) env))
                 ))
             ('char[] (do
