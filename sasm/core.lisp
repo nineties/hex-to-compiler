@@ -179,6 +179,9 @@
             ('syscall   (do
                 (def regs '(%eax %ebx %ecx %edx %esi %edi %ebp))
                 (def args (cdr expr))
+
+
+                (when (>= (length args) 7) (push '%ebp))
                 (for arg (reverse args) (compile-expr arg env))
                 (while args (do
                     (pop (car regs))
@@ -186,6 +189,8 @@
                     (set args (cdr args))
                     ))
                 (emit-asm '(int 0x80))
+                (when (>= (length (cdr expr)) 7) (pop '%ebp))
+
                 (push '%eax)
                 ))
             (compile-call expr env)
