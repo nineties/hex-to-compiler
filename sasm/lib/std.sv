@@ -39,6 +39,24 @@
     (return (get buf 5)) ; offset of st_size
     )
 
+(def PROT_READ 0x1)
+(def PROT_WRITE 0x2)
+(def PROT_EXEC 0x4)
+(def PROT_NONE 0x0)
+
+(def MAP_SHARED 0x1)
+(def MAP_PRIVATE 0x2)
+(def MAP_FIXED 0x10)
+(def MAP_ANONYMOUS 0x20)
+
+(fun mmap2 (addr length prot flags fd pgoffset)
+    (return (syscall SYS_MMAP2 0 length prot flags fd pgoffset))
+    )
+
+(fun munmap (addr length)
+    (syscall SYS_MUNMAP addr length)
+    )
+
 ; === String
 (fun strlen (ptr)
     (var len 0)
