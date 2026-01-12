@@ -44,13 +44,17 @@
         ))
 
     (define comp-expr? (e) (&& (cons? e)
-        (member? (car e) '(< > <= >= >> !=))))
+        (member? (car e) '(< > <= >= u< u> u<= u>= == !=))))
 
     (define to-ifnot-jump (op) (switch op
         ('<     'jge)
         ('>     'jle)
         ('<=    'jg)
         ('>=    'jl)
+        ('u<    'jae)
+        ('u>    'jbe)
+        ('u<=   'ja)
+        ('u>=   'jb)
         ('==    'jne)
         ('!=    'je)
         (not-reachable "to-ifnot-jump")
@@ -112,6 +116,9 @@
                 (emit-asm '(idiv %ecx))
                 (push '%edx)
                 ))
+            ('&     (compile-binop 'and epr env))
+            ('|     (compile-binop 'or expr env))
+            ('^     (compile-binop 'xor expr env))
             ('<     (not-implemented "<"))
             ('>     (not-implemented ">"))
             ('<=    (not-implemented "<="))
