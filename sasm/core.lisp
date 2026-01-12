@@ -289,7 +289,12 @@
 
     (define compile-stmt (stmt env) (switch (car stmt)
         ('do    (do
+            (def nlocal_old nlocal)
             (for s (cdr stmt) (set env (compile-stmt s env)))
+            (when (> nlocal nlocal_old)
+                (emit-asm `(add %esp ,(* 4 (- nlocal nlocal_old))))
+                )
+            (set nlocal nlocal_old)
             env
             ))
         ('return    (do
@@ -362,10 +367,22 @@
 
                     (compile-ifnot (nth 1 stmt) env ifelse_label)
 
+                    (def nlocal_old nlocal)
                     (compile-stmt (nth 2 stmt) env)
+                    (when (> nlocal nlocal_old)
+                        (emit-asm `(add %esp ,(* 4 (- nlocal nlocal_old))))
+                        )
+                    (set nlocal nlocal_old)
+
                     (emit-asm `(jmp ,join_label))
                     (emit-asm `(label ,ifelse_label))
+
                     (compile-stmt (nth 3 stmt) env)
+                    (when (> nlocal nlocal_old)
+                        (emit-asm `(add %esp ,(* 4 (- nlocal nlocal_old))))
+                        )
+                    (set nlocal nlocal_old)
+
                     (emit-asm `(label ,join_label))
                     env
                 ))
@@ -387,7 +404,12 @@
 
             (emit-asm `(label ,begin))
             (compile-ifnot e env exit)
+            (def nlocal_old nlocal)
             (compile-stmt body env)
+            (when (> nlocal nlocal_old)
+                (emit-asm `(add %esp ,(* 4 (- nlocal nlocal_old))))
+                )
+            (set nlocal nlocal_old)
             (emit-asm `(jmp ,begin))
             (emit-asm `(label ,exit))
             env
