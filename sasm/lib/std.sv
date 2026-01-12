@@ -88,7 +88,7 @@
     (char[] 11 int2str_buf) ; max length of 32bit integer + 1 for '\0'
     (var pos (+ int2str_buf 9))
     (setb pos (int2char (% n base)))
-    (while (>= n base) (do
+    (while (u>= n base) (do
         (/= n base)
         (-= pos 1)
         (setb pos (int2char (% n base)))
