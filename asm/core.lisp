@@ -4,6 +4,7 @@
 ; This assembler generates directly executable ELF files.
 
 (define assemble (asm-code) (do
+    (def reg8 '(%al %cl %dl %bl))
     (def reg32 '(%eax %ecx %edx %ebx %esp %ebp %esi %edi))
 
     (def x86_instructions '(
@@ -22,6 +23,7 @@
         ((jle "rel32")          ("D"  0x0f 0x8e "cd"))
         ((jne "rel32")          ("D"  0x0f 0x85 "cd"))
         ((mov "r32" "imm32")    ("OI" 0xb8 "id"))
+        ((mov "r/m8" "r8")      ("MR" 0x88 "/r"))
         ((mov "r/m32" "r32")    ("MR" 0x89 "/r"))
         ((mov "r32" "r/m32")    ("RM" 0x8b "/r"))
         ((movzx "r32" "r/m8")   ("RM" 0x0f 0xb6 "/r"))
@@ -59,13 +61,14 @@
     (define to_operand_type (opd) (cond
         ((int? opd) "imm")
         ((member? opd reg32) "r32")
+        ((member? opd reg8) "r8")
         ((sym? opd) "sym") ; addr or offset or const
         ((&& (cons? opd) (= (car opd) 'mem))  "m")
         (true   (not-implemented "to_operand_type"))
         ))
 
     (define lookup_insn (insn)
-        (if (member? (car insn) '(ascii asciz byte short long))
+        (if (member? (car insn) '(ascii asciz byte short long comm))
             insn
             (do
                 (def type (cons (car insn) (map to_operand_type (cdr insn))))
@@ -81,10 +84,10 @@
 
     (define reg? (r) (member? r reg32))
     (define encode_reg (r) (cond
-        ((member? r (list '%eax "/0")) 0)
-        ((member? r (list '%ecx "/1")) 1)
-        ((member? r (list '%edx "/2")) 2)
-        ((member? r (list '%ebx "/3")) 3)
+        ((member? r (list '%eax "/0" '%al)) 0)
+        ((member? r (list '%ecx "/1" '%cl)) 1)
+        ((member? r (list '%edx "/2" '%dl)) 2)
+        ((member? r (list '%ebx "/3" '%bl)) 3)
         ((member? r (list '%esp "/4")) 4)
         ((member? r (list '%ebp "/5")) 5)
         ((member? r (list '%esi "/6")) 6)
@@ -172,7 +175,7 @@
         ('byte  (length (cdr line)))
         ('short (* 2 (length (cdr line))))
         ('long  (* 4 (length (cdr line))))
-        ('quad  (* 8 (length (cdr line))))
+        ('comm  (eval (cadr line)))
         ('insn  (do
             (def bytes 0)
             (defvar (insn fmt) (cdr line))
@@ -307,6 +310,7 @@
         ((int? e)           e)
         ((= e 'here)        (here))
         ((member? e reg32)  e)
+        ((member? e reg8)   e)
         ((sym? e)        (do
             (def off (assoc e label_offsets))
             (def val (assoc e consts))
@@ -401,6 +405,10 @@
         ('byte  (emit (eval (cadr insn))))
         ('short (emit_i16 (eval (cadr insn))))
         ('long  (emit_i32 (eval (cadr insn))))
+        ('comm  (do
+            (def len (eval (cadr insn)))
+            (while (> len 0) (do (emit 0) (-= len 1)))
+            ))
         ('insn (do
             (defvar (code fmt) (cdr insn))
             (set code (cons (car code) (map eval (cdr code))))

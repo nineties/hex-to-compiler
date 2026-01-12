@@ -47,7 +47,29 @@
 (def STDOUT 1)
 (def STDERR 2)
 
+(fun fputs (fd str)
+    (write fd str (strlen str))
+    (write fd "\n" 1)
+    )
+
 (fun puts (str)
-    (write STDOUT str (strlen str))
-    (write STDOUT "\n" 1)
+    (fputs STDOUT str)
+    )
+
+(char[] 11 int2str_buf) ; max length of 32bit integer + 1 for '\0'
+(fun int2char (n)
+    (if (< n 10)
+        (return (+ n 48))   ; 48 = '0'
+        (return (+ n 87))   ; 87 = 'a' - 10
+        )
+    )
+(fun fprint_int (fd n base)
+    (var pos (+ int2str_buf 9))
+    (setb pos (int2char (% n base)))
+    (while (>= n base) (do
+        (/= n base)
+        (-= pos 1)
+        (setb pos (int2char (% n base)))
+        ))
+    (write fd pos (- 10 (- pos int2str_buf)))
     )

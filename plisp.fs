@@ -2095,7 +2095,7 @@ create int2strbuf 128 allot
 : int2str ( c-addr base u -- c-addr )
     over /mod    ( c-addr base mod quot )
     ?dup if
-        swap >r over dup >r ( c-addr base quot R: mod base )
+        swap >r over >r ( c-addr base quot R: mod base )
         recurse ( c-addr R: mod base )
         r> r>   ( c-addr base mod )
     then
