@@ -65,6 +65,15 @@
     (syscall SYS_MUNMAP addr length)
     )
 
+(fun memcpy (to from bytes)
+    (while (> bytes 0) (do
+        (setb to (getb from))
+        (+= to 1)
+        (+= from 1)
+        (-= bytes 1)
+        ))
+    )
+
 ; === String
 (fun strlen (ptr)
     (var len 0)
@@ -73,6 +82,13 @@
         (+= ptr 1)
         ))
     (return len)
+    )
+
+(fun strndup (from size)
+    (var to (allocate (+ size 1)))
+    (memcpy to from size)
+    (setb to size 0)
+    (return to)
     )
 
 ; === I/O
@@ -117,3 +133,12 @@
     ))
 (fun puti (n) (fputi STDOUT n))
 (fun eputi (n) (fputi STDERR n))
+
+; === Errors
+
+(fun not_implemented (msg)
+    (eputs "not implemented: ")
+    (eputs msg)
+    (eputs "\n")
+    (exit 1)
+    )
