@@ -171,12 +171,21 @@
                 (emit-asm '(mov %eax (mem %eax)))
                 (push '%eax)
                 ))
-            ('set (do
-                (compile-expr (nth 3 expr) env)         ; val
-                (compile-expr `(* 4 ,(nth 2 expr)) env) ; offs
-                (compile-expr (nth 1 expr) env)         ; arr
-                (pop '%eax)
+            ('set (do ; (set ptr offs val) or (set ptr val)
+                (def ptr (cadr expr))
+                (def idx 0)
+                (def val 0)
+                (if (= (length expr) 3)
+                    (set val (caddr expr))
+                    (do
+                        (set idx (caddr expr))
+                        (set val (nth 3 expr))
+                        ))
+                (compile-expr val env)         ; val
+                (compile-expr ptr env)         ; arr
+                (compile-expr `(* 4 ,idx) env) ; offs
                 (pop '%ecx)
+                (pop '%eax)
                 (emit-asm '(add %eax %ecx))
                 (pop '%ecx)
                 (emit-asm '(mov (mem %eax) %ecx))

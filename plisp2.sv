@@ -40,6 +40,13 @@
 
 ; === Nodes
 
+(fun box (val)
+    (var cell (allocate 4))
+    (set cell 0 val)
+    (return cell)
+    )
+(fun unbox (cell) (get cell))
+
 ; last 3 bit of address is used to detect node types
 ; 000  : int
 ; 001  : nil
@@ -100,6 +107,8 @@
     (return (| prim Nprim))
     )
 
+; === Parser
+
 (fun read_file (path)
     (var fd (open path O_RDONLY))
     (if (< fd 0) (do
@@ -127,23 +136,27 @@
     (if (|| (== c (char " ")) (|| (== c (char "\t")) (== c (char "\n")))) (return 1) (return 0))
     )
 
-(fun skip_spaces_and_commets (addr)
+(fun skip_spaces_and_commets (text_buf)
+    (var addr (unbox text_buf))
     (while (getb addr) (do
         (var c (getb addr))
         (if (== c (char ";"))
             (while (&& (!= (getb addr) (char "\n")) (getb addr)) (+= addr 1))
         (if (is_blank c)
             (+= addr 1)
-            (return addr)
-            ))
+            (do
+                (set text_buf addr)
+                (return)
+            )))
         ))
-    (return addr)
+    (set text_buf addr)
     )
 
 (fun read_sexp_list (path)
-    (var text_buf (read_file path))
-    (= text_buf (skip_spaces_and_commets text_buf))
-    (puts text_buf)
+    (var text_buf (box (read_file path)))
+    (skip_spaces_and_commets text_buf)
+    (if (== (getb (unbox text_buf)) 0) (return nil))
+    (puts (unbox text_buf))
     )
 
 (fun main (argc argv)
