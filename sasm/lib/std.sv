@@ -84,13 +84,6 @@
     (return len)
     )
 
-(fun strndup (from size)
-    (var to (allocate (+ size 1)))
-    (memcpy to from size)
-    (setb to size 0)
-    (return to)
-    )
-
 ; === I/O
 
 (def STDIN 0)
@@ -133,6 +126,14 @@
     ))
 (fun puti (n) (fputi STDOUT n))
 (fun eputi (n) (fputi STDERR n))
+
+(char[] 2 fputc_buf)
+(fun fputc (fd c)
+    (setb fputc_buf c)
+    (fputs fd fputc_buf)
+    )
+(fun putc (c) (fputc STDOUT c))
+(fun eputc (c) (fputc STDERR c))
 
 ; === Errors
 

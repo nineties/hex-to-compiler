@@ -2171,7 +2171,7 @@ s" print-env" :noname dup print-env ; add-prim
         2dup
         ( env sym env sym )
         env-find ?dup unless
-            ." undefined variable: " print-sexp cr
+            ." Undefined variable: " print-sexp cr
             1 quit
         then
         nip

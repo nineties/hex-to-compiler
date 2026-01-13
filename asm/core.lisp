@@ -38,6 +38,7 @@
         ((push "r32")           ("O"  0x50))
         ((push "imm32")         ("I"  0x68 "id"))
         ((ret)                  ("ZO" 0xc3))
+        ((sar "r/m32" "CL")     ("MC" 0xd3 "/7"))
         ((shl "r/m32" "CL")     ("MC" 0xd3 "/4"))
         ((sub "r/m32" "imm32")  ("MI" 0x81 "/5" "id"))
         ((sub "r/m32" "r32")    ("MR" 0x29 "/r"))

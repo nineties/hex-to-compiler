@@ -88,6 +88,7 @@
 
 ; # Utility Functions
 (define println (e) (do (print e) (put "\n")))
+(define printlist (ls) (for e ls (println e)))
 (define puts (s) (do (put s) (put "\n")))
 (define not (x) (= x ()))
 (define negate (x) (- 0 x))
