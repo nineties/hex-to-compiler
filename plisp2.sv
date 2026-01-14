@@ -347,14 +347,8 @@
 (fun parse_sexp_list (textbuf)
     (skip_spaces_and_commets textbuf)
     (var c (nextchar textbuf))
-    (if (== c 0) (do
-        (eputs "syntax error")
-        (exit 1)
-        ))
-    (if (== c (char ")")) (do
-        (succ textbuf 1)
-        (return nil)
-        ))
+    (if (== c 0) (return nil))
+    (if (== c (char ")")) (return nil))
     (var sexp (parse_sexp textbuf))
     (var list (parse_sexp_list textbuf))
     (return (make_cons sexp list))
@@ -364,7 +358,14 @@
     (var addr (unbox textbuf))
     (var c (getb addr))
     (if (== c (char "("))
-        (return (parse_sexp_list (succ textbuf 1)))
+        (do
+            (var ls (parse_sexp_list (succ textbuf 1)))
+            (if (!= (nextchar textbuf) (char ")")) (do
+                (eputs "syntax error: missing closing parenthesis ')'\n")
+                (exit 1)
+                ))
+            (return ls)
+        )
         (return (parse_atom textbuf))
         )
     )
@@ -373,8 +374,20 @@
     (var textbuf (box (read_file path)))
     (skip_spaces_and_commets textbuf)
     (if (== (getb (unbox textbuf)) 0) (return nil))
+
     (var sexp (parse_sexp textbuf))
-    (print_sexp sexp)
+    (var rest (parse_sexp_list textbuf))
+    (return (make_cons sexp rest))
+    )
+
+; === Eval
+
+(fun eval_sexp (sexp env)
+    (var t (tag sexp))
+    (if (== t Ncons) (not_implemented "eval_sexp:cons")
+    (if (== t Nsymbol) (not_implemented "eval_sexp:symbol")
+        ))
+    (return sexp)
     )
 
 (fun main (argc argv)
@@ -385,5 +398,10 @@
 
     (init_heap)
 
+    (var env nil)
     (var sexp_list (read_sexp_list (get argv 1)))
+    (while (!= sexp_list nil) (do
+        (= env (eval_sexp (car sexp_list) env))
+        (= sexp_list (cdr sexp_list))
+        ))
     )
