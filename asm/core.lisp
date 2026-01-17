@@ -11,6 +11,7 @@
         ((add "r/m32" "imm32")  ("MI" 0x81 "/0" "id"))
         ((add "r/m32" "r32")    ("MR" 0x01 "/r"))
         ((and "r/m32" "r32")    ("MR" 0x21 "/r"))
+        ((call "r/m32")         ("M"  0xff "/2"))
         ((call "rel32")         ("D"  0xe8 "cd"))
         ((cmp "r/m32" "r32")    ("MR" 0x39 "/r"))
         ((idiv "r/m32")         ("M"  0xf7 "/7"))
