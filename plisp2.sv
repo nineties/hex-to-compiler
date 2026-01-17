@@ -375,7 +375,7 @@
     (if (|| (== c (char " ")) (|| (== c (char "\t")) (== c (char "\n")))) (return 1) (return 0))
     )
 
-(fun skip_spaces_and_commets (textbuf)
+(fun skip_spaces_and_comments (textbuf)
     (var addr (unbox textbuf))
     (while (getb addr) (do
         (var c (getb addr))
@@ -544,7 +544,7 @@
     )
 
 (fun parse_sexp_list (textbuf)
-    (skip_spaces_and_commets textbuf)
+    (skip_spaces_and_comments textbuf)
     (var c (nextchar textbuf))
     (if (== c 0) (return nil))
     (if (== c (char ")")) (return nil))
@@ -554,6 +554,7 @@
     )
 
 (fun parse_sexp (textbuf)
+    (skip_spaces_and_comments textbuf)
     (var addr (unbox textbuf))
     (var c (getb addr))
     (if (== c (char "("))
