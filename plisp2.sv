@@ -493,10 +493,8 @@
             (= v (+ (- c (char "a") 10)))
         (if (&& (<= (char "A") c) (<= c (char "F")))
             (= v (+ (- c (char "A") 10)))
-            (do
-                (eputs "invalid integer literal\n")
-                (exit 1)
-            ))))
+            (return (make_int n))
+            )))
         (if (>= v base) (do
             (eputs "invalid integer literal\n")
             (exit 1)
@@ -504,7 +502,7 @@
         (= n (+ (* base n) v))
         (succ textbuf 1)
         ))
-    (return n)
+    (return (make_int n))
     )
 
 (fun parse_int (textbuf)
@@ -528,7 +526,7 @@
         (if (== c (char "x"))
             (return (parse_uint (succ textbuf 1) 16))
             )
-        (return (parse_uint (succ textbuf 1) 8))
+        (return (parse_uint textbuf 8))
         )))))
     (return (parse_uint textbuf 10))
     )
@@ -537,9 +535,9 @@
     (var c (nextchar textbuf))
     (if (== c (char "\""))
         (return (parse_str textbuf))
-    (if (is_atom_char c)
-        (return (parse_sym textbuf))
+    (if (&& (>= c (char "0")) (<= c (char "9")))
         (return (parse_int textbuf))
+        (return (parse_sym textbuf))
         ))
     )
 
