@@ -84,6 +84,15 @@
     (return len)
     )
 
+(fun streq (s1 s2)
+    (while (&& (&& (getb s1) (getb s2)) (== (getb s1) (getb s2))) (do
+        (+= s1 1)
+        (+= s2 1)
+        ))
+    (if (== (getb s1) (getb s2)) (return 1) (return 0))
+    )
+
+
 ; === I/O
 
 (def STDIN 0)
