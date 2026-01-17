@@ -658,7 +658,18 @@
         (env_push env x e)
         (return nil)
         )
-    (if (== head Sset) (not_implemented "eval_cons:set")
+    (if (== head Sset) (do
+        (if (|| (!= (length sexp) 3) (!= (tag (car sexp)) Nsymbol)) (do
+            (eputs "malformed set statement: ")
+            (fprint_sexp STDERR sexp)
+            (eputs "\n")
+            (exit 1)
+            ))
+        (var x (cadr sexp))
+        (var e (caddr sexp))
+        (env_update env x (eval_sexp e env))
+        (return nil)
+        )
     (if (== head Sif) (do
         (if (!= (length sexp) 4) (do
             (eputs "malformed if statement: ")
