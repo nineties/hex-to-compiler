@@ -577,7 +577,7 @@
 (fun apply (fn args env)
     (var params (nget fn 0))
     (var body (nget fn 1))
-    (var fn_env (box (get fn 2)))
+    (var fn_env (box (nget fn 2)))
 
     ; bind args to params
     (if (== (tag params) Nsymbol)
