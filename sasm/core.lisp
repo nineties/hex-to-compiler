@@ -29,9 +29,22 @@
         (def fun (car expr))
         (def args (cdr expr))
         (for arg (reverse args) (compile-expr arg env))
-        (emit-asm `(call ,fun))
-        (when args (emit-asm `(add %esp ,(* 4 (length args)))))
-        (push '%eax)
+
+
+        (def pos (assoc fun env))
+        (if (= pos 'error)
+            (do
+                (emit-asm `(call ,fun))
+                (when args (emit-asm `(add %esp ,(* 4 (length args)))))
+                (push '%eax)
+            )
+            (do
+                (compile-expr fun env)
+                (pop '%eax)
+                (emit-asm '(call %eax))
+                (when args (emit-asm `(add %esp ,(* 4 (length args)))))
+                (push '%eax)
+            ))
         ))
 
     (define compile-binop (op expr env) (do
@@ -464,6 +477,7 @@
         (set nlocal 0)
         (for stmt body (set newenv (compile-stmt stmt newenv)))
         (compile-stmt '(return) newenv)
+        (set env (acons label `(label ,label) env))
         ))
 
     ; entry point
