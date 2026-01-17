@@ -147,6 +147,17 @@
 (fun cddar (node) (return (cdr (cdr (car node)))))
 (fun cdddr (node) (return (cdr (cdr (cdr node)))))
 
+(fun setcar (node v)
+    (check_tag Ncons node)
+    (nset node 0 v)
+    (return nil)
+    )
+(fun setcdr (node v)
+    (check_tag Ncons node)
+    (nset node 1 v)
+    (return nil)
+    )
+
 ; interning of symbols
 (long symbols 0)    ; { sym, next }
 
@@ -707,20 +718,57 @@
     (return sexp)
     )
 
+(fun expand_macro (sexp env nest)
+    (var t (tag sexp))
+    (if (!= t Ncons) (return sexp))
+    (var head (car sexp))
+    (if (== head Squote) (return sexp)
+    (if (== head Sqquote)
+        (return (make_qquote (expand_macro (cadr sexp) env (+ nest 1))))
+    (if (== head Sunquote)
+        (return (make_unquote (expand_macro (cadr sexp) env (- nest 1))))
+        )))
+    (if (!= nest 0) (return sexp))
+    (if (!= (tag head) Nsymbol) (return sexp))
+    (var ent (env_find env head))
+    (if (== ent Serror) (return sexp))
+    (if (!= (tag ent) Nmacro) (return sexp))
+    (return (expand_macro (apply ent (cdr sexp) env)) env nest)
+    )
+
 (fun eval_file (path env)
-    (puts "eval_file: ") (puts path) (puts "\n")
     (var textbuf (box (read_file path)))
 
     (while 1 (do
-        (skip_spaces_and_commets textbuf)
+        (skip_spaces_and_comments textbuf)
         (if (! (nextchar textbuf)) (return))
         (var sexp (parse_sexp textbuf))
+        (= sexp (expand_macro sexp env 0))
         (eval_sexp sexp env)
         ))
     )
 
 ; === Primitive Functions
-(fun init_prim ()
+(fun prim_put (s)
+    (check_tag Nstr s)
+    (puts (to_str s))
+    (return nil)
+    )
+
+(fun add_prim (name f env)
+    (var sym (make_symbol name))
+    (var p (make_prim sym f))
+    (env_push env sym p)
+    )
+
+(fun init_prim (env)
+    (add_prim "cons" make_cons env)
+    (add_prim "car" car env)
+    (add_prim "cdr" cdr env)
+    (add_prim "setcar" setcar env)
+    (add_prim "setcd" setcdr env)
+    (add_prim "print" print_sexp env)
+    (add_prim "put" prim_put env)
     )
 
 
@@ -731,10 +779,12 @@
         ))
 
     (init_heap)
-    (init_symbols)
-    (init_prim)
 
     (var env (box 0))
+
+    (init_symbols)
+    (init_prim env)
+
     (eval_file "plisp/init.lisp" env)
     (eval_file (get argv 1) env)
     )
