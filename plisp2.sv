@@ -227,6 +227,17 @@
     (return Serror)
     )
 
+(fun print_env (env)
+    (puts "=========\n")
+    (var iter (unbox env))
+    (while iter (do
+        (putx iter) (puts "\n")
+        (print_sexp (get iter 0)) (puts " -> ") (print_sexp (get iter 1)) (puts "\n")
+        (= iter (get iter 2))
+        ))
+    (puts "=========\n")
+    )
+
 (fun make_quote (e)
     (return (make_cons Squote (make_cons e nil)))
     )
