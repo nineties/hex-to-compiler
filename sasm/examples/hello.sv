@@ -3,5 +3,5 @@
 (include "std.sv")
 
 (fun main ()
-    (puts "Hello World!")
+    (puts "Hello World!\n")
     )
