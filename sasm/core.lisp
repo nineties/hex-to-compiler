@@ -311,13 +311,14 @@
 
     (define compile-stmt (stmt env) (switch (car stmt)
         ('do    (do
+            (def env_old env)
             (def nlocal_old nlocal)
             (for s (cdr stmt) (set env (compile-stmt s env)))
             (when (> nlocal nlocal_old)
                 (emit-asm `(add %esp ,(* 4 (- nlocal nlocal_old))))
                 )
             (set nlocal nlocal_old)
-            env
+            env_old
             ))
         ('return    (do
             (when (cdr stmt) (do
