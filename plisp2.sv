@@ -783,6 +783,16 @@
     (return sexp)
     )
 
+(fun expand_macro_list (ls env nest)
+    (if (== ls nil)
+        (return nil)
+        (return (make_cons
+            (expand_macro (car ls) env nest)
+            (expand_macro_list (cdr ls) env nest)
+            ))
+        )
+    )
+
 (fun expand_macro (sexp env nest)
     (var t (tag sexp))
     (if (!= t Ncons) (return sexp))
@@ -796,9 +806,10 @@
     (if (!= nest 0) (return sexp))
     (if (!= (tag head) Nsymbol) (return sexp))
     (var ent (env_find env head))
-    (if (== ent Serror) (return sexp))
-    (if (!= (tag ent) Nmacro) (return sexp))
-    (return (expand_macro (apply ent (cdr sexp) env)) env nest)
+    (if (== (tag ent) Nmacro)
+        (return (expand_macro (apply ent (cdr sexp) env) env nest))
+        (return (expand_macro_list sexp env nest))
+        )
     )
 
 (fun eval_file (path env)
