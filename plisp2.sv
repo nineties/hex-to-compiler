@@ -727,7 +727,7 @@
         )
     (if (== head Slambda) (do
         (if (|| (!= (length sexp) 3)
-            (&& (!= (tag (cadr sexp)) Ncons) (!= (tag (cadr sexp)) Nsymbol))) (do
+            (&& (!= (cadr sexp) nil) (&& (!= (tag (cadr sexp)) Ncons) (!= (tag (cadr sexp)) Nsymbol)))) (do
             (eputs "malformed lambda expression: ")
             (fprint_sexp STDERR sexp)
             (eputs "\n")
@@ -740,7 +740,7 @@
     (if (== head Sdefmacro) (do ; (defmacro f params body)
         (if (|| (!= (length sexp) 4)
             (|| (!= (tag (cadr sexp)) Nsymbol)
-            (&& (!= (tag (caddr sexp)) Ncons) (!= (tag (caddr sexp)) Nsymbol)))) (do
+            (&& (!= (caddr sexp) nil) (&& (!= (tag (caddr sexp)) Ncons) (!= (tag (caddr sexp)) Nsymbol))))) (do
             (eputs "malformed defmacro statement: ")
             (fprint_sexp STDERR sexp)
             (eputs "\n")
