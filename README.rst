@@ -64,6 +64,8 @@ Second, we implement `sasm.lisp <https://github.com/nineties/hex-to-compiler/blo
 This is a C-like untyped language implemented as an internal DSL within plisp.
 To simplify development, it generates code for a stack-machine model using frequent push/pop instructions instead of complex register allocation.
 
+Example: `hello.sv <https://github.com/nineties/hex-to-compiler/blob/main/sasm/examples/hello.sv>`_
+
 Finally, I re-implemented ``plisp`` using ``sasm`` to create ``plisp2``. The performance of the initial plisp (built from hand-written machine code via Forth) was insufficient for complex tasks. While memory usage remains significant, ``plisp2`` provides the minimum efficiency required to proceed with the implementation of a full-scale language environment.
 
 Hot to Run
