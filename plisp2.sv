@@ -334,7 +334,12 @@
             ))
         (fputs fd ")")
         )
-    (if (== t Nsymbol) (fputs fd (symbol_name sexp))
+    (if (== t Nsymbol) (do
+        (var n (symbol_name sexp))
+        (if n
+            (fputs fd (symbol_name sexp))
+            (fputs fd "<anon>")
+            ))
     (if (== t Nstr) (fprint_str fd (to_str sexp))
     (if (== t Nlambda) (do
         (fputs fd "(lambda ")
