@@ -2150,7 +2150,7 @@ s" commandline-args" :noname
 ;
 
 s" read-file" :noname ( path -- (nbytes data) )
-    to-str read-file make-int swap make-str swap make-list2
+    to-str read-file drop make-str
 ; add-prim
 
 s" write-file" :noname ( nbytes data path -- nbytes )
