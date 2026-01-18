@@ -198,6 +198,7 @@
 (long Sqquote)
 (long Sunquote)
 (long Serror)
+(long Sundefined)
 
 ; variable table
 (fun env_push (env sym val)
@@ -228,7 +229,7 @@
             (return (get iter 1)))
         (= iter (get iter 2))
         ))
-    (return Serror)
+    (return Sundefined)
     )
 
 (fun print_env (env)
@@ -266,6 +267,7 @@
     (= Sqquote (make_symbol "qquote"))
     (= Sunquote (make_symbol "unquote"))
     (= Serror (make_symbol "error"))
+    (= Sundefined (make_symbol "undefined"))
     )
 
 (fun make_str (s)
@@ -768,7 +770,7 @@
     (if (== t Ncons) (return (eval_cons sexp env))
     (if (== t Nsymbol) (do
         (var r (env_find env sexp))
-        (if (== r Serror) (do
+        (if (== r Sundefined) (do
             (eputs "undefined variable: ")
             (eputs (symbol_name sexp))
             (eputs "\n")
