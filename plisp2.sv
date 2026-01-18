@@ -13,7 +13,7 @@
 (long heap_end)
 (long heap_pos)
 (fun init_heap ()
-    (var heap_block_size 2048)  ; 2GB
+    (var heap_block_size 1024)  ; 1GB
     (*= heap_block_size 1024)
     (*= heap_block_size 1024)
     (var addr (mmap2 0 heap_block_size
