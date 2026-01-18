@@ -1,6 +1,10 @@
 hex-to-compiler
 ===============
 
+.. image:: https://github.com/nineties/hex-to-compiler/actions/workflows/runtests.yaml/badge.svg?branch=main&event=push
+   :target: https://github.com/nineties/hex-to-compiler/actions/workflows/runtests.yaml
+   :alt: run tests
+
 Overview
 --------
 
