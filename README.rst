@@ -42,13 +42,29 @@ Starting from hand-written machine code imposes strong constraints, but these ca
 be addressed by leveraging core features of Forth.
 
 Lisp is selected as the target of Stage1 because subsequent stages involve building
-tools such as assemblers and linkers. Lisp is well suited for this role, as it allows
+tools such as assemblers. Lisp is well suited for this role, as it allows
 easy construction of internal DSLs and direct manipulation of syntax trees.
 
-Stage2
-~~~~~~
+Stage2: Building Tools
+~~~~~~~~~~~~~~~~~~~~~~
 
-TBD
+In Stage 2, we develop a suite of intermediate tools to move away from hand-written machine code.
+These tools are "disposable" utilities designed to bridge the gap toward a more complete system,
+prioritizing ease of implementation over performance and safety.
+
+First, we implement `asm.lisp <https://github.com/nineties/hex-to-compiler/blob/main/asm.lisp>`_, a basic assembler. It makes significant architectural compromises to keep the implementation simple:
+
+* **Target:** x86 32-bit mode only.
+* **Direct Output:** It generates standalone executables directly, bypassing separate compilation.
+* **Monolithic ELF:** All headers and code/data are packed into a single ``PT_LOAD (RWX)`` segment to avoid complex page alignment logic.
+
+Example: `hello.s <https://github.com/nineties/hex-to-compiler/blob/main/asm/examples/hello.s>`_
+
+Second, we implement `sasm.lisp <https://github.com/nineties/hex-to-compiler/blob/main/sasm.lisp>`_ (Structured Assembly).
+This is a C-like untyped language implemented as an internal DSL within plisp.
+To simplify development, it generates code for a stack-machine model using frequent push/pop instructions instead of complex register allocation.
+
+Finally, I re-implemented ``plisp`` using ``sasm`` to create ``plisp2``. The performance of the initial plisp (built from hand-written machine code via Forth) was insufficient for complex tasks. While memory usage remains significant, ``plisp2`` provides the minimum efficiency required to proceed with the implementation of a full-scale language environment.
 
 Hot to Run
 ----------
