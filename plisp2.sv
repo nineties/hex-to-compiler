@@ -166,8 +166,9 @@
 
 (fun make_symbol (s)
     (var iter symbols)
+    (var s2 0)
     (while iter (do
-        (var s2 (get iter 0))
+        (= s2 (get iter 0))
         (if (streq (symbol_name s2) s) (return s2))
         (= iter (get iter 1))
         ))
@@ -300,10 +301,12 @@
 ; === Parser and Printer
 
 (fun fprint_str (fd str)
+    (var c 0)
+    (var v 0)
     (fputs fd "\"")
     (while (getb str) (do
-        (var c (getb str))
-        (var v (escape_char c))
+        (= c (getb str))
+        (= v (escape_char c))
         (if (< v 0)
             (fputc fd c)
             (do
@@ -380,8 +383,9 @@
 
 (fun skip_spaces_and_comments (textbuf)
     (var addr (unbox textbuf))
+    (var c 0)
     (while (getb addr) (do
-        (var c (getb addr))
+        (= c (getb addr))
         (if (== c (char ";"))
             (while (&& (!= (getb addr) (char "\n")) (getb addr)) (+= addr 1))
         (if (is_blank c)
@@ -460,9 +464,10 @@
 (char[] 4096 parse_str_buf)
 (fun parse_str (textbuf)
     (var end parse_str_buf)
+    (var c 0)
     (succ textbuf 1) ; skip '"'
     (while (nextchar textbuf) (do
-        (var c (nextchar textbuf))
+        (= c (nextchar textbuf))
         (if (== c (char "\"")) (do
             (succ textbuf 1)
             (return (make_str (strndup parse_str_buf (- end parse_str_buf))))
@@ -793,12 +798,13 @@
     )
 
 (fun eval_file (path env)
+    (var sexp nil)
     (var textbuf (box (read_file path)))
 
     (while 1 (do
         (skip_spaces_and_comments textbuf)
         (if (! (nextchar textbuf)) (return))
-        (var sexp (parse_sexp textbuf))
+        (= sexp (parse_sexp textbuf))
         (= sexp (expand_macro sexp env 0))
         (eval_sexp sexp env)
         ))
