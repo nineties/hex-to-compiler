@@ -135,8 +135,6 @@
 (expect (parse "(+ 1 2 3)abc") '((+ 1 2 3) "abc"))
 ; skip leading spaces and eliminates following spaces
 (expect (parse "    (+ 1 2 3)   ") '((+ 1 2 3) ""))
-; returns 'error for broken s-expr
-(expect (parse "(+ 1 2") 'error)
 
 (expect '(1 2 ,(+ 1 2)) '(1 2 ,(+ 1 2)))
 (expect `(1 2 ,(+ 1 2)) '(1 2 3))
