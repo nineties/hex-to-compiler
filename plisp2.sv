@@ -718,11 +718,12 @@
         )
     (if (== head Sdo) (do
         (var args (cdr sexp))
+        (var ret nil)
         (while (!= args nil) (do
-            (eval_sexp (car args) env)
+            (= ret (eval_sexp (car args) env))
             (= args (cdr args))
             ))
-        (return nil)
+        (return ret)
         )
     (if (== head Slambda) (do
         (if (|| (!= (length sexp) 3)
