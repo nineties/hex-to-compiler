@@ -9,12 +9,14 @@
     (return (& (+ n 7) 0xfffffff8))
     )
 
-(def HEAP_BLOCK_SIZE (* 128 (* 1024 1024))) ; 128 MB
 (long heap_root)
 (long heap_end)
 (long heap_pos)
 (fun init_heap ()
-    (var addr (mmap2 0 HEAP_BLOCK_SIZE
+    (var heap_block_size 2048)  ; 2GB
+    (*= heap_block_size 1024)
+    (*= heap_block_size 1024)
+    (var addr (mmap2 0 heap_block_size
         (| PROT_READ PROT_WRITE)
         (| MAP_PRIVATE MAP_ANONYMOUS)
         -1 0))
@@ -24,7 +26,8 @@
         ))
     (= heap_root addr)
     (= heap_pos (align addr))
-    (= heap_end (+ addr HEAP_BLOCK_SIZE))
+    (= heap_end (+ addr heap_block_size))
+
     )
 
 (fun allocate (size)
