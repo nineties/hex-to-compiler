@@ -41,6 +41,7 @@
         ((ret)                  ("ZO" 0xc3))
         ((sar "r/m32" "CL")     ("MC" 0xd3 "/7"))
         ((shl "r/m32" "CL")     ("MC" 0xd3 "/4"))
+        ((shr "r/m32" "CL")     ("MC" 0xd3 "/5"))
         ((sub "r/m32" "imm32")  ("MI" 0x81 "/5" "id"))
         ((sub "r/m32" "r32")    ("MR" 0x29 "/r"))
         ((xor "r/m32" "r32")    ("MR" 0x31 "/r"))
