@@ -68,6 +68,11 @@ Example: `hello.sv <https://github.com/nineties/hex-to-compiler/blob/main/sasm/e
 
 Finally, I re-implemented ``plisp`` using ``sasm`` to create ``plisp2``. The performance of the initial plisp (built from hand-written machine code via Forth) was insufficient for complex tasks. While memory usage remains significant, ``plisp2`` provides the minimum efficiency required to proceed with the implementation of a full-scale language environment.
 
+Stage3: Implementing Full-Scale Language Processor
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+TBD
+
 Hot to Run
 ----------
 
