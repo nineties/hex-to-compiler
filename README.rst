@@ -86,7 +86,7 @@ For Other Environments
 TBD
 
 Development Blog
-================
+----------------
 
 *Language: Japanese*
 
