@@ -85,6 +85,15 @@ For Other Environments
 
 TBD
 
+Development Blog
+================
+
+*Language: Japanese*
+
+* `機械語手書きから言語処理系をブートストラップする <https://qiita.com/9_ties/items/349b2ed65b7cd8a7d580>`_
+* `機械語手書きから言語処理系をブートストラップする(2) <https://qiita.com/9_ties/items/d70390d2a7f18b45b4d3>`_
+* `機械語手書きから言語処理系をブートストラップする(3) <https://qiita.com/9_ties/items/689071cf51f1a8c15507>`_
+
 Status
 ------
 
