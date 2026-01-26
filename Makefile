@@ -12,7 +12,8 @@ SASM_EXAMPLE_TARGETS := $(SASM_EXAMPLE_SOURCES:%.sv=%)
 
 default:\
 	pforth\
-	plisp2
+	plisp2\
+	planck0
 
 example:\
 	$(ASM_EXAMPLE_TARGETS)\
@@ -21,6 +22,10 @@ example:\
 pforth: pforth.xxd
 	xxd -r -c 8 $< > pforth
 	chmod +x pforth
+
+planck0: planck0.sv plisp2 $(SASM_LIBS)
+	-time ./plisp2 sasm.lisp $< $@
+	-chmod +x $@
 
 %: %.s pforth plisp.fs $(ASM_SOURCES)
 	-time ./pforth < plisp.fs asm.lisp $< $@
