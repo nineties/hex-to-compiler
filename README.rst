@@ -35,8 +35,11 @@ Stage1: Hex -> Forth -> Lisp
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Stage1 begins with a minimal Forth interpreter written by hand in machine code.
+`planck.xxd <https://github.com/nineties/hex-to-compiler/blob/main/pforth.xxd>`_
+
 Using Forth’s self-extensibility, this interpreter is grown into a more capable
 language environment, eventually producing a simple Lisp interpreter.
+`plisp.fs <https://github.com/nineties/hex-to-compiler/blob/main/plisp.fs>`_
 
 Starting from hand-written machine code imposes strong constraints, but these can
 be addressed by leveraging core features of Forth.
@@ -66,7 +69,10 @@ To simplify development, it generates code for a stack-machine model using frequ
 
 Example: `hello.sv <https://github.com/nineties/hex-to-compiler/blob/main/sasm/examples/hello.sv>`_
 
-Finally, I re-implemented ``plisp`` using ``sasm`` to create ``plisp2``. The performance of the initial plisp (built from hand-written machine code via Forth) was insufficient for complex tasks. While memory usage remains significant, ``plisp2`` provides the minimum efficiency required to proceed with the implementation of a full-scale language environment.
+Finally, I re-implemented ``plisp`` using ``sasm`` to create ``plisp2``. 
+`plisp2.sv <https://github.com/nineties/hex-to-compiler/blob/main/plisp2.sv>`_
+
+The performance of the initial plisp (built from hand-written machine code via Forth) was insufficient for complex tasks. While memory usage remains significant, ``plisp2`` provides the minimum efficiency required to proceed with the implementation of a full-scale language environment.
 
 Stage3: Implementing Full-Scale Language Processor
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
