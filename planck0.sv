@@ -210,7 +210,7 @@
     )
 
 (long symtable)     ; table for interning symbols
-(fun make_symbol (text)
+(fun sym (text)
     (var data (table_lookup symtable text))
     (if data (return data))
     (var sym (allocate 8))
@@ -315,10 +315,18 @@
 
 (long Sparse)
 (long Seval)
+(long S_)
+(long S_TypeOf)
+(long Sint)
+(long Sstring)
 
 (fun init_symbols ()
-    (= Sparse (make_symbol "parse"))
-    (= Seval  (make_symbol "eval"))
+    (= Sparse   (sym "parse"))
+    (= Seval    (sym "eval"))
+    (= S_       (sym "_"))
+    (= S_TypeOf (sym "_TypeOf"))
+    (= Sint     (sym "int"))
+    (= Sstring  (sym "string"))
     )
 
 (fun read_file (path)
