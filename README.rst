@@ -35,8 +35,11 @@ Stage1: Hex -> Forth -> Lisp
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Stage1 begins with a minimal Forth interpreter written by hand in machine code.
+`planck.xxd <https://github.com/nineties/hex-to-compiler/blob/main/pforth.xxd>`_
+
 Using Forth’s self-extensibility, this interpreter is grown into a more capable
 language environment, eventually producing a simple Lisp interpreter.
+`plisp.fs <https://github.com/nineties/hex-to-compiler/blob/main/plisp.fs>`_
 
 Starting from hand-written machine code imposes strong constraints, but these can
 be addressed by leveraging core features of Forth.
@@ -64,7 +67,17 @@ Second, we implement `sasm.lisp <https://github.com/nineties/hex-to-compiler/blo
 This is a C-like untyped language implemented as an internal DSL within plisp.
 To simplify development, it generates code for a stack-machine model using frequent push/pop instructions instead of complex register allocation.
 
-Finally, I re-implemented ``plisp`` using ``sasm`` to create ``plisp2``. The performance of the initial plisp (built from hand-written machine code via Forth) was insufficient for complex tasks. While memory usage remains significant, ``plisp2`` provides the minimum efficiency required to proceed with the implementation of a full-scale language environment.
+Example: `hello.sv <https://github.com/nineties/hex-to-compiler/blob/main/sasm/examples/hello.sv>`_
+
+Finally, I re-implemented ``plisp`` using ``sasm`` to create ``plisp2``. 
+`plisp2.sv <https://github.com/nineties/hex-to-compiler/blob/main/plisp2.sv>`_
+
+The performance of the initial plisp (built from hand-written machine code via Forth) was insufficient for complex tasks. While memory usage remains significant, ``plisp2`` provides the minimum efficiency required to proceed with the implementation of a full-scale language environment.
+
+Stage3: Implementing Full-Scale Language Processor
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+TBD
 
 Hot to Run
 ----------
@@ -82,6 +95,15 @@ For Other Environments
 ~~~~~~~~~~~~~~~~~~~~~~
 
 TBD
+
+Development Blog
+----------------
+
+*Language: Japanese*
+
+* `機械語手書きから言語処理系をブートストラップする <https://qiita.com/9_ties/items/349b2ed65b7cd8a7d580>`_
+* `機械語手書きから言語処理系をブートストラップする(2) <https://qiita.com/9_ties/items/d70390d2a7f18b45b4d3>`_
+* `機械語手書きから言語処理系をブートストラップする(3) <https://qiita.com/9_ties/items/689071cf51f1a8c15507>`_
 
 Status
 ------
