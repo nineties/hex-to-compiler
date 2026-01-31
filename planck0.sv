@@ -214,11 +214,16 @@
     (return (>> n 1))
     )
 
-(fun make_string (text)
+(fun str (text)
     (var data (allocate 8))
-    (set data 0 (| (<< (strlen text) 4) StructT))
+    (set data 0 (| (<< (strlen text) 4) StringT))
     (set data 1 text)
     (return data)
+    )
+
+(fun str_text (str)
+    (expect str StringT)
+    (return (get str 1))
     )
 
 (fun strhash (str)
