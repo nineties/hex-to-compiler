@@ -75,7 +75,7 @@
 ; array   | length |    m |  011 |
 ; struct  |        |    m |  100 |
 ; closure |        |    0 |  101 |
-; prim    |  arity |    0 |  110 |
+; prim    |  arity |    0 |  110 | ptr | pat1 | pat2 | ... |
 ;
 ;
 ; Both symbols and mexpr undergo interning,
@@ -158,6 +158,7 @@
 (def ArrayT   0x3)
 (def StructT  0x4)
 (def ClosureT 0x5)
+(def PrimT    0x6)
 (def IntT     0x8)
 
 (fun print_tag (chan tag)
@@ -195,6 +196,10 @@
     (if (is_fixnum node) (return 1))
     (var header (get node 0))
     (return (& 0x8 header))
+    )
+
+(fun make_header (tag mutable arg)
+    (return (| tag (| (<< mutable 3) (<< arg 4))))
     )
 
 (fun get_header_arg (node)
@@ -330,6 +335,7 @@
     )
 
 (long Sparse)
+(long Sprint)
 (long Seval)
 (long S_)
 (long S_TypeOf)
@@ -338,12 +344,107 @@
 
 (fun init_symbols ()
     (= Sparse   (sym "parse"))
+    (= Sprint   (sym "print"))
     (= Seval    (sym "eval"))
     (= S_       (sym "_"))
     (= S_TypeOf (sym "_TypeOf"))
     (= Sint     (sym "int"))
     (= Sstring  (sym "string"))
     )
+
+; === Pattern Matching
+; a pattern is represetned by mexprs.
+; wildcard pattern (_): matches any value without binding.
+; variable pattern (x, y, ..): matches any value and binds it to the variable.
+; literal pattern (23, "hello"): matches only if the value is equal to the constant.
+; m-expr pattern (User{name, age}): matches an m-expr with the tag User and two fields
+; type or pattern (_TypeOf{x, type}): matches any value with the type
+
+; ==== Printing
+(fun escape_char (c)
+    (if (== c 0) (return (char "0"))
+    (if (== c 7) (return (char "a"))
+    (if (== c 8) (return (char "b"))
+    (if (== c 9) (return (char "t"))
+    (if (== c 10) (return (char "n"))
+    (if (== c 11) (return (char "v"))
+    (if (== c 12) (return (char "f"))
+    (if (== c 13) (return (char "r"))
+    (if (== c (char "\"")) (return (char "\""))
+    (if (== c (char "'")) (return (char "'"))
+    (if (== c (char "\\")) (return (char "\\"))
+        (return -1)
+        ))))))))))))
+
+(fun unescape_char (c)
+    (if (== c (char "0")) (return 0)
+    (if (== c (char "a")) (return 7)
+    (if (== c (char "b")) (return 8)
+    (if (== c (char "t")) (return 9)
+    (if (== c (char "n")) (return 10)
+    (if (== c (char "v")) (return 11)
+    (if (== c (char "f")) (return 12)
+    (if (== c (char "r")) (return 13)
+    (if (== c (char "\"")) (return (char "\"")))
+    (if (== c (char "'")) (return (char "'")))
+    (if (== c (char "\\")) (return (char "\\"))
+        (do
+            (eputs "invalid escaped character\n")
+            (exit 1)
+        )))))))))))
+
+(fun print_str (str)
+    (var c 0)
+    (var v 0)
+    (= str (str_text str))
+    (puts "\"")
+    (while (getb str 0) (do
+        (= c (getb str 0))
+        (= v (escape_char c))
+        (if (< v 0)
+            (putc c)
+            (do
+                (puts "\\")
+                (putc v)
+            ))
+        (+= str 1)
+        ))
+    (puts "\"")
+    )
+
+(fun print (e)
+    (var t (gettag e))
+    (if (== t IntT) (puti (fixnum_to_int e))
+    (if (== t SymbolT) (puts (sym_name e))
+    (if (== t StringT) (print_str e)
+        (not_implemented "print")
+        )))
+    )
+
+(fun eval (e)
+    (puts "eval\n")
+    )
+
+; === Primitive Functions
+(fun allocate_prim (arity)
+    (var prim (allocate (* 4 (+ 2 arity))))
+    (set prim 0 (make_header PrimT 0 arity))
+    (return prim)
+    )
+
+(fun add_prim1 (name p1 ptr)
+    (var prim (allocate_prim 1))
+    (set prim 1 ptr)
+    (set prim 2 p1)
+    (env_insert global_env name prim)
+    )
+
+(fun init_prims ()
+    (add_prim1 Sprint (sym "e") print)
+    (add_prim1 Seval (sym "e") eval)
+    )
+
+; === Interpreter
 
 (fun read_file (path)
     (var fd (open path O_RDONLY))
@@ -371,9 +472,9 @@
 
 (fun interpret (path)
     (var text (read_file path))
-    (value_of Sparse)
-
-    (puts text)
+    (print (int_to_fixnum 123)) (puts "\n")
+    (print (sym "abc")) (puts "\n")
+    (print (str "hello")) (puts "\n")
     )
 
 (fun main (argc argv)
@@ -385,6 +486,7 @@
     (init_heap)
     (init_tables)
     (init_symbols)
+    (init_prims)
 
     (interpret "planck/init.pk")
     )
