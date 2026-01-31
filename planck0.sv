@@ -6,6 +6,22 @@
 
 (include "std.sv")
 
+; === Utilities
+
+(fun not_implemented (name)
+    (eputs "not implemented: ")
+    (eputs name)
+    (eputs "\n")
+    (exit 1)
+    )
+
+(fun not_reachable (name)
+    (eputs "not reachable: ")
+    (eputs name)
+    (eputs "\n")
+    (exit 1)
+    )
+
 ; === Memory Allocation
 
 (fun align (n) ; align n to 4-byte boundary
