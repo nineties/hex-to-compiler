@@ -207,7 +207,7 @@
     (return (>> header 4))
     )
 
-(fun int_to_fixnum (n)
+(fun fixnum (n)
     (return (| (<< n 1) 1))
     )
 (fun fixnum_to_int (n)
@@ -477,7 +477,7 @@
 
 (fun interpret (path)
     (var text (read_file path))
-    (print (int_to_fixnum 123)) (puts "\n")
+    (print (fixnum 123)) (puts "\n")
     (print (sym "abc")) (puts "\n")
     (print (str "hello")) (puts "\n")
     )
