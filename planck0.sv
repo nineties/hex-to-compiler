@@ -289,6 +289,23 @@
     )
 
 (long mexprtable)   ; table for interning mexprs
+
+(fun mexpr2 (h a b)
+    (char[] 16 tmpobj)  ; 4 word temporary objet
+    (set tmpobj 0 (make_header MexprT 0 2))
+    (set tmpobj 1 h)
+    (set tmpobj 2 a)
+    (set tmpobj 3 b)
+    (var obj (table_lookup mexprtable tmpobj))
+    (if obj (return obj))
+    (= obj (allocate 16))
+    (set obj 0 (make_header MexprT 0 2))
+    (set obj 1 h)
+    (set obj 2 a)
+    (set obj 3 b)
+    (return obj)
+    )
+
 (long global_env)   ; variable table (sym -> data)
 
 (fun make_env (size parent)
@@ -417,13 +434,27 @@
     (puts "\"")
     )
 
+(fun print_mexpr (e)
+    (var i 0)
+    (var arity  (get_header_arg e))
+    (print (get e 1))
+    (puts "{")
+    (while (< i arity) (do
+        (print (get e (+ i 2)))
+        (+= i 1)
+        (if (< i arity) (puts ", "))
+        ))
+    (puts "}")
+    )
+
 (fun print (e)
     (var t (gettag e))
     (if (== t IntT) (puti (fixnum_to_int e))
     (if (== t SymbolT) (puts (sym_name e))
     (if (== t StringT) (print_str e)
+    (if (== t MexprT) (print_mexpr e)
         (not_implemented "print")
-        )))
+        ))))
     )
 
 (fun eval (e)
@@ -480,6 +511,7 @@
     (print (fixnum 123)) (puts "\n")
     (print (sym "abc")) (puts "\n")
     (print (str "hello")) (puts "\n")
+    (print (mexpr2 (sym "Add") (fixnum 123) (fixnum 456))) (puts "\n")
     )
 
 (fun main (argc argv)
