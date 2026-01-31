@@ -287,6 +287,21 @@
 
 (long mexprtable)   ; table for interning mexprs
 
+(fun mexpr1 (h a)
+    (char[] 12 tmpobj)  ; 3 word temporary objet
+    (set tmpobj 0 (make_header MexprT 0 1))
+    (set tmpobj 1 h)
+    (set tmpobj 2 a)
+    (var obj (table_lookup mexprtable tmpobj))
+    (if obj (return obj))
+    (= obj (allocate 12))
+    (set obj 0 (make_header MexprT 0 1))
+    (set obj 1 h)
+    (set obj 2 a)
+    (table_insert mexprtable obj obj)
+    (return obj)
+    )
+
 (fun mexpr2 (h a b)
     (char[] 16 tmpobj)  ; 4 word temporary objet
     (set tmpobj 0 (make_header MexprT 0 2))
@@ -300,6 +315,25 @@
     (set obj 1 h)
     (set obj 2 a)
     (set obj 3 b)
+    (table_insert mexprtable obj obj)
+    (return obj)
+    )
+
+(fun mexpr3 (h a b c)
+    (char[] 20 tmpobj)  ; 5 word temporary objet
+    (set tmpobj 0 (make_header MexprT 0 3))
+    (set tmpobj 1 h)
+    (set tmpobj 2 a)
+    (set tmpobj 3 b)
+    (set tmpobj 4 c)
+    (var obj (table_lookup mexprtable tmpobj))
+    (if obj (return obj))
+    (= obj (allocate 20))
+    (set obj 0 (make_header MexprT 0 3))
+    (set obj 1 h)
+    (set obj 2 a)
+    (set obj 3 b)
+    (set obj 4 c)
     (table_insert mexprtable obj obj)
     (return obj)
     )
@@ -520,13 +554,6 @@
     (print (sym "abc")) (puts "\n")
     (print (str "hello")) (puts "\n")
     (var e1 (mexpr2 (sym "Add") (fixnum 123) (fixnum 456)))
-    (var e2 (mexpr2 (sym "Sub") (fixnum 123) (fixnum 456)))
-    (var e3 (mexpr2 (sym "Add") (fixnum 123) (fixnum 456)))
-    (var e4 (mexpr2 (sym "Add") (fixnum 321) (fixnum 456)))
-    (putx e1) (puts "\n")
-    (putx e2) (puts "\n")
-    (putx e3) (puts "\n")
-    (putx e4) (puts "\n")
     )
 
 (fun main (argc argv)
