@@ -144,6 +144,26 @@
 (def ClosureT 0x5)
 (def IntT     0x8)
 
+(fun print_tag (chan tag)
+    (if (== tag SymbolT) (fputs chan "Symbol")
+    (if (== tag StringT) (fputs chan "String")
+    (if (== tag MexprT) (fputs chan "Mexpr")
+    (if (== tag ArrayT) (fputs chan "Array")
+    (if (== tag StructT) (fputs chan "Struct")
+    (if (== tag ClosureT) (fputs chan "Closure")
+    (if (== tag IntT) (fputs chan "Int")
+        )))))))
+    )
+
+
+(fun expect (val tag)
+    (if (!= (gettag val) tag) (do
+        (print_tag STDERR tag)
+        (eputs " is expected\n")
+        (exit 1)
+        ))
+    )
+
 (fun gettag (node)
     (if (& node 1)
         (return IntT)
@@ -198,6 +218,11 @@
     (set sym 1 text)
     (table_insert symtable text sym)
     (return sym)
+    )
+
+(fun sym_name (sym)
+    (expect sym SymbolT)
+    (return (get sym 1))
     )
 
 (fun symhash (sym)
@@ -272,10 +297,20 @@
     (return 0)
     )
 
+(fun value_of (sym)
+    (var data (env_lookup global_env sym))
+    (if (! data) (do
+        (eputs "undefined variable: ")
+        (eputs (sym_name sym))
+        (eputs "\n")
+        (exit 1)
+        ))
+    )
+
 (fun init_tables ()
     (= symtable (make_table 0x10000 strhash streq))
     (= mexprtable (make_table 0x10000 mexprhash mexpreq))
-    (= global_env (make_env 0x1000 symhash symeq))
+    (= global_env (make_env 0x1000 0))
     )
 
 (long Sparse)
@@ -312,6 +347,7 @@
 
 (fun interpret (path)
     (var text (read_file path))
+    (value_of Sparse)
 
     (puts text)
     )
@@ -324,6 +360,7 @@
 
     (init_heap)
     (init_tables)
+    (init_symbols)
 
     (interpret "planck/init.pk")
     )
