@@ -261,18 +261,15 @@
     )
 
 (fun mexprhash (mexpr)
-    (var hash 5381)
+    (var h 5381)
     (var arity (get_header_arg mexpr))
     (var i 1)
     (var e (+ arity 2))
     (while (< i e) (do
-        ; use address of args as the hash value
-        ; since header symbol and mexpr arguments
-        ; are globally unique and their address are also unique.
-        (= hash (+ (+ (<< hash 5) hash) (get mexpr i)))
+        (= h (+ (+ (<< h 5) h) (hash (get mexpr i))))
         (+= i 1)
         ))
-    (return hash)
+    (return h)
     )
 
 (fun mexpreq (mexpr1 mexpr2)
@@ -303,7 +300,18 @@
     (set obj 1 h)
     (set obj 2 a)
     (set obj 3 b)
+    (table_insert mexprtable obj obj)
     (return obj)
+    )
+
+(fun hash (e)
+    (var t (gettag e))
+    (if (== t IntT) (return (* (fixnum_to_int e) 536870909))
+    (if (== t SymbolT) (return (symhash e))
+    (if (== t StringT) (return (strhash (str_text e)))
+    (if (== t MexprT) (return (mexprhash e))
+        (not_implemented "print")
+        ))))
     )
 
 (long global_env)   ; variable table (sym -> data)
