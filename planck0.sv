@@ -71,11 +71,12 @@
 ;         |  28bit | 1bit | 3bit |
 ; symbol  |        |    0 |  000 | text |
 ; string  | length |    0 |  001 | text |
-; mexpr   |  arity |    0 |  010 | sym  | mexpr1 | ... |
+; mexpr   |  arity |    0 |  010 | sym  | arg1 | ... |
 ; array   | length |    m |  011 |
 ; struct  |        |    m |  100 |
 ; closure |        |    0 |  101 |
-; prim    |  arity |    0 |  110 | ptr | pat1 | pat2 | ... |
+; prim    |  arity |    0 |  110 | ptr  | pat1 | pat2 | ... |
+; union   |        |    0 |  111 | fun1 | fun2 |
 ;
 ;
 ; Both symbols and mexpr undergo interning,
@@ -358,11 +359,36 @@
         ))))
     )
 
+; === builtin symbols
+
+(long Sparse)
+(long Sprint)
+(long Seval)
+(long S_)
+(long S_TypeOf)
+(long Sint)
+(long Sstring)
+(long SDef)
+(long SSet)
+(long SApply)
+(long SDo)
+(long SIf)
+(long SWhile)
+(long SLambda)
+(long SUnion)
+(long SDefMacro)
+(long SQuote)
+(long SQuasiQuote)
+(long SUnQuote)
+(long SHandle)
+(long SPerform)
+(long STuple)
+
 (fun tup2 (a b) (return (mexpr2 STuple a b)))
 (fun tup3 (a b c) (return (mexpr3 STuple a b c)))
 
 (fun tup_get (e i)
-    (expect_mexpr Tuple e)
+    (expect_mexpr STuple e)
     (var arity (get_header_arg e))
     (if (>= i arity) (not_reachable "tup_get"))
     (return (get e (+ 2 i)))
@@ -417,29 +443,6 @@
     (= mexprtable (make_table 0x10000 mexprhash mexpreq))
     (= global_env (make_env 0x1000 0))
     )
-
-(long Sparse)
-(long Sprint)
-(long Seval)
-(long S_)
-(long S_TypeOf)
-(long Sint)
-(long Sstring)
-(long SDef)
-(long SSet)
-(long SApply)
-(long SDo)
-(long SIf)
-(long SWhile)
-(long SLambda)
-(long SUnion)
-(long SDefMacro)
-(long SQuote)
-(long SQuasiQuote)
-(long SUnQuote)
-(long SHandle)
-(long SPerform)
-(long STuple)
 
 (fun init_symbols ()
     (= Sparse   (sym "parse"))
@@ -565,6 +568,13 @@
 (fun print (e) (fprint STDOUT e))
 (fun eprint (e) (fprint STDERR e))
 
+; === Parsing
+(fun parse (text)
+    (puts "parse\n")
+    )
+
+; === Evaluator
+
 (fun eval_apply (env e)
     (var arity (get_header_arg e))
     (if (== arity 0) (do
@@ -634,23 +644,16 @@
     (setb buf file_size 0)
 
     (close fd)
-    (return buf)
+    (return (str buf))
     )
 
 
 (fun interpret (path)
     (var text (read_file path))
-
-    (print (fixnum 123)) (puts "\n")
-    (print (sym "abc")) (puts "\n")
-    (print (str "hello")) (puts "\n")
-    (print (mexpr2 (sym "Add") (fixnum 123) (fixnum 456))) (puts "\n")
-
-    (eval global_env (fixnum 123))
-    (eval global_env (sym "print"))
-    (eval global_env (str "hello"))
-
-    (eval global_env (mexpr2 SApply Sprint (fixnum 123)))
+    (var ret (parse text))
+    (var e (tup_get ret 0))
+    (print e)
+    (eval global_env e)
     )
 
 (fun main (argc argv)
@@ -665,4 +668,7 @@
     (init_prims)
 
     (interpret "planck/init.pk")
+    (puts "total memory used: ")
+    (puti (/ (- heap_pos heap_root) 0x100000))
+    (puts "MB\n")
     )
