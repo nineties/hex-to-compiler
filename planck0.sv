@@ -358,6 +358,16 @@
         ))))
     )
 
+(fun tup2 (a b) (return (mexpr2 STuple a b)))
+(fun tup3 (a b c) (return (mexpr3 STuple a b c)))
+
+(fun tup_get (e i)
+    (expect_mexpr Tuple e)
+    (var arity (get_header_arg e))
+    (if (>= i arity) (not_reachable "tup_get"))
+    (return (get e (+ 2 i)))
+    )
+
 (long global_env)   ; variable table (sym -> data)
 
 (fun make_env (size parent)
@@ -429,6 +439,7 @@
 (long SUnQuote)
 (long SHandle)
 (long SPerform)
+(long STuple)
 
 (fun init_symbols ()
     (= Sparse   (sym "parse"))
@@ -452,6 +463,7 @@
     (= SUnQuote     (sym "UnQuote"))
     (= SHandle      (sym "Handle"))
     (= SPerform     (sym "Perform"))
+    (= STuple       (sym "Tuple"))
     )
 
 ; === Pattern Matching
