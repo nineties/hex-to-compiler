@@ -199,6 +199,13 @@
         ))
     )
 
+(fun has_head (head expr)
+    (if (&& (== (gettag expr) MexprT)
+            (== (get 1 expr) head))
+        (return 1)
+        (return 0)
+    ))
+
 (fun gettag (node)
     (if (& node 1)
         (return IntT)
@@ -304,6 +311,16 @@
     )
 
 (long mexprtable)   ; table for interning mexprs
+
+(fun mexpr (expr)
+    (var obj (table_lookup mexprtable expr))
+    (if obj (return obj))
+    (var arity (get_header_arg expr))
+    (= obj (allocate (* 4 (+ 2 arity))))
+    (memcpy obj expr (* 4 (+ 2 arity)))
+    (table_insert mexprtable obj obj)
+    (return obj)
+    )
 
 (fun mexpr1 (h a)
     (char[] 12 tmpobj)  ; 3 word temporary objet
@@ -705,17 +722,64 @@
     (return raw)
     )
 
-(fun parse (text)
-    (char[] 4 ret)
-    (expect StringT text)
-    (var raw (get text 1))
+
+(char[] (+ 8 4096) mexpr_buf) ; buffer for m-expr with 1024 arity at maximum
+(fun parse_mexpr (ret head raw)
+    (var arity 0)
+    (char[] 4 tmp)
+    (+= raw 1)  ; skip {
+
+    (set mexpr_buf 1 head)
+
+    (= raw (skip_spaces raw))
+    (if (== (getb raw) (char "}")) (do
+        (set mexpr_buf 0 (make_header MexprT 0 arity))
+        (set ret (mexpr mexpr_buf))
+        (return (+ raw 1))
+        ))
+
+    (= raw (parse_ tmp raw))
+    (if (has_head SyntaxErrorS (get tmp)) (do
+        (set ret (get tmp))
+        (return raw)
+        ))
+    (set mexpr_buf (+ 2 arity) (get tmp))
+    (+= arity 1)
+
+    (while (== (getb raw) (char ",")) (do
+        (+= raw 1) ; skip ,
+        (= raw (parse_ tmp raw))
+        (if (has_head SyntaxErrorS (get tmp)) (do
+            (set ret (get tmp))
+            (return raw)
+            ))
+        (set mexpr_buf (+ 2 arity) (get tmp))
+        (+= arity 1)
+        (if (>= arity 128) (do
+            (set ret (syntax_error "too many arguments"))
+            (return raw)
+            ))
+        ))
+    (if (== (getb raw) (char "}")) (do
+        (set mexpr_buf 0 (make_header MexprT 0 arity))
+        (set ret (mexpr mexpr_buf))
+        (return (+ raw 1))
+        ))
+    (set ret (syntax_error "unterminated M-expr"))
+    (return raw)
+    )
+
+(fun parse_ (ret raw)
     (= raw (skip_spaces raw))
 
     (var c (getb raw 0))
     (if (is_symbol_leading_char c) (do
         ; symbol or m-expr
         (= raw (parse_symbol ret raw))
-        (not_implemented "parse:symbol")
+        (= raw (skip_spaces raw))
+        (if (== (getb raw) (char "{"))
+            (= raw (parse_mexpr ret (get ret) raw))
+            )
         )
     (if (&& (<= (char "0") c) (<= c (char "9")))
         (= raw (parse_int ret raw))
@@ -724,6 +788,14 @@
         (not_implemented "parse")
         )))
     (= raw (skip_spaces raw))
+    (return raw)
+    )
+
+(fun parse (text)
+    (char[] 4 ret)
+    (expect StringT text)
+    (var raw (get text 1))
+    (= raw (parse_ ret raw))
     (return (tup2 (get ret) (str raw)))
     )
 
@@ -742,7 +814,6 @@
 (fun eval_mexpr (env e)
     (var head (get e 1))
     (if (== head ApplyS) (return (eval_apply env e)))
-    (print e) (puts "\n")
     (not_implemented "eval_mexpr")
     )
 
