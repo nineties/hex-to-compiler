@@ -394,7 +394,7 @@
 (long stringS)
 (long DefS)
 (long SetS)
-(long ApplyS)
+(long CallS)
 (long DoS)
 (long IfS)
 (long WhileS)
@@ -479,7 +479,7 @@
     (= stringS  (sym "string"))
     (= DefS         (sym "Def"))
     (= SetS         (sym "Set"))
-    (= ApplyS       (sym "Apply"))
+    (= CallS        (sym "Call"))
     (= DoS          (sym "Do"))
     (= IfS          (sym "If"))
     (= WhileS       (sym "While"))
@@ -801,19 +801,22 @@
 
 ; === Evaluator
 
-(fun eval_apply (env e)
+(fun eval_call (env e)
     (var arity (get_header_arg e))
     (if (== arity 0) (do
-        (eputs "malformed Apply expr: ")
+        (eputs "malformed Call expr: ")
         (eprint e)
         (eputs "\n")
         (exit 1)
         ))
+    (var fn (eval env (get 2)))
+    (print fn) (puts "\n")
+    (not_implemented "eval_call")
     )
 
 (fun eval_mexpr (env e)
     (var head (get e 1))
-    (if (== head ApplyS) (return (eval_apply env e)))
+    (if (== head CallS) (return (eval_call env e)))
     (not_implemented "eval_mexpr")
     )
 
