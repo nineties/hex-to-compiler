@@ -382,8 +382,8 @@
     (return 0)
     )
 
-(fun value_of (sym)
-    (var data (env_lookup global_env sym))
+(fun value_of (env sym)
+    (var data (env_lookup env sym))
     (if (! data) (do
         (eputs "undefined variable: ")
         (eputs (sym_name sym))
