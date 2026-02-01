@@ -514,10 +514,8 @@
     (if (== c (char "\"")) (return (char "\"")))
     (if (== c (char "'")) (return (char "'")))
     (if (== c (char "\\")) (return (char "\\"))
-        (do
-            (eputs "invalid escaped character\n")
-            (exit 1)
-        )))))))))))
+        (return -1)
+        ))))))))))
 
 (fun fprint_str (chan str)
     (var c 0)
@@ -670,6 +668,43 @@
     (not_reachable "parse_int")
     )
 
+(char[] 4096 parse_str_buf)
+(fun parse_str (ret raw)
+    (var end parse_str_buf)
+    (var c 0)
+    (+= raw 1)  ; skip '"'
+    (while (getb raw) (do
+        (= c (getb raw))
+        (if (== c (char "\"")) (do
+            (+= raw 1)
+            (set ret (str (strndup parse_str_buf (- end parse_str_buf))))
+            (return raw)
+            )
+        (if (== c (char "\\")) (do
+            (+= raw 1)
+            (= c (unescape_char (getb raw)))
+            (if (< c 0) (do
+                (set ret (syntax_error "invalid escaped character"))
+                (return raw)
+                ))
+            (setb end c)
+            (+= end 1)
+            (+= raw 1)
+            )
+        (if (== c (char "\n")) (do
+            (set ret (syntax_error "unterminated string literal"))
+            (return (+ raw 1))
+            )
+        (do
+            (setb end c)
+            (+= end 1)
+            (+= raw 1)
+            ))))
+        ))
+    (set ret (syntax_error "unterminated string literal"))
+    (return raw)
+    )
+
 (fun parse (text)
     (char[] 4 ret)
     (expect StringT text)
@@ -680,16 +715,16 @@
     (if (is_symbol_leading_char c) (do
         ; symbol or m-expr
         (= raw (parse_symbol ret raw))
-        (= raw (skip_spaces raw))
-        (print (get ret))
         (not_implemented "parse:symbol")
         )
-    (if (&& (<= (char "0") c) (<= c (char "9"))) (do
+    (if (&& (<= (char "0") c) (<= c (char "9")))
         (= raw (parse_int ret raw))
-        (= raw (skip_spaces raw))
-        (return (tup2 (get ret) (str raw)))
+    (if (== c (char "\""))
+        (= raw (parse_str ret raw))
+        (not_implemented "parse")
         )))
-    (not_implemented "parse")
+    (= raw (skip_spaces raw))
+    (return (tup2 (get ret) (str raw)))
     )
 
 ; === Evaluator
