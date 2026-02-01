@@ -78,11 +78,11 @@
 ;         |  28bit | 1bit | 3bit |
 ; symbol  |        |    0 |  000 | text |
 ; string  | length |    0 |  001 | text |
-; mexpr   |  arity |    0 |  010 | sym  | arg1 | ... |
+; mexpr   |  arity |    0 |  010 | sym  | arg1 | .... |
 ; array   | length |    m |  011 |
 ; struct  |        |    m |  100 |
-; closure |        |    0 |  101 |
-; prim    |  arity |    0 |  110 | ptr  | pat1 | pat2 | ... |
+; closure |  arity |    0 |  101 | pat1 | pat2 | ...  |  env | body |
+; prim    |  arity |    0 |  110 | pat1 | pat2 | .... |  ptr |
 ; union   |        |    0 |  111 | fun1 | fun2 |
 ;
 ;
@@ -167,6 +167,7 @@
 (def StructT  0x4)
 (def ClosureT 0x5)
 (def PrimT    0x6)
+(def UnionT   0x7)
 (def IntT     0x8)
 
 (fun fprint_tag (chan tag)
@@ -408,6 +409,7 @@
 (long PerformS)
 (long TupleS)
 (long SyntaxErrorS)
+(long NoneS)
 
 (fun tup2 (a b) (return (mexpr2 TupleS a b)))
 (fun tup3 (a b c) (return (mexpr3 TupleS a b c)))
@@ -493,6 +495,7 @@
     (= PerformS     (sym "Perform"))
     (= TupleS       (sym "Tuple"))
     (= SyntaxErrorS (sym "SyntaxError"))
+    (= NoneS        (sym "None"))
     )
 
 ; === Pattern Matching
@@ -502,6 +505,54 @@
 ; literal pattern (23, "hello"): matches only if the value is equal to the constant.
 ; m-expr pattern (User{name, age}): matches an m-expr with the tag User and two fields
 ; type or pattern (_TypeOf{x, type}): matches any value with the type
+
+(fun match_arg (binds offs pat arg)
+    (var i 0)
+    (var t (gettag pat))
+    (if (== pat _S) (do ; wildcard
+        (return 1)
+        )
+    (if (== t SymbolT) (do ; variable pattern
+        (= i (get offs))
+        (set binds (* 2 i) pat)
+        (set binds (+ (* 2 i) 1) arg)
+        (set offs (+ i 1))
+        (return 1)
+        )))
+    (not_implemented "match_arg")
+    )
+
+(fun match (matched_fn binds fn e args)
+    (var t (gettag fn))
+    (var arity 0)
+    (var i 0)
+    (var nbinds 0)
+    (char[] 4 offs)
+    (if (== t UnionT)
+        (if (match matched_fn binds (get fn 1) e args)
+            (return 1)
+            (return (match matched_fn binds (get fn 2) e args))
+            )
+    (if (&& (!= t PrimT) (!= t ClosureT)) (do
+        (eputs "not a function: ")
+        (eprint fn)
+        (exit 1)
+        )))
+
+    (= arity (get_header_arg fn))
+    (if (!= (+ arity 1) (get_header_arg e)) (return 0))
+    (set offs 0 0)
+    (while (< i arity) (do
+        (if (! (match_arg binds offs (get fn (+ 1 i)) (get args i)))
+            (return 0)
+            )
+        (+= i 1)
+        ))
+    ; Found the function!
+    (set matched_fn fn)
+    (set binds (* 2 (get offs)) 0)
+    (return 1)
+    )
 
 ; ==== Printing
 (fun escape_char (c)
@@ -572,7 +623,7 @@
     (var arity (get_header_arg e))
     (fputs chan "(")
     (while (< i arity) (do
-        (fprint chan (get e (+ 2 i)))
+        (fprint chan (get e (+ 1 i)))
         (+= i 1)
         (if (< i arity) (fputs chan ", "))
         ))
@@ -589,7 +640,10 @@
         (not_implemented "print")
         )))))
     )
-(fun print (e) (fprint STDOUT e))
+(fun print (e)
+    (fprint STDOUT e)
+    (return NoneS)
+    )
 (fun eprint (e) (fprint STDERR e))
 
 ; === Parsing
@@ -802,15 +856,52 @@
 ; === Evaluator
 
 (fun eval_call (env e)
-    (var arity (get_header_arg e))
-    (if (== arity 0) (do
+    (var arity (- (get_header_arg e) 1))
+    (var fn 0)
+    (var i 0)
+    (char[] 4 matched_fn)
+
+    ; local array for storing args and variable bindings
+    ; from pattern matching. The size is sufficient
+    ; for the temporary implementation of planck.
+    (char[] 64 args)    ; 16 args
+    (char[] 128 binds)  ; 16 binds
+
+    (if (< arity 0) (do
         (eputs "malformed Call expr: ")
         (eprint e)
         (eputs "\n")
         (exit 1)
         ))
-    (var fn (eval env (get 2)))
-    (print fn) (puts "\n")
+    (= fn (eval env (get e 2)))
+    ; eval args
+    (while (< i arity) (do
+        (set args i (eval env (get e (+ 3 i))))
+        (+= i 1)
+        ))
+
+    (if (! (match matched_fn binds fn e args)) (do
+        (eputs "matching failed: ")
+        (eprint e)
+        (eputs "\n")
+        (exit 1)
+        ))
+
+    (= fn (get matched_fn))
+    (if (== (gettag fn) PrimT) (do
+        (= fn (get fn (+ arity 1)))
+        (if (== arity 0)
+            (return (fn env))
+        (if (== arity 1)
+            (return (fn (get args 0) env))
+        (if (== arity 2)
+            (return (fn (get args 0) (get args 1) env))
+        (if (== arity 3)
+            (return (fn (get args 0) (get args 1) (get args 2) env))
+            (not_implemented "call prim")
+            ))))
+        ))
+
     (not_implemented "eval_call")
     )
 
@@ -840,8 +931,8 @@
 
 (fun add_prim1 (name p1 ptr)
     (var prim (allocate_prim 1))
-    (set prim 1 ptr)
-    (set prim 2 p1)
+    (set prim 1 p1)
+    (set prim 2 ptr)
     (env_insert global_env name prim)
     )
 
