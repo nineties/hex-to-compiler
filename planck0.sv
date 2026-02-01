@@ -22,6 +22,13 @@
     (exit 1)
     )
 
+(fun strndup (from size)
+    (var to (allocate (+ size 1)))
+    (memcpy to from size)
+    (setb to size 0)
+    (return to)
+    )
+
 ; === Memory Allocation
 
 (fun align (n) ; align n to 4-byte boundary
@@ -383,6 +390,7 @@
 (long HandleS)
 (long PerformS)
 (long TupleS)
+(long SyntaxErrorS)
 
 (fun tup2 (a b) (return (mexpr2 TupleS a b)))
 (fun tup3 (a b c) (return (mexpr3 TupleS a b c)))
@@ -467,6 +475,7 @@
     (= HandleS      (sym "Handle"))
     (= PerformS     (sym "Perform"))
     (= TupleS       (sym "Tuple"))
+    (= SyntaxErrorS (sym "SyntaxError"))
     )
 
 ; === Pattern Matching
@@ -569,8 +578,117 @@
 (fun eprint (e) (fprint STDERR e))
 
 ; === Parsing
+(fun syntax_error (msg)
+    (return (mexpr1 SyntaxErrorS (str msg)))
+    )
+
+(fun is_blank (c)
+    (if (|| (== c (char " "))
+        (|| (== c (char "\t"))
+            (== c (char "\n"))))
+        (return 1)
+        (return 0)
+        )
+    )
+
+(fun skip_spaces (raw)
+    (var c 0)
+    (while (getb raw) (do
+        (= c (getb raw))
+        (if (! (is_blank c)) (return raw))
+        (+= raw 1)
+        ))
+    (return raw)
+    )
+
+(fun is_symbol_leading_char (c)
+    ; a-z, A-Z, _
+    (if (== (getb "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxooooooooooooooooooooooooooxxxxoxooooooooooooooooooooooooooxxxxx" c) (char "o"))
+        (return 1)
+        (return 0)
+        )
+    )
+
+(fun is_symbol_following_char (c)
+    ; a-z, A-Z, 0-9, _
+    (if (== (getb "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxooooooooooxxxxxxxooooooooooooooooooooooooooxxxxoxooooooooooooooooooooooooooxxxxx" c) (char "o"))
+        (return 1)
+        (return 0)
+        )
+    )
+
+(fun parse_symbol (ret raw)
+    (var start raw)
+    (+= raw 1)
+    (while (is_symbol_following_char (getb raw)) (+= raw 1))
+    (var name (strndup start (- raw start)))
+    (set ret (sym name))
+    (return raw)
+    )
+
+(fun parse_int (ret raw)
+    (var value 0)
+    (var d 0)
+    (var base 10)
+    (var c 0)
+    (if (== (getb raw) (char "0")) (do
+        (+= raw 1)
+        (= base 8)
+        (= c (getb raw))
+        (if (|| (== c (char "x")) (== c (char "X"))) (do
+            (+= raw 1)
+            (= base 16)
+            )
+        (if (|| (== c (char "o")) (== c (char "O"))) (do
+            (+= raw 1)
+            (= base 8)
+            )
+        (if (|| (== c (char "b")) (== c (char "B"))) (do
+            (+= raw 1)
+            (= base 2)
+            ))))
+        ))
+    (while 1 (do
+        (= c (getb raw))
+        (if (&& (<= (char "0") c) (<= c (char "9")))
+            (= d (- c (char "0")))
+        (if (&& (<= (char "a") c) (<= c (char "f")))
+            (= d (+ (- c (char "a")) 10))
+        (if (&& (<= (char "A") c) (<= c (char "F")))
+            (= d (+ (- c (char "A")) 10))
+            (do
+                (set ret (fixnum value))
+                (return raw)
+            ))))
+        (if (>= d base) (do
+            (set ret (syntax_error "malformed integer literal"))
+            (return (+ raw 1))
+            ))
+        (= value (+ (* value base) d))
+        (+= raw 1)
+        ))
+    (not_reachable "parse_int")
+    )
+
 (fun parse (text)
-    (puts "parse\n")
+    (char[] 4 ret)
+    (expect StringT text)
+    (var raw (get text 1))
+    (= raw (skip_spaces raw))
+
+    (var c (getb raw 0))
+    (if (is_symbol_leading_char c) (do
+        ; symbol or m-expr
+        (= raw (parse_symbol ret raw))
+        (= raw (skip_spaces raw))
+        (print (get ret))
+        (not_implemented "parse:symbol")
+        )
+    (if (&& (<= (char "0") c) (<= c (char "9"))) (do
+        (= raw (parse_int ret raw))
+        (= raw (skip_spaces raw))
+        (return (tup2 (get ret) (str raw)))
+        )))
     (not_implemented "parse")
     )
 
@@ -653,8 +771,9 @@
     (var text (read_file path))
     (var ret (parse text))
     (var e (tup_get ret 0))
-    (print e)
-    (eval global_env e)
+    (puts "parsed:") (print e) (puts "\n")
+    (var v (eval global_env e))
+    (puts "result:") (print v) (puts "\n")
     )
 
 (fun main (argc argv)
