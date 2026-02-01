@@ -173,9 +173,19 @@
     )
 
 
-(fun expect (val tag)
+(fun expect (tag val)
     (if (!= (gettag val) tag) (do
         (fprint_tag STDERR tag)
+        (eputs " is expected\n")
+        (exit 1)
+        ))
+    )
+
+(fun expect_mexpr (head val)
+    (expect MexprT val)
+    (if (!= (get val 1) head) (do
+        (eputs "M-expr with head ")
+        (eprint head)
         (eputs " is expected\n")
         (exit 1)
         ))
@@ -222,7 +232,7 @@
     )
 
 (fun str_text (str)
-    (expect str StringT)
+    (expect StringT str)
     (return (get str 1))
     )
 
@@ -247,7 +257,7 @@
     )
 
 (fun sym_name (sym)
-    (expect sym SymbolT)
+    (expect SymbolT sym)
     (return (get sym 1))
     )
 
@@ -518,7 +528,7 @@
     )
 
 (fun fprint_prim (chan e)
-    (expect e PrimT)
+    (expect PrimT e)
     (var i 0)
     (var arity (get_header_arg e))
     (fputs chan "(")
