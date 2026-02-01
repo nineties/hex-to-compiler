@@ -543,8 +543,32 @@
 (fun print (e) (fprint STDOUT e))
 (fun eprint (e) (fprint STDERR e))
 
-(fun eval (e)
-    (puts "eval\n")
+(fun eval_apply (env e)
+    (var arity (get_header_arg e))
+    (if (== arity 0) (do
+        (eputs "malformed Apply expr: ")
+        (eprint e)
+        (eputs "\n")
+        (exit 1)
+        ))
+    )
+
+(fun eval_mexpr (env e)
+    (var head (get e 1))
+    (if (== head SApply) (return (eval_apply env e)))
+    (print e) (puts "\n")
+    (not_implemented "eval_mexpr")
+    )
+
+(fun eval (env e)
+    (var t (gettag e))
+    (if (== t IntT) (return e)
+    (if (== t SymbolT) (return (value_of env e))
+    (if (== t StringT) (return e)
+    (if (== t MexprT) (return (eval_mexpr env e))
+        ))))
+    (fprint_tag STDERR t) (eputs "\n")
+    (not_implemented "eval")
     )
 
 ; === Primitive Functions
@@ -594,11 +618,17 @@
 
 (fun interpret (path)
     (var text (read_file path))
+
     (print (fixnum 123)) (puts "\n")
     (print (sym "abc")) (puts "\n")
     (print (str "hello")) (puts "\n")
     (print (mexpr2 (sym "Add") (fixnum 123) (fixnum 456))) (puts "\n")
-    (print (value_of (sym "eval"))) (puts "\n")
+
+    (eval global_env (fixnum 123))
+    (eval global_env (sym "print"))
+    (eval global_env (str "hello"))
+
+    (eval global_env (mexpr2 SApply Sprint (fixnum 123)))
     )
 
 (fun main (argc argv)
