@@ -401,7 +401,6 @@
 (long WhileS)
 (long LambdaS)
 (long UnionS)
-(long DefMacroS)
 (long QuoteS)
 (long QuasiQuoteS)
 (long UnQuoteS)
@@ -409,7 +408,7 @@
 (long PerformS)
 (long TupleS)
 (long SyntaxErrorS)
-(long NoneS)
+(long noneS)
 
 (fun tup2 (a b) (return (mexpr2 TupleS a b)))
 (fun tup3 (a b c) (return (mexpr3 TupleS a b c)))
@@ -487,7 +486,6 @@
     (= WhileS       (sym "While"))
     (= LambdaS      (sym "Lambda"))
     (= UnionS       (sym "Union"))
-    (= DefMacroS    (sym "DefMacro"))
     (= QuoteS       (sym "Quote"))
     (= QuasiQuoteS  (sym "QuasiQuote"))
     (= UnQuoteS     (sym "UnQuote"))
@@ -495,7 +493,7 @@
     (= PerformS     (sym "Perform"))
     (= TupleS       (sym "Tuple"))
     (= SyntaxErrorS (sym "SyntaxError"))
-    (= NoneS        (sym "None"))
+    (= noneS        (sym "none"))
     )
 
 ; === Pattern Matching
@@ -642,7 +640,7 @@
     )
 (fun print (e)
     (fprint STDOUT e)
-    (return NoneS)
+    (return noneS)
     )
 (fun eprint (e) (fprint STDERR e))
 
@@ -777,10 +775,10 @@
     )
 
 
-(char[] (+ 8 4096) mexpr_buf) ; buffer for m-expr with 1024 arity at maximum
 (fun parse_mexpr (ret head raw)
-    (var arity 0)
     (char[] 4 tmp)
+    (char[] 72 mexpr_buf) ; buffer for m-expr with 16 arity at maximum
+    (var arity 0)
     (+= raw 1)  ; skip {
 
     (set mexpr_buf 1 head)
@@ -809,7 +807,7 @@
             ))
         (set mexpr_buf (+ 2 arity) (get tmp))
         (+= arity 1)
-        (if (>= arity 128) (do
+        (if (>= arity 16) (do
             (set ret (syntax_error "too many arguments"))
             (return raw)
             ))
@@ -906,8 +904,26 @@
     )
 
 (fun eval_mexpr (env e)
+    (puts "eval: ") (print e) (puts "\n")
     (var head (get e 1))
-    (if (== head CallS) (return (eval_call env e)))
+    (var arity (get_header_arg e))
+    (var v 0)
+    (if (== head CallS) (return (eval_call env e))
+    (if (== head DefS) (do
+        (if (|| (!= arity 2) (!= (gettag (get e 2)) SymbolT)) (do
+            (eputs "malfoemd Def expr: ") (eprint e) (eputs "\n") (exit 1)
+            ))
+        (= v (eval env (get e 3)))
+        (env_insert env (get e 2) v)
+        (return v)
+        )
+    (if (== head QuoteS) (do
+        (if (!= arity 1) (do
+            (eputs "malformed Quote expr: ") (eprint e) (eputs "\n") (exit 1)
+            ))
+        (return (get e 2))
+        )
+        )))
     (not_implemented "eval_mexpr")
     )
 
