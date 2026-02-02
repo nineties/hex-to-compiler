@@ -969,11 +969,18 @@
 
 (fun interpret (path)
     (var text (read_file path))
-    (var ret (parse text))
-    (var e (tup_get ret 0))
-    (puts "parsed:") (print e) (puts "\n")
-    (var v (eval global_env e))
-    (puts "result:") (print v) (puts "\n")
+    (var ret 0)
+    (var e 0)
+    (var v 0)
+    (while 1 (do
+        (= ret (parse text))
+        (= e (tup_get ret 0))
+        (puts "parsed:") (print e) (puts "\n")
+        (= v (eval global_env e))
+        (puts "result:") (print v) (puts "\n")
+        (= text (tup_get ret 1))
+        (if (== (get_header_arg text) 0) (return ))
+        ))
     )
 
 (fun main (argc argv)
