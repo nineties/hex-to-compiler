@@ -917,13 +917,23 @@
         (env_insert env (get e 2) v)
         (return v)
         )
+    (if (== head SetS) (do
+        (if (|| (!= arity 2) (!= (gettag (get e 2)) SymbolT)) (do
+            (eputs "malfoemd Set expr: ") (eprint e) (eputs "\n") (exit 1)
+            ))
+        (= v (eval env (get e 3)))
+        (if (! (env_update env (get e 2) v)) (do
+            (eputs "undefined variable: ") (eprint (get e 2)) (eputs "\n") (exit 1)
+            ))
+        (return v)
+        )
     (if (== head QuoteS) (do
         (if (!= arity 1) (do
             (eputs "malformed Quote expr: ") (eprint e) (eputs "\n") (exit 1)
             ))
         (return (get e 2))
         )
-        )))
+        ))))
     (not_implemented "eval_mexpr")
     )
 
