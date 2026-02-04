@@ -386,6 +386,9 @@
 
 ; === builtin symbols
 
+(long trueS)
+(long falseS)
+(long noneS)
 (long parseS)
 (long printS)
 (long evalS)
@@ -422,34 +425,33 @@
 
 (long global_env)   ; variable table (sym -> data)
 
-(fun make_env (size parent)
-    (var table (make_table size symhash symeq))
-    (var env (allocate 8))
-    (set env 0 table)
-    (set env 1 parent)
-    (return env)
-    )
-
 (fun env_lookup (env sym)
-    (var table (get env 0))
-    (var data 0)
-    (while table (do
-        (= data (table_lookup table sym))
-        (if data (return data))
-        (= table (get env 1))
+    (var iter (get env))
+    (while iter (do
+        (if (== sym (get iter 0))
+            (return (get iter 1))
+            )
+        (= iter (get iter 2))
         ))
     (return 0)
     )
 
 (fun env_insert (env sym val)
-    (table_insert (get env 0) sym val)
+    (var ent (allocate 12))
+    (set ent 0 sym)
+    (set ent 1 val)
+    (set ent 2 (get env))
+    (set env ent)
     )
 
 (fun env_update (env sym val)
-    (var table (get env 0))
-    (while table (do
-        (if (table_update table sym val) (return 1))
-        (= table (get env 1))
+    (var iter (get env))
+    (while iter (do
+        (if (== sym (get iter 0)) (do
+            (set iter 1 val)
+            (return 1)
+            ))
+        (= iter (get iter 2))
         ))
     (return 0)
     )
@@ -467,10 +469,14 @@
 (fun init_tables ()
     (= symtable (make_table 0x10000 strhash streq))
     (= mexprtable (make_table 0x10000 mexprhash mexpreq))
-    (= global_env (make_env 0x1000 0))
+    (= global_env (allocate 4))
+    (set global_env 0)
     )
 
 (fun init_symbols ()
+    (= trueS    (sym "true"))
+    (= falseS   (sym "false"))
+    (= noneS    (sym "none"))
     (= parseS   (sym "parse"))
     (= printS   (sym "print"))
     (= evalS    (sym "eval"))
@@ -908,10 +914,11 @@
     (var head (get e 1))
     (var arity (get_header_arg e))
     (var v 0)
+    (var env_old (get env))
     (if (== head CallS) (return (eval_call env e))
     (if (== head DefS) (do
         (if (|| (!= arity 2) (!= (gettag (get e 2)) SymbolT)) (do
-            (eputs "malfoemd Def expr: ") (eprint e) (eputs "\n") (exit 1)
+            (eputs "malformed Def expr: ") (eprint e) (eputs "\n") (exit 1)
             ))
         (= v (eval env (get e 3)))
         (env_insert env (get e 2) v)
@@ -919,7 +926,7 @@
         )
     (if (== head SetS) (do
         (if (|| (!= arity 2) (!= (gettag (get e 2)) SymbolT)) (do
-            (eputs "malfoemd Set expr: ") (eprint e) (eputs "\n") (exit 1)
+            (eputs "malformed Set expr: ") (eprint e) (eputs "\n") (exit 1)
             ))
         (= v (eval env (get e 3)))
         (if (! (env_update env (get e 2) v)) (do
@@ -927,13 +934,35 @@
             ))
         (return v)
         )
+    (if (== head IfS) (do
+        (if (!= arity 3) (do
+            (eputs "malformed If expr: ") (eputs e) (eputs "\n") (exit 1)
+            ))
+        (= v (eval env (get e 2)))
+        (if (!= v falseS)
+            (= v (eval env (get e 3)))
+            (= v (eval env (get e 4)))
+            )
+        (set env env_old)
+        (return v)
+        )
+    (if (== head WhileS) (do
+        (if (!= arity 2) (do
+            (eputs "malformed While expr: ") (eputs e) (eputs "\n") (exit 1)
+            ))
+        (while (!= (eval env (get e 2)) falseS) (do
+            (eval env (get e 3))
+            (set env env_old)
+            ))
+        (return noneS)
+        )
     (if (== head QuoteS) (do
         (if (!= arity 1) (do
             (eputs "malformed Quote expr: ") (eprint e) (eputs "\n") (exit 1)
             ))
         (return (get e 2))
         )
-        ))))
+        ))))))
     (not_implemented "eval_mexpr")
     )
 
