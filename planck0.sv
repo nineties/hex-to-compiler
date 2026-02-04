@@ -912,6 +912,7 @@
 (fun eval_mexpr (env e)
     (puts "eval: ") (print e) (puts "\n")
     (var head (get e 1))
+    (var i 0)
     (var arity (get_header_arg e))
     (var v 0)
     (var env_old (get env))
@@ -956,13 +957,21 @@
             ))
         (return noneS)
         )
+    (if (== head DoS) (do
+        (= i 0)
+        (while (< i arity) (do
+            (= v (eval env (get e (+ i 2))))
+            (+= i 1)
+            ))
+        (return v)
+        )
     (if (== head QuoteS) (do
         (if (!= arity 1) (do
             (eputs "malformed Quote expr: ") (eprint e) (eputs "\n") (exit 1)
             ))
         (return (get e 2))
         )
-        ))))))
+        )))))))
     (not_implemented "eval_mexpr")
     )
 
