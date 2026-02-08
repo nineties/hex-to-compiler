@@ -398,7 +398,7 @@
 (long stringS)
 (long DefS)
 (long SetS)
-(long CallS)
+(long ApplyS)
 (long DoS)
 (long IfS)
 (long WhileS)
@@ -486,7 +486,7 @@
     (= stringS  (sym "string"))
     (= DefS         (sym "Def"))
     (= SetS         (sym "Set"))
-    (= CallS        (sym "Call"))
+    (= ApplyS       (sym "Apply"))
     (= DoS          (sym "Do"))
     (= IfS          (sym "If"))
     (= WhileS       (sym "While"))
@@ -526,16 +526,17 @@
     (not_implemented "match_arg")
     )
 
-(fun match (matched_fn binds fn e args)
+(fun match (matched_fn binds fn args)
     (var t (gettag fn))
     (var arity 0)
     (var i 0)
     (var nbinds 0)
     (char[] 4 offs)
+
     (if (== t UnionT)
-        (if (match matched_fn binds (get fn 1) e args)
+        (if (match matched_fn binds (get fn 1) args)
             (return 1)
-            (return (match matched_fn binds (get fn 2) e args))
+            (return (match matched_fn binds (get fn 2) args))
             )
     (if (&& (!= t PrimT) (!= t ClosureT)) (do
         (eputs "not a function: ")
@@ -544,10 +545,10 @@
         )))
 
     (= arity (get_header_arg fn))
-    (if (!= (+ arity 1) (get_header_arg e)) (return 0))
+    (if (!= arity (get_header_arg args)) (return 0))
     (set offs 0 0)
     (while (< i arity) (do
-        (if (! (match_arg binds offs (get fn (+ 1 i)) (get args i)))
+        (if (! (match_arg binds offs (get fn (+ 1 i)) (get args (+ 2 i))))
             (return 0)
             )
         (+= i 1)
@@ -873,54 +874,50 @@
     (return (mexpr mexpr_buf))
     )
 
-(fun eval_call (env e)
-    (var arity (- (get_header_arg e) 1))
-    (var fn 0)
+(fun eval_apply (env fn args)
+    (var nargs (get_header_arg args))
     (var i 0)
     (char[] 4 matched_fn)
 
     ; local array for storing args and variable bindings
     ; from pattern matching. The size is sufficient
     ; for the temporary implementation of planck.
-    (char[] 64 args)    ; 16 args
+    (char[] 64 tmp_args)    ; 14 args
     (char[] 128 binds)  ; 16 binds
 
-    (if (< arity 0) (do
-        (eputs "malformed Call expr: ")
-        (eprint e)
-        (eputs "\n")
-        (exit 1)
-        ))
-    (= fn (eval env (get e 2)))
+    ; eval function
+    (= fn (eval env fn))
+
     ; eval args
-    (while (< i arity) (do
-        (set args i (eval env (get e (+ 3 i))))
+    (set tmp_args 0 (make_header MexprT 0 nargs))
+    (set tmp_args 1 TupleS)
+    (while (< i nargs) (do
+        (set tmp_args (+ i 2) (eval env (get args (+ 2 i))))
         (+= i 1)
         ))
 
-    (if (! (match matched_fn binds fn e args)) (do
+    (if (! (match matched_fn binds fn tmp_args)) (do
         (eputs "matching failed: ")
-        (eprint e)
-        (eputs "\n")
+        (eprint fn) (eputs " <-> ") (eprint args) (eputs "\n")
         (exit 1)
         ))
 
     (= fn (get matched_fn))
     (if (== (gettag fn) PrimT) (do
-        (= fn (get fn (+ arity 1)))
-        (if (== arity 0)
+        (= fn (get fn (+ nargs 1)))
+        (if (== nargs 0)
             (return (fn env))
-        (if (== arity 1)
-            (return (fn (get args 0) env))
-        (if (== arity 2)
-            (return (fn (get args 0) (get args 1) env))
-        (if (== arity 3)
-            (return (fn (get args 0) (get args 1) (get args 2) env))
+        (if (== nargs 1)
+            (return (fn (get tmp_args 2) env))
+        (if (== nargs 2)
+            (return (fn (get tmp_args 2) (get tmp_args 3) env))
+        (if (== nargs 3)
+            (return (fn (get tmp_args 2) (get tmp_args 3) (get tmp_args 4) env))
             (not_implemented "call prim")
             ))))
         ))
 
-    (not_implemented "eval_call")
+    (not_implemented "eval_apply")
     )
 
 (fun eval_mexpr (env e)
@@ -931,7 +928,12 @@
     (var v 0)
     (var env_old (get env))
     (if (== head TupleS) (return (eval_tuple env e))
-    (if (== head CallS) (return (eval_call env e))
+    (if (== head ApplyS) (do
+        (if (|| (!= arity 2) (! (has_head TupleS (get e 3)))) (do
+            (eputs "malformed Apply expr: ") (eprint e) (eputs "\n") (exit 1)
+            ))
+        (return (eval_apply env (get e 2) (get e 3)))
+        )
     (if (== head DefS) (do
         (if (|| (!= arity 2) (!= (gettag (get e 2)) SymbolT)) (do
             (eputs "malformed Def expr: ") (eprint e) (eputs "\n") (exit 1)
