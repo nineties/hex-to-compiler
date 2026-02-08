@@ -76,14 +76,14 @@
 ; 
 ;         |        header        |
 ;         |  28bit | 1bit | 3bit |
-; symbol  |        |    0 |  000 | text |
+; symbol  |      0 |    0 |  000 | text |
 ; string  | length |    0 |  001 | text |
 ; mexpr   |  arity |    0 |  010 | sym  | arg1 | .... |
 ; array   | length |    m |  011 |
 ; struct  |        |    m |  100 |
 ; lambda  |  arity |    0 |  101 | pat1 | pat2 | ...  |  env | body |
 ; prim    |  arity |    0 |  110 | pat1 | pat2 | .... |  ptr |
-; union   |        |    0 |  111 | fun1 | fun2 |
+; fusion  |      0 |    0 |  111 | fun1 | fun2 |
 ;
 ;
 ; Both symbols and mexpr undergo interning,
@@ -167,7 +167,7 @@
 (def StructT  0x4)
 (def LambdaT  0x5)
 (def PrimT    0x6)
-(def UnionT   0x7)
+(def FusionT   0x7)
 (def IntT     0x8)
 
 (fun fprint_tag (chan tag)
@@ -222,6 +222,14 @@
     (if (is_fixnum node) (return 1))
     (var header (get node 0))
     (return (& 0x8 header))
+    )
+
+(fun is_function (obj)
+    (var t (gettag obj))
+    (if (|| (== t PrimT) (== t LambdaT))
+        (return 1)
+        (return 0)
+        )
     )
 
 (fun make_header (tag mutable arg)
@@ -384,6 +392,21 @@
         ))))
     )
 
+(fun fusion (f1 f2)
+    (var obj (allocate 12))
+    (if (|| (!= (is_function f1) 1) (! (is_function f2))) (do
+        (eputs "functions are expected for Fusion expr: ")
+        (eprint f1)
+        (eputs ", ")
+        (eprint f2)
+        (exit 1)
+        ))
+    (set obj 0 (make_header FusionT 0 0))
+    (set obj 1 f1)
+    (set obj 2 f2)
+    (return obj)
+    )
+
 ; === builtin symbols
 
 (long trueS)
@@ -403,7 +426,7 @@
 (long IfS)
 (long WhileS)
 (long LambdaS)
-(long UnionS)
+(long FusionS)
 (long QuoteS)
 (long QuasiQuoteS)
 (long UnQuoteS)
@@ -491,7 +514,7 @@
     (= IfS          (sym "If"))
     (= WhileS       (sym "While"))
     (= LambdaS      (sym "Lambda"))
-    (= UnionS       (sym "Union"))
+    (= FusionS      (sym "Fusion"))
     (= QuoteS       (sym "Quote"))
     (= QuasiQuoteS  (sym "QuasiQuote"))
     (= UnQuoteS     (sym "UnQuote"))
@@ -532,7 +555,7 @@
     (var i 0)
     (char[] 4 offs)
 
-    (if (== t UnionT)
+    (if (== t FusionT)
         (if (match matched_fn binds (get fn 1) args)
             (return 1)
             (return (match matched_fn binds (get fn 2) args))
@@ -966,7 +989,7 @@
     )
 
 (fun eval_mexpr (env e)
-    (puts "eval: ") (print e) (puts "\n")
+    ; (puts "eval: ") (print e) (puts "\n")
     (var head (get e 1))
     (var i 0)
     (var arity (get_header_arg e))
@@ -1033,13 +1056,19 @@
             ))
         (return (eval_lambda env (get e 2) (get e 3)))
         )
+    (if (== head FusionS) (do
+        (if (!= arity 2) (do
+            (eputs "malformed Fusion expr: ") (eprint e) (eputs "\n") (exit 1)
+            ))
+        (return (fusion (eval env (get e 2)) (eval env (get e 3))))
+        )
     (if (== head QuoteS) (do
         (if (!= arity 1) (do
             (eputs "malformed Quote expr: ") (eprint e) (eputs "\n") (exit 1)
             ))
         (return (get e 2))
         )
-        )))))))))
+        ))))))))))
     (not_implemented "eval_mexpr")
     )
 
@@ -1107,9 +1136,9 @@
     (while 1 (do
         (= ret (parse text))
         (= e (tup_get ret 0))
-        (puts "parsed:") (print e) (puts "\n")
+        ; (puts "parsed:") (print e) (puts "\n")
         (= v (eval global_env e))
-        (puts "result:") (print v) (puts "\n")
+        ; (puts "result:") (print v) (puts "\n")
         (= text (tup_get ret 1))
         (if (== (get_header_arg text) 0) (return ))
         ))
