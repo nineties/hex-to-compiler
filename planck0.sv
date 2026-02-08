@@ -202,7 +202,7 @@
 
 (fun has_head (head expr)
     (if (&& (== (gettag expr) MexprT)
-            (== (get 1 expr) head))
+            (== (get expr 1) head))
         (return 1)
         (return 0)
     ))
