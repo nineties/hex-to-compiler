@@ -380,7 +380,7 @@
     (if (== t SymbolT) (return (symhash e))
     (if (== t StringT) (return (strhash (str_text e)))
     (if (== t MexprT) (return (mexprhash e))
-        (not_implemented "print")
+        (not_implemented "hash")
         ))))
     )
 
