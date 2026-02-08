@@ -530,7 +530,6 @@
     (var t (gettag fn))
     (var arity 0)
     (var i 0)
-    (var nbinds 0)
     (char[] 4 offs)
 
     (if (== t UnionT)
@@ -930,8 +929,25 @@
             (not_implemented "call prim")
             ))))
         ))
+    (if (== (gettag fn) LambdaT)
+        (return (apply_lambda binds fn tmp_args))
+        )
 
     (not_implemented "eval_apply")
+    )
+
+(fun apply_lambda (binds fn args)
+    (var arity (get_header_arg fn))
+    (var body (get fn (+ arity 2)))
+    (var i 0)
+    (char[] 4 env)
+
+    (set env (get fn (+ arity 1)))
+    (while (get binds i) (do
+        (env_insert env (get binds i) (get binds (+ i 1)))
+        (+= i 2)
+        ))
+    (return (eval env body))
     )
 
 (fun eval_lambda (env args body)
