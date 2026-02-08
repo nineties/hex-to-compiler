@@ -10,6 +10,8 @@ SASM_LIBS	:= $(wildcard sasm/lib/*.sv)
 SASM_EXAMPLE_SOURCES := $(wildcard sasm/examples/*.sv)
 SASM_EXAMPLE_TARGETS := $(SASM_EXAMPLE_SOURCES:%.sv=%)
 
+PLISP := $(shell if [ -f ./plisp2 ]; then echo "./plisp2"; else echo "./pforth < plisp.fs"; fi)
+
 default:\
 	pforth\
 	plisp2\
@@ -28,11 +30,11 @@ planck0: planck0.sv plisp2 $(SASM_LIBS)
 	-chmod +x $@
 
 %: %.s pforth plisp.fs $(ASM_SOURCES)
-	-time ./pforth < plisp.fs asm.lisp $< $@
+	-time $(PLISP) asm.lisp $< $@
 	-chmod +x $@
 
 %: %.sv pforth plisp.fs $(SASM_SOURCES) $(ASM_SOURCES) $(SASM_LIBS)
-	-time ./pforth < plisp.fs sasm.lisp $< $@
+	-time $(PLISP) sasm.lisp $< $@
 	-chmod +x $@
 
 .PHONY: clean test
