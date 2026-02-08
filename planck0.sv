@@ -678,8 +678,13 @@
     (if (== t MexprT) (fprint_mexpr chan e)
     (if (== t LambdaT) (fprint_lambda chan e)
     (if (== t PrimT) (fprint_prim chan e)
+    (if (== t FusionT) (do
+        (fprint chan (get e 1))
+        (fputs chan "|")
+        (fprint chan (get e 2))
+        )
         (not_implemented "print")
-        ))))))
+        )))))))
     )
 (fun print (e)
     (fprint STDOUT e)
@@ -988,13 +993,57 @@
     (return lam)
     )
 
+(fun eval_qquote (updated env e nest)
+    (char[] 72 mexpr_buf)
+    (var t (gettag e))
+    (var r 0)
+    (if (!= t MexprT) (return e))
+    (var head (get e 1))
+    (var i 0)
+    (var arity (get_header_arg e))
+    (if (== head QuasiQuoteS) (do
+        (if (!= arity 1) (do
+            (eputs "malformed QuasiQuote expr: ") (eprint e) (eputs "\n") (exit 1)
+            ))
+        (= r (eval_qquote updated env (get e 2) (+ nest 1)))
+        (if (get updated)
+            (return (mexpr1 QuasiQuoteS r))
+            (return e)
+            )
+        )
+    (if (&& (== head UnQuoteS) (== nest 0)) (do
+        (if (!= arity 1) (do
+            (eputs "malformed UnQuote expr: ") (eprint e) (eputs "\n") (exit 1)
+            ))
+        (set updated 1)
+        (return (eval env (get e 2)))
+        )
+    (if (== head UnQuoteS) (do
+        (if (!= arity 1) (do
+            (eputs "malformed UnQuote expr: ") (eprint e) (eputs "\n") (exit 1)
+            ))
+        (= r (eval_qquote updated env (get e 2) (- nest 1)))
+        (if (get updated)
+            (return (mexpr1 UnQuoteS r))
+            (return e)
+            )
+        ))))
+    (set mexpr_buf 0 (make_header MexprT 0 arity))
+    (set mexpr_buf 1 head)
+    (while (< i arity) (do
+        (set mexpr_buf (+ i 2) (eval_qquote updated env (get e (+ i 2)) nest))
+        (+= i 1)
+        ))
+    (return (mexpr mexpr_buf))
+    )
+
 (fun eval_mexpr (env e)
-    ; (puts "eval: ") (print e) (puts "\n")
     (var head (get e 1))
     (var i 0)
     (var arity (get_header_arg e))
     (var v 0)
     (var env_old (get env))
+    (char[] 4 updated)
     (if (== head TupleS) (return (eval_tuple env e))
     (if (== head ApplyS) (do
         (if (|| (!= arity 2) (! (has_head TupleS (get e 3)))) (do
@@ -1068,7 +1117,14 @@
             ))
         (return (get e 2))
         )
-        ))))))))))
+    (if (== head QuasiQuoteS) (do
+        (if (!= arity 1) (do
+            (eputs "malformed QuasiQuote expr: ") (eprint e) (eputs "\n") (exit 1)
+            ))
+        (set updated 0)
+        (return (eval_qquote updated env (get e 2) 0))
+        )
+        )))))))))))
     (not_implemented "eval_mexpr")
     )
 
@@ -1136,9 +1192,9 @@
     (while 1 (do
         (= ret (parse text))
         (= e (tup_get ret 0))
-        ; (puts "parsed:") (print e) (puts "\n")
+        (puts "parsed:") (print e) (puts "\n")
         (= v (eval global_env e))
-        ; (puts "result:") (print v) (puts "\n")
+        (puts "result:") (print v) (puts "\n")
         (= text (tup_get ret 1))
         (if (== (get_header_arg text) 0) (return ))
         ))
