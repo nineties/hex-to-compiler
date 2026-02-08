@@ -81,7 +81,7 @@
 ; mexpr   |  arity |    0 |  010 | sym  | arg1 | .... |
 ; array   | length |    m |  011 |
 ; struct  |        |    m |  100 |
-; closure |  arity |    0 |  101 | pat1 | pat2 | ...  |  env | body |
+; lambda  |  arity |    0 |  101 | pat1 | pat2 | ...  |  env | body |
 ; prim    |  arity |    0 |  110 | pat1 | pat2 | .... |  ptr |
 ; union   |        |    0 |  111 | fun1 | fun2 |
 ;
@@ -165,7 +165,7 @@
 (def MexprT   0x2)
 (def ArrayT   0x3)
 (def StructT  0x4)
-(def ClosureT 0x5)
+(def LambdaT  0x5)
 (def PrimT    0x6)
 (def UnionT   0x7)
 (def IntT     0x8)
@@ -176,7 +176,7 @@
     (if (== tag MexprT) (fputs chan "Mexpr")
     (if (== tag ArrayT) (fputs chan "Array")
     (if (== tag StructT) (fputs chan "Struct")
-    (if (== tag ClosureT) (fputs chan "Closure")
+    (if (== tag LambdaT) (fputs chan "Lambda")
     (if (== tag IntT) (fputs chan "Int")
         )))))))
     )
@@ -538,7 +538,7 @@
             (return 1)
             (return (match matched_fn binds (get fn 2) args))
             )
-    (if (&& (!= t PrimT) (!= t ClosureT)) (do
+    (if (&& (!= t PrimT) (!= t LambdaT)) (do
         (eputs "not a function: ")
         (eprint fn)
         (exit 1)
@@ -622,17 +622,30 @@
     (fputs chan "}")
     )
 
-(fun fprint_prim (chan e)
-    (expect PrimT e)
+(fun fprint_lambda (chan e)
+    (expect LambdaT e)
     (var i 0)
     (var arity (get_header_arg e))
-    (fputs chan "(")
+    (fputs chan "<lambda:(")
     (while (< i arity) (do
         (fprint chan (get e (+ 1 i)))
         (+= i 1)
         (if (< i arity) (fputs chan ", "))
         ))
-    (fputs chan ") -> ...")
+    (fputs chan ")>")
+    )
+
+(fun fprint_prim (chan e)
+    (expect PrimT e)
+    (var i 0)
+    (var arity (get_header_arg e))
+    (fputs chan "<prim:(")
+    (while (< i arity) (do
+        (fprint chan (get e (+ 1 i)))
+        (+= i 1)
+        (if (< i arity) (fputs chan ", "))
+        ))
+    (fputs chan ")>")
     )
 
 (fun fprint (chan e)
@@ -641,9 +654,10 @@
     (if (== t SymbolT) (fputs chan (sym_name e))
     (if (== t StringT) (fprint_str chan e)
     (if (== t MexprT) (fprint_mexpr chan e)
+    (if (== t LambdaT) (fprint_lambda chan e)
     (if (== t PrimT) (fprint_prim chan e)
         (not_implemented "print")
-        )))))
+        ))))))
     )
 (fun print (e)
     (fprint STDOUT e)
@@ -920,6 +934,21 @@
     (not_implemented "eval_apply")
     )
 
+(fun eval_lambda (env args body)
+    (var arity (get_header_arg args))
+    (var lam (allocate (* 4 (+ arity 3))))
+    (var i 0)
+
+    (set lam 0 (make_header LambdaT 0 arity))
+    (while (< i arity) (do
+        (set lam (+ i 1) (get args (+ i 2)))
+        (+= i 1)
+        ))
+    (set lam (+ arity 1) (get env))
+    (set lam (+ arity 2) body)
+    (return lam)
+    )
+
 (fun eval_mexpr (env e)
     (puts "eval: ") (print e) (puts "\n")
     (var head (get e 1))
@@ -982,13 +1011,19 @@
             ))
         (return v)
         )
+    (if (== head LambdaS) (do
+        (if (|| (!= arity 2) (! (has_head TupleS (get e 2)))) (do
+            (eputs "malformed Lambda expr: ") (eprint e) (eputs "\n") (exit 1)
+            ))
+        (return (eval_lambda env (get e 2) (get e 3)))
+        )
     (if (== head QuoteS) (do
         (if (!= arity 1) (do
             (eputs "malformed Quote expr: ") (eprint e) (eputs "\n") (exit 1)
             ))
         (return (get e 2))
         )
-        ))))))))
+        )))))))))
     (not_implemented "eval_mexpr")
     )
 
