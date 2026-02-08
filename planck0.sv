@@ -394,7 +394,7 @@
 
 (fun fusion (f1 f2)
     (var obj (allocate 12))
-    (if (|| (!= (is_function f1) 1) (! (is_function f2))) (do
+    (if (|| (! (is_function f1)) (! (is_function f2))) (do
         (eputs "functions are expected for Fusion expr: ")
         (eprint f1)
         (eputs ", ")

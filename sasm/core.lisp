@@ -257,6 +257,7 @@
             (do (println expr) (not-implemented "compile-expr")))
         ))
 
+    (def compile-ifnot ())
     (define compile-if (expr env label) (if (comp-expr? expr)
         (do
             (def op (car expr))
@@ -283,7 +284,7 @@
         (compile-if `(!= ,expr 0) env label)
         ))
 
-    (define compile-ifnot (expr env label) (if (comp-expr? expr)
+    (set compile-ifnot (lambda (expr env label) (if (comp-expr? expr)
         (do
             (def op (car expr))
             (switch op
@@ -307,7 +308,7 @@
                     (emit-asm `(,(to-ifnot-jump op) ,label))
                     )))
         (compile-ifnot `(!= ,expr 0) env label)
-        ))
+        )))
 
     (define compile-stmt (stmt env) (switch (car stmt)
         ('do    (do
