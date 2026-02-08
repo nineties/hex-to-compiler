@@ -859,6 +859,20 @@
 
 ; === Evaluator
 
+(fun eval_tuple (env e)
+    (char[] 72 mexpr_buf) ; buffer for m-expr with 16 arity at maximum
+    (var i 0)
+    (var narg (get_header_arg e))
+
+    (set mexpr_buf 0 (make_header MexprT 0 narg))
+    (set mexpr_buf 1 TupleS)
+    (while (< i narg) (do
+        (set mexpr_buf (+ 2 i) (eval env (get e (+ 2 i))))
+        (+= i 1)
+        ))
+    (return (mexpr mexpr_buf))
+    )
+
 (fun eval_call (env e)
     (var arity (- (get_header_arg e) 1))
     (var fn 0)
@@ -916,6 +930,7 @@
     (var arity (get_header_arg e))
     (var v 0)
     (var env_old (get env))
+    (if (== head TupleS) (return (eval_tuple env e))
     (if (== head CallS) (return (eval_call env e))
     (if (== head DefS) (do
         (if (|| (!= arity 2) (!= (gettag (get e 2)) SymbolT)) (do
@@ -971,7 +986,7 @@
             ))
         (return (get e 2))
         )
-        )))))))
+        ))))))))
     (not_implemented "eval_mexpr")
     )
 
