@@ -34,7 +34,8 @@ planck0: planck0.sv plisp2 $(SASM_LIBS)
 	-chmod +x $@
 
 %: %.sv pforth plisp.fs $(SASM_SOURCES) $(ASM_SOURCES) $(SASM_LIBS)
-	-time $(PLISP) sasm.lisp $< $@
+	-time $(PLISP) sasm.lisp $< tmp-$@
+	-mv tmp-$@ $@
 	-chmod +x $@
 
 .PHONY: clean test
