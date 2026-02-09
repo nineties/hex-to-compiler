@@ -1093,6 +1093,7 @@
         )
     (if (== head DoS) (do
         (= i 0)
+        (= v noneS)
         (while (< i arity) (do
             (= v (eval env (get e (+ i 2))))
             (+= i 1)
