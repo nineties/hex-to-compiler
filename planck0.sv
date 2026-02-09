@@ -1125,7 +1125,10 @@
         (set updated 0)
         (return (eval_qquote updated env (get e 2) 0))
         )
-        )))))))))))
+    (if (== head UnQuoteS) (do
+        (eputs "UnQuote expr outside of QuasiQuote expr: ") (eprint e) (eputs "\n") (exit 1)
+        )
+        ))))))))))))
     (not_implemented "eval_mexpr")
     )
 
