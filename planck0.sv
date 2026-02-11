@@ -75,15 +75,16 @@
 ; m: 1 if the object is mutable
 ; 
 ;         |        header        |
-;         |  28bit | 1bit | 3bit |
-; symbol  |      0 |    0 |  000 | text |
-; string  | length |    0 |  001 | text |
-; mexpr   |  arity |    0 |  010 | sym  | arg1 | .... |
-; array   | length |    m |  011 |
-; struct  |        |    m |  100 |
-; lambda  |  arity |    0 |  101 | pat1 | pat2 | ...  |  env | body |
-; prim    |  arity |    0 |  110 | pat1 | pat2 | .... |  ptr |
-; fusion  |      0 |    0 |  111 | fun1 | fun2 |
+;         |  27bit | 1bit | 4bit |
+; symbol  |      0 |    0 | 0000 | text |
+; string  | length |    0 | 0001 | text |
+; mexpr   |  arity |    0 | 0010 | sym  | arg1 | .... |
+; array   | length |    m | 0011 |
+; struct  |        |    m | 0100 |
+; lambda  |  arity |    0 | 0101 | pat1 | pat2 | ...  |  env | body |
+; prim    |  arity |    0 | 0110 | pat1 | pat2 | .... |  ptr |
+; cont    |      0 |    0 | 0111 |
+; fusion  |      0 |    0 | 1000 | fun1 | fun2 |
 ;
 ;
 ; Both symbols and mexpr undergo interning,
@@ -167,8 +168,9 @@
 (def StructT  0x4)
 (def LambdaT  0x5)
 (def PrimT    0x6)
-(def FusionT   0x7)
-(def IntT     0x8)
+(def ContT    0x7)
+(def FusionT  0x8)
+(def IntT     0x9)
 
 (fun fprint_tag (chan tag)
     (if (== tag SymbolT) (fputs chan "Symbol")
@@ -226,19 +228,19 @@
 
 (fun is_function (obj)
     (var t (gettag obj))
-    (if (|| (== t PrimT) (== t LambdaT))
+    (if (|| (== t PrimT) (|| (== t LambdaT) (== t ContT)))
         (return 1)
         (return 0)
         )
     )
 
 (fun make_header (tag mutable arg)
-    (return (| tag (| (<< mutable 3) (<< arg 4))))
+    (return (| tag (| (<< mutable 4) (<< arg 5))))
     )
 
 (fun get_header_arg (node)
     (var header (get node 0))
-    (return (>> header 4))
+    (return (>> header 5))
     )
 
 (fun fixnum (n)
@@ -250,7 +252,7 @@
 
 (fun str (text)
     (var data (allocate 8))
-    (set data 0 (| (<< (strlen text) 4) StringT))
+    (set data 0 (make_header StringT 0 (strlen text)))
     (set data 1 text)
     (return data)
     )
@@ -560,7 +562,7 @@
             (return 1)
             (return (match matched_fn binds (get fn 2) args))
             )
-    (if (&& (!= t PrimT) (!= t LambdaT)) (do
+    (if (! (is_function fn)) (do
         (eputs "not a function: ")
         (eprint fn)
         (exit 1)
@@ -670,6 +672,11 @@
     (fputs chan ")>")
     )
 
+(fun fprint_cont (chan e)
+    (expect ContT e)
+    (fputs chan "<cont>")
+    )
+
 (fun fprint (chan e)
     (var t (gettag e))
     (if (== t IntT) (fputi chan (fixnum_to_int e))
@@ -678,13 +685,14 @@
     (if (== t MexprT) (fprint_mexpr chan e)
     (if (== t LambdaT) (fprint_lambda chan e)
     (if (== t PrimT) (fprint_prim chan e)
+    (if (== t ContT) (fprint_cont chan e)
     (if (== t FusionT) (do
         (fprint chan (get e 1))
         (fputs chan "|")
         (fprint chan (get e 2))
         )
         (not_implemented "print")
-        )))))))
+        ))))))))
     )
 (fun print (e)
     (fprint STDOUT e)
