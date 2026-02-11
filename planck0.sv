@@ -1037,6 +1037,29 @@
     (return (mexpr mexpr_buf))
     )
 
+(long effect_handlers 0)
+(fun eval_handle (env e)
+    (var body (get e 2))
+    (var handler (get e 3))
+    (var ret 0)
+    (char[] 8 ent)
+
+    ; push new handler to the effect handler stack
+    (set ent 0 handler)
+    (set ent 1 effect_handlers)
+    (= effect_handlers ent)
+
+    (= ret (eval env body))
+
+    (= effect_handlers (get ent 1))
+    (return ret)
+    )
+
+(fun eval_perform (env e)
+    (var effect (get e 2))
+    (not_implemented "eval_perform")
+    )
+
 (fun eval_mexpr (env e)
     (var head (get e 1))
     (var i 0)
@@ -1128,8 +1151,20 @@
     (if (== head UnQuoteS) (do
         (eputs "UnQuote expr outside of QuasiQuote expr: ") (eprint e) (eputs "\n") (exit 1)
         )
-        ))))))))))))
-    (not_implemented "eval_mexpr")
+    (if (== head HandleS) (do
+        (if (!= arity 2) (do
+            (eputs "malformed Handle expr: ") (eprint e) (eputs "\n") (exit 1)
+            ))
+        (return (eval_handle env e))
+        )
+    (if (== head PerformS) (do
+        (if (!= arity 1) (do
+            (eputs "malformed Perform expr: ") (eprint e) (eputs "\n") (exit 1)
+            ))
+        (return (eval_perform env e))
+        )
+        ))))))))))))))
+    (eputs "unknown M-expr: ") (eprint e) (eputs "\n") (exit 1)
     )
 
 (fun eval (env e)
