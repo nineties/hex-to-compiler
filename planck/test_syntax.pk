@@ -179,6 +179,444 @@ x := 5
 check(`F{!x, x}, 'F{5, x})
 check(Apply{add, Tuple{1, 2}}, 3)
 
+# === match ===
+check(tree("match x { A{a} -> a\n B{} -> 0 }"), 'Apply{Fusion{Lambda{Tuple{A{a}}, a}, Lambda{Tuple{B{}}, 0}}, Tuple{x}})
+check(tree("match x { 1 -> 2 }"), 'Apply{Lambda{Tuple{1}, 2}, Tuple{x}})
+check(tree("match f(x) + 1 { y -> y; _ -> 0 }"), 'Apply{Fusion{Lambda{Tuple{y}, y}, Lambda{Tuple{_}, 0}}, Tuple{Apply{add, Tuple{Apply{f, Tuple{x}}, 1}}}})
+check(tree("match l {\n  x :: xs -> x\n  Nil{} -> 0\n}"), 'Apply{Fusion{Lambda{Tuple{Cons{x, xs}}, x}, Lambda{Tuple{Nil{}}, 0}}, Tuple{l}})
+check(tree("match x {\n  -1 -> 1\n  (a, b) -> a\n}"), 'Apply{Fusion{Lambda{Tuple{-1}, 1}, Lambda{Tuple{Tuple{a, b}}, a}}, Tuple{x}})
+check(head(tree("match x { }")), 'SyntaxError)
+check(head(tree("match x A{} -> 1")), 'SyntaxError)
+check(head(tree("match x { a b }")), 'SyntaxError)
+
+shape(n) := match n {
+    n if n < 0 -> "neg"
+    0 -> "zero"
+    n if n < 10 and n % 2 == 1 -> "small odd"
+    n if n < 10 -> "small even"
+    _ -> "big"
+}
+check(shape(-5), "neg")
+check(shape(0), "zero")
+check(shape(7), "small odd")
+check(shape(8), "small even")
+check(shape(70), "big")
+# a guard that is false goes on to the arms after it, with the same value
+check(match 5 { n if n > 10 -> "a"; n if n > 3 -> "b"; _ -> "c" }, "b")
+check(match 5 { 5 if false -> "a"; 5 -> "b" }, "b")
+tree_eval := (e) -> match e {
+    Num{n} -> n
+    Neg{e} -> 0 - tree_eval(e)
+    Add{a, b} -> tree_eval(a) + tree_eval(b)
+    Mul{a, b} -> tree_eval(a) * tree_eval(b)
+}
+check(tree_eval(Add{Num{2}, Mul{Num{3}, Neg{Num{4}}}}), -10)
+check(match [1, 2] { x :: xs -> x; Nil{} -> 0 }, 1)
+check(match 'a { 'a -> 1; 'b -> 2 }, 1)
+k := 3
+check(match k { 3 -> match k + 1 { n if n > 3 -> "inner"; _ -> "no" }; _ -> "outer" }, "inner")
+# matching nested guards: each match has its own variables
+nest(a, b) := match a { x if x > 0 -> match b { y if y > 0 -> x + y; _ -> x }; _ -> 0 }
+check(nest(1, 2), 3)
+check(nest(1, -2), 1)
+check(nest(-1, 2), 0)
+# the scrutinee is evaluated once
+calls := 0
+once() := { calls = calls + 1; 5 }
+check(match once() { n if n > 9 -> 1; n if n > 4 -> 2; _ -> 3 }, 2)
+check(calls, 1)
+# an arm may change variables of the outside
+acc := 0
+match 4 { n if n > 3 -> acc = acc + n; _ -> acc = 100 }
+check(acc, 4)
+
+# === String interpolation ===
+check(tree("f\"a{x}b\""), 'Apply{strcat, Tuple{Apply{strcat, Tuple{"a", Apply{to_text, Tuple{x}}}}, "b"}})
+check(tree("f\"{x}\""), 'Apply{to_text, Tuple{x}})
+check(tree("f\"{x}{y}\""), 'Apply{strcat, Tuple{Apply{to_text, Tuple{x}}, Apply{to_text, Tuple{y}}}})
+check(tree("f\"{1 + 2}\""), 'Apply{to_text, Tuple{Apply{add, Tuple{1, 2}}}})
+check(tree("f\"a{f(\"q\")}\""), 'Apply{strcat, Tuple{"a", Apply{to_text, Tuple{Apply{f, Tuple{"q"}}}}}})
+check(tree("f\"{ x }\""), 'Apply{to_text, Tuple{x}})
+check(tree("f\"a\\tb\""), "a\tb")
+check(tree("f\"\""), "")
+check(tree("f\"abc\""), "abc")
+check(tree("f\"{{x}}\""), "{x}")
+check(tree("f\"{{{x}}}\""), 'Apply{strcat, Tuple{Apply{strcat, Tuple{"{", Apply{to_text, Tuple{x}}}}, "}"}})
+check(tree("f\"\\\"{x}\""), 'Apply{strcat, Tuple{"\"", Apply{to_text, Tuple{x}}}})
+check(tree("\"{x}\""), "{x}")
+check(tree("\"a { b } {{\""), "a { b } {{")
+check(head(tree("\"\\(x)\"")), 'SyntaxError)
+check(head(tree("f\"a{x\"")), 'SyntaxError)
+check(head(tree("f\"a{\"")), 'SyntaxError)
+check(head(tree("f\"a{x}")), 'SyntaxError)
+check(head(tree("f\"a}b\"")), 'SyntaxError)
+check(head(tree("f\"a{}b\"")), 'SyntaxError)
+check(rest("f\"{x}\" y"), "y")
+check(tree("f(x)"), 'Apply{f, Tuple{x}})
+check(tree("f"), 'f)
+check(tree("f + 1"), 'Apply{add, Tuple{f, 1}})
+check(tree("f \"s\""), 'f)
+check(rest("f \"s\""), "\"s\"")
+check(tree("fx"), 'fx)
+check(tree("foo\"s\""), 'foo)
+check(rest("foo\"s\""), "\"s\"")
+
+n := 7
+word := "w"
+check(f"n={n}", "n=7")
+check(f"{n}", "7")
+check(f"{n}:{n + 1}:{word}", "7:8:w")
+check(f"[{word}] {word}{word}", "[w] ww")
+check(f"neg {0 - 5}!", "neg -5!")
+check(f"zero {0}", "zero 0")
+check(f"tab\there {n}\n", "tab\there 7\n")
+check(f"{{n}} is {n}", "{n} is 7")
+check(f"{{{n}}}", "{7}")
+check(f"}}{{", "}{")
+check(f"", "")
+check(f"plain", "plain")
+check("{n} {{", "{n} {{")
+check("a}b", "a}b")
+wrap(s) := f"<{s}>"
+check(f"a{wrap("x")}b", "a<x>b")
+check(f"nest {wrap(f"in {n}")}", "nest <in 7>")
+check(f"{wrap(wrap("x"))}", "<<x>>")
+check(f"{if (n > 3) "big" else "small"}", "big")
+f := x -> x + 1
+check(f(2), 3)
+check(f(n) + 1, 9)
+check(f"{f(n)}", "8")
+use("pretty")
+check(f"list {[1, 2]}", "list [1, 2]")
+check(f"sym {'a} tree {F{1, "s"}}", "sym a tree F{1, \"s\"}")
+
+# === Records ===
+check(tree("record Tok(kind, value, pos)"), 'Apply{record_declare, Tuple{Quote{Tok}, Quote{Tuple{kind, value, pos}}}})
+check(tree("record R()"), 'Apply{record_declare, Tuple{Quote{R}, Quote{Tuple{}}}})
+check(tree("t.kind"), 'Apply{record_get, Tuple{t, Quote{kind}}})
+check(tree("t.a.b"), 'Apply{record_get, Tuple{Apply{record_get, Tuple{t, Quote{a}}}, Quote{b}}})
+check(tree("f(x).y"), 'Apply{record_get, Tuple{Apply{f, Tuple{x}}, Quote{y}}})
+check(tree("t.f(1)"), 'Apply{Apply{record_get, Tuple{t, Quote{f}}}, Tuple{1}})
+check(tree("a.b + c.d * 2"), 'Apply{add, Tuple{Apply{record_get, Tuple{a, Quote{b}}}, Apply{mul, Tuple{Apply{record_get, Tuple{c, Quote{d}}}, 2}}}})
+check(tree("a.b == 'x"), 'Apply{eq, Tuple{Apply{record_get, Tuple{a, Quote{b}}}, Quote{x}}})
+check(tree("x := t.v"), 'Def{x, Apply{record_get, Tuple{t, Quote{v}}}})
+check(tree("F{a.b}"), 'F{Apply{record_get, Tuple{a, Quote{b}}}})
+check(head(tree("t.")), 'SyntaxError)
+check(head(tree("t.1")), 'SyntaxError)
+check(head(tree("record Tok")), 'SyntaxError)
+check(head(tree("record Tok(1)")), 'SyntaxError)
+
+record Tok(kind, value, pos)
+record Node(op, left, right)
+record Rev(c, b, a)
+record Fwd(a, b, c)
+tk := Tok{'id, "abc", 3}
+check(tk.kind, 'id)
+check(tk.value, "abc")
+check(tk.pos + 1, 4)
+nd := Node{"+", Node{"*", 1, 2}, 3}
+check(nd.op, "+")
+check(nd.left.op, "*")
+check(nd.left.right, 2)
+check(nd.right, 3)
+# the field is found by the head of the value
+check(Rev{1, 2, 3}.a, 3)
+check(Fwd{1, 2, 3}.a, 1)
+getv(t) := t.value
+check(getv(tk), "abc")
+check(getv(Tok{'num, 7, 0}), 7)
+check((match tk { Tok{k, v, p} -> k }), 'id)
+record Tok(value, kind)
+check(Tok{1, 2}.kind, 2)
+check(record_index('Tok, 'kind), 1)
+check(record_index('Tok, 'value), 0)
+# the old names of a redeclared head are gone
+check(record_index('Tok, 'pos), none)
+check(record_index('Nope, 'kind), none)
+# the same name under another head is another field
+check(record_index('Node, 'op), 0)
+check(record_index('Rev, 'a), 2)
+check(record_index('Fwd, 'a), 0)
+record Tok(kind, value, pos)
+check(tk.kind, 'id)
+check(record_get(Tok{1, 2, 3}, 'pos), 3)
+check(record_index('Tok, 'pos), 2)
+record Tok(pos)
+check(record_index('Tok, 'kind), none)
+check(record_index('Tok, 'value), none)
+check(record_get(Tok{9}, 'pos), 9)
+record Tok(kind, value, pos)
+check(record_get(Tok{1, 2, 3}, 'kind), 1)
+record R0()
+check(record_index('R0, 'x), none)
+
+# === for, return and break ===
+rh := 'Lambda{Tuple{Return{v}, k}, v}
+bh := 'Lambda{Tuple{Break{}, k}, none}
+check(tree("for (x in xs) f(x)"), 'Apply{peg_for, Tuple{xs, Lambda{Tuple{x}, Apply{f, Tuple{x}}}}})
+check(tree("for (Tuple{a, b} in ps) a"), 'Apply{peg_for, Tuple{ps, Lambda{Tuple{Tuple{a, b}}, a}}})
+check(tree("for (x in f(y)) { z }"), 'Apply{peg_for, Tuple{Apply{f, Tuple{y}}, Lambda{Tuple{x}, Do{z}}}})
+check(tree("return 1"), 'Perform{Return{1}})
+check(tree("return a + 1"), 'Perform{Return{Apply{add, Tuple{a, 1}}}})
+check(tree("return"), 'Perform{Return{none}})
+check(tree("{ return\n 1 }"), 'Do{Perform{Return{none}}, 1})
+check(tree("{ return }"), 'Do{Perform{Return{none}}})
+check(tree("if (a) return 1 else 2"), 'If{a, Perform{Return{1}}, 2})
+check(tree("break"), 'Perform{Break{}})
+check(tree("f(x) := { return x }"), `Def{f, Lambda{Tuple{x}, Handle{Do{Perform{Return{x}}}, !rh}}})
+check(tree("f(x) := x"), 'Def{f, Lambda{Tuple{x}, x}})
+check(tree("x -> return x"), `Lambda{Tuple{x}, Handle{Perform{Return{x}}, !rh}})
+check(tree("while (a) { break }"), `Handle{While{a, Do{Perform{Break{}}}}, !bh})
+check(tree("while (a) b"), 'While{a, b})
+check(tree("for (x in xs) break"), `Handle{Apply{peg_for, Tuple{xs, Lambda{Tuple{x}, Perform{Break{}}}}}, !bh})
+# a loop or a function handles only its own return and break
+check(tree("while (a) { while (b) break }"), `While{a, Do{Handle{While{b, Perform{Break{}}}, !bh}}})
+check(tree("f() := { g() := return 1; 2 }"), `Def{f, Lambda{Tuple{}, Do{Def{g, Lambda{Tuple{}, Handle{Perform{Return{1}}, !rh}}}, 2}}})
+check(tree("f() := for (x in xs) return x"), `Def{f, Lambda{Tuple{}, Handle{Apply{peg_for, Tuple{xs, Lambda{Tuple{x}, Perform{Return{x}}}}}, !rh}}})
+check(tree("f() := match x { 1 -> return 2; _ -> 3 }"), `Def{f, Lambda{Tuple{}, Handle{Apply{Fusion{Lambda{Tuple{1}, Perform{Return{2}}}, Lambda{Tuple{_}, 3}}, Tuple{x}}, !rh}}})
+check(tree("f() := '(return 1)"), 'Def{f, Lambda{Tuple{}, Quote{Perform{Return{1}}}}})
+ch := 'Lambda{Tuple{Continue{}, k}, none}
+check(tree("continue"), 'Perform{Continue{}})
+check(tree("while (a) { continue }"), `While{a, Handle{Do{Perform{Continue{}}}, !ch}})
+check(tree("for (x in xs) continue"), `Apply{peg_for, Tuple{xs, Lambda{Tuple{x}, Handle{Perform{Continue{}}, !ch}}}})
+check(tree("while (a) { if (b) continue else break }"), `Handle{While{a, Handle{Do{If{b, Perform{Continue{}}, Perform{Break{}}}}, !ch}}, !bh})
+check(tree("while (a) { for (x in xs) continue }"), `While{a, Do{Apply{peg_for, Tuple{xs, Lambda{Tuple{x}, Handle{Perform{Continue{}}, !ch}}}}}})
+check(tree("while (a) b"), 'While{a, b})
+check(head(tree("for x in xs f(x)")), 'SyntaxError)
+check(head(tree("for (x in xs)")), 'SyntaxError)
+check(head(tree("for (x xs) x")), 'SyntaxError)
+
+use("list")
+use("vector")
+total := 0
+for (x in [1, 2, 3]) total = total + x
+check(total, 6)
+for (x in []) total = 100
+check(total, 6)
+vv := vec_new()
+vec_push(vv, 10)
+vec_push(vv, 20)
+for (x in vv) total = total + x
+check(total, 36)
+for (Tuple{a, b} in [Tuple{1, 2}, Tuple{3, 4}]) total = total + a * b
+check(total, 50)
+check((for (x in [1]) x), none)
+find_first(p, xs) := {
+    for (x in xs) {
+        if (p(x)) return x
+    }
+    none
+}
+check(find_first(x -> x > 2, [1, 2, 3, 4]), 3)
+check(find_first(x -> x > 9, [1, 2]), none)
+n := 0
+while (true) {
+    n = n + 1
+    if (n == 5) break
+}
+check(n, 5)
+s := 0
+for (x in range(1, 100)) {
+    if (x > 4) break
+    s = s + x
+}
+check(s, 10)
+# break leaves only the inner loop
+pairs := 0
+for (i in range(0, 3)) {
+    for (j in range(0, 3)) {
+        if (j == 1) break
+        pairs = pairs + 1
+    }
+}
+check(pairs, 3)
+# continue goes on to the next round of while and for
+odd := 0
+i := 0
+while (i < 10) {
+    i = i + 1
+    if (i % 2 == 0) continue
+    odd = odd + i
+}
+check(odd, 25)
+evens := Nil{}
+for (x in range(0, 8)) {
+    if (x % 2 == 1) continue
+    evens = Cons{x, evens}
+}
+check(evens, [6, 4, 2, 0])
+tsum := 0
+for (Tuple{a, b} in [Tuple{1, 2}, Tuple{0, 5}, Tuple{3, 4}]) {
+    if (a == 0) continue
+    tsum = tsum + a * b
+}
+check(tsum, 14)
+# continue goes on in the inner loop only
+cnt := 0
+for (i in range(0, 3)) {
+    for (j in range(0, 4)) {
+        if (j == 1) continue
+        cnt = cnt + 1
+    }
+    cnt = cnt + 100
+}
+check(cnt, 3 * 100 + 3 * 3)
+# the code after the inner loop runs even when the inner loop continues in its last round
+cnt = 0
+i = 0
+while (i < 3) {
+    i = i + 1
+    j := 0
+    while (j < 3) {
+        j = j + 1
+        continue
+        cnt = cnt + 1000
+    }
+    cnt = cnt + 1
+}
+check(cnt, 3)
+# continue and break in one loop
+k := 0
+log := 0
+while (true) {
+    k = k + 1
+    if (k > 8) break
+    if (k % 3 != 0) continue
+    log = log + k
+}
+check(log, 9)
+# continue under match and in a function that has a return
+skip_neg(xs) := {
+    r := Nil{}
+    for (x in xs) {
+        match x { n if n < 0 -> continue; _ -> none }
+        if (x == 99) return r
+        r = Cons{x, r}
+    }
+    r
+}
+check(skip_neg([1, -2, 3, 99, 4]), [3, 1])
+check(skip_neg([-1, 5]), [5])
+# a continue in a function called from the body belongs to that function's own loop
+f_in() := { t := 0; for (x in [1, 2, 3]) { if (x == 2) continue; t = t + x }; t }
+w := 0
+for (x in [1, 2]) { if (x == 1) continue; w = w + f_in() }
+check(w, 4)
+# return leaves the function, from inside loops
+first_pair(xs) := {
+    for (a in xs) {
+        for (b in xs) {
+            if (a < b) return Tuple{a, b}
+        }
+    }
+    none
+}
+check(first_pair([3, 1, 2]), Tuple{1, 3})
+check(first_pair([1]), none)
+count_to(m) := {
+    i := 0
+    while (true) {
+        i = i + 1
+        if (i >= m) return i * 10
+    }
+}
+check(count_to(4), 40)
+bare() := { return; 1 }
+check(bare(), none)
+outer() := {
+    inner() := return 1
+    inner() + 10
+}
+check(outer(), 11)
+by_match(x) := match x { 0 -> return "zero"; _ -> "other" }
+check(by_match(0), "zero")
+check(by_match(1), "other")
+check(map(x -> { if (x > 1) return x * 2; x }, [1, 2, 3]), [1, 4, 6])
+ask() := {
+    r := perform Ask{}
+    if (r > 0) return r * 2
+    0
+}
+check(handle ask() with (Ask{}, k) -> k(21), 42)
+check(handle ask() with (Ask{}, k) -> k(-1), 0)
+# recursion keeps one Return handler for each call
+fact(m) := { if (m <= 1) return 1; m * fact(m - 1) }
+check(fact(10), 3628800)
+# a loop variable is a pattern variable of the body only
+x := 7
+for (x in [1, 2]) total = total + x
+check(x, 7)
+
+# === fun ===
+check(tree("{ fun f(x) x }"), 'Do{Def{f, none}, Set{f, Lambda{Tuple{x}, x}}})
+check(tree("{ a := 1; fun f() { a }; f() }"), 'Do{Def{f, none}, Def{a, 1}, Set{f, Lambda{Tuple{}, Do{a}}}, Apply{f, Tuple{}}})
+check(tree("{ fun f(x, y) x + y\n fun g() f(1, 2)\n g() }"), 'Do{Def{f, none}, Def{g, none}, Set{f, Lambda{Tuple{x, y}, Apply{add, Tuple{x, y}}}}, Set{g, Lambda{Tuple{}, Apply{f, Tuple{1, 2}}}}, Apply{g, Tuple{}}})
+check(tree("{ fun f(x :: xs) x }"), 'Do{Def{f, none}, Set{f, Lambda{Tuple{Cons{x, xs}}, x}}})
+check(tree("{ fun f() { return 1 } }"), `Do{Def{f, none}, Set{f, Lambda{Tuple{}, Handle{Do{Perform{Return{1}}}, !rh}}}})
+check(tree("{ a; b }"), 'Do{a, b})
+check(head(tree("fun f(x) x")), 'SyntaxError)
+check(head(tree("{ fun f x }")), 'SyntaxError)
+check(head(tree("{ fun (x) x }")), 'SyntaxError)
+
+check({
+    fun even(n) n == 0 ? true : odd(n - 1)
+    fun odd(n) n == 0 ? false : even(n - 1)
+    Tuple{even(10), odd(10), even(7)}
+}, Tuple{true, false, false})
+counter() := {
+    c := 0
+    fun inc() {
+        c = c + 1
+        c
+    }
+    inc()
+    inc()
+}
+check(counter(), 2)
+# a fun sees the variables declared before it, and funs call each other
+fact_sum(n) := {
+    base := 1
+    fun fact(m) m <= 1 ? base : m * fact(m - 1)
+    fun sum_to(m) m == 0 ? 0 : fact(m) + sum_to(m - 1)
+    sum_to(n)
+}
+check(fact_sum(4), 33)
+find_in(xs, y) := {
+    fun go(l) {
+        for (x in l) {
+            if (x == y) return true
+        }
+        false
+    }
+    go(xs)
+}
+check(find_in([1, 2, 3], 2), true)
+check(find_in([1, 2, 3], 5), false)
+# a recursive descent parser: sum := num ("+" num)* with parentheses
+parse_sum(toks) := {
+    pos := 0
+    fun peek() pos < length(toks) ? nth(toks, pos) : "eof"
+    fun atom() {
+        t := peek()
+        pos = pos + 1
+        if (t == "(") {
+            v := sum()
+            pos = pos + 1
+            v
+        } else t
+    }
+    fun sum() {
+        v := atom()
+        while (peek() == "+") {
+            pos = pos + 1
+            v = v + atom()
+        }
+        v
+    }
+    sum()
+}
+check(parse_sum([1, "+", "(", 2, "+", 3, ")", "+", 4]), 10)
+
 # === Packrat parser: grammar declarations ===
 num ::= integer
 check(arg(peg_parse('num, "12 rest"), 0), 12)

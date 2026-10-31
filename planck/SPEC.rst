@@ -30,6 +30,8 @@ M-expressions are expressions of this syntax too.
      - ``Def{x, e}``
    * - ``f(p, ...) := e``
      - ``Def{f, Lambda{Tuple{p, ...}, e}}``
+   * - ``record T(f, ...)``
+     - ``Apply{record_declare, Tuple{Quote{T}, Quote{Tuple{f, ...}}}}``
    * - ``x = e``
      - ``Set{x, e}``
    * - ``f | g``
@@ -54,6 +56,8 @@ M-expressions are expressions of this syntax too.
      - ``Quote{e}``, ``QuasiQuote{e}``, ``UnQuote{e}``
    * - ``f(a, ...)``
      - ``Apply{f, Tuple{a, ...}}``
+   * - ``t.f``
+     - ``Apply{record_get, Tuple{t, Quote{f}}}``
    * - ``p @ type``
      - ``_TypeOf{p, type}``
    * - ``{ e; ... }``
@@ -62,6 +66,18 @@ M-expressions are expressions of this syntax too.
      - ``If{c, a, b}``, ``If{c, a, none}``
    * - ``while (c) e``
      - ``While{c, e}``
+   * - ``for (p in e) a``
+     - ``Apply{peg_for, Tuple{e, Lambda{Tuple{p}, a}}}``
+   * - ``return e``, ``return``, ``break``, ``continue``
+     - ``Perform{Return{e}}``, ``Perform{Return{none}}``, ``Perform{Break{}}``, ``Perform{Continue{}}``
+   * - ``match e { p -> a; ... }``
+     - ``Apply{Fusion{Lambda{Tuple{p}, a}, ...}, Tuple{e}}``
+   * - ``match e { p if c -> a; ... }``
+     - the arm applies when ``p`` matches and ``c`` is true
+   * - ``f"a{e}b"``
+     - ``Apply{strcat, Tuple{Apply{strcat, Tuple{"a", Apply{to_text, Tuple{e}}}}, "b"}}``
+   * - ``fun f(p, ...) e`` in a block
+     - ``Def{f, none}`` at the top of the block, and ``Set{f, Lambda{Tuple{p, ...}, e}}`` in its place
    * - ``handle e with h``
      - ``Handle{e, h}``
    * - ``perform e``
@@ -82,15 +98,48 @@ a block ``{ ... }`` is the usual body of several expressions.
 ``else if (c) ...`` is ``else`` followed by an ``if`` expression.
 An ``if`` is an expression: ``y = if (c) 1 else 2``.
 
+``record T(f, g, ...)`` declares the names of the fields of the values ``T{a, b, ...}``, which are built as before,
+and ``t.f`` is the argument of ``t`` at the position of the field ``f`` in the declaration for the head of ``t``.
+Values with different heads can have fields of the same name. Declaring ``T`` again replaces the names.
+A ``.`` follows its left operand with no space. A value whose head is not declared or has no field ``f`` stops the program with a message.
+
+``fun f(p, ...) e`` declares a function in a block, as ``f(p, ...) := e`` does, but all the ``fun`` of a block are
+declared at its top, so each function can call the functions declared after it. A function is assigned where its ``fun`` is,
+so it sees the variables declared before it in the block, and it can be called after that place.
+A ``fun`` is written only as an expression of a block. It is a variable of the function or the program that contains the block,
+like ``x := e``.
+
+``for (p in e) a`` evaluates ``a`` for each element of the list or the vector ``e``, with the elements matched by the pattern ``p``,
+and has the value ``none``. The variables of ``a`` outside the loop are shared, so ``a`` can assign them.
+
+``return e`` ends the call of the function that contains it, with the value ``e`` (``none`` without ``e``; ``e`` must start on the same line).
+``break`` ends the innermost ``while`` or ``for`` that contains it. They are effects:
+the function is translated to ``Handle{body, (Return{v}, k) -> v}`` when its body has a ``return``,
+and the loop to ``Handle{loop, (Break{}, k) -> none}`` when its body has a ``break``.
+``continue`` goes on to the next round of the innermost ``while`` or ``for`` that contains it:
+the body of the loop is translated to ``Handle{body, (Continue{}, k) -> none}`` when it has a ``continue``.
+A ``continue`` outside of a loop stops the program with ``unhandled effect: Continue{}``.
+A ``return`` in a ``for`` body or in an arm of ``match`` belongs to the function around them,
+and one in a function written inside belongs to that function.
+
+``match`` evaluates ``e`` once and selects the first arm whose pattern ``p`` matches it.
+The arms are separated by ``;`` or newlines. The body ``a`` is any expression.
+The guard ``if c`` is evaluated after ``p`` matched, with the variables of ``p``; when it is false the arms after it are tried.
+``e`` and ``c`` are expressions up to ``?:``, so a lambda needs parentheses.
+When no arm applies the call fails as a call of a function with no matching pattern does.
+``match`` binds ``%v`` and ``%r0``, ``%r1`` ... in the arms with guards, which no identifier can name.
+
 Parameters ``p`` are patterns: unary expressions such as ``x``, ``1``, ``'none``, ``Cons{x, xs}`` or ``x @ int``,
 and ``p :: q`` for ``Cons{p, q}``, e.g. ``(x :: xs) -> ...`` and ``f(x :: y :: rest) := ...``.
 
 Lexical rules:
 
 * identifiers are ``[A-Za-z_][A-Za-z0-9_]*`` except the reserved words
-  ``if else while and or handle with perform``.
+  ``if else while and or handle with perform match record for in return break continue fun``.
 * integers are decimal (``10``, ``-3``), ``0x1f``, ``0o17`` or ``0b101``.
 * strings are ``"..."`` in one line with the escapes ``\a \b \t \n \v \f \r \" \' \\``.
+  ``f"...{e}..."`` embeds the value of the expression ``e``, which may contain strings and f-strings;
+  ``{{`` and ``}}`` are the braces themselves. A string without the prefix ``f`` embeds nothing.
 * ``#`` starts a comment up to the end of the line.
 * there is no space between ``f`` and ``(`` in ``f(a)``, and between ``Head`` and ``{`` in ``Head{a}``.
 
@@ -258,8 +307,14 @@ Builtin functions
    * - ``planck/peg.pk``
      - ``peg_parse`` ``define_rule``
    * - ``planck/syntax.pk``
-     - ``parse_mexpr`` (the parser of M-expressions)
+     - ``parse_mexpr`` ``to_text`` ``record_declare`` ``record_get`` ``peg_for``
 
+* ``parse_mexpr(s)``: the parser of M-expressions, with the same arguments and result as ``parse``.
+* ``to_text(x)``: ``x`` for a string, the decimal text for an integer, and ``show(x)`` (``planck/lib/pretty.pk``) otherwise,
+  so a value other than a string or an integer in ``{e}`` needs ``use("pretty")``.
+  A string with embedded values is joined by ``strcat`` from the left, and an empty piece is left out.
+* ``record_declare(name, fields)``: set the field names of the head ``name`` (``fields`` is ``Tuple{f, ...}``). ``record_get(t, name)``: the field.
+* ``peg_for(xs, f)``: call ``f`` with each element of the list or vector ``xs``, and return ``none``.
 * ``symname(sym)``: the name of the symbol as a string (the inverse of ``intern``).
 * ``strlen(s)``: the number of bytes. ``ord(s, i)``: the byte at ``i``, or ``-1`` when ``i`` is out of range.
 * ``substr(s, i, j)``: the bytes from ``i`` to ``j - 1``. ``strcat(a, b)``: ``a`` followed by ``b``.
@@ -321,7 +376,7 @@ A vector is a growable array: ``vec_push(v, x)`` appends and returns ``x``, ``ve
 String functions:
 
 * ``chr(c)`` is the one-character string of a code from 32 to 126, 9, 10 or 13. ``char_at(s, i)`` is ``""`` outside ``s``.
-* ``index_of_str(s, sub, from)`` is the first position at or after ``from`` where ``sub`` occurs, or ``-1``.
+* ``index_of_str(s, part, from)`` is the first position at or after ``from`` where ``part`` occurs, or ``-1``.
 * ``str_cmp(a, b)`` is ``-1``, ``0`` or ``1`` by the byte order. ``trim(s)`` removes blanks at both ends.
 * ``str_to_int(s)`` reads an optional ``-`` and decimal digits, otherwise ``none``.
 * ``split(s, sep)`` is the list of the parts between the occurrences of ``sep``, which must not be empty.

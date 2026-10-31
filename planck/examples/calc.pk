@@ -14,6 +14,8 @@ cur_file := ""
 cur_src := ""
 here(p) := loc_at(cur_file, cur_src, p)
 
+record Tok(kind, value, pos)
+
 # === Lexer: the source text to a vector of Tok{kind, value, position} ===
 lex(src) := {
     toks := vec_new()
@@ -21,35 +23,34 @@ lex(src) := {
     i := 0
     while (i < n) {
         c := ord(src, i)
-        if (c == 10) {
-            vec_push(toks, Tok{'nl, "\n", i})
-            i = i + 1
-        } else if (is_space(c)) {
-            i = i + 1
-        } else if (is_digit(c)) {
-            j := i
-            while (j < n and is_digit(ord(src, j))) j = j + 1
-            vec_push(toks, Tok{'num, str_to_int(substr(src, i, j)), i})
-            i = j
-        } else if (is_ident_start(c)) {
-            j := i
-            while (j < n and is_ident_char(ord(src, j))) j = j + 1
-            vec_push(toks, Tok{'id, substr(src, i, j), i})
-            i = j
-        } else if (index_of_str("+-*/()=", chr(c), 0) >= 0) {
-            vec_push(toks, Tok{'op, chr(c), i})
-            i = i + 1
-        } else {
-            error_at(here(i), strcat("unexpected character ", quote_str(chr(c))))
+        match c {
+            10 -> {
+                vec_push(toks, Tok{'nl, "\n", i})
+                i = i + 1
+            }
+            c if is_space(c) -> i = i + 1
+            c if is_digit(c) -> {
+                j := i
+                while (j < n and is_digit(ord(src, j))) j = j + 1
+                vec_push(toks, Tok{'num, str_to_int(substr(src, i, j)), i})
+                i = j
+            }
+            c if is_ident_start(c) -> {
+                j := i
+                while (j < n and is_ident_char(ord(src, j))) j = j + 1
+                vec_push(toks, Tok{'id, substr(src, i, j), i})
+                i = j
+            }
+            c if index_of_str("+-*/()=", chr(c), 0) >= 0 -> {
+                vec_push(toks, Tok{'op, chr(c), i})
+                i = i + 1
+            }
+            _ -> error_at(here(i), f"unexpected character {quote_str(chr(c))}")
         }
     }
     vec_push(toks, Tok{'eof, "", n})
     toks
 }
-
-tk(t) := arg(t, 0)
-tv(t) := arg(t, 1)
-tp(t) := arg(t, 2)
 
 # === Parser: tokens to [Let{name, e, pos}, Expr{e}, ...] ===
 # e is Num{n}, Var{name, pos}, Neg{e} or Bin{op, left, right, pos}
@@ -61,30 +62,27 @@ parse_program(toks) := {
         pos = pos + 1
         t
     }
-    at(kind, v) := tk(peek()) == kind and tv(peek()) == v
-    syntax_error(msg) := error_at(here(tp(peek())), msg)
-    expect_op(v) := if (at('op, v)) advance() else syntax_error(strcat(strcat("expected \"", v), "\""))
-
-    # expr is used by factor before it is defined
-    expr := none
+    at(kind, v) := peek().kind == kind and peek().value == v
+    syntax_error(msg) := error_at(here(peek().pos), msg)
+    expect_op(v) := if (at('op, v)) advance() else syntax_error(f"expected \"{v}\"")
 
     # left associative chain: next (op next)*
     chain(next, ops) := {
         l := next()
-        while (tk(peek()) == 'op and member(tv(peek()), ops)) {
+        while (peek().kind == 'op and member(peek().value, ops)) {
             t := advance()
-            l = Bin{tv(t), l, next(), tp(t)}
+            l = Bin{t.value, l, next(), t.pos}
         }
         l
     }
-    factor() := {
+    fun factor() {
         t := peek()
-        if (tk(t) == 'num) {
+        if (t.kind == 'num) {
             advance()
-            Num{tv(t)}
-        } else if (tk(t) == 'id) {
+            Num{t.value}
+        } else if (t.kind == 'id) {
             advance()
-            Var{tv(t), tp(t)}
+            Var{t.value, t.pos}
         } else if (at('op, "(")) {
             advance()
             e := expr()
@@ -95,23 +93,23 @@ parse_program(toks) := {
             Neg{factor()}
         } else syntax_error("expected an expression")
     }
-    term() := chain(factor, ["*", "/"])
-    expr = () -> chain(term, ["+", "-"])
+    fun term() chain(factor, ["*", "/"])
+    fun expr() chain(term, ["+", "-"])
     stmt() := if (at('id, "let")) {
         advance()
         t := peek()
-        if (tk(t) != 'id) syntax_error("expected a variable name")
+        if (t.kind != 'id) syntax_error("expected a variable name")
         advance()
         expect_op("=")
-        Let{tv(t), expr(), tp(t)}
+        Let{t.value, expr(), t.pos}
     } else Expr{expr()}
-    skip_newlines() := while (tk(peek()) == 'nl) advance()
+    skip_newlines() := while (peek().kind == 'nl) advance()
 
     stmts := []
     skip_newlines()
-    while (tk(peek()) != 'eof) {
+    while (peek().kind != 'eof) {
         stmts = stmt() :: stmts
-        if (tk(peek()) != 'eof and tk(peek()) != 'nl) syntax_error("expected the end of the line")
+        if (peek().kind != 'eof and peek().kind != 'nl) syntax_error("expected the end of the line")
         skip_newlines()
     }
     reverse(stmts)
@@ -126,7 +124,7 @@ compile(stmts) := {
     gensym_reset()
     operand := (Num{n}) -> n
              | (Var{x, p}) -> {
-                   if (not set_has(defined, intern(x))) error_at(here(p), strcat("undefined variable ", x))
+                   if (not set_has(defined, intern(x))) error_at(here(p), f"undefined variable {x}")
                    intern(x)
                }
              | (Neg{e}) -> {
@@ -151,9 +149,11 @@ compile(stmts) := {
 }
 
 show_operand(o) := if (typeof(o) == 'int) int_to_str(o) else symname(o)
-show_instr := (Bin{d, op, a, b, _}) -> join(" ", [show_operand(d), "=", show_operand(a), op, show_operand(b)])
-            | (Copy{d, a}) -> join(" ", [show_operand(d), "=", show_operand(a)])
-            | (Print{a}) -> strcat("print ", show_operand(a))
+show_instr(i) := match i {
+    Bin{d, op, a, b, _} -> join(" ", [show_operand(d), "=", show_operand(a), op, show_operand(b)])
+    Copy{d, a}          -> join(" ", [show_operand(d), "=", show_operand(a)])
+    Print{a}            -> strcat("print ", show_operand(a))
+}
 
 # === Virtual machine ===
 run_code(code) := {
@@ -181,12 +181,12 @@ calc(file, src, verbose) := {
         stmts := parse_program(toks)
         if (verbose) {
             put("syntax tree:\n")
-            each(pprint, stmts)
+            for (st in stmts) pprint(st)
         }
         code := compile(stmts)
         if (verbose) {
             put("code:\n")
-            each(i -> { put("  "); put(show_instr(i)); put("\n") }, code)
+            for (i in code) { put("  "); put(show_instr(i)); put("\n") }
             put("run:\n")
         }
         run_code(code)
