@@ -4,7 +4,7 @@
 passed := 0
 failed := 0
 
-check(actual, expected) := if actual == expected {
+check(actual, expected) := if (actual == expected) {
     passed = passed + 1
 } else {
     failed = failed + 1
@@ -75,12 +75,46 @@ check(tree("`F{!x}"), 'QuasiQuote{F{UnQuote{x}}})
 check(tree("{ a; b }"), 'Do{a, b})
 check(tree("{\n a\n b\n}"), 'Do{a, b})
 check(tree("{}"), 'Do{})
-check(tree("if a { b }"), 'If{a, Do{b}, none})
-check(tree("if a { b } else { c }"), 'If{a, Do{b}, Do{c}})
-check(tree("if a { b }\nelse if c { d }"), 'If{a, Do{b}, If{c, Do{d}, none}})
-check(tree("while a { b }"), 'While{a, Do{b}})
+check(tree("if (a) { b }"), 'If{a, Do{b}, none})
+check(tree("if (a) { b } else { c }"), 'If{a, Do{b}, Do{c}})
+check(tree("if (a) { b }\nelse if (c) { d }"), 'If{a, Do{b}, If{c, Do{d}, none}})
+check(tree("while (a) { b }"), 'While{a, Do{b}})
 check(tree("handle { a } with (E{}, k) -> k(1)"), 'Handle{Do{a}, Lambda{Tuple{E{}, k}, Apply{k, Tuple{1}}}})
+check(tree("if (a) b"), 'If{a, b, none})
+check(tree("if (a) b else c"), 'If{a, b, c})
+check(tree("if (a) x = 1 else x = 2"), 'If{a, Set{x, 1}, Set{x, 2}})
+check(tree("if (a) b else if (c) d else e"), 'If{a, b, If{c, d, e}})
+check(tree("if (a) if (b) c else d"), 'If{a, If{b, c, d}, none})
+check(tree("if (a) if (b) c else d else e"), 'If{a, If{b, c, d}, e})
+check(tree("if (a) { if (b) c } else d"), 'If{a, Do{If{b, c, none}}, d})
+check(tree("if (a)\n  b\nelse\n  c"), 'If{a, b, c})
+check(tree("if (a) b else c + 1"), 'If{a, b, Apply{add, Tuple{c, 1}}})
+check(tree("while (a) b"), 'While{a, b})
+check(tree("while (a) if (b) c else d"), 'While{a, If{b, c, d}})
+check(tree("{ if (a) b; c }"), 'Do{If{a, b, none}, c})
+check(tree("{ if (a) b\n c }"), 'Do{If{a, b, none}, c})
+check(tree("{ while (a) b\n c }"), 'Do{While{a, b}, c})
+check(tree("y = if (a) 1 else 2"), 'Set{y, If{a, 1, 2}})
+check(head(tree("if a { b }")), 'SyntaxError)
+check(head(tree("while a { b }")), 'SyntaxError)
 check(tree("perform E{x}"), 'Perform{E{x}})
+
+# === Cons ===
+check(tree("x :: xs"), 'Cons{x, xs})
+check(tree("1 :: 2 :: []"), 'Cons{1, Cons{2, Nil{}}})
+check(tree("a + 1 :: b * 2"), 'Cons{Apply{add, Tuple{a, 1}}, Apply{mul, Tuple{b, 2}}})
+check(tree("a :: b == c :: d"), 'Apply{eq, Tuple{Cons{a, b}, Cons{c, d}}})
+check(tree("a :: b - 1"), 'Cons{a, Apply{sub, Tuple{b, 1}}})
+check(tree("(a :: b) :: c"), 'Cons{Cons{a, b}, c})
+check(tree("f(a :: b, c)"), 'Apply{f, Tuple{Cons{a, b}, c}})
+check(tree("[a :: b]"), 'Cons{Cons{a, b}, Nil{}})
+check(tree("c ? a :: b : d"), 'If{c, Cons{a, b}, d})
+check(tree("(x :: xs) -> x"), 'Lambda{Tuple{Cons{x, xs}}, x})
+check(tree("x :: xs -> x"), 'Lambda{Tuple{Cons{x, xs}}, x})
+check(tree("(x :: y :: r, n) -> x"), 'Lambda{Tuple{Cons{x, Cons{y, r}}, n}, x})
+check(tree("(x :: Nil{}) -> x | (x :: xs) -> xs"), 'Fusion{Lambda{Tuple{Cons{x, Nil{}}}, x}, Lambda{Tuple{Cons{x, xs}}, xs}})
+check(tree("f(x :: xs) := x"), 'Def{f, Lambda{Tuple{Cons{x, xs}}, x}})
+check(tree("xs ::= ident"), 'Apply{define_rule, Tuple{Quote{xs}, Quote{ident}}})
 
 # === Lines and comments ===
 check(tree("a\n-1"), 'a)
@@ -101,12 +135,37 @@ check(head(tree("\"abc")), 'SyntaxError)
 fib := (0) -> 0 | (1) -> 1 | (n) -> fib(n - 1) + fib(n - 2)
 check(fib(15), 610)
 check({ a := 2; b := 3; a * b }, 6)
-check(if 1 < 2 { "y" } else { "n" }, "y")
-check(if 1 > 2 { "y" }, none)
+check(if (1 < 2) { "y" } else { "n" }, "y")
+check(if (1 > 2) { "y" }, none)
 n := 0
 i := 0
-while i < 5 { i = i + 1; n = n + i }
+while (i < 5) { i = i + 1; n = n + i }
 check(n, 15)
+last := (x :: Nil{}) -> x | (x :: xs) -> last(xs)
+check(last(1 :: 2 :: 3 :: []), 3)
+check(1 :: 2 :: [], [1, 2])
+sum := (Nil{}) -> 0 | (x :: xs) -> x + sum(xs)
+check(sum(1 :: 2 :: 3 :: []), 6)
+count := 0
+if (count == 0) count = 10 else count = 20
+check(count, 10)
+if (count == 0) count = 1 else if (count == 10) count = 2 else count = 3
+check(count, 2)
+# dangling else binds to the nearest if
+dangle(a, b) := if (a) if (b) "ab" else "a-nb"
+check(dangle(true, true), "ab")
+check(dangle(true, false), "a-nb")
+check(dangle(false, true), none)
+check(dangle(false, false), none)
+dangle2(a, b) := if (a) { if (b) "ab" } else "na"
+check(dangle2(false, true), "na")
+check(dangle2(true, false), none)
+k := 0
+total := 0
+while (k < 4) { k = k + 1; total = total + k }
+check(total, 10)
+while (k > 0) if (k % 2 == 0) k = k - 1 else k = k - 1
+check(k, 0)
 check(handle { 1 + perform Ask{} } with (Ask{}, k) -> k(41), 42)
 check((x -> y -> x - y)(10)(3), 7)
 check(not 1 == 2, true)
@@ -164,4 +223,4 @@ check(unless 1 > 2 { "a" } else { "b" }, "a")
 check(tree("unless c { a } else { b }"), 'If{c, Do{b}, Do{a}})
 
 put("Tests passed "); print(passed); put("/"); println(passed + failed)
-if failed > 0 { exit(1) }
+if (failed > 0) exit(1)
