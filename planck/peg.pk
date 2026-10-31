@@ -27,9 +27,8 @@ Def{peg_nrules, 0}
 " state of the current parse "
 Def{peg_src, ""}
 Def{peg_srclen, 0}
-Def{peg_memo_pos, none}
-Def{peg_memo_val, none}
-Def{peg_memo_lr, none}
+Def{peg_memo, none}
+Def{peg_memo_w, 0}
 Def{peg_far, 0}
 Def{peg_pv, none}
 
@@ -209,11 +208,19 @@ Def{peg_px, Lambda{Tuple{e, p}, Do{
         Apply{Apply{table_get, Tuple{peg_handlers, Apply{head, Tuple{e}}, none}}, Tuple{e, p}}}}}}}}
 
 " === Rules and memoization === "
-" peg_memo_pos[key] is the end position, -1 for failure and -2 while the rule is running. "
-" key = position * 256 + rule id "
+" The memo of position p is the array peg_memo[p] (made when first used), which holds "
+" three slots for each rule id: end position, value and left-recursion flag. "
+" The end position is none before the rule runs, -1 for failure and -2 while the rule is running. "
 " On left recursion (the rule is called again at the same position while it runs), "
 " the inner call fails, which is the seed. Then the rule is run again "
 " while it consumes more than the last result. "
+
+Def{peg_row, Lambda{Tuple{p}, Do{
+    Def{row, Apply{array_get, Tuple{peg_memo, p}}},
+    If{Apply{eq, Tuple{row, none}}, Do{
+        Set{row, Apply{array, Tuple{peg_memo_w}}},
+        Apply{array_set, Tuple{peg_memo, p, row}}}, none},
+    row}}}
 
 Def{peg_call_rule, Lambda{Tuple{r, p}, Do{
     Def{id, Apply{table_get, Tuple{peg_ids, r, none}}},
@@ -221,34 +228,36 @@ Def{peg_call_rule, Lambda{Tuple{r, p}, Do{
         Apply{put, Tuple{"undefined rule: "}},
         Apply{println, Tuple{r}},
         Apply{exit, Tuple{1}}}, none},
-    Def{key, Apply{add, Tuple{Apply{mul, Tuple{p, 256}}, id}}},
-    Def{m, Apply{table_get, Tuple{peg_memo_pos, key, none}}},
-    If{Apply{eq, Tuple{m, none}}, Apply{peg_run_rule, Tuple{r, p, key}},
+    Def{row, Apply{peg_row, Tuple{p}}},
+    Def{b, Apply{mul, Tuple{id, 3}}},
+    Def{m, Apply{array_get, Tuple{row, b}}},
+    If{Apply{eq, Tuple{m, none}}, Apply{peg_run_rule, Tuple{r, p, row, b}},
     If{Apply{eq, Tuple{m, -2}}, Do{
-        Apply{table_set, Tuple{peg_memo_pos, key, -1}},
-        Apply{table_set, Tuple{peg_memo_lr, key, true}},
+        Apply{array_set, Tuple{row, b, -1}},
+        Apply{array_set, Tuple{row, Apply{add, Tuple{b, 2}}, true}},
         -1},
     Do{
-        Set{peg_pv, Apply{table_get, Tuple{peg_memo_val, key, none}}},
+        Set{peg_pv, Apply{array_get, Tuple{row, Apply{add, Tuple{b, 1}}}}},
         m}}}}}}
 
-Def{peg_run_rule, Lambda{Tuple{r, p, key}, Do{
+Def{peg_run_rule, Lambda{Tuple{r, p, row, b}, Do{
     Def{body, Apply{table_get, Tuple{peg_rules, r, none}}},
-    Apply{table_set, Tuple{peg_memo_pos, key, -2}},
+    Def{b1, Apply{add, Tuple{b, 1}}},
+    Apply{array_set, Tuple{row, b, -2}},
     Def{q, Apply{peg_px, Tuple{body, p}}},
-    Apply{table_set, Tuple{peg_memo_pos, key, q}},
-    Apply{table_set, Tuple{peg_memo_val, key, peg_pv}},
-    If{Apply{table_get, Tuple{peg_memo_lr, key, false}}, Do{
+    Apply{array_set, Tuple{row, b, q}},
+    Apply{array_set, Tuple{row, b1, peg_pv}},
+    If{Apply{eq, Tuple{Apply{array_get, Tuple{row, Apply{add, Tuple{b, 2}}}}, true}}, Do{
         Def{go, Apply{ge, Tuple{q, 0}}},
         While{go, Do{
             Set{q, Apply{peg_px, Tuple{body, p}}},
-            If{Apply{gt, Tuple{q, Apply{table_get, Tuple{peg_memo_pos, key, -1}}}},
+            If{Apply{gt, Tuple{q, Apply{array_get, Tuple{row, b}}}},
                 Do{
-                    Apply{table_set, Tuple{peg_memo_pos, key, q}},
-                    Apply{table_set, Tuple{peg_memo_val, key, peg_pv}}},
+                    Apply{array_set, Tuple{row, b, q}},
+                    Apply{array_set, Tuple{row, b1, peg_pv}}},
                 Set{go, false}}}},
-        Set{peg_pv, Apply{table_get, Tuple{peg_memo_val, key, none}}},
-        Apply{table_get, Tuple{peg_memo_pos, key, -1}}},
+        Set{peg_pv, Apply{array_get, Tuple{row, b1}}},
+        Apply{array_get, Tuple{row, b}}},
     q}}}}
 
 " evaluate the actions of a parsing expression "
@@ -287,9 +296,8 @@ Def{peg_line_at, Lambda{Tuple{p}, Do{
 Def{peg_parse, Lambda{Tuple{r, s}, Do{
     Set{peg_src, s},
     Set{peg_srclen, Apply{strlen, Tuple{s}}},
-    Set{peg_memo_pos, Apply{table, Tuple{}}},
-    Set{peg_memo_val, Apply{table, Tuple{}}},
-    Set{peg_memo_lr, Apply{table, Tuple{}}},
+    Set{peg_memo, Apply{array, Tuple{Apply{peg_inc, Tuple{Apply{strlen, Tuple{s}}}}}}},
+    Set{peg_memo_w, Apply{mul, Tuple{peg_nrules, 3}}},
     Set{peg_far, 0},
     Def{p, Apply{peg_skip_ws, Tuple{0}}},
     If{Apply{ge, Tuple{p, peg_srclen}}, Tuple{Eof{}, ""}, Do{
