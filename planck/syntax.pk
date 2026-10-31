@@ -18,6 +18,10 @@ Apply{table_set, Tuple{peg_reserved, "with", true}}
 Apply{table_set, Tuple{peg_reserved, "perform", true}}
 Apply{table_set, Tuple{peg_reserved, "match", true}}
 Apply{table_set, Tuple{peg_reserved, "record", true}}
+Apply{table_set, Tuple{peg_reserved, "for", true}}
+Apply{table_set, Tuple{peg_reserved, "in", true}}
+Apply{table_set, Tuple{peg_reserved, "return", true}}
+Apply{table_set, Tuple{peg_reserved, "break", true}}
 
 " identifier: [A-Za-z_][A-Za-z0-9_]* except the peg_reserved words "
 Def{peg_tok_ident, Lambda{Tuple{p}, Do{
@@ -144,7 +148,7 @@ Apply{define_rule, Tuple{Quote{toplevel}, Quote{
 Apply{define_rule, Tuple{Quote{expr}, Quote{Choice{
     syntax_decl,
     Act{Seq{ident, Tight{"("}, Delimited{pattern, ","}, ")", ":=", expr},
-        Lambda{Tuple{Tuple{f, _, ps, _, _, e}}, QuasiQuote{Def{UnQuote{f}, Lambda{UnQuote{ps}, UnQuote{e}}}}}},
+        Lambda{Tuple{Tuple{f, _, ps, _, _, e}}, QuasiQuote{Def{UnQuote{f}, UnQuote{Apply{peg_lambda, Tuple{ps, e}}}}}}},
     Act{Seq{ident, ":=", expr},
         Lambda{Tuple{Tuple{x, _, e}}, QuasiQuote{Def{UnQuote{x}, UnQuote{e}}}}},
     Act{Seq{ident, "=", Not{Tight{"="}}, expr},
@@ -162,7 +166,7 @@ Apply{define_rule, Tuple{Quote{params}, Quote{Choice{
 
 Apply{define_rule, Tuple{Quote{arrow}, Quote{Choice{
     Act{Seq{params, "->", arrow},
-        Lambda{Tuple{Tuple{ps, _, e}}, QuasiQuote{Lambda{UnQuote{ps}, UnQuote{e}}}}},
+        Lambda{Tuple{Tuple{ps, _, e}}, Apply{peg_lambda, Tuple{ps, e}}}},
     ternary}}}}
 
 Apply{define_rule, Tuple{Quote{ternary}, Quote{Choice{
@@ -253,7 +257,7 @@ Apply{define_rule, Tuple{Quote{if_expr}, Quote{
 Apply{define_rule, Tuple{Quote{primary}, Quote{Choice{
     if_expr,
     Act{Seq{Key{"while"}, "(", expr, ")", expr},
-        Lambda{Tuple{Tuple{_, _, c, _, b}}, QuasiQuote{While{UnQuote{c}, UnQuote{b}}}}},
+        Lambda{Tuple{Tuple{_, _, c, _, b}}, Apply{peg_while, Tuple{c, b}}}},
     Act{Seq{Key{"handle"}, expr, Key{"with"}, union},
         Lambda{Tuple{Tuple{_, b, _, h}}, QuasiQuote{Handle{UnQuote{b}, UnQuote{h}}}}},
     Act{Seq{Key{"perform"}, unary},
@@ -819,6 +823,186 @@ Apply{
             }
         }
     }}
+
+Def{peg_ret_handler, QuasiQuote{Lambda{Tuple{Return{v}, k}, v}}}
+
+Def{peg_break_handler, QuasiQuote{Lambda{Tuple{Break{}, k}, none}}}
+
+Def{
+    peg_catches,
+    Lambda{
+        Tuple{h, tag},
+        If{
+            Apply{peg_is_head, Tuple{h, Quote{Lambda}}},
+            If{
+                Apply{gt, Tuple{Apply{arity, Tuple{Apply{arg, Tuple{h, 0}}}}, 0}},
+                Apply{peg_is_head, Tuple{Apply{arg, Tuple{Apply{arg, Tuple{h, 0}}, 0}}, tag}},
+                false
+            },
+            false
+        }
+    }}
+
+Def{
+    peg_scan,
+    Lambda{
+        Tuple{e, tag},
+        Do{
+            If{
+                Apply{ne, Tuple{Apply{typeof, Tuple{e}}, Quote{mexpr}}},
+                false,
+                Do{
+                    Def{h, Apply{head, Tuple{e}}},
+                    If{
+                        If{Apply{eq, Tuple{h, Quote{Quote}}}, true, Apply{eq, Tuple{h, Quote{QuasiQuote}}}},
+                        false,
+                        If{
+                            If{
+                                Apply{eq, Tuple{h, Quote{Perform}}},
+                                If{
+                                    Apply{eq, Tuple{Apply{arity, Tuple{e}}, 1}},
+                                    Apply{peg_is_head, Tuple{Apply{arg, Tuple{e, 0}}, tag}},
+                                    false
+                                },
+                                false
+                            },
+                            true,
+                            If{
+                                If{
+                                    Apply{eq, Tuple{h, Quote{Handle}}},
+                                    If{
+                                        Apply{eq, Tuple{Apply{arity, Tuple{e}}, 2}},
+                                        Apply{peg_catches, Tuple{Apply{arg, Tuple{e, 1}}, tag}},
+                                        false
+                                    },
+                                    false
+                                },
+                                Apply{peg_scan, Tuple{Apply{arg, Tuple{e, 1}}, tag}},
+                                Do{
+                                    Def{i, 0},
+                                    Def{r, false},
+                                    While{
+                                        If{
+                                            Apply{not, Tuple{r}},
+                                            Apply{lt, Tuple{i, Apply{arity, Tuple{e}}}},
+                                            false
+                                        },
+                                        Do{
+                                            Set{r, Apply{peg_scan, Tuple{Apply{arg, Tuple{e, i}}, tag}}},
+                                            Set{i, Apply{add, Tuple{i, 1}}}
+                                        }
+                                    },
+                                    r
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }}
+
+Def{
+    peg_wrap,
+    Lambda{
+        Tuple{body, tag, handler},
+        If{Apply{peg_scan, Tuple{body, tag}}, QuasiQuote{Handle{UnQuote{body}, UnQuote{handler}}}, body}
+    }}
+
+Def{
+    peg_lambda,
+    Lambda{
+        Tuple{ps, body},
+        QuasiQuote{Lambda{UnQuote{ps}, UnQuote{Apply{peg_wrap, Tuple{body, Quote{Return}, peg_ret_handler}}}}}
+    }}
+
+Def{peg_loop, Lambda{Tuple{loop}, Apply{peg_wrap, Tuple{loop, Quote{Break}, peg_break_handler}}}}
+
+Def{peg_while, Lambda{Tuple{c, b}, Apply{peg_loop, Tuple{QuasiQuote{While{UnQuote{c}, UnQuote{b}}}}}}}
+
+Def{
+    peg_for_tree,
+    Lambda{
+        Tuple{x, xs, b},
+        Apply{
+            peg_loop,
+            Tuple{QuasiQuote{Apply{peg_for, Tuple{UnQuote{xs}, Lambda{Tuple{UnQuote{x}}, UnQuote{b}}}}}}
+        }
+    }}
+
+Def{
+    peg_for,
+    Lambda{
+        Tuple{xs, f},
+        Do{
+            If{
+                Apply{eq, Tuple{Apply{typeof, Tuple{xs}}, Quote{array}}},
+                Do{
+                    Def{i, 0},
+                    While{
+                        Apply{lt, Tuple{i, Apply{array_get, Tuple{xs, 1}}}},
+                        Do{
+                            Apply{f, Tuple{Apply{array_get, Tuple{Apply{array_get, Tuple{xs, 0}}, i}}}},
+                            Set{i, Apply{add, Tuple{i, 1}}}
+                        }
+                    }
+                },
+                Do{
+                    While{
+                        Apply{eq, Tuple{Apply{head, Tuple{xs}}, Quote{Cons}}},
+                        Do{Apply{f, Tuple{Apply{arg, Tuple{xs, 0}}}}, Set{xs, Apply{arg, Tuple{xs, 1}}}}
+                    }
+                }
+            },
+            none
+        }
+    }}
+
+Apply{define_rule, Tuple{Quote{same}, Quote{Same{}}}}
+
+Apply{
+    define_rule,
+    Tuple{
+        Quote{return_expr},
+        Quote{
+            Act{
+                Seq{Key{"return"}, Option{Seq{same, expr}}},
+                Lambda{
+                    Tuple{Tuple{_, v}},
+                    Do{
+                        If{
+                            Apply{eq, Tuple{Apply{arity, Tuple{v}}, 0}},
+                            QuasiQuote{Perform{Return{none}}},
+                            QuasiQuote{
+                                Perform{Return{UnQuote{Apply{arg, Tuple{Apply{arg, Tuple{v, 0}}, 1}}}}}
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }}
+
+Apply{
+    define_rule,
+    Tuple{
+        Quote{break_expr},
+        Quote{Act{Seq{Key{"break"}}, Lambda{Tuple{Tuple{_}}, Do{QuasiQuote{Perform{Break{}}}}}}}
+    }}
+
+Apply{
+    define_rule,
+    Tuple{
+        Quote{for_expr},
+        Quote{
+            Act{
+                Seq{Key{"for"}, "(", pattern, Key{"in"}, expr, ")", expr},
+                Lambda{Tuple{Tuple{_, _, x, _, xs, _, b}}, Do{Apply{peg_for_tree, Tuple{x, xs, b}}}}
+            }
+        }
+    }}
+
+Apply{define_rule, Tuple{Quote{primary}, Quote{Choice{return_expr, break_expr, for_expr, Prev{}}}}}
 
 " === Switch to the new syntax === "
 Def{parse_mexpr, parse}
