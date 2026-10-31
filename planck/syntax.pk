@@ -133,7 +133,7 @@ Def{peg_to_list, Lambda{Tuple{t}, Do{
 
 " === Expressions === "
 " from the loosest: definition and assignment, | , ->, ?:, or, and, not, "
-" comparison, + -, * / %, unary - ' ` !, call and @, primary "
+" comparison, ::, + -, * / %, unary - ' ` !, call and @, primary "
 
 " a top-level expression ends with ; or a newline, or another expression follows "
 Apply{define_rule, Tuple{Quote{toplevel}, Quote{
@@ -184,12 +184,18 @@ Apply{define_rule, Tuple{Quote{not_expr}, Quote{Choice{
     rel_expr}}}}
 
 Apply{define_rule, Tuple{Quote{rel_expr}, Quote{Choice{
-    Act{Seq{add_expr, "==", add_expr}, Apply{peg_binop, Tuple{Quote{eq}}}},
-    Act{Seq{add_expr, "!=", add_expr}, Apply{peg_binop, Tuple{Quote{ne}}}},
-    Act{Seq{add_expr, "<=", add_expr}, Apply{peg_binop, Tuple{Quote{le}}}},
-    Act{Seq{add_expr, ">=", add_expr}, Apply{peg_binop, Tuple{Quote{ge}}}},
-    Act{Seq{add_expr, "<", add_expr}, Apply{peg_binop, Tuple{Quote{lt}}}},
-    Act{Seq{add_expr, ">", add_expr}, Apply{peg_binop, Tuple{Quote{gt}}}},
+    Act{Seq{cons_expr, "==", cons_expr}, Apply{peg_binop, Tuple{Quote{eq}}}},
+    Act{Seq{cons_expr, "!=", cons_expr}, Apply{peg_binop, Tuple{Quote{ne}}}},
+    Act{Seq{cons_expr, "<=", cons_expr}, Apply{peg_binop, Tuple{Quote{le}}}},
+    Act{Seq{cons_expr, ">=", cons_expr}, Apply{peg_binop, Tuple{Quote{ge}}}},
+    Act{Seq{cons_expr, "<", cons_expr}, Apply{peg_binop, Tuple{Quote{lt}}}},
+    Act{Seq{cons_expr, ">", cons_expr}, Apply{peg_binop, Tuple{Quote{gt}}}},
+    cons_expr}}}}
+
+" x :: xs is Cons{x, xs}. It groups to the right. "
+Apply{define_rule, Tuple{Quote{cons_expr}, Quote{Choice{
+    Act{Seq{add_expr, "::", cons_expr},
+        Lambda{Tuple{Tuple{a, _, b}}, QuasiQuote{Cons{UnQuote{a}, UnQuote{b}}}}},
     add_expr}}}}
 
 " a binary - must be on the same line as its left operand "
@@ -217,8 +223,11 @@ Apply{define_rule, Tuple{Quote{unary}, Quote{Choice{
     Act{Seq{"!", unary},
         Lambda{Tuple{Tuple{_, a}}, Apply{mexpr, Tuple{Quote{UnQuote}, Tuple{a}}}}}}}}}
 
-" parameters of functions "
-Apply{define_rule, Tuple{Quote{pattern}, Quote{unary}}}
+" parameters of functions: x :: xs is a pattern too "
+Apply{define_rule, Tuple{Quote{pattern}, Quote{Choice{
+    Act{Seq{unary, "::", pattern},
+        Lambda{Tuple{Tuple{a, _, b}}, QuasiQuote{Cons{UnQuote{a}, UnQuote{b}}}}},
+    unary}}}}
 
 Apply{define_rule, Tuple{Quote{postfix}, Quote{Choice{
     Act{Seq{postfix, Tight{"("}, Delimited{expr, ","}, ")"},
@@ -231,16 +240,18 @@ Apply{define_rule, Tuple{Quote{block}, Quote{
     Act{Seq{"{", Many{Seq{expr, Option{";"}}}, "}"},
         Lambda{Tuple{Tuple{_, es, _}}, Apply{mexpr, Tuple{Quote{Do}, Apply{peg_map_args, Tuple{peg_first, es}}}}}}}}}
 
+" the condition is in parentheses, the body is any expression. "
+" else belongs to the nearest if, since the body takes it first. "
 Apply{define_rule, Tuple{Quote{if_expr}, Quote{
-    Act{Seq{Key{"if"}, expr, block, Option{Seq{Key{"else"}, Choice{block, if_expr}}}},
+    Act{Seq{Key{"if"}, "(", expr, ")", expr, Option{Seq{Key{"else"}, expr}}},
         Fusion{
-            Lambda{Tuple{Tuple{_, c, a, Tuple{}}}, QuasiQuote{If{UnQuote{c}, UnQuote{a}, none}}},
-            Lambda{Tuple{Tuple{_, c, a, Tuple{Tuple{_, b}}}}, QuasiQuote{If{UnQuote{c}, UnQuote{a}, UnQuote{b}}}}}}}}}
+            Lambda{Tuple{Tuple{_, _, c, _, a, Tuple{}}}, QuasiQuote{If{UnQuote{c}, UnQuote{a}, none}}},
+            Lambda{Tuple{Tuple{_, _, c, _, a, Tuple{Tuple{_, b}}}}, QuasiQuote{If{UnQuote{c}, UnQuote{a}, UnQuote{b}}}}}}}}}
 
 Apply{define_rule, Tuple{Quote{primary}, Quote{Choice{
     if_expr,
-    Act{Seq{Key{"while"}, expr, block},
-        Lambda{Tuple{Tuple{_, c, b}}, QuasiQuote{While{UnQuote{c}, UnQuote{b}}}}},
+    Act{Seq{Key{"while"}, "(", expr, ")", expr},
+        Lambda{Tuple{Tuple{_, _, c, _, b}}, QuasiQuote{While{UnQuote{c}, UnQuote{b}}}}},
     Act{Seq{Key{"handle"}, expr, Key{"with"}, union},
         Lambda{Tuple{Tuple{_, b, _, h}}, QuasiQuote{Handle{UnQuote{b}, UnQuote{h}}}}},
     Act{Seq{Key{"perform"}, unary},

@@ -44,6 +44,8 @@ M-expressions are expressions of this syntax too.
      - ``Apply{not, Tuple{a}}``
    * - ``a == b`` ``a != b`` ``a < b`` ``a <= b`` ``a > b`` ``a >= b``
      - ``Apply{eq, Tuple{a, b}}`` and ``ne`` ``lt`` ``le`` ``gt`` ``ge``
+   * - ``a :: b``
+     - ``Cons{a, b}``
    * - ``a + b`` ``a - b`` ``a * b`` ``a / b`` ``a % b``
      - ``Apply{add, Tuple{a, b}}`` and ``sub`` ``mul`` ``div`` ``mod``
    * - ``-a``
@@ -56,10 +58,10 @@ M-expressions are expressions of this syntax too.
      - ``_TypeOf{p, type}``
    * - ``{ e; ... }``
      - ``Do{e, ...}``
-   * - ``if c { ... } else { ... }``, ``if c { ... }``
-     - ``If{c, Do{...}, Do{...}}``, ``If{c, Do{...}, none}``
-   * - ``while c { ... }``
-     - ``While{c, Do{...}}``
+   * - ``if (c) a else b``, ``if (c) a``
+     - ``If{c, a, b}``, ``If{c, a, none}``
+   * - ``while (c) e``
+     - ``While{c, e}``
    * - ``handle e with h``
      - ``Handle{e, h}``
    * - ``perform e``
@@ -70,10 +72,18 @@ M-expressions are expressions of this syntax too.
      - ``Cons{a, Cons{b, ... Nil{}}}``, ``Nil{}``
 
 The rows are ordered from the loosest binding to the tightest.
-``|`` and ``->`` group to the right, ``+ - * / %`` group to the left
-and comparisons do not group. ``()`` groups an expression.
-``else if c { ... }`` is ``else { if c { ... } }``.
-Parameters ``p`` are patterns: unary expressions such as ``x``, ``1``, ``'none``, ``Cons{x, xs}`` or ``x @ int``.
+``|``, ``->`` and ``::`` group to the right, ``+ - * / %`` group to the left
+and comparisons do not group. ``::`` binds tighter than comparisons and looser than ``+ -``,
+so ``a + 1 :: b == c`` is ``Cons{a + 1, b} == c``. ``()`` groups an expression.
+
+The condition of ``if`` and ``while`` is in parentheses, and the body ``a``, ``b``, ``e`` is any expression;
+a block ``{ ... }`` is the usual body of several expressions.
+``else`` belongs to the nearest ``if`` that has no ``else``, so ``if (a) if (b) x else y`` is ``if (a) { if (b) x else y }``.
+``else if (c) ...`` is ``else`` followed by an ``if`` expression.
+An ``if`` is an expression: ``y = if (c) 1 else 2``.
+
+Parameters ``p`` are patterns: unary expressions such as ``x``, ``1``, ``'none``, ``Cons{x, xs}`` or ``x @ int``,
+and ``p :: q`` for ``Cons{p, q}``, e.g. ``(x :: xs) -> ...`` and ``f(x :: y :: rest) := ...``.
 
 Lexical rules:
 
