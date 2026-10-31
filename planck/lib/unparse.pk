@@ -1,0 +1,555 @@
+# unparse: print a syntax tree as text by reading the grammar that parses it
+# Copyright (C) 2026 nineties
+#
+# unparse(t) is a text that parses back to t with the rule expr.
+# The grammar is read from peg_sources (planck/peg.pk). An alternative of a rule
+#   Act{Seq{e1, e2, ...}, Lambda{Tuple{Tuple{l1, l2, ...}}, body}}
+# can be run backwards when body is a quasi-quotation (`Apply{add, Tuple{!a, !b}}`),
+# Quote{c}, a label, or Tuple{labels}. Such an alternative is a template that
+# a tree is matched against. The labels bind the subtrees, and the elements of the sequence
+# are printed in order: texts as they are, rules by unparse_as(rule, subtree).
+# An alternative of a stronger rule where a weaker rule is wanted is put in the parentheses
+# of the grammar: "(" e ")".
+
+use("base")
+use("list")
+use("string")
+use("table")
+use("pretty")
+
+bad := Bad{}
+is_bad(x) := is_mx(x) and head(x) == 'Bad
+is_mx(x) := typeof(x) == 'mexpr
+is_hole(p) := is_mx(p) and head(p) == 'Hole
+un_hole(x) := mexpr('Hole, Tuple{x})
+
+# === Templates ===
+
+# the number of nodes of a template that are not holes. Generic{h, args} matches any M-expression.
+un_spec(p) :=
+    if (not is_mx(p)) 2
+    else if (is_hole(p)) 0
+    else if (head(p) == 'Generic) 1
+    else foldl((n, a) -> n + un_spec(a), 2, args_of(p))
+
+holes_of(p) :=
+    if (not is_mx(p)) []
+    else if (is_hole(p)) [arg(p, 0)]
+    else concat_map(holes_of, args_of(p))
+
+args_tuple(t) := {
+    r := Tuple{}
+    i := 0
+    while (i < arity(t)) {
+        r = push(r, arg(t, i))
+        i = i + 1
+    }
+    r
+}
+
+# un_match(template, tree, env) binds the holes in the table env
+un_match(p, t, env) :=
+    if (is_hole(p)) {
+        table_set(env, arg(p, 0), t)
+        true
+    } else if (is_mx(p) and head(p) == 'Generic) {
+        if (is_mx(t)) {
+            table_set(env, arg(arg(p, 0), 0), head(t))
+            table_set(env, arg(arg(p, 1), 0), args_tuple(t))
+            true
+        } else false
+    } else if (is_mx(p)) {
+        is_mx(t) and head(t) == head(p) and arity(t) == arity(p) and un_match_args(p, t, 0, env)
+    } else p == t
+
+un_match_args(p, t, i, env) := {
+    ok := true
+    while (ok and i < arity(p)) {
+        ok = un_match(arg(p, i), arg(t, i), env)
+        i = i + 1
+    }
+    ok
+}
+
+# === Reading the actions of the grammar ===
+
+# the template of a quasi-quotation. A hole must be a label.
+quasi(p, labels) :=
+    if (not is_mx(p)) p
+    else if (head(p) == 'UnQuote) (if (label_ok(arg(p, 0), labels)) un_hole(arg(p, 0)) else bad)
+    else {
+        r := mexpr(head(p), Tuple{})
+        i := 0
+        while (not is_bad(r) and i < arity(p)) {
+            c := quasi(arg(p, i), labels)
+            r = if (is_bad(c)) bad else push(r, c)
+            i = i + 1
+        }
+        r
+    }
+
+label_ok(x, labels) := typeof(x) == 'symbol and x != '_ and member(x, labels)
+
+# Head{labels...} as a template
+vars_tmpl(h, tup, labels) := {
+    r := mexpr(h, Tuple{})
+    i := 0
+    while (not is_bad(r) and i < arity(tup)) {
+        v := arg(tup, i)
+        r = if (label_ok(v, labels)) push(r, un_hole(v)) else bad
+        i = i + 1
+    }
+    r
+}
+
+body_tmpl(b, labels) :=
+    if (typeof(b) == 'symbol) (if (label_ok(b, labels)) un_hole(b) else bad)
+    else if (not is_mx(b)) bad
+    else if (head(b) == 'QuasiQuote) quasi(arg(b, 0), labels)
+    else if (head(b) == 'Quote) arg(b, 0)
+    else if (head(b) == 'Do and arity(b) == 1) body_tmpl(arg(b, 0), labels)
+    else if (head(b) == 'Tuple) vars_tmpl('Tuple, b, labels)
+    else if (head(b) == 'Apply and arg(b, 0) == 'mexpr) mexpr_tmpl(arg(arg(b, 1), 0), arg(arg(b, 1), 1), labels)
+    else bad
+
+# mexpr(h, args) in an action
+mexpr_tmpl(h, args, labels) :=
+    if (is_mx(h) and head(h) == 'Quote and is_mx(args) and head(args) == 'Tuple) vars_tmpl(arg(h, 0), args, labels)
+    else if (label_ok(h, labels) and label_ok(args, labels)) Generic{un_hole(h), un_hole(args)}
+    else bad
+
+# the labels and the template of an action, as Tuple{labels, template} or Bad{}
+action_of(f, elems, is_seq) := {
+    n := length(elems)
+    if (is_mx(f) and head(f) == 'Apply and arg(f, 0) == 'peg_binop and n == 3) {
+        op := arg(arg(arg(f, 1), 0), 0)
+        Tuple{['a, '_, 'b], mexpr('Apply, Tuple{op, mexpr('Tuple, Tuple{un_hole('a), un_hole('b)})})}
+    } else if (is_mx(f) and head(f) == 'Lambda) {
+        pat := arg(arg(f, 0), 0)
+        labels := if (is_mx(pat) and head(pat) == 'Tuple and is_seq) args_of(pat)
+                  else if (typeof(pat) == 'symbol and not is_seq) [pat]
+                  else bad
+        if (is_bad(labels) or length(labels) != n) bad else {
+            tm := body_tmpl(arg(f, 1), labels)
+            if (is_bad(tm)) bad else Tuple{labels, tm}
+        }
+    } else bad
+}
+
+# === Constant texts ===
+# the text that an element always matches, such as "+", Tight{"("} or a rule like minus ::= Same{} "-"
+
+const_text(e, depth) :=
+    if (typeof(e) == 'string) e
+    else if (typeof(e) == 'symbol) {
+        src := table_get(peg_sources, e, none)
+        if (depth > 3 or not is_mx(src) or head(src) != 'Seq) bad else const_text(src, depth + 1)
+    } else if (not is_mx(e)) bad
+    else if (head(e) == 'Tight or head(e) == 'Key) arg(e, 0)
+    else if (head(e) == 'Same or head(e) == 'Not or head(e) == 'And or head(e) == 'Option or head(e) == 'Many) ""
+    else if (head(e) == 'Seq) {
+        r := ""
+        i := 0
+        while (not is_bad(r) and i < arity(e)) {
+            c := const_text(arg(e, i), depth)
+            r = if (is_bad(c)) bad else strcat(r, c)
+            i = i + 1
+        }
+        r
+    } else bad
+
+# the kind of a piece: 'tight sticks to the left, 'prefix to the right
+const_kind(e, i, n, text) :=
+    if (is_mx(e) and head(e) == 'Tight) 'tight
+    else if (i == 0 and n > 1 and strlen(text) > 0 and not is_ident_char(ord(text, 0))) 'prefix
+    else 'plain
+
+# ConstItem{text, kind} or ValItem{label, element}, or Bad{} when an element cannot be run backwards
+make_items(elems, labels, holes) := {
+    n := length(elems)
+    go := (Nil{}, _, _) -> []
+        | (e :: es, l :: ls, i) -> {
+            it := if (l == '_) {
+                    c := const_text(e, 0)
+                    if (is_bad(c)) bad else ConstItem{c, const_kind(e, i, n, c)}
+                } else if (member(l, holes)) ValItem{l, e}
+                else bad
+            rest := go(es, ls, i + 1)
+            if (is_bad(it) or is_bad(rest)) bad else it :: rest
+        }
+    items := go(elems, labels, 0)
+    if (is_bad(items)) bad
+    else if (all(h -> any(it -> head(it) == 'ValItem and arg(it, 0) == h, items), holes)) items
+    else bad
+}
+
+token_rule(r) := typeof(table_get(peg_sources, r, none)) == 'function
+
+# the rule of the last element when it is a rule of its own, or none. The alternative
+# runs on to the right as far as that rule does.
+tail_of(items) :=
+    if (items == []) none
+    else if (head(last(items)) == 'ValItem and typeof(arg(last(items), 1)) == 'symbol and not token_rule(arg(last(items), 1))) arg(last(items), 1)
+    else none
+
+# Alt{owner, order, template, items, tail}
+extract_act(owner, order, e, f) := {
+    is_seq := is_mx(e) and head(e) == 'Seq
+    elems := if (is_seq) args_of(e) else [e]
+    a := action_of(f, elems, is_seq)
+    if (is_bad(a)) bad else {
+        tm := arg(a, 1)
+        items := make_items(elems, arg(a, 0), holes_of(tm))
+        if (is_bad(items)) bad else Alt{owner, order, tm, items, tail_of(items)}
+    }
+}
+
+# "(" e ")" with any action: Paren{owner, inner rule, open, close}
+find_paren(owner, a) := {
+    if (is_mx(a) and head(a) == 'Act and is_mx(arg(a, 0)) and head(arg(a, 0)) == 'Seq and arity(arg(a, 0)) == 3) {
+        s := arg(a, 0)
+        x := arg(s, 1)
+        inner := if (typeof(x) == 'symbol) x
+                 else if (is_mx(x) and head(x) == 'Delimited1 and typeof(arg(x, 0)) == 'symbol) arg(x, 0)
+                 else none
+        if (typeof(arg(s, 0)) == 'string and typeof(arg(s, 2)) == 'string and inner != none)
+            Paren{owner, inner, arg(s, 0), arg(s, 2)}
+        else none
+    } else none
+}
+
+un_flat(src) := if (is_mx(src) and head(src) == 'Choice) concat_map(un_flat, args_of(src)) else [src]
+
+tok_types := {
+    t := table()
+    table_set(t, 'ident, 'symbol)
+    table_set(t, 'integer, 'int)
+    table_set(t, 'string, 'string)
+    t
+}
+
+# === The model of the grammar ===
+ug_version := -1
+ug_extra := []
+ug_stack := []
+ug_alts := []
+ug_links := table()
+ug_paren := none
+ug_reach := table()
+ug_cands := table()
+
+un_build() := {
+    alts := []
+    links := table()
+    paren := none
+    names := map(kv -> arg(kv, 0), sort((a, b) -> arg(a, 1) < arg(b, 1), table_items(peg_ids)))
+    each(r -> {
+        src := table_get(peg_sources, r, none)
+        if (is_mx(src) or typeof(src) == 'symbol) {
+            id := table_get(peg_ids, r, 0)
+            i := 0
+            each(a -> {
+                order := id * 100 + i
+                i = i + 1
+                if (paren == none) {
+                    p := find_paren(r, a)
+                    if (p != none) paren = p
+                }
+                if (typeof(a) == 'symbol) {
+                    target := table_get(peg_sources, a, none)
+                    if (typeof(target) == 'function) {
+                        ty := table_get(tok_types, a, none)
+                        if (ty != none) alts = Alt{r, order, Tok{a, ty}, [], none} :: alts
+                    } else if (target != none) table_set(links, r, a :: table_get(links, r, []))
+                } else if (is_mx(a) and head(a) == 'Act) {
+                    x := extract_act(r, order, arg(a, 0), arg(a, 1))
+                    if (not is_bad(x)) alts = x :: alts
+                }
+            }, un_flat(src))
+        }
+    }, names)
+    i := 0
+    each(x -> {
+        alts = Alt{arg(x, 0), 90000 + i, Custom{arg(x, 1), arg(x, 3)}, [], arg(x, 2)} :: alts
+        i = i + 1
+    }, ug_extra)
+    ug_alts = reverse(alts)
+    ug_links = links
+    ug_paren = paren
+    ug_reach = table()
+    ug_cands = table()
+    ug_version = peg_version
+}
+
+un_ensure() := if (ug_version != peg_version) un_build()
+
+alt_owner(a) := arg(a, 0)
+alt_order(a) := arg(a, 1)
+alt_tmpl(a) := arg(a, 2)
+alt_items(a) := arg(a, 3)
+alt_tail(a) := arg(a, 4)
+alt_spec(a) := if (is_tok(alt_tmpl(a))) 1 else if (is_custom(alt_tmpl(a))) arg(alt_tmpl(a), 0) else un_spec(alt_tmpl(a))
+is_tok(tm) := is_mx(tm) and head(tm) == 'Tok
+is_custom(tm) := is_mx(tm) and head(tm) == 'Custom
+
+reach_add(seen, r) := if (not set_has(seen, r)) {
+    set_add(seen, r)
+    each(x -> reach_add(seen, x), table_get(ug_links, r, []))
+}
+
+# the rules that rule r reaches by alternatives that are only a rule name
+un_reach(r) := {
+    c := table_get(ug_reach, r, none)
+    if (c != none) c else {
+        seen := set_new()
+        reach_add(seen, r)
+        table_set(ug_reach, r, seen)
+        seen
+    }
+}
+
+# an alternative is open when its last element is a rule that is looser than the rule of the alternative
+# (if (c) a else b ends with expr, which goes on to the right as far as it can)
+is_open(a) := alt_tail(a) != none and set_has(un_reach(alt_tail(a)), alt_owner(a)) and not set_has(un_reach(alt_owner(a)), alt_tail(a))
+
+# Cand{key, alt, wrapped}, the alternatives that can stand for rule r. The more concrete
+# template comes first. An alternative of a stronger rule needs parentheses.
+un_cands(r) := {
+    c := table_get(ug_cands, r, none)
+    if (c != none) c else {
+        rr := un_reach(r)
+        wrap_ok := ug_paren != none and set_has(rr, arg(ug_paren, 0))
+        uni := if (ug_paren == none) set_new() else un_reach(arg(ug_paren, 1))
+        out := []
+        each(a -> {
+            o := alt_owner(a)
+            sp := alt_spec(a)
+            if (set_has(rr, o) and (not is_open(a) or set_has(rr, alt_tail(a)))) out = Cand{(sp * 2 + 1) * 100000 - alt_order(a), a, false} :: out
+            else if (wrap_ok and sp > 0 and set_has(uni, o)) out = Cand{sp * 2 * 100000 - alt_order(a), a, true} :: out
+        }, ug_alts)
+        res := sort((x, y) -> arg(x, 0) > arg(y, 0), out)
+        table_set(ug_cands, r, res)
+        res
+    }
+}
+
+# === Printing ===
+
+ident_ok(name) := {
+    ok := strlen(name) > 0 and is_ident_start(ord(name, 0)) and not table_get(peg_reserved, name, false)
+    i := 1
+    while (ok and i < strlen(name)) {
+        ok = is_ident_char(ord(name, i))
+        i = i + 1
+    }
+    ok
+}
+
+print_tok(rule, t) :=
+    if (rule == 'ident) (if (ident_ok(symname(t))) symname(t) else none)
+    else if (rule == 'integer) int_to_str(t)
+    else quote_str(t)
+
+# pieces are strings, T{s} (sticks to the left) and P{s} (sticks to the right)
+piece_text := (T{s}) -> s
+            | (P{s}) -> s
+            | (s) -> s
+
+is_bracket(s) := s == "(" or s == "[" or s == "{"
+no_space_before(s) := s == ")" or s == "]" or s == "}" or s == "," or s == ";"
+
+un_render(ps) := {
+    out := ""
+    glue := true
+    pfx := ""
+    each(p -> {
+        s := piece_text(p)
+        if (strlen(s) > 0) {
+            sp := not (glue or (is_mx(p) and head(p) == 'T) or no_space_before(s))
+            if (glue and pfx == "-" and is_digit(ord(s, 0))) sp = true
+            if (sp) out = strcat(out, " ")
+            out = strcat(out, s)
+            pfx = if (is_mx(p) and head(p) == 'P) s else ""
+            glue = pfx != "" or is_bracket(s)
+        }
+    }, ps)
+    out
+}
+
+list_pieces(inner, sep, v) := {
+    acc := []
+    ok := true
+    i := 0
+    while (ok and i < arity(v)) {
+        s := unparse_pp(inner, arg(v, i))
+        if (s == none) ok = false
+        else {
+            if (i > 0 and strlen(sep) > 0) acc = sep :: acc
+            acc = s :: acc
+        }
+        i = i + 1
+    }
+    if (ok) reverse(acc) else none
+}
+
+val_pieces(elem, v) :=
+    if (typeof(elem) == 'symbol) {
+        s := unparse_pp(elem, v)
+        if (s == none) none else [s]
+    } else if (not is_mx(elem)) none
+    else if (head(elem) == 'Delimited or head(elem) == 'Delimited1 or head(elem) == 'Many) {
+        inner := arg(elem, 0)
+        sep := if (head(elem) == 'Many) "" else const_text(arg(elem, 1), 0)
+        if (typeof(inner) != 'symbol or is_bad(sep) or not (is_mx(v) and head(v) == 'Tuple)) none
+        else if (head(elem) == 'Delimited1 and arity(v) == 0) none
+        else list_pieces(inner, sep, v)
+    } else if (head(elem) == 'Option and typeof(arg(elem, 0)) == 'symbol and is_mx(v) and head(v) == 'Tuple) {
+        if (arity(v) == 0) []
+        else if (arity(v) == 1) val_pieces(arg(elem, 0), arg(v, 0))
+        else none
+    } else none
+
+item_pieces := (ConstItem{text, kind}, env) -> {
+                   if (text == "") [] else if (kind == 'tight) [T{text}] else if (kind == 'prefix) [P{text}] else [text]
+               }
+             | (ValItem{label, elem}, env) -> val_pieces(elem, table_get(env, label, none))
+
+items_pieces := (Nil{}, env) -> []
+              | (it :: rest, env) -> {
+                    ps := item_pieces(it, env)
+                    qs := if (ps == none) none else items_pieces(rest, env)
+                    if (ps == none or qs == none) none else append(ps, qs)
+                }
+
+# a quick test that the head and the constants just below the head of the template fit t
+fits(p, t) := {
+    ok := true
+    if (not is_mx(p)) ok = p == t
+    else if (head(p) == 'Hole) ok = true
+    else if (head(p) == 'Generic) ok = is_mx(t)
+    else {
+        ok = is_mx(t) and head(t) == head(p) and arity(t) == arity(p)
+        i := 0
+        while (ok and i < arity(p)) {
+            q := arg(p, i)
+            if (not is_mx(q)) ok = q == arg(t, i)
+            else if (head(q) != 'Hole) ok = is_mx(arg(t, i)) and head(arg(t, i)) == head(q)
+            i = i + 1
+        }
+    }
+    ok
+}
+
+try_alt(a, wrapped, t) :=
+    if (is_tok(alt_tmpl(a)) or is_custom(alt_tmpl(a)) or fits(alt_tmpl(a), t)) try_fit(a, wrapped, t) else none
+
+try_fit(a, wrapped, t) := {
+    env := table()
+    tm := alt_tmpl(a)
+    if (is_tok(tm)) {
+        if (typeof(t) == arg(tm, 1)) print_tok(arg(tm, 0), t) else none
+    } else if (is_custom(tm)) {
+        txt := arg(tm, 1)(t)
+        if (txt == none) none
+        else if (wrapped) strcat(arg(ug_paren, 2), strcat(txt, arg(ug_paren, 3)))
+        else txt
+    } else if (un_match(tm, t, env)) {
+        ps := items_pieces(alt_items(a), env)
+        if (ps == none) none
+        else if (wrapped) strcat(arg(ug_paren, 2), strcat(un_render(ps), arg(ug_paren, 3)))
+        else un_render(ps)
+    } else none
+}
+
+try_cands := (Nil{}, t) -> none
+           | (c :: cs, t) -> {
+                s := try_alt(arg(c, 1), arg(c, 2), t)
+                if (s == none) try_cands(cs, t) else s
+             }
+
+# unparse_pp(rule, t) is the text of t as the rule, or none
+unparse_pp(r, t) :=
+    if (typeof(table_get(peg_sources, r, none)) == 'function) {
+        ty := table_get(tok_types, r, none)
+        if (ty != none and typeof(t) == ty) print_tok(r, t) else none
+    } else if (any(e -> arg(e, 0) == r and arg(e, 1) == t, ug_stack)) none
+    else {
+        # a rule that passes its tree on to itself (identity actions) would go round forever
+        ug_stack = Tuple{r, t} :: ug_stack
+        res := try_cands(un_cands(r), t)
+        ug_stack = drop(ug_stack, 1)
+        res
+    }
+
+# unparse_try(rule, t) is a text that the rule parses to t, or none when t has no such text
+unparse_try(r, t) := {
+    un_ensure()
+    unparse_pp(r, t)
+}
+
+# unparse_as(rule, t) is like unparse_try and stops the program when there is no text
+unparse_as(r, t) := {
+    s := unparse_try(r, t)
+    if (s == none) panic(strcat("unparse: cannot print ", show(t))) else s
+}
+
+unparse(t) := unparse_as('expr, t)
+
+# unparse_custom(owner, spec, tail, f) adds an alternative of the rule owner that is not
+# written in the grammar (what cannot be run backwards, or a layout). f(t) is the text of t or none.
+# spec ranks it against the templates of the grammar: the number of the nodes of a template that are not holes.
+# tail is the rule that the text runs on to the right as far as, or none.
+unparse_custom(owner, spec, tail, f) := {
+    ug_extra = append(ug_extra, [Tuple{owner, spec, tail, f}])
+    ug_version = -1
+}
+
+# === Layout of the syntax of planck ===
+# { ... } puts every expression on its own line, indented by 4 spaces.
+# if (c) a else b is used for If instead of c ? a : b.
+
+indent(s) := strcat("    ", join("\n    ", split(s, "\n")))
+
+# the texts of the arguments of t as expr, or none
+arg_texts(t) := {
+    acc := []
+    ok := true
+    i := 0
+    while (ok and i < arity(t)) {
+        s := unparse_pp('expr, arg(t, i))
+        if (s == none) ok = false else acc = s :: acc
+        i = i + 1
+    }
+    if (ok) reverse(acc) else none
+}
+
+print_do(t) :=
+    if (not (is_mx(t) and head(t) == 'Do)) none
+    else {
+        ss := arg_texts(t)
+        if (ss == none) none
+        else if (arity(t) == 0) "{}"
+        else strcat("{\n", strcat(join("\n", map(indent, ss)), "\n}"))
+    }
+
+# an If without else inside (not in { }) takes the else of an outer If
+has_open_if(t) :=
+    if (not is_mx(t) or head(t) == 'Do) false
+    else if (head(t) == 'If and arity(t) == 3 and arg(t, 2) == none) true
+    else any(has_open_if, args_of(t))
+
+print_if(t) :=
+    if (not (is_mx(t) and head(t) == 'If and arity(t) == 3)) none
+    else {
+        c := unparse_pp('expr, arg(t, 0))
+        a := unparse_pp('expr, arg(t, 1))
+        b := if (arg(t, 2) == none) "" else unparse_pp('expr, arg(t, 2))
+        if (c == none or a == none or b == none) none
+        else {
+            a2 := if (b != "" and has_open_if(arg(t, 1))) strcat("(", strcat(a, ")")) else a
+            strcat("if (", strcat(c, strcat(") ", strcat(a2, if (b == "") "" else strcat(" else ", b)))))
+        }
+    }
+
+unparse_custom('primary, 3, none, print_do)
+unparse_custom('primary, 3, 'expr, print_if)
