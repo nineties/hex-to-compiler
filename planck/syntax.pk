@@ -22,6 +22,7 @@ Apply{table_set, Tuple{peg_reserved, "for", true}}
 Apply{table_set, Tuple{peg_reserved, "in", true}}
 Apply{table_set, Tuple{peg_reserved, "return", true}}
 Apply{table_set, Tuple{peg_reserved, "break", true}}
+Apply{table_set, Tuple{peg_reserved, "continue", true}}
 Apply{table_set, Tuple{peg_reserved, "fun", true}}
 
 " identifier: [A-Za-z_][A-Za-z0-9_]* except the peg_reserved words "
@@ -776,6 +777,8 @@ Def{peg_ret_handler, QuasiQuote{Lambda{Tuple{Return{v}, k}, v}}}
 
 Def{peg_break_handler, QuasiQuote{Lambda{Tuple{Break{}, k}, none}}}
 
+Def{peg_continue_handler, QuasiQuote{Lambda{Tuple{Continue{}, k}, none}}}
+
 Def{
     peg_catches,
     Lambda{
@@ -854,11 +857,16 @@ Def{peg_nret, 0}
 
 Def{peg_nbrk, 0}
 
+Def{peg_ncnt, 0}
+
 Def{peg_parse_plain, peg_parse}
 
 Def{
     peg_parse,
-    Lambda{Tuple{r, s}, Do{Set{peg_nret, 0}, Set{peg_nbrk, 0}, Apply{peg_parse_plain, Tuple{r, s}}}}}
+    Lambda{
+        Tuple{r, s},
+        Do{Set{peg_nret, 0}, Set{peg_nbrk, 0}, Set{peg_ncnt, 0}, Apply{peg_parse_plain, Tuple{r, s}}}
+    }}
 
 Def{
     peg_wrap,
@@ -892,7 +900,19 @@ Def{
         If{Apply{gt, Tuple{peg_nbrk, 0}}, Apply{peg_wrap, Tuple{loop, Quote{Break}, peg_break_handler}}, loop}
     }}
 
-Def{peg_while, Lambda{Tuple{c, b}, Apply{peg_loop, Tuple{QuasiQuote{While{UnQuote{c}, UnQuote{b}}}}}}}
+Def{
+    peg_body,
+    Lambda{
+        Tuple{b},
+        If{Apply{gt, Tuple{peg_ncnt, 0}}, Apply{peg_wrap, Tuple{b, Quote{Continue}, peg_continue_handler}}, b}
+    }}
+
+Def{
+    peg_while,
+    Lambda{
+        Tuple{c, b},
+        Apply{peg_loop, Tuple{QuasiQuote{While{UnQuote{c}, UnQuote{Apply{peg_body, Tuple{b}}}}}}}
+    }}
 
 Def{
     peg_for_tree,
@@ -900,7 +920,14 @@ Def{
         Tuple{x, xs, b},
         Apply{
             peg_loop,
-            Tuple{QuasiQuote{Apply{peg_for, Tuple{UnQuote{xs}, Lambda{Tuple{UnQuote{x}}, UnQuote{b}}}}}}
+            Tuple{
+                QuasiQuote{
+                    Apply{
+                        peg_for,
+                        Tuple{UnQuote{xs}, Lambda{Tuple{UnQuote{x}}, UnQuote{Apply{peg_body, Tuple{b}}}}}
+                    }
+                }
+            }
         }
     }}
 
@@ -949,6 +976,10 @@ Def{
 Def{
     peg_break,
     Lambda{Tuple{}, Do{Set{peg_nbrk, Apply{add, Tuple{peg_nbrk, 1}}}, QuasiQuote{Perform{Break{}}}}}}
+
+Def{
+    peg_continue,
+    Lambda{Tuple{}, Do{Set{peg_ncnt, Apply{add, Tuple{peg_ncnt, 1}}}, QuasiQuote{Perform{Continue{}}}}}}
 
 Def{
     peg_block,
@@ -1025,6 +1056,7 @@ Apply{
                     Lambda{Tuple{Tuple{_, v}}, Do{Apply{peg_return, Tuple{v}}}}
                 },
                 Act{Seq{Key{"break"}}, Lambda{Tuple{Tuple{_}}, Do{Apply{peg_break, Tuple{}}}}},
+                Act{Seq{Key{"continue"}}, Lambda{Tuple{Tuple{_}}, Do{Apply{peg_continue, Tuple{}}}}},
                 Act{
                     Seq{Key{"for"}, "(", pattern, Key{"in"}, expr, ")", expr},
                     Lambda{Tuple{Tuple{_, _, x, _, xs, _, b}}, Do{Apply{peg_for_tree, Tuple{x, xs, b}}}}

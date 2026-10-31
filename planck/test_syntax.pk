@@ -329,6 +329,13 @@ check(tree("f() := { g() := return 1; 2 }"), `Def{f, Lambda{Tuple{}, Do{Def{g, L
 check(tree("f() := for (x in xs) return x"), `Def{f, Lambda{Tuple{}, Handle{Apply{peg_for, Tuple{xs, Lambda{Tuple{x}, Perform{Return{x}}}}}, !rh}}})
 check(tree("f() := match x { 1 -> return 2; _ -> 3 }"), `Def{f, Lambda{Tuple{}, Handle{Apply{Fusion{Lambda{Tuple{1}, Perform{Return{2}}}, Lambda{Tuple{_}, 3}}, Tuple{x}}, !rh}}})
 check(tree("f() := '(return 1)"), 'Def{f, Lambda{Tuple{}, Quote{Perform{Return{1}}}}})
+ch := 'Lambda{Tuple{Continue{}, k}, none}
+check(tree("continue"), 'Perform{Continue{}})
+check(tree("while (a) { continue }"), `While{a, Handle{Do{Perform{Continue{}}}, !ch}})
+check(tree("for (x in xs) continue"), `Apply{peg_for, Tuple{xs, Lambda{Tuple{x}, Handle{Perform{Continue{}}, !ch}}}})
+check(tree("while (a) { if (b) continue else break }"), `Handle{While{a, Handle{Do{If{b, Perform{Continue{}}, Perform{Break{}}}}, !ch}}, !bh})
+check(tree("while (a) { for (x in xs) continue }"), `While{a, Do{Apply{peg_for, Tuple{xs, Lambda{Tuple{x}, Handle{Perform{Continue{}}, !ch}}}}}})
+check(tree("while (a) b"), 'While{a, b})
 check(head(tree("for x in xs f(x)")), 'SyntaxError)
 check(head(tree("for (x in xs)")), 'SyntaxError)
 check(head(tree("for (x xs) x")), 'SyntaxError)
@@ -377,6 +384,78 @@ for (i in range(0, 3)) {
     }
 }
 check(pairs, 3)
+# continue goes on to the next round of while and for
+odd := 0
+i := 0
+while (i < 10) {
+    i = i + 1
+    if (i % 2 == 0) continue
+    odd = odd + i
+}
+check(odd, 25)
+evens := Nil{}
+for (x in range(0, 8)) {
+    if (x % 2 == 1) continue
+    evens = Cons{x, evens}
+}
+check(evens, [6, 4, 2, 0])
+tsum := 0
+for (Tuple{a, b} in [Tuple{1, 2}, Tuple{0, 5}, Tuple{3, 4}]) {
+    if (a == 0) continue
+    tsum = tsum + a * b
+}
+check(tsum, 14)
+# continue goes on in the inner loop only
+cnt := 0
+for (i in range(0, 3)) {
+    for (j in range(0, 4)) {
+        if (j == 1) continue
+        cnt = cnt + 1
+    }
+    cnt = cnt + 100
+}
+check(cnt, 3 * 100 + 3 * 3)
+# the code after the inner loop runs even when the inner loop continues in its last round
+cnt = 0
+i = 0
+while (i < 3) {
+    i = i + 1
+    j := 0
+    while (j < 3) {
+        j = j + 1
+        continue
+        cnt = cnt + 1000
+    }
+    cnt = cnt + 1
+}
+check(cnt, 3)
+# continue and break in one loop
+k := 0
+log := 0
+while (true) {
+    k = k + 1
+    if (k > 8) break
+    if (k % 3 != 0) continue
+    log = log + k
+}
+check(log, 9)
+# continue under match and in a function that has a return
+skip_neg(xs) := {
+    r := Nil{}
+    for (x in xs) {
+        match x { n if n < 0 -> continue; _ -> none }
+        if (x == 99) return r
+        r = Cons{x, r}
+    }
+    r
+}
+check(skip_neg([1, -2, 3, 99, 4]), [3, 1])
+check(skip_neg([-1, 5]), [5])
+# a continue in a function called from the body belongs to that function's own loop
+f_in() := { t := 0; for (x in [1, 2, 3]) { if (x == 2) continue; t = t + x }; t }
+w := 0
+for (x in [1, 2]) { if (x == 1) continue; w = w + f_in() }
+check(w, 4)
 # return leaves the function, from inside loops
 first_pair(xs) := {
     for (a in xs) {

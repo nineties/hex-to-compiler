@@ -68,8 +68,8 @@ M-expressions are expressions of this syntax too.
      - ``While{c, e}``
    * - ``for (p in e) a``
      - ``Apply{peg_for, Tuple{e, Lambda{Tuple{p}, a}}}``
-   * - ``return e``, ``return``, ``break``
-     - ``Perform{Return{e}}``, ``Perform{Return{none}}``, ``Perform{Break{}}``
+   * - ``return e``, ``return``, ``break``, ``continue``
+     - ``Perform{Return{e}}``, ``Perform{Return{none}}``, ``Perform{Break{}}``, ``Perform{Continue{}}``
    * - ``match e { p -> a; ... }``
      - ``Apply{Fusion{Lambda{Tuple{p}, a}, ...}, Tuple{e}}``
    * - ``match e { p if c -> a; ... }``
@@ -116,6 +116,9 @@ and has the value ``none``. The variables of ``a`` outside the loop are shared, 
 ``break`` ends the innermost ``while`` or ``for`` that contains it. They are effects:
 the function is translated to ``Handle{body, (Return{v}, k) -> v}`` when its body has a ``return``,
 and the loop to ``Handle{loop, (Break{}, k) -> none}`` when its body has a ``break``.
+``continue`` goes on to the next round of the innermost ``while`` or ``for`` that contains it:
+the body of the loop is translated to ``Handle{body, (Continue{}, k) -> none}`` when it has a ``continue``.
+A ``continue`` outside of a loop stops the program with ``unhandled effect: Continue{}``.
 A ``return`` in a ``for`` body or in an arm of ``match`` belongs to the function around them,
 and one in a function written inside belongs to that function.
 
@@ -132,7 +135,7 @@ and ``p :: q`` for ``Cons{p, q}``, e.g. ``(x :: xs) -> ...`` and ``f(x :: y :: r
 Lexical rules:
 
 * identifiers are ``[A-Za-z_][A-Za-z0-9_]*`` except the reserved words
-  ``if else while and or handle with perform match record for in return break fun``.
+  ``if else while and or handle with perform match record for in return break continue fun``.
 * integers are decimal (``10``, ``-3``), ``0x1f``, ``0o17`` or ``0b101``.
 * strings are ``"..."`` in one line with the escapes ``\a \b \t \n \v \f \r \" \' \\``.
   ``\(e)`` in a string embeds the value of the expression ``e``, which may contain strings.
