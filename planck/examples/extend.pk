@@ -1,0 +1,34 @@
+# Extending the syntax by grammar declarations
+
+# for i in a..b { ... }
+primary ::= 'for i:ident 'in a:add_expr ".." b:add_expr body:block {
+    `Do{Def{!i, !a}, While{Apply{le, Tuple{!i, !b}}, Do{!body, Set{!i, Apply{add, Tuple{!i, 1}}}}}}
+} | ...
+
+for i in 1..5 { put("square of "); print(i); put(" = "); println(i * i) }
+
+# x |> f is f(x), left associative
+union ::= x:union "|>" f:arrow { `Apply{!f, Tuple{!x}} } | ...
+
+double(x) := 2 * x
+3 |> double |> double |> println
+
+# A calculator. The actions compute the values instead of building trees.
+# Left recursion makes - and / left associative.
+calc_expr ::= a:calc_expr "+" b:calc_term { a + b }
+            | a:calc_expr "-" b:calc_term { a - b }
+            | calc_term
+calc_term ::= a:calc_term "*" b:calc_atom { a * b }
+            | a:calc_term "/" b:calc_atom { a / b }
+            | calc_atom
+calc_atom ::= integer | "(" e:calc_expr ")" { e }
+
+# peg_parse(rule, s) returns Tuple{value, rest of s}
+calc(s) := {
+    r := peg_parse('calc_expr, s)
+    if arg(r, 1) == "" { arg(r, 0) } else { Error{"unexpected", arg(r, 1)} }
+}
+println(calc("1 + 2 * (10 - 4) / 3"))
+println(calc("100 - 20 - 3"))
+println(calc("2 * (3 + 4"))
+println(calc(")"))
