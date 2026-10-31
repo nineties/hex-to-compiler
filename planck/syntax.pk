@@ -274,6 +274,7 @@ Apply{define_rule, Tuple{Quote{primary}, Quote{Choice{
     Act{Seq{Key{"perform"}, unary},
         Lambda{Tuple{Tuple{_, v}}, QuasiQuote{Perform{UnQuote{v}}}}},
     block,
+    embed,
     Act{Seq{ident, Tight{"{"}, Delimited{expr, ","}, "}"},
         Lambda{Tuple{Tuple{h, _, args, _}}, Apply{mexpr, Tuple{h, args}}}},
     Act{Seq{istr_open, Many{Seq{istr_text, istr_hole, expr, "}"}}, istr_text, istr_close},
@@ -1119,6 +1120,33 @@ Apply{
             }
         }
     }}
+
+" === Embedded text of a rule === "
+" name{| text |} reads the text by the rule name when the expression is parsed. "
+" The rule decides where the text ends, and |} must follow it. "
+" The value is the value of the rule as a constant. "
+
+Def{peg_tok_embed, Lambda{Tuple{p}, Do{
+    Set{p, Apply{peg_skip_ws, Tuple{p}}},
+    Def{q, p},
+    Def{r, none},
+    Def{v, none},
+    If{Apply{peg_is_alpha, Tuple{Apply{peg_char_at, Tuple{p}}}}, Do{
+        While{Apply{peg_is_alnum, Tuple{Apply{peg_char_at, Tuple{q}}}}, Set{q, Apply{peg_inc, Tuple{q}}}},
+        If{If{Apply{eq, Tuple{Apply{peg_char_at, Tuple{q}}, 123}}, Apply{eq, Tuple{Apply{peg_char_at, Tuple{Apply{peg_inc, Tuple{q}}}}, 124}}, false}, Do{
+            Set{r, Apply{intern, Tuple{Apply{substr, Tuple{peg_src, p, q}}}}},
+            If{Apply{eq, Tuple{Apply{table_get, Tuple{peg_ids, r, none}}, none}}, Apply{peg_fail, Tuple{p}}, Do{
+                Set{q, Apply{peg_call_rule, Tuple{r, Apply{add, Tuple{q, 2}}}}},
+                If{Apply{lt, Tuple{q, 0}}, -1, Do{
+                    Set{v, peg_pv},
+                    Set{q, Apply{peg_lit, Tuple{"|}", Apply{peg_skip_ws, Tuple{q}}}}},
+                    If{Apply{lt, Tuple{q, 0}}, -1, Do{
+                        Set{peg_pv, Apply{mexpr, Tuple{Quote{Quote}, Tuple{v}}}},
+                        q}}}}}}},
+            Apply{peg_fail, Tuple{p}}}},
+        Apply{peg_fail, Tuple{p}}}}}}
+
+Apply{define_rule, Tuple{Quote{embed}, peg_tok_embed}}
 
 " === Switch to the new syntax === "
 Def{parse_mexpr, parse}
