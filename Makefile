@@ -10,6 +10,8 @@ SASM_LIBS	:= $(wildcard sasm/lib/*.sv)
 SASM_EXAMPLE_SOURCES := $(wildcard sasm/examples/*.sv)
 SASM_EXAMPLE_TARGETS := $(SASM_EXAMPLE_SOURCES:%.sv=%)
 
+PLANCK_EXAMPLES := $(wildcard planck/examples/*.pk)
+
 PLISP := $(shell if [ -f ./plisp2 ]; then echo "./plisp2"; else echo "./pforth < plisp.fs"; fi)
 
 default:\
@@ -38,12 +40,22 @@ planck0: planck0.sv plisp2 $(SASM_LIBS)
 	-mv tmp-$@ $@
 	-chmod +x $@
 
-.PHONY: clean test
+.PHONY: clean test test-planck0
 clean:
 	rm -f pforth
 	rm -f plisp2
+	rm -f planck0
 	rm -f $(ASM_EXAMPLE_TARGETS)
 	rm -f $(SASM_EXAMPLE_TARGETS)
 
 test: pforth plisp.fs $(shell find plisp -name "*.lisp")
 	./pforth < plisp.fs plisp/test.lisp
+
+# run tests of planck0 and compare outputs of examples with *.out
+test-planck0: planck0
+	./planck0 planck/test.pk
+	@for f in $(PLANCK_EXAMPLES); do \
+		./planck0 $$f > tmp-example.out || exit 1; \
+		diff -u $${f%.pk}.out tmp-example.out || exit 1; \
+		echo "$$f: ok"; \
+	done; rm -f tmp-example.out

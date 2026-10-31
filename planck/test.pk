@@ -1,0 +1,258 @@
+" tests for planck0 "
+" Copyright (C) 2026 nineties "
+
+" check{Quote{expr}, expected} evaluates expr and compares it with expected. "
+
+Def{passed, 0}
+Def{failed, 0}
+
+Def{check, Lambda{Tuple{e, expected}, Do{
+    Def{actual, Apply{eval, Tuple{e}}},
+    If{Apply{eq, Tuple{actual, expected}},
+        Set{passed, Apply{add, Tuple{passed, 1}}},
+        Do{
+            Set{failed, Apply{add, Tuple{failed, 1}}},
+            Apply{put, Tuple{"Test failed: expected "}},
+            Apply{print, Tuple{expected}},
+            Apply{put, Tuple{" but got "}},
+            Apply{print, Tuple{actual}},
+            Apply{put, Tuple{" for "}},
+            Apply{println, Tuple{e}}
+            }}
+    }}}
+
+" === Atoms === "
+Apply{check, Tuple{Quote{1}, 1}}
+Apply{check, Tuple{Quote{-3}, Apply{sub, Tuple{0, 3}}}}
+Apply{check, Tuple{Quote{0x1f}, 31}}
+Apply{check, Tuple{Quote{0b101}, 5}}
+Apply{check, Tuple{Quote{"abc"}, "abc"}}
+Apply{check, Tuple{Quote{true}, Quote{true}}}
+Apply{check, Tuple{Quote{none}, Quote{none}}}
+
+" === Arithmetic and comparison === "
+Apply{check, Tuple{Quote{Apply{add, Tuple{1, 2}}}, 3}}
+Apply{check, Tuple{Quote{Apply{sub, Tuple{1, 5}}}, -4}}
+Apply{check, Tuple{Quote{Apply{mul, Tuple{-6, 7}}}, -42}}
+Apply{check, Tuple{Quote{Apply{div, Tuple{7, 2}}}, 3}}
+Apply{check, Tuple{Quote{Apply{div, Tuple{-7, 2}}}, -3}}
+Apply{check, Tuple{Quote{Apply{mod, Tuple{7, 3}}}, 1}}
+Apply{check, Tuple{Quote{Apply{mod, Tuple{-7, 3}}}, -1}}
+Apply{check, Tuple{Quote{Apply{lt, Tuple{-1, 0}}}, true}}
+Apply{check, Tuple{Quote{Apply{le, Tuple{2, 2}}}, true}}
+Apply{check, Tuple{Quote{Apply{gt, Tuple{2, 2}}}, false}}
+Apply{check, Tuple{Quote{Apply{ge, Tuple{3, 2}}}, true}}
+Apply{check, Tuple{Quote{Apply{eq, Tuple{"abc", "abc"}}}, true}}
+Apply{check, Tuple{Quote{Apply{eq, Tuple{"abc", "abd"}}}, false}}
+Apply{check, Tuple{Quote{Apply{ne, Tuple{1, 2}}}, true}}
+Apply{check, Tuple{Quote{Apply{not, Tuple{false}}}, true}}
+Apply{check, Tuple{Quote{Apply{not, Tuple{0}}}, false}}
+
+" === Def, Set, Do, If, While === "
+Def{x, 10}
+Apply{check, Tuple{Quote{x}, 10}}
+Apply{check, Tuple{Quote{Set{x, 20}}, 20}}
+Apply{check, Tuple{Quote{x}, 20}}
+Apply{check, Tuple{Quote{Do{}}, none}}
+Apply{check, Tuple{Quote{Do{1, 2, 3}}, 3}}
+Apply{check, Tuple{Quote{If{true, 1, 2}}, 1}}
+Apply{check, Tuple{Quote{If{false, 1, 2}}, 2}}
+Apply{check, Tuple{Quote{If{0, 1, 2}}, 1}}
+Apply{check, Tuple{Quote{Do{
+    Def{i, 0},
+    Def{s, 0},
+    While{Apply{lt, Tuple{i, 10}}, Do{
+        Set{s, Apply{add, Tuple{s, i}}},
+        Set{i, Apply{add, Tuple{i, 1}}}}},
+    s}}, 45}}
+Apply{check, Tuple{Quote{While{false, 1}}, none}}
+
+" Def in a block is local to the block "
+Def{y, 1}
+Apply{check, Tuple{Quote{If{true, Do{Def{y, 2}, y}, 0}}, 2}}
+Apply{check, Tuple{Quote{y}, 1}}
+
+" === Lambda and closures === "
+Def{inc, Lambda{Tuple{n}, Apply{add, Tuple{n, 1}}}}
+Apply{check, Tuple{Quote{Apply{inc, Tuple{41}}}, 42}}
+Apply{check, Tuple{Quote{Apply{Lambda{Tuple{}, 7}, Tuple{}}}, 7}}
+Apply{check, Tuple{Quote{Apply{Lambda{Tuple{a, b, c}, Tuple{c, b, a}}, Tuple{1, 2, 3}}}, Tuple{3, 2, 1}}}
+
+Def{make_adder, Lambda{Tuple{n}, Lambda{Tuple{m}, Apply{add, Tuple{n, m}}}}}
+Def{add10, Apply{make_adder, Tuple{10}}}
+Apply{check, Tuple{Quote{Apply{add10, Tuple{5}}}, 15}}
+
+" closures share variables "
+Def{make_counter, Lambda{Tuple{}, Do{
+    Def{c, 0},
+    Lambda{Tuple{}, Set{c, Apply{add, Tuple{c, 1}}}}}}}
+Def{counter, Apply{make_counter, Tuple{}}}
+Apply{counter, Tuple{}}
+Apply{counter, Tuple{}}
+Apply{check, Tuple{Quote{Apply{counter, Tuple{}}}, 3}}
+Apply{check, Tuple{Quote{Apply{Apply{make_counter, Tuple{}}, Tuple{}}}, 1}}
+
+" three levels of nesting "
+Apply{check, Tuple{Quote{Apply{Apply{Apply{
+    Lambda{Tuple{a}, Lambda{Tuple{b}, Lambda{Tuple{c},
+        Apply{sub, Tuple{Apply{mul, Tuple{a, b}}, c}}}}},
+    Tuple{3}}, Tuple{4}}, Tuple{5}}}, 7}}
+
+" === Recursion === "
+Def{fact, Fusion{
+    Lambda{Tuple{0}, 1},
+    Lambda{Tuple{n}, Apply{mul, Tuple{n, Apply{fact, Tuple{Apply{sub, Tuple{n, 1}}}}}}}}}
+Apply{check, Tuple{Quote{Apply{fact, Tuple{10}}}, 3628800}}
+
+" mutual recursion of global functions "
+Def{is_even, Fusion{Lambda{Tuple{0}, true}, Lambda{Tuple{n}, Apply{is_odd, Tuple{Apply{sub, Tuple{n, 1}}}}}}}
+Def{is_odd, Fusion{Lambda{Tuple{0}, false}, Lambda{Tuple{n}, Apply{is_even, Tuple{Apply{sub, Tuple{n, 1}}}}}}}
+Apply{check, Tuple{Quote{Apply{is_even, Tuple{10}}}, true}}
+Apply{check, Tuple{Quote{Apply{is_odd, Tuple{7}}}, true}}
+
+" local recursive function "
+Def{sum_to, Lambda{Tuple{n}, Do{
+    Def{loop, Lambda{Tuple{i, acc},
+        If{Apply{gt, Tuple{i, n}},
+            acc,
+            Apply{loop, Tuple{Apply{add, Tuple{i, 1}}, Apply{add, Tuple{acc, i}}}}}}},
+    Apply{loop, Tuple{1, 0}}}}}
+Apply{check, Tuple{Quote{Apply{sum_to, Tuple{100}}}, 5050}}
+" deep recursion (tail calls) "
+Apply{check, Tuple{Quote{Apply{sum_to, Tuple{40000}}}, 800020000}}
+
+" deep recursion (non-tail calls) "
+Def{count_down, Fusion{
+    Lambda{Tuple{0}, 0},
+    Lambda{Tuple{n}, Apply{add, Tuple{1, Apply{count_down, Tuple{Apply{sub, Tuple{n, 1}}}}}}}}}
+Apply{check, Tuple{Quote{Apply{count_down, Tuple{100000}}}, 100000}}
+
+" === Pattern matching === "
+Def{describe, Fusion{Fusion{Fusion{Fusion{Fusion{
+    Lambda{Tuple{0}, "zero"},
+    Lambda{Tuple{"hi"}, "greeting"}},
+    Lambda{Tuple{Quote{none}}, "none"}},
+    Lambda{Tuple{Point{x, _}}, x}},
+    Lambda{Tuple{_TypeOf{_, int}}, "int"}},
+    Lambda{Tuple{_}, "other"}}}
+Apply{check, Tuple{Quote{Apply{describe, Tuple{0}}}, "zero"}}
+Apply{check, Tuple{Quote{Apply{describe, Tuple{"hi"}}}, "greeting"}}
+Apply{check, Tuple{Quote{Apply{describe, Tuple{none}}}, "none"}}
+Apply{check, Tuple{Quote{Apply{describe, Tuple{Point{3, 4}}}}, 3}}
+Apply{check, Tuple{Quote{Apply{describe, Tuple{5}}}, "int"}}
+Apply{check, Tuple{Quote{Apply{describe, Tuple{"bye"}}}, "other"}}
+Apply{check, Tuple{Quote{Apply{describe, Tuple{Point{3}}}}, "other"}}
+
+" nested patterns bind variables in order "
+Def{swap_pair, Lambda{Tuple{Pair{Pair{a, b}, c}}, Pair{c, Pair{b, a}}}}
+Apply{check, Tuple{Quote{Apply{swap_pair, Tuple{Pair{Pair{1, 2}, 3}}}}, Quote{Pair{3, Pair{2, 1}}}}}
+Apply{check, Tuple{Quote{Apply{Lambda{Tuple{_TypeOf{s, string}}, s}, Tuple{"str"}}}, "str"}}
+
+" fusion selects by arity too "
+Def{arity_of, Fusion{Fusion{
+    Lambda{Tuple{}, 0},
+    Lambda{Tuple{a}, 1}},
+    Lambda{Tuple{a, b}, 2}}}
+Apply{check, Tuple{Quote{Apply{arity_of, Tuple{}}}, 0}}
+Apply{check, Tuple{Quote{Apply{arity_of, Tuple{1, 2}}}, 2}}
+
+" === Data === "
+Apply{check, Tuple{Quote{Tuple{1, Apply{add, Tuple{1, 1}}}}, Quote{Tuple{1, 2}}}}
+Apply{check, Tuple{Quote{Cons{1, Nil{}}}, Quote{Cons{1, Nil{}}}}}
+Apply{check, Tuple{Quote{Apply{head, Tuple{Quote{F{1, 2}}}}}, Quote{F}}}
+Apply{check, Tuple{Quote{Apply{arity, Tuple{Quote{F{1, 2}}}}}, 2}}
+Apply{check, Tuple{Quote{Apply{arg, Tuple{Quote{F{1, 2}}, 1}}}, 2}}
+Apply{check, Tuple{Quote{Apply{mexpr, Tuple{Quote{G}, Tuple{1, 2}}}}, Quote{G{1, 2}}}}
+Apply{check, Tuple{Quote{Apply{typeof, Tuple{1}}}, Quote{int}}}
+Apply{check, Tuple{Quote{Apply{typeof, Tuple{"s"}}}, Quote{string}}}
+Apply{check, Tuple{Quote{Apply{typeof, Tuple{Quote{a}}}}, Quote{symbol}}}
+Apply{check, Tuple{Quote{Apply{typeof, Tuple{Quote{F{}}}}}, Quote{mexpr}}}
+Apply{check, Tuple{Quote{Apply{typeof, Tuple{inc}}}, Quote{function}}}
+
+" === Quote, QuasiQuote, UnQuote === "
+Apply{check, Tuple{Quote{Quote{Apply{add, Tuple{1, 2}}}}, Quote{Apply{add, Tuple{1, 2}}}}}
+Apply{check, Tuple{Quote{QuasiQuote{F{1, UnQuote{Apply{add, Tuple{1, 1}}}}}}, Quote{F{1, 2}}}}
+Apply{check, Tuple{Quote{Apply{Lambda{Tuple{v}, QuasiQuote{F{UnQuote{v}, v}}}, Tuple{5}}}, Quote{F{5, v}}}}
+Apply{check, Tuple{Quote{QuasiQuote{A{QuasiQuote{B{UnQuote{UnQuote{Apply{add, Tuple{2, 3}}}}}}}}},
+    Quote{A{QuasiQuote{B{UnQuote{5}}}}}}}
+
+" === eval and parse === "
+Apply{check, Tuple{Quote{Apply{eval, Tuple{Quote{Apply{mul, Tuple{6, 7}}}}}}, 42}}
+Apply{check, Tuple{Quote{Apply{parse, Tuple{"F{1, x}  rest"}}}, Tuple{Quote{F{1, x}}, "rest"}}}
+Apply{check, Tuple{Quote{Apply{eval, Tuple{Apply{arg, Tuple{Apply{parse, Tuple{"Apply{add, Tuple{1, 2}}"}}, 0}}}}}, 3}}
+
+" === Algebraic effects === "
+" resume with a value "
+Apply{check, Tuple{Quote{
+    Handle{Apply{add, Tuple{1, Perform{Ask{}}}},
+        Lambda{Tuple{Ask{}, k}, Apply{k, Tuple{41}}}}}, 42}}
+
+" the result of the handler is the result of Handle "
+Apply{check, Tuple{Quote{
+    Handle{Apply{add, Tuple{1, Perform{Ask{}}}},
+        Lambda{Tuple{Ask{}, k}, Apply{mul, Tuple{Apply{k, Tuple{10}}, 2}}}}}, 22}}
+
+" abort without resuming "
+Apply{check, Tuple{Quote{
+    Handle{Do{Perform{Raise{"oops"}}, 1},
+        Lambda{Tuple{Raise{msg}, k}, msg}}}, "oops"}}
+
+" deep handler: the handler is reinstalled for the resumed computation "
+Apply{check, Tuple{Quote{
+    Handle{Apply{add, Tuple{Perform{Ask{}}, Perform{Ask{}}}},
+        Lambda{Tuple{Ask{}, k}, Apply{k, Tuple{5}}}}}, 10}}
+
+" perform in a nested function call "
+Def{ask, Lambda{Tuple{}, Perform{Ask{}}}}
+Def{use_ask, Lambda{Tuple{n}, Apply{mul, Tuple{n, Apply{ask, Tuple{}}}}}}
+Apply{check, Tuple{Quote{
+    Handle{Apply{use_ask, Tuple{3}},
+        Lambda{Tuple{Ask{}, k}, Apply{k, Tuple{7}}}}}, 21}}
+
+" multi-shot continuation "
+Apply{check, Tuple{Quote{
+    Handle{Apply{add, Tuple{Perform{Flip{}}, 100}},
+        Lambda{Tuple{Flip{}, k}, Tuple{Apply{k, Tuple{1}}, Apply{k, Tuple{2}}}}}},
+    Quote{Tuple{101, 102}}}}
+
+" effects which do not match the handler are forwarded to outer handlers "
+Apply{check, Tuple{Quote{
+    Handle{
+        Handle{Apply{add, Tuple{Perform{A{}}, Perform{B{}}}},
+            Lambda{Tuple{A{}, k}, Apply{k, Tuple{1}}}},
+        Lambda{Tuple{B{}, k}, Apply{k, Tuple{10}}}}}, 11}}
+
+" handlers made by fusion, state "
+Apply{check, Tuple{Quote{Do{
+    Def{state, 0},
+    Handle{
+        Do{
+            Perform{Put{Apply{add, Tuple{Perform{Get{}}, 5}}}},
+            Perform{Put{Apply{mul, Tuple{Perform{Get{}}, 2}}}},
+            Perform{Get{}}},
+        Fusion{
+            Lambda{Tuple{Get{}, k}, Apply{k, Tuple{state}}},
+            Lambda{Tuple{Put{v}, k}, Do{Set{state, v}, Apply{k, Tuple{none}}}}}}}}, 10}}
+
+" perform inside a handler goes to the outer handler "
+Apply{check, Tuple{Quote{
+    Handle{
+        Handle{Perform{A{}},
+            Lambda{Tuple{A{}, k}, Apply{k, Tuple{Apply{add, Tuple{Perform{B{}}, 1}}}}}},
+        Lambda{Tuple{B{}, k}, Apply{k, Tuple{100}}}}}, 101}}
+
+" a continuation can be resumed after Handle has returned "
+Def{saved_k, none}
+Apply{check, Tuple{Quote{
+    Handle{Apply{add, Tuple{Perform{Save{}}, 1}},
+        Lambda{Tuple{Save{}, k}, Do{Set{saved_k, k}, 0}}}}, 0}}
+Apply{check, Tuple{Quote{Apply{saved_k, Tuple{41}}}, 42}}
+Apply{check, Tuple{Quote{Apply{saved_k, Tuple{9}}}, 10}}
+
+" === End of Tests === "
+
+Apply{put, Tuple{"Tests passed "}}
+Apply{print, Tuple{passed}}
+Apply{put, Tuple{"/"}}
+Apply{println, Tuple{Apply{add, Tuple{passed, failed}}}}
+If{Apply{eq, Tuple{failed, 0}}, none, Apply{exit, Tuple{1}}}
