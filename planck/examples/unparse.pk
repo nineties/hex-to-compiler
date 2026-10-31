@@ -1,0 +1,56 @@
+# Print syntax trees back as text. The printer is made from the grammar that parses them:
+# parse, print and parse again give the same tree.
+use("unparse")
+
+tree(s) := arg(peg_parse('toplevel, s), 0)
+say(s) := { put(s); put("\n") }
+
+trip(s) := {
+    t := tree(s)
+    out := unparse(t)
+    say(strcat("input:  ", s))
+    put("tree:   "); println(t)
+    say(strcat("output: ", out))
+    put("same tree: "); println(tree(out) == t)
+    say("")
+}
+
+trip("1+2*3")
+trip("((1 + 2)) * 3")
+trip("a - (b - c)")
+trip("-(x + 1) * f(y, 2)")
+trip("x->y->x+y")
+trip("not (a and b) or c")
+
+# a block is one expression to a line, indented
+out := unparse(tree("f(n) := { s := 0; while (n > 0) { s = s + n; n = n - 1 }; s }"))
+say(out)
+println(tree(out) == tree("f(n) := { s := 0; while (n > 0) { s = s + n; n = n - 1 }; s }"))
+say("")
+
+# return, for, match with a guard, f-strings and records are printed as they are written
+show(s) := {
+    t := tree(s)
+    out := unparse(t)
+    say(out)
+    put("same tree: "); println(tree(out) == t)
+    say("")
+}
+show("record Point(x, y)")
+show("dist(p) := { dx := p.x; dy := p.y; f\"({dx}, {dy})\" }")
+show("find(xs, v) := { for (x in xs) { if (x == v) return true }; false }")
+show("sign(n) := match n { n if n < 0 -> -1; 0 -> 0; _ -> 1 }")
+show("count(n) := { i := 0; while (true) { i = i + 1; if (i > n) break; if (i % 2 == 0) continue }; i }")
+
+# a tree that was not made by the parser
+say(unparse('Apply{mul, Tuple{Apply{add, Tuple{1, 2}}, 3}}))
+say("")
+
+# a grammar written with ::= is run backwards too
+arith ::= a:arith "+" b:term { `Apply{add, Tuple{!a, !b}} } | a:arith "-" b:term { `Apply{sub, Tuple{!a, !b}} } | term
+term ::= a:term "*" b:factor { `Apply{mul, Tuple{!a, !b}} } | factor
+factor ::= n:integer { n } | x:ident { x } | "(" e:arith ")" { e }
+t := arg(peg_parse('arith, "1+(2+3)*x"), 0)
+println(t)
+say(unparse_as('arith, t))
+say(unparse_as('arith, 'Apply{mul, Tuple{Apply{sub, Tuple{a, 1}}, Apply{add, Tuple{b, 2}}}}))

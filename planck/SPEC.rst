@@ -193,6 +193,9 @@ A rule may be directly left recursive (``sum ::= a:sum "+" b:term { ... } | term
 ``peg_parse(rule, s)`` parses a prefix of ``s`` by the rule and returns ``Tuple{value, rest}``,
 ``Tuple{Eof{}, ""}`` when only blanks are left, or ``Tuple{SyntaxError{...}, ""}``.
 
+``peg_sources`` is a table from a rule name to the parsing expression given to ``define_rule``, with the actions not evaluated
+(``...`` replaced by the previous definition). ``peg_version`` increases at every ``define_rule``.
+
 Values
 ------
 
@@ -360,6 +363,8 @@ Each file uses the files it needs. Lists are ``Cons{x, xs}`` and ``Nil{}``, and 
      - ``line_col`` ``line_text`` ``loc_at`` ``show_loc`` ``error_at`` ``catch_error`` ``show_error``
    * - ``pretty``
      - ``quote_str`` ``show`` ``pretty`` ``pprint``
+   * - ``unparse``
+     - ``unparse`` ``unparse_as`` ``unparse_try`` ``unparse_custom``
 
 List functions:
 
@@ -400,3 +405,21 @@ Errors with positions:
 
 ``show(x)`` is the text that ``print`` writes, with ``[a, b]`` for lists. ``pretty(x, width)`` keeps a part that fits in ``width``
 columns on one line and puts every element of the others on its own line, indented by 2 spaces. ``pprint(x)`` prints it with width 60.
+
+``unparse(t)`` is a text that parses to the tree ``t`` by the rule ``expr``, made from the grammar in ``peg_sources``.
+``unparse_as(rule, t)`` does so for any rule and stops the program when there is no text, and ``unparse_try`` gives ``none`` instead.
+
+* An alternative ``Act{Seq{e1, ...}, Lambda{Tuple{Tuple{l1, ...}}, body}}`` can be inverted when ``body`` is a quasi-quotation
+  whose ``!x`` are labels, ``Quote{c}``, a label, ``Tuple{labels}`` or ``mexpr(h, args)``. The tree is matched against the quasi-quotation,
+  the labels get the subtrees, and the elements are printed in order. Texts are printed as they are, and a rule by ``unparse_as(rule, subtree)``.
+  A label ``_`` is allowed for an element that always matches the same text, such as ``"+"`` or ``Same{}``.
+  An element is a text, a rule, or ``Delimited``, ``Delimited1``, ``Many`` or ``Option`` of a rule.
+* Among the alternatives that match the tree, the one with the most nodes in the quasi-quotation that are not ``!x`` is used.
+* An alternative of a stronger rule where a weaker rule is wanted is put in the first ``"(" e ")"`` of the grammar, whose action is any.
+  The alternative that is a rule name only links a rule to the rules it can be, and so decides which alternative needs parentheses.
+  An alternative that ends with a looser rule (``if (c) a else b`` ends with ``expr``) also needs them unless a rule at least as loose is wanted.
+* ``unparse_custom(owner, spec, tail, f)`` adds an alternative of the rule ``owner``: ``f(t)`` is the text of ``t`` or ``none``,
+  ``spec`` ranks it against the quasi-quotations and ``tail`` is the last rule of the text or ``none``.
+  ``unparse`` prints ``Do{...}`` as ``{ }`` with one expression to a line indented by 4 spaces, and ``If`` as ``if (c) a else b``, in this way.
+* The text of a tree not written by the grammar is the call of the constructor, ``Head{a, ...}``.
+  A symbol that is not an identifier, and a value that is not an integer, a string, a symbol or an M-expression, has no text.
