@@ -25,7 +25,7 @@ Apply{table_set, Tuple{peg_reserved, "break", true}}
 Apply{table_set, Tuple{peg_reserved, "continue", true}}
 Apply{table_set, Tuple{peg_reserved, "fun", true}}
 
-" identifier: [A-Za-z_][A-Za-z0-9_]* except the peg_reserved words "
+" identifier: [A-Za-z_][A-Za-z0-9_]* except the peg_reserved words and the f of f\"...\" "
 Def{peg_tok_ident, Lambda{Tuple{p}, Do{
     Set{p, Apply{peg_skip_ws, Tuple{p}}},
     Def{q, Apply{peg_inc, Tuple{p}}},
@@ -33,7 +33,10 @@ Def{peg_tok_ident, Lambda{Tuple{p}, Do{
     If{Apply{peg_is_alpha, Tuple{Apply{peg_char_at, Tuple{p}}}}, Do{
         While{Apply{peg_is_alnum, Tuple{Apply{peg_char_at, Tuple{q}}}}, Set{q, Apply{peg_inc, Tuple{q}}}},
         Set{name, Apply{substr, Tuple{peg_src, p, q}}},
-        If{Apply{table_get, Tuple{peg_reserved, name, false}},
+        If{If{Apply{table_get, Tuple{peg_reserved, name, false}}, true,
+              If{Apply{eq, Tuple{q, Apply{add, Tuple{p, 1}}}},
+                 If{Apply{eq, Tuple{Apply{peg_char_at, Tuple{p}}, 102}}, Apply{eq, Tuple{Apply{peg_char_at, Tuple{q}}, 34}}, false},
+                 false}},
             Apply{peg_fail, Tuple{p}},
             Do{Set{peg_pv, Apply{intern, Tuple{name}}}, q}}},
         Apply{peg_fail, Tuple{p}}}}}}
@@ -273,10 +276,10 @@ Apply{define_rule, Tuple{Quote{primary}, Quote{Choice{
     block,
     Act{Seq{ident, Tight{"{"}, Delimited{expr, ","}, "}"},
         Lambda{Tuple{Tuple{h, _, args, _}}, Apply{mexpr, Tuple{h, args}}}},
+    Act{Seq{istr_open, Many{Seq{istr_text, istr_hole, expr, "}"}}, istr_text, istr_close},
+        Lambda{Tuple{Tuple{_, parts, last, _}}, Apply{peg_interp, Tuple{parts, last}}}},
     ident,
     integer,
-    Act{Seq{istr_open, Many{Seq{istr_text, istr_hole, expr, ")"}}, istr_text, istr_close},
-        Lambda{Tuple{Tuple{_, parts, last, _}}, Apply{peg_interp, Tuple{parts, last}}}},
     string,
     Act{Seq{"(", ")"}, Lambda{Tuple{_}, Quote{Tuple{}}}},
     Act{Seq{"(", Delimited1{expr, ","}, ")"},
@@ -537,42 +540,13 @@ Def{
         Do{
             Set{p, Apply{peg_skip_ws, Tuple{p}}},
             If{
-                Apply{ne, Tuple{Apply{peg_char_at, Tuple{p}}, 34}},
-                Apply{peg_fail, Tuple{p}},
-                Do{
-                    Def{q, Apply{add, Tuple{p, 1}}},
-                    Def{found, false},
-                    Def{go, true},
-                    While{
-                        go,
-                        Do{
-                            Def{c, Apply{peg_char_at, Tuple{q}}},
-                            If{
-                                If{
-                                    Apply{eq, Tuple{c, 34}},
-                                    true,
-                                    If{Apply{lt, Tuple{c, 0}}, true, Apply{eq, Tuple{c, 10}}}
-                                },
-                                Set{go, false},
-                                If{
-                                    Apply{eq, Tuple{c, 92}},
-                                    Do{
-                                        If{
-                                            Apply{
-                                                eq,
-                                                Tuple{Apply{peg_char_at, Tuple{Apply{add, Tuple{q, 1}}}}, 40}
-                                            },
-                                            Do{Set{found, true}, Set{go, false}},
-                                            Set{q, Apply{add, Tuple{q, 2}}}
-                                        }
-                                    },
-                                    Set{q, Apply{add, Tuple{q, 1}}}
-                                }
-                            }
-                        }
-                    },
-                    If{found, Do{Set{peg_pv, none}, Apply{add, Tuple{p, 1}}}, Apply{peg_fail, Tuple{p}}}
-                }
+                If{
+                    Apply{eq, Tuple{Apply{peg_char_at, Tuple{p}}, 102}},
+                    Apply{eq, Tuple{Apply{peg_char_at, Tuple{Apply{add, Tuple{p, 1}}}}, 34}},
+                    false
+                },
+                Do{Set{peg_pv, none}, Apply{add, Tuple{p, 2}}},
+                Apply{peg_fail, Tuple{p}}
             }
         }
     }}
@@ -599,11 +573,65 @@ Def{
                         },
                         Set{go, false},
                         If{
-                            Apply{eq, Tuple{c, 92}},
+                            Apply{eq, Tuple{c, 123}},
                             Do{
                                 If{
-                                    Apply{eq, Tuple{Apply{peg_char_at, Tuple{Apply{add, Tuple{q, 1}}}}, 40}},
-                                    Set{go, false},
+                                    Apply{eq, Tuple{Apply{peg_char_at, Tuple{Apply{add, Tuple{q, 1}}}}, 123}},
+                                    Do{
+                                        Set{
+                                            acc,
+                                            Apply{
+                                                strcat,
+                                                Tuple{
+                                                    Apply{
+                                                        strcat,
+                                                        Tuple{acc, Apply{substr, Tuple{peg_src, start, q}}}
+                                                    },
+                                                    "{"
+                                                }
+                                            }
+                                        },
+                                        Set{q, Apply{add, Tuple{q, 2}}},
+                                        Set{start, q},
+                                        Set{c, Apply{peg_char_at, Tuple{q}}}
+                                    },
+                                    Set{go, false}
+                                }
+                            },
+                            If{
+                                Apply{eq, Tuple{c, 125}},
+                                Do{
+                                    If{
+                                        Apply{
+                                            eq,
+                                            Tuple{Apply{peg_char_at, Tuple{Apply{add, Tuple{q, 1}}}}, 125}
+                                        },
+                                        Do{
+                                            Set{
+                                                acc,
+                                                Apply{
+                                                    strcat,
+                                                    Tuple{
+                                                        Apply{
+                                                            strcat,
+                                                            Tuple{
+                                                                acc,
+                                                                Apply{substr, Tuple{peg_src, start, q}}
+                                                            }
+                                                        },
+                                                        "}"
+                                                    }
+                                                }
+                                            },
+                                            Set{q, Apply{add, Tuple{q, 2}}},
+                                            Set{start, q},
+                                            Set{c, Apply{peg_char_at, Tuple{q}}}
+                                        },
+                                        Do{Set{ok, false}, Set{go, false}}
+                                    }
+                                },
+                                If{
+                                    Apply{eq, Tuple{c, 92}},
                                     Do{
                                         Def{
                                             e,
@@ -641,10 +669,10 @@ Def{
                                                 Set{c, Apply{peg_char_at, Tuple{q}}}
                                             }
                                         }
-                                    }
+                                    },
+                                    Do{Set{q, Apply{add, Tuple{q, 1}}}, Set{c, Apply{peg_char_at, Tuple{q}}}}
                                 }
-                            },
-                            Do{Set{q, Apply{add, Tuple{q, 1}}}, Set{c, Apply{peg_char_at, Tuple{q}}}}
+                            }
                         }
                     }
                 }
@@ -662,12 +690,8 @@ Def{
     Lambda{
         Tuple{p},
         If{
-            If{
-                Apply{eq, Tuple{Apply{peg_char_at, Tuple{p}}, 92}},
-                Apply{eq, Tuple{Apply{peg_char_at, Tuple{Apply{add, Tuple{p, 1}}}}, 40}},
-                false
-            },
-            Do{Set{peg_pv, "\\("}, Apply{add, Tuple{p, 2}}},
+            Apply{eq, Tuple{Apply{peg_char_at, Tuple{p}}, 123}},
+            Do{Set{peg_pv, "{"}, Apply{add, Tuple{p, 1}}},
             Apply{peg_fail, Tuple{p}}
         }
     }}
@@ -724,7 +748,7 @@ Def{
                 }
             },
             If{Apply{ne, Tuple{last, ""}}, Apply{seg, Tuple{last}}, none},
-            acc
+            If{Apply{eq, Tuple{acc, none}}, "", acc}
         }
     }}
 

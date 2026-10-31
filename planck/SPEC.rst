@@ -74,7 +74,7 @@ M-expressions are expressions of this syntax too.
      - ``Apply{Fusion{Lambda{Tuple{p}, a}, ...}, Tuple{e}}``
    * - ``match e { p if c -> a; ... }``
      - the arm applies when ``p`` matches and ``c`` is true
-   * - ``"a\(e)b"``
+   * - ``f"a{e}b"``
      - ``Apply{strcat, Tuple{Apply{strcat, Tuple{"a", Apply{to_text, Tuple{e}}}}, "b"}}``
    * - ``fun f(p, ...) e`` in a block
      - ``Def{f, none}`` at the top of the block, and ``Set{f, Lambda{Tuple{p, ...}, e}}`` in its place
@@ -138,7 +138,8 @@ Lexical rules:
   ``if else while and or handle with perform match record for in return break continue fun``.
 * integers are decimal (``10``, ``-3``), ``0x1f``, ``0o17`` or ``0b101``.
 * strings are ``"..."`` in one line with the escapes ``\a \b \t \n \v \f \r \" \' \\``.
-  ``\(e)`` in a string embeds the value of the expression ``e``, which may contain strings.
+  ``f"...{e}..."`` embeds the value of the expression ``e``, which may contain strings and f-strings;
+  ``{{`` and ``}}`` are the braces themselves. A string without the prefix ``f`` embeds nothing.
 * ``#`` starts a comment up to the end of the line.
 * there is no space between ``f`` and ``(`` in ``f(a)``, and between ``Head`` and ``{`` in ``Head{a}``.
 
@@ -310,7 +311,7 @@ Builtin functions
 
 * ``parse_mexpr(s)``: the parser of M-expressions, with the same arguments and result as ``parse``.
 * ``to_text(x)``: ``x`` for a string, the decimal text for an integer, and ``show(x)`` (``planck/lib/pretty.pk``) otherwise,
-  so a value other than a string or an integer in ``\(e)`` needs ``use("pretty")``.
+  so a value other than a string or an integer in ``{e}`` needs ``use("pretty")``.
   A string with embedded values is joined by ``strcat`` from the left, and an empty piece is left out.
 * ``record_declare(name, fields)``: set the field names of the head ``name`` (``fields`` is ``Tuple{f, ...}``). ``record_get(t, name)``: the field.
 * ``peg_for(xs, f)``: call ``f`` with each element of the list or vector ``xs``, and return ``none``.
