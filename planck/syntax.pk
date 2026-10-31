@@ -762,22 +762,53 @@ Apply{define_rule, Tuple{Quote{istr_close}, peg_tok_istr_close}}
 
 Def{record_fields, Apply{table, Tuple{}}}
 
-Def{record_declare, Lambda{Tuple{name, fields}, Apply{table_set, Tuple{record_fields, name, fields}}}}
+Def{record_slots, Apply{table, Tuple{}}}
+
+Def{
+    record_declare,
+    Lambda{
+        Tuple{name, fields},
+        Do{
+            Def{old, Apply{table_get, Tuple{record_fields, name, none}}},
+            If{
+                Apply{ne, Tuple{old, none}},
+                Do{
+                    Def{i, 0},
+                    While{
+                        Apply{lt, Tuple{i, Apply{arity, Tuple{old}}}},
+                        Do{
+                            Apply{
+                                table_set,
+                                Tuple{record_slots, Tuple{name, Apply{arg, Tuple{old, i}}}, none}
+                            },
+                            Set{i, Apply{add, Tuple{i, 1}}}
+                        }
+                    }
+                },
+                none
+            },
+            Apply{table_set, Tuple{record_fields, name, fields}},
+            Def{i, 0},
+            While{
+                Apply{lt, Tuple{i, Apply{arity, Tuple{fields}}}},
+                Do{
+                    Apply{table_set, Tuple{record_slots, Tuple{name, Apply{arg, Tuple{fields, i}}}, i}},
+                    Set{i, Apply{add, Tuple{i, 1}}}
+                }
+            }
+        }
+    }}
+
+Def{record_index, Lambda{Tuple{name, field}, Apply{table_get, Tuple{record_slots, Tuple{name, field}, none}}}}
 
 Def{
     record_get,
     Lambda{
         Tuple{t, name},
         Do{
-            Def{fs, Apply{table_get, Tuple{record_fields, Apply{head, Tuple{t}}, none}}},
-            Def{n, If{Apply{eq, Tuple{fs, none}}, 0, Apply{arity, Tuple{fs}}}},
-            Def{i, 0},
-            While{
-                If{Apply{lt, Tuple{i, n}}, Apply{ne, Tuple{Apply{arg, Tuple{fs, i}}, name}}, false},
-                Set{i, Apply{add, Tuple{i, 1}}}
-            },
+            Def{i, Apply{table_get, Tuple{record_slots, Tuple{Apply{head, Tuple{t}}, name}, none}}},
             If{
-                Apply{eq, Tuple{i, n}},
+                Apply{eq, Tuple{i, none}},
                 Do{
                     Apply{put, Tuple{"no field "}},
                     Apply{put, Tuple{Apply{symname, Tuple{name}}}},
