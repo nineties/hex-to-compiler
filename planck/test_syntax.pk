@@ -262,6 +262,48 @@ use("pretty")
 check("list \([1, 2])", "list [1, 2]")
 check("sym \('a) tree \(F{1, "s"})", "sym a tree F{1, \"s\"}")
 
+# === Records ===
+check(tree("record Tok(kind, value, pos)"), 'Apply{record_declare, Tuple{Quote{Tok}, Quote{Tuple{kind, value, pos}}}})
+check(tree("record R()"), 'Apply{record_declare, Tuple{Quote{R}, Quote{Tuple{}}}})
+check(tree("t.kind"), 'Apply{record_get, Tuple{t, Quote{kind}}})
+check(tree("t.a.b"), 'Apply{record_get, Tuple{Apply{record_get, Tuple{t, Quote{a}}}, Quote{b}}})
+check(tree("f(x).y"), 'Apply{record_get, Tuple{Apply{f, Tuple{x}}, Quote{y}}})
+check(tree("t.f(1)"), 'Apply{Apply{record_get, Tuple{t, Quote{f}}}, Tuple{1}})
+check(tree("a.b + c.d * 2"), 'Apply{add, Tuple{Apply{record_get, Tuple{a, Quote{b}}}, Apply{mul, Tuple{Apply{record_get, Tuple{c, Quote{d}}}, 2}}}})
+check(tree("a.b == 'x"), 'Apply{eq, Tuple{Apply{record_get, Tuple{a, Quote{b}}}, Quote{x}}})
+check(tree("x := t.v"), 'Def{x, Apply{record_get, Tuple{t, Quote{v}}}})
+check(tree("F{a.b}"), 'F{Apply{record_get, Tuple{a, Quote{b}}}})
+check(head(tree("t.")), 'SyntaxError)
+check(head(tree("t.1")), 'SyntaxError)
+check(head(tree("record Tok")), 'SyntaxError)
+check(head(tree("record Tok(1)")), 'SyntaxError)
+
+record Tok(kind, value, pos)
+record Node(op, left, right)
+record Rev(c, b, a)
+record Fwd(a, b, c)
+tk := Tok{'id, "abc", 3}
+check(tk.kind, 'id)
+check(tk.value, "abc")
+check(tk.pos + 1, 4)
+nd := Node{"+", Node{"*", 1, 2}, 3}
+check(nd.op, "+")
+check(nd.left.op, "*")
+check(nd.left.right, 2)
+check(nd.right, 3)
+# the field is found by the head of the value
+check(Rev{1, 2, 3}.a, 3)
+check(Fwd{1, 2, 3}.a, 1)
+getv(t) := t.value
+check(getv(tk), "abc")
+check(getv(Tok{'num, 7, 0}), 7)
+check((match tk { Tok{k, v, p} -> k }), 'id)
+record Tok(value, kind)
+check(Tok{1, 2}.kind, 2)
+record Tok(kind, value, pos)
+check(tk.kind, 'id)
+check(record_get(Tok{1, 2, 3}, 'pos), 3)
+
 # === Packrat parser: grammar declarations ===
 num ::= integer
 check(arg(peg_parse('num, "12 rest"), 0), 12)

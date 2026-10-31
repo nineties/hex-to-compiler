@@ -17,6 +17,7 @@ Apply{table_set, Tuple{peg_reserved, "handle", true}}
 Apply{table_set, Tuple{peg_reserved, "with", true}}
 Apply{table_set, Tuple{peg_reserved, "perform", true}}
 Apply{table_set, Tuple{peg_reserved, "match", true}}
+Apply{table_set, Tuple{peg_reserved, "record", true}}
 
 " identifier: [A-Za-z_][A-Za-z0-9_]* except the peg_reserved words "
 Def{peg_tok_ident, Lambda{Tuple{p}, Do{
@@ -748,6 +749,76 @@ Apply{
     }}
 
 Apply{define_rule, Tuple{Quote{primary}, Quote{Choice{interp_str, Prev{}}}}}
+
+Def{record_fields, Apply{table, Tuple{}}}
+
+Def{record_declare, Lambda{Tuple{name, fields}, Apply{table_set, Tuple{record_fields, name, fields}}}}
+
+Def{
+    record_get,
+    Lambda{
+        Tuple{t, name},
+        Do{
+            Def{fs, Apply{table_get, Tuple{record_fields, Apply{head, Tuple{t}}, none}}},
+            Def{n, If{Apply{eq, Tuple{fs, none}}, 0, Apply{arity, Tuple{fs}}}},
+            Def{i, 0},
+            While{
+                If{Apply{lt, Tuple{i, n}}, Apply{ne, Tuple{Apply{arg, Tuple{fs, i}}, name}}, false},
+                Set{i, Apply{add, Tuple{i, 1}}}
+            },
+            If{
+                Apply{eq, Tuple{i, n}},
+                Do{
+                    Apply{put, Tuple{"no field "}},
+                    Apply{put, Tuple{Apply{symname, Tuple{name}}}},
+                    Apply{put, Tuple{" in "}},
+                    Apply{println, Tuple{t}},
+                    Apply{exit, Tuple{1}}
+                },
+                none
+            },
+            Apply{arg, Tuple{t, i}}
+        }
+    }}
+
+Apply{define_rule, Tuple{Quote{idents}, Quote{Delimited{ident, ","}}}}
+
+Apply{define_rule, Tuple{Quote{tdot}, Quote{Tight{"."}}}}
+
+Apply{
+    define_rule,
+    Tuple{
+        Quote{record_decl},
+        Quote{
+            Act{
+                Seq{Key{"record"}, ident, "(", idents, ")"},
+                Lambda{
+                    Tuple{Tuple{_, n, _, fs, _}},
+                    Do{QuasiQuote{Apply{record_declare, Tuple{Quote{UnQuote{n}}, Quote{UnQuote{fs}}}}}}
+                }
+            }
+        }
+    }}
+
+Apply{define_rule, Tuple{Quote{expr}, Quote{Choice{record_decl, Prev{}}}}}
+
+Apply{
+    define_rule,
+    Tuple{
+        Quote{postfix},
+        Quote{
+            Choice{
+                Act{
+                    Seq{postfix, tdot, ident},
+                    Lambda{
+                        Tuple{Tuple{t, _, f}},
+                        Do{QuasiQuote{Apply{record_get, Tuple{UnQuote{t}, Quote{UnQuote{f}}}}}}
+                    }
+                },
+                Prev{}
+            }
+        }
+    }}
 
 " === Switch to the new syntax === "
 Def{parse_mexpr, parse}

@@ -30,6 +30,8 @@ M-expressions are expressions of this syntax too.
      - ``Def{x, e}``
    * - ``f(p, ...) := e``
      - ``Def{f, Lambda{Tuple{p, ...}, e}}``
+   * - ``record T(f, ...)``
+     - ``Apply{record_declare, Tuple{Quote{T}, Quote{Tuple{f, ...}}}}``
    * - ``x = e``
      - ``Set{x, e}``
    * - ``f | g``
@@ -54,6 +56,8 @@ M-expressions are expressions of this syntax too.
      - ``Quote{e}``, ``QuasiQuote{e}``, ``UnQuote{e}``
    * - ``f(a, ...)``
      - ``Apply{f, Tuple{a, ...}}``
+   * - ``t.f``
+     - ``Apply{record_get, Tuple{t, Quote{f}}}``
    * - ``p @ type``
      - ``_TypeOf{p, type}``
    * - ``{ e; ... }``
@@ -88,6 +92,11 @@ a block ``{ ... }`` is the usual body of several expressions.
 ``else if (c) ...`` is ``else`` followed by an ``if`` expression.
 An ``if`` is an expression: ``y = if (c) 1 else 2``.
 
+``record T(f, g, ...)`` declares the names of the fields of the values ``T{a, b, ...}``, which are built as before,
+and ``t.f`` is the argument of ``t`` at the position of the field ``f`` in the declaration for the head of ``t``.
+Values with different heads can have fields of the same name. Declaring ``T`` again replaces the names.
+A ``.`` follows its left operand with no space. A value whose head is not declared or has no field ``f`` stops the program with a message.
+
 ``match`` evaluates ``e`` once and selects the first arm whose pattern ``p`` matches it.
 The arms are separated by ``;`` or newlines. The body ``a`` is any expression.
 The guard ``if c`` is evaluated after ``p`` matched, with the variables of ``p``; when it is false the arms after it are tried.
@@ -101,7 +110,7 @@ and ``p :: q`` for ``Cons{p, q}``, e.g. ``(x :: xs) -> ...`` and ``f(x :: y :: r
 Lexical rules:
 
 * identifiers are ``[A-Za-z_][A-Za-z0-9_]*`` except the reserved words
-  ``if else while and or handle with perform match``.
+  ``if else while and or handle with perform match record``.
 * integers are decimal (``10``, ``-3``), ``0x1f``, ``0o17`` or ``0b101``.
 * strings are ``"..."`` in one line with the escapes ``\a \b \t \n \v \f \r \" \' \\``.
   ``\(e)`` in a string embeds the value of the expression ``e``, which may contain strings.
@@ -272,12 +281,13 @@ Builtin functions
    * - ``planck/peg.pk``
      - ``peg_parse`` ``define_rule``
    * - ``planck/syntax.pk``
-     - ``parse_mexpr`` ``to_text``
+     - ``parse_mexpr`` ``to_text`` ``record_declare`` ``record_get``
 
 * ``parse_mexpr(s)``: the parser of M-expressions, with the same arguments and result as ``parse``.
 * ``to_text(x)``: ``x`` for a string, the decimal text for an integer, and ``show(x)`` (``planck/lib/pretty.pk``) otherwise,
   so a value other than a string or an integer in ``\(e)`` needs ``use("pretty")``.
   A string with embedded values is joined by ``strcat`` from the left, and an empty piece is left out.
+* ``record_declare(name, fields)``: set the field names of the head ``name`` (``fields`` is ``Tuple{f, ...}``). ``record_get(t, name)``: the field.
 * ``symname(sym)``: the name of the symbol as a string (the inverse of ``intern``).
 * ``strlen(s)``: the number of bytes. ``ord(s, i)``: the byte at ``i``, or ``-1`` when ``i`` is out of range.
 * ``substr(s, i, j)``: the bytes from ``i`` to ``j - 1``. ``strcat(a, b)``: ``a`` followed by ``b``.
