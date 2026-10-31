@@ -77,7 +77,12 @@ The performance of the initial plisp (built from hand-written machine code via F
 Stage3: Implementing Full-Scale Language Processor
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-TBD
+Stage3 starts with ``planck0``, an implementation of the Planck language written in ``sasm``.
+`planck0.sv <https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv>`_
+
+The language is described in `planck/SPEC.rst <https://github.com/nineties/hex-to-compiler/blob/main/planck/SPEC.rst>`_.
+`planck/examples <https://github.com/nineties/hex-to-compiler/tree/main/planck/examples>`_ has sample programs,
+and ``make test-planck0`` runs ``planck/test.pk`` and the examples.
 
 Hot to Run
 ----------
@@ -90,6 +95,7 @@ For x86 Linux
    $ git clone https://github.com/nineties/hex-to-compiler.git
    $ cd hex-to-compiler
    $ make
+   $ make test-planck0   # planck/test.pk and planck/examples
 
 For Other Environments
 ~~~~~~~~~~~~~~~~~~~~~~
