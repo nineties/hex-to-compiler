@@ -66,6 +66,8 @@ M-expressions are expressions of this syntax too.
      - ``Apply{Fusion{Lambda{Tuple{p}, a}, ...}, Tuple{e}}``
    * - ``match e { p if c -> a; ... }``
      - the arm applies when ``p`` matches and ``c`` is true
+   * - ``"a\(e)b"``
+     - ``Apply{strcat, Tuple{Apply{strcat, Tuple{"a", Apply{to_text, Tuple{e}}}}, "b"}}``
    * - ``handle e with h``
      - ``Handle{e, h}``
    * - ``perform e``
@@ -102,6 +104,7 @@ Lexical rules:
   ``if else while and or handle with perform match``.
 * integers are decimal (``10``, ``-3``), ``0x1f``, ``0o17`` or ``0b101``.
 * strings are ``"..."`` in one line with the escapes ``\a \b \t \n \v \f \r \" \' \\``.
+  ``\(e)`` in a string embeds the value of the expression ``e``, which may contain strings.
 * ``#`` starts a comment up to the end of the line.
 * there is no space between ``f`` and ``(`` in ``f(a)``, and between ``Head`` and ``{`` in ``Head{a}``.
 
@@ -269,8 +272,12 @@ Builtin functions
    * - ``planck/peg.pk``
      - ``peg_parse`` ``define_rule``
    * - ``planck/syntax.pk``
-     - ``parse_mexpr`` (the parser of M-expressions)
+     - ``parse_mexpr`` ``to_text``
 
+* ``parse_mexpr(s)``: the parser of M-expressions, with the same arguments and result as ``parse``.
+* ``to_text(x)``: ``x`` for a string, the decimal text for an integer, and ``show(x)`` (``planck/lib/pretty.pk``) otherwise,
+  so a value other than a string or an integer in ``\(e)`` needs ``use("pretty")``.
+  A string with embedded values is joined by ``strcat`` from the left, and an empty piece is left out.
 * ``symname(sym)``: the name of the symbol as a string (the inverse of ``intern``).
 * ``strlen(s)``: the number of bytes. ``ord(s, i)``: the byte at ``i``, or ``-1`` when ``i`` is out of range.
 * ``substr(s, i, j)``: the bytes from ``i`` to ``j - 1``. ``strcat(a, b)``: ``a`` followed by ``b``.

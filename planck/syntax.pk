@@ -513,6 +513,242 @@ Apply{
         }
     }}
 
+Def{
+    to_text,
+    Lambda{
+        Tuple{x},
+        Apply{
+            Fusion{
+                Lambda{Tuple{_TypeOf{s, string}}, s},
+                Fusion{
+                    Lambda{Tuple{_TypeOf{n, int}}, Apply{peg_itoa, Tuple{n}}},
+                    Lambda{Tuple{_}, Apply{show, Tuple{x}}}
+                }
+            },
+            Tuple{x}
+        }
+    }}
+
+Def{
+    peg_tok_istr_open,
+    Lambda{
+        Tuple{p},
+        Do{
+            Set{p, Apply{peg_skip_ws, Tuple{p}}},
+            If{
+                Apply{ne, Tuple{Apply{peg_char_at, Tuple{p}}, 34}},
+                Apply{peg_fail, Tuple{p}},
+                Do{
+                    Def{q, Apply{add, Tuple{p, 1}}},
+                    Def{found, false},
+                    Def{go, true},
+                    While{
+                        go,
+                        Do{
+                            Def{c, Apply{peg_char_at, Tuple{q}}},
+                            If{
+                                If{
+                                    Apply{eq, Tuple{c, 34}},
+                                    true,
+                                    If{Apply{lt, Tuple{c, 0}}, true, Apply{eq, Tuple{c, 10}}}
+                                },
+                                Set{go, false},
+                                If{
+                                    Apply{eq, Tuple{c, 92}},
+                                    Do{
+                                        If{
+                                            Apply{
+                                                eq,
+                                                Tuple{Apply{peg_char_at, Tuple{Apply{add, Tuple{q, 1}}}}, 40}
+                                            },
+                                            Do{Set{found, true}, Set{go, false}},
+                                            Set{q, Apply{add, Tuple{q, 2}}}
+                                        }
+                                    },
+                                    Set{q, Apply{add, Tuple{q, 1}}}
+                                }
+                            }
+                        }
+                    },
+                    If{found, Do{Set{peg_pv, none}, Apply{add, Tuple{p, 1}}}, Apply{peg_fail, Tuple{p}}}
+                }
+            }
+        }
+    }}
+
+Def{
+    peg_tok_istr_text,
+    Lambda{
+        Tuple{p},
+        Do{
+            Def{q, p},
+            Def{start, p},
+            Def{acc, ""},
+            Def{ok, true},
+            Def{go, true},
+            Def{c, Apply{peg_char_at, Tuple{q}}},
+            While{
+                go,
+                Do{
+                    If{
+                        If{
+                            Apply{eq, Tuple{c, 34}},
+                            true,
+                            If{Apply{lt, Tuple{c, 0}}, true, Apply{eq, Tuple{c, 10}}}
+                        },
+                        Set{go, false},
+                        If{
+                            Apply{eq, Tuple{c, 92}},
+                            Do{
+                                If{
+                                    Apply{eq, Tuple{Apply{peg_char_at, Tuple{Apply{add, Tuple{q, 1}}}}, 40}},
+                                    Set{go, false},
+                                    Do{
+                                        Def{
+                                            e,
+                                            Apply{
+                                                table_get,
+                                                Tuple{
+                                                    peg_escapes,
+                                                    Apply{peg_char_at, Tuple{Apply{add, Tuple{q, 1}}}},
+                                                    none
+                                                }
+                                            }
+                                        },
+                                        If{
+                                            Apply{eq, Tuple{e, none}},
+                                            Do{Set{ok, false}, Set{go, false}},
+                                            Do{
+                                                Set{
+                                                    acc,
+                                                    Apply{
+                                                        strcat,
+                                                        Tuple{
+                                                            Apply{
+                                                                strcat,
+                                                                Tuple{
+                                                                    acc,
+                                                                    Apply{substr, Tuple{peg_src, start, q}}
+                                                                }
+                                                            },
+                                                            e
+                                                        }
+                                                    }
+                                                },
+                                                Set{q, Apply{add, Tuple{q, 2}}},
+                                                Set{start, q},
+                                                Set{c, Apply{peg_char_at, Tuple{q}}}
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            Do{Set{q, Apply{add, Tuple{q, 1}}}, Set{c, Apply{peg_char_at, Tuple{q}}}}
+                        }
+                    }
+                }
+            },
+            If{
+                ok,
+                Do{Set{peg_pv, Apply{strcat, Tuple{acc, Apply{substr, Tuple{peg_src, start, q}}}}}, q},
+                Apply{peg_fail, Tuple{q}}
+            }
+        }
+    }}
+
+Def{
+    peg_tok_istr_hole,
+    Lambda{
+        Tuple{p},
+        If{
+            If{
+                Apply{eq, Tuple{Apply{peg_char_at, Tuple{p}}, 92}},
+                Apply{eq, Tuple{Apply{peg_char_at, Tuple{Apply{add, Tuple{p, 1}}}}, 40}},
+                false
+            },
+            Do{Set{peg_pv, "\\("}, Apply{add, Tuple{p, 2}}},
+            Apply{peg_fail, Tuple{p}}
+        }
+    }}
+
+Def{
+    peg_tok_istr_close,
+    Lambda{
+        Tuple{p},
+        If{
+            Apply{eq, Tuple{Apply{peg_char_at, Tuple{p}}, 34}},
+            Do{Set{peg_pv, "\""}, Apply{add, Tuple{p, 1}}},
+            Apply{peg_fail, Tuple{p}}
+        }
+    }}
+
+Def{
+    peg_interp,
+    Lambda{
+        Tuple{parts, last},
+        Do{
+            Def{acc, none},
+            Def{
+                seg,
+                Lambda{
+                    Tuple{x},
+                    Set{
+                        acc,
+                        If{
+                            Apply{eq, Tuple{acc, none}},
+                            x,
+                            QuasiQuote{Apply{strcat, Tuple{UnQuote{acc}, UnQuote{x}}}}
+                        }
+                    }
+                }
+            },
+            Def{i, 0},
+            While{
+                Apply{lt, Tuple{i, Apply{arity, Tuple{parts}}}},
+                Do{
+                    Def{t, Apply{arg, Tuple{Apply{arg, Tuple{parts, i}}, 0}}},
+                    If{Apply{ne, Tuple{t, ""}}, Apply{seg, Tuple{t}}, none},
+                    Apply{
+                        seg,
+                        Tuple{
+                            QuasiQuote{
+                                Apply{
+                                    to_text,
+                                    Tuple{UnQuote{Apply{arg, Tuple{Apply{arg, Tuple{parts, i}}, 2}}}}
+                                }
+                            }
+                        }
+                    },
+                    Set{i, Apply{add, Tuple{i, 1}}}
+                }
+            },
+            If{Apply{ne, Tuple{last, ""}}, Apply{seg, Tuple{last}}, none},
+            acc
+        }
+    }}
+
+Apply{define_rule, Tuple{Quote{istr_open}, peg_tok_istr_open}}
+
+Apply{define_rule, Tuple{Quote{istr_text}, peg_tok_istr_text}}
+
+Apply{define_rule, Tuple{Quote{istr_hole}, peg_tok_istr_hole}}
+
+Apply{define_rule, Tuple{Quote{istr_close}, peg_tok_istr_close}}
+
+Apply{
+    define_rule,
+    Tuple{
+        Quote{interp_str},
+        Quote{
+            Act{
+                Seq{istr_open, Many{Seq{istr_text, istr_hole, expr, ")"}}, istr_text, istr_close},
+                Lambda{Tuple{Tuple{_, parts, last, _}}, Do{Apply{peg_interp, Tuple{parts, last}}}}
+            }
+        }
+    }}
+
+Apply{define_rule, Tuple{Quote{primary}, Quote{Choice{interp_str, Prev{}}}}}
+
 " === Switch to the new syntax === "
 Def{parse_mexpr, parse}
 Def{parse, Lambda{Tuple{s}, Apply{peg_parse, Tuple{Quote{toplevel}, s}}}}
