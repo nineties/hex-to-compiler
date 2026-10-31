@@ -21,26 +21,29 @@ lex(src) := {
     i := 0
     while (i < n) {
         c := ord(src, i)
-        if (c == 10) {
-            vec_push(toks, Tok{'nl, "\n", i})
-            i = i + 1
-        } else if (is_space(c)) {
-            i = i + 1
-        } else if (is_digit(c)) {
-            j := i
-            while (j < n and is_digit(ord(src, j))) j = j + 1
-            vec_push(toks, Tok{'num, str_to_int(substr(src, i, j)), i})
-            i = j
-        } else if (is_ident_start(c)) {
-            j := i
-            while (j < n and is_ident_char(ord(src, j))) j = j + 1
-            vec_push(toks, Tok{'id, substr(src, i, j), i})
-            i = j
-        } else if (index_of_str("+-*/()=", chr(c), 0) >= 0) {
-            vec_push(toks, Tok{'op, chr(c), i})
-            i = i + 1
-        } else {
-            error_at(here(i), strcat("unexpected character ", quote_str(chr(c))))
+        match c {
+            10 -> {
+                vec_push(toks, Tok{'nl, "\n", i})
+                i = i + 1
+            }
+            c if is_space(c) -> i = i + 1
+            c if is_digit(c) -> {
+                j := i
+                while (j < n and is_digit(ord(src, j))) j = j + 1
+                vec_push(toks, Tok{'num, str_to_int(substr(src, i, j)), i})
+                i = j
+            }
+            c if is_ident_start(c) -> {
+                j := i
+                while (j < n and is_ident_char(ord(src, j))) j = j + 1
+                vec_push(toks, Tok{'id, substr(src, i, j), i})
+                i = j
+            }
+            c if index_of_str("+-*/()=", chr(c), 0) >= 0 -> {
+                vec_push(toks, Tok{'op, chr(c), i})
+                i = i + 1
+            }
+            _ -> error_at(here(i), strcat("unexpected character ", quote_str(chr(c))))
         }
     }
     vec_push(toks, Tok{'eof, "", n})
@@ -151,9 +154,11 @@ compile(stmts) := {
 }
 
 show_operand(o) := if (typeof(o) == 'int) int_to_str(o) else symname(o)
-show_instr := (Bin{d, op, a, b, _}) -> join(" ", [show_operand(d), "=", show_operand(a), op, show_operand(b)])
-            | (Copy{d, a}) -> join(" ", [show_operand(d), "=", show_operand(a)])
-            | (Print{a}) -> strcat("print ", show_operand(a))
+show_instr(i) := match i {
+    Bin{d, op, a, b, _} -> join(" ", [show_operand(d), "=", show_operand(a), op, show_operand(b)])
+    Copy{d, a}          -> join(" ", [show_operand(d), "=", show_operand(a)])
+    Print{a}            -> strcat("print ", show_operand(a))
+}
 
 # === Virtual machine ===
 run_code(code) := {

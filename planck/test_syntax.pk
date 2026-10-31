@@ -179,6 +179,57 @@ x := 5
 check(`F{!x, x}, 'F{5, x})
 check(Apply{add, Tuple{1, 2}}, 3)
 
+# === match ===
+check(tree("match x { A{a} -> a\n B{} -> 0 }"), 'Apply{Fusion{Lambda{Tuple{A{a}}, a}, Lambda{Tuple{B{}}, 0}}, Tuple{x}})
+check(tree("match x { 1 -> 2 }"), 'Apply{Lambda{Tuple{1}, 2}, Tuple{x}})
+check(tree("match f(x) + 1 { y -> y; _ -> 0 }"), 'Apply{Fusion{Lambda{Tuple{y}, y}, Lambda{Tuple{_}, 0}}, Tuple{Apply{add, Tuple{Apply{f, Tuple{x}}, 1}}}})
+check(tree("match l {\n  x :: xs -> x\n  Nil{} -> 0\n}"), 'Apply{Fusion{Lambda{Tuple{Cons{x, xs}}, x}, Lambda{Tuple{Nil{}}, 0}}, Tuple{l}})
+check(tree("match x {\n  -1 -> 1\n  (a, b) -> a\n}"), 'Apply{Fusion{Lambda{Tuple{-1}, 1}, Lambda{Tuple{Tuple{a, b}}, a}}, Tuple{x}})
+check(head(tree("match x { }")), 'SyntaxError)
+check(head(tree("match x A{} -> 1")), 'SyntaxError)
+check(head(tree("match x { a b }")), 'SyntaxError)
+
+shape(n) := match n {
+    n if n < 0 -> "neg"
+    0 -> "zero"
+    n if n < 10 and n % 2 == 1 -> "small odd"
+    n if n < 10 -> "small even"
+    _ -> "big"
+}
+check(shape(-5), "neg")
+check(shape(0), "zero")
+check(shape(7), "small odd")
+check(shape(8), "small even")
+check(shape(70), "big")
+# a guard that is false goes on to the arms after it, with the same value
+check(match 5 { n if n > 10 -> "a"; n if n > 3 -> "b"; _ -> "c" }, "b")
+check(match 5 { 5 if false -> "a"; 5 -> "b" }, "b")
+tree_eval := (e) -> match e {
+    Num{n} -> n
+    Neg{e} -> 0 - tree_eval(e)
+    Add{a, b} -> tree_eval(a) + tree_eval(b)
+    Mul{a, b} -> tree_eval(a) * tree_eval(b)
+}
+check(tree_eval(Add{Num{2}, Mul{Num{3}, Neg{Num{4}}}}), -10)
+check(match [1, 2] { x :: xs -> x; Nil{} -> 0 }, 1)
+check(match 'a { 'a -> 1; 'b -> 2 }, 1)
+k := 3
+check(match k { 3 -> match k + 1 { n if n > 3 -> "inner"; _ -> "no" }; _ -> "outer" }, "inner")
+# matching nested guards: each match has its own variables
+nest(a, b) := match a { x if x > 0 -> match b { y if y > 0 -> x + y; _ -> x }; _ -> 0 }
+check(nest(1, 2), 3)
+check(nest(1, -2), 1)
+check(nest(-1, 2), 0)
+# the scrutinee is evaluated once
+calls := 0
+once() := { calls = calls + 1; 5 }
+check(match once() { n if n > 9 -> 1; n if n > 4 -> 2; _ -> 3 }, 2)
+check(calls, 1)
+# an arm may change variables of the outside
+acc := 0
+match 4 { n if n > 3 -> acc = acc + n; _ -> acc = 100 }
+check(acc, 4)
+
 # === Packrat parser: grammar declarations ===
 num ::= integer
 check(arg(peg_parse('num, "12 rest"), 0), 12)

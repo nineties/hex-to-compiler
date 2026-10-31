@@ -62,6 +62,10 @@ M-expressions are expressions of this syntax too.
      - ``If{c, a, b}``, ``If{c, a, none}``
    * - ``while (c) e``
      - ``While{c, e}``
+   * - ``match e { p -> a; ... }``
+     - ``Apply{Fusion{Lambda{Tuple{p}, a}, ...}, Tuple{e}}``
+   * - ``match e { p if c -> a; ... }``
+     - the arm applies when ``p`` matches and ``c`` is true
    * - ``handle e with h``
      - ``Handle{e, h}``
    * - ``perform e``
@@ -82,13 +86,20 @@ a block ``{ ... }`` is the usual body of several expressions.
 ``else if (c) ...`` is ``else`` followed by an ``if`` expression.
 An ``if`` is an expression: ``y = if (c) 1 else 2``.
 
+``match`` evaluates ``e`` once and selects the first arm whose pattern ``p`` matches it.
+The arms are separated by ``;`` or newlines. The body ``a`` is any expression.
+The guard ``if c`` is evaluated after ``p`` matched, with the variables of ``p``; when it is false the arms after it are tried.
+``e`` and ``c`` are expressions up to ``?:``, so a lambda needs parentheses.
+When no arm applies the call fails as a call of a function with no matching pattern does.
+``match`` binds ``%v`` and ``%r0``, ``%r1`` ... in the arms with guards, which no identifier can name.
+
 Parameters ``p`` are patterns: unary expressions such as ``x``, ``1``, ``'none``, ``Cons{x, xs}`` or ``x @ int``,
 and ``p :: q`` for ``Cons{p, q}``, e.g. ``(x :: xs) -> ...`` and ``f(x :: y :: rest) := ...``.
 
 Lexical rules:
 
 * identifiers are ``[A-Za-z_][A-Za-z0-9_]*`` except the reserved words
-  ``if else while and or handle with perform``.
+  ``if else while and or handle with perform match``.
 * integers are decimal (``10``, ``-3``), ``0x1f``, ``0o17`` or ``0b101``.
 * strings are ``"..."`` in one line with the escapes ``\a \b \t \n \v \f \r \" \' \\``.
 * ``#`` starts a comment up to the end of the line.
