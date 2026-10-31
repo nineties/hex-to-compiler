@@ -433,6 +433,7 @@
 (long PerformS)
 (long TupleS)
 (long SyntaxErrorS)
+(long EofS)
 (long readS)
 (long evalS)
 (long emptyTuple)
@@ -480,6 +481,7 @@
     (= PerformS     (sym "Perform"))
     (= TupleS       (sym "Tuple"))
     (= SyntaxErrorS (sym "SyntaxError"))
+    (= EofS         (sym "Eof"))
     (= readS        (sym "read"))
     (= evalS        (sym "eval"))
     (= emptyTuple   (mexpr0 TupleS))
@@ -835,7 +837,10 @@
 (fun parse (text)
     (char[] 4 ret)
     (expect StringT text)
-    (var raw (get text 1))
+    (var raw (skip_spaces (get text 1)))
+    (if (== (getb raw) 0)
+        (return (tup2 (mexpr0 EofS) (str raw)))
+        )
     (= raw (parse_ ret raw))
     (return (tup2 (get ret) (str raw)))
     )
@@ -2087,6 +2092,8 @@
 ; a program can replace them (Def{read, ...}, Def{eval, ...}) and the next
 ; top-level expression is read/evaluated by the new definitions.
 ;   read: String -> Tuple{m-expr, rest String}   (initially the builtin parse)
+;     When only white space is left, read returns Tuple{Eof{}, rest} and the
+;     loop stops. A replacement read should pass Eof{} through.
 ;   eval: m-expr -> any value                    (initially the builtin eval)
 ; Inside the VM, eval is always the builtin (PRIM_EVAL).
 (fun call_global (name arg)
@@ -2098,7 +2105,8 @@
     (var text (read_file path))
     (var ret 0)
     (var e 0)
-    (while (getb (skip_spaces (get text 1))) (do
+    (var more 1)
+    (while more (do
         (= ret (call_global readS text))
         (if (|| (! (has_head TupleS ret))
             (|| (!= (get_header_arg ret) 2)
@@ -2110,15 +2118,17 @@
             (exit 1)
             ))
         (= e (tup_get ret 0))
-        (if (has_head SyntaxErrorS e) (do
-            (eputs path)
-            (eputs ": syntax error: ")
-            (eprint e)
-            (eputs "\n")
-            (exit 1)
+        (if (has_head EofS e) (= more 0) (do
+            (if (has_head SyntaxErrorS e) (do
+                (eputs path)
+                (eputs ": syntax error: ")
+                (eprint e)
+                (eputs "\n")
+                (exit 1)
+                ))
+            (call_global evalS (mexpr1 QuoteS e))
+            (= text (tup_get ret 1))
             ))
-        (call_global evalS (mexpr1 QuoteS e))
-        (= text (tup_get ret 1))
         ))
     )
 
