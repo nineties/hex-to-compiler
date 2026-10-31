@@ -21,6 +21,7 @@ bad := Bad{}
 is_bad(x) := is_mx(x) and head(x) == 'Bad
 is_mx(x) := typeof(x) == 'mexpr
 is_hole(p) := is_mx(p) and head(p) == 'Hole
+is_unwrap(p) := is_mx(p) and (head(p) == 'UnwrapReturn or head(p) == 'UnwrapBreak or head(p) == 'UnwrapContinue)
 un_hole(x) := mexpr('Hole, Tuple{x})
 
 # === Templates ===
@@ -30,6 +31,7 @@ un_spec(p) :=
     if (not is_mx(p)) 2
     else if (is_hole(p)) 0
     else if (head(p) == 'Generic) 1
+    else if (is_unwrap(p)) un_spec(arg(p, 0))
     else foldl((n, a) -> n + un_spec(a), 2, args_of(p))
 
 holes_of(p) :=
@@ -47,12 +49,30 @@ args_tuple(t) := {
     r
 }
 
+# UnwrapReturn{q}, UnwrapBreak{q} and UnwrapContinue{q} in a template match q against the tree
+# without the handler that the parser puts around a body that has return, break or continue in it
+# (peg_wrap in syntax.pk). The text of such a body has the word, and parsing it puts the handler back.
+un_strip(h, t) := {
+    tag := if (h == 'UnwrapReturn) 'Return else if (h == 'UnwrapBreak) 'Break else 'Continue
+    hd := if (h == 'UnwrapReturn) peg_ret_handler else if (h == 'UnwrapBreak) peg_break_handler else peg_continue_handler
+    if (is_mx(t) and head(t) == 'Handle and arity(t) == 2 and arg(t, 1) == hd and peg_scan(arg(t, 0), tag)) arg(t, 0) else t
+}
+
+# A body with a return that is not inside the handler of the parser is not what the parser makes
+# from a text with return in it (it would put the handler around the body again). No match.
+un_match_unwrap(p, t, env) := {
+    t2 := un_strip(head(p), t)
+    tag := if (head(p) == 'UnwrapReturn) 'Return else if (head(p) == 'UnwrapBreak) 'Break else 'Continue
+    if (t2 == t and peg_scan(t, tag)) false else un_match(arg(p, 0), t2, env)
+}
+
 # un_match(template, tree, env) binds the holes in the table env
 un_match(p, t, env) :=
     if (is_hole(p)) {
         table_set(env, arg(p, 0), t)
         true
-    } else if (is_mx(p) and head(p) == 'Generic) {
+    } else if (is_unwrap(p)) un_match_unwrap(p, t, env)
+    else if (is_mx(p) and head(p) == 'Generic) {
         if (is_mx(t)) {
             table_set(env, arg(arg(p, 0), 0), head(t))
             table_set(env, arg(arg(p, 1), 0), args_tuple(t))
@@ -76,7 +96,7 @@ un_match_args(p, t, i, env) := {
 # the template of a quasi-quotation. A hole must be a label.
 quasi(p, labels) :=
     if (not is_mx(p)) p
-    else if (head(p) == 'UnQuote) (if (label_ok(arg(p, 0), labels)) un_hole(arg(p, 0)) else bad)
+    else if (head(p) == 'UnQuote) (if (label_ok(arg(p, 0), labels)) un_hole(arg(p, 0)) else call_tmpl(arg(p, 0), labels))
     else {
         r := mexpr(head(p), Tuple{})
         i := 0
@@ -110,7 +130,36 @@ body_tmpl(b, labels) :=
     else if (head(b) == 'Do and arity(b) == 1) body_tmpl(arg(b, 0), labels)
     else if (head(b) == 'Tuple) vars_tmpl('Tuple, b, labels)
     else if (head(b) == 'Apply and arg(b, 0) == 'mexpr) mexpr_tmpl(arg(arg(b, 1), 0), arg(arg(b, 1), 1), labels)
+    else if (head(b) == 'Apply) call_tmpl(b, labels)
     else bad
+
+# a call of a function of syntax.pk that builds the tree (peg_lambda(ps, body) and the like), as the
+# template of the tree it makes. The wrapper that return, break and continue add is looked through.
+call_tmpl(c, labels) :=
+    if (not (is_mx(c) and head(c) == 'Apply and arity(c) == 2 and is_mx(arg(c, 1)) and head(arg(c, 1)) == 'Tuple)) bad
+    else if (not all(x -> label_ok(x, labels), args_of(arg(c, 1)))) bad
+    else {
+        f := arg(c, 0)
+        n := arity(arg(c, 1))
+        a := un_hole(if (n > 0) arg(arg(c, 1), 0) else '_)
+        b := un_hole(if (n > 1) arg(arg(c, 1), 1) else '_)
+        d := un_hole(if (n > 2) arg(arg(c, 1), 2) else '_)
+        if (f == 'peg_lambda and n == 2) `Lambda{!a, UnwrapReturn{!b}}
+        else if (f == 'peg_while and n == 2) `UnwrapBreak{While{!a, UnwrapContinue{!b}}}
+        else if (f == 'peg_for_tree and n == 3) `UnwrapBreak{Apply{peg_for, Tuple{!b, Lambda{Tuple{!a}, UnwrapContinue{!d}}}}}
+        else if (f == 'peg_break and n == 0) `Perform{Break{}}
+        else if (f == 'peg_continue and n == 0) `Perform{Continue{}}
+        else if (f == 'peg_return and n == 1) `Perform{Return{!a}}
+        else if (f == 'peg_record and n == 2) `Apply{record_declare, Tuple{Quote{!a}, Quote{!b}}}
+        else bad
+    }
+
+mentions(x, s) := if (is_mx(x)) any(c -> mentions(c, s), args_of(x)) else x == s
+
+# return takes an optional expression: Option{Seq{same, expr}}. The template has the expression itself.
+unopt(e) :=
+    if (is_mx(e) and head(e) == 'Option and is_mx(arg(e, 0)) and head(arg(e, 0)) == 'Seq and arity(arg(e, 0)) == 2 and arg(arg(e, 0), 0) == 'same) arg(arg(e, 0), 1)
+    else e
 
 # mexpr(h, args) in an action
 mexpr_tmpl(h, args, labels) :=
@@ -159,25 +208,26 @@ const_text(e, depth) :=
     } else bad
 
 # the kind of a piece: 'tight sticks to the left, 'prefix to the right
-const_kind(e, i, n, text) :=
+const_kind(e, i, n, text, prev) :=
     if (is_mx(e) and head(e) == 'Tight) 'tight
+    else if (text == "(" and prev == 'ident) 'tight
     else if (i == 0 and n > 1 and strlen(text) > 0 and not is_ident_char(ord(text, 0))) 'prefix
     else 'plain
 
 # ConstItem{text, kind} or ValItem{label, element}, or Bad{} when an element cannot be run backwards
 make_items(elems, labels, holes) := {
     n := length(elems)
-    go := (Nil{}, _, _) -> []
-        | (e :: es, l :: ls, i) -> {
+    go := (Nil{}, _, _, _) -> []
+        | (e :: es, l :: ls, i, prev) -> {
             it := if (l == '_) {
                     c := const_text(e, 0)
-                    if (is_bad(c)) bad else ConstItem{c, const_kind(e, i, n, c)}
+                    if (is_bad(c)) bad else ConstItem{c, const_kind(e, i, n, c, prev)}
                 } else if (member(l, holes)) ValItem{l, e}
                 else bad
-            rest := go(es, ls, i + 1)
+            rest := go(es, ls, i + 1, e)
             if (is_bad(it) or is_bad(rest)) bad else it :: rest
         }
-    items := go(elems, labels, 0)
+    items := go(elems, labels, 0, none)
     if (is_bad(items)) bad
     else if (all(h -> any(it -> head(it) == 'ValItem and arg(it, 0) == h, items), holes)) items
     else bad
@@ -195,7 +245,8 @@ tail_of(items) :=
 # Alt{owner, order, template, items, tail}
 extract_act(owner, order, e, f) := {
     is_seq := is_mx(e) and head(e) == 'Seq
-    elems := if (is_seq) args_of(e) else [e]
+    elems0 := if (is_seq) args_of(e) else [e]
+    elems := if (mentions(f, 'peg_return)) map(unopt, elems0) else elems0
     a := action_of(f, elems, is_seq)
     if (is_bad(a)) bad else {
         tm := arg(a, 1)
@@ -355,7 +406,7 @@ piece_text := (T{s}) -> s
             | (P{s}) -> s
             | (s) -> s
 
-is_bracket(s) := s == "(" or s == "[" or s == "{"
+is_bracket(s) := s == "(" or s == "[" or s == "{" or s == "."
 no_space_before(s) := s == ")" or s == "]" or s == "}" or s == "," or s == ";"
 
 un_render(ps) := {
@@ -392,8 +443,15 @@ list_pieces(inner, sep, v) := {
     if (ok) reverse(acc) else none
 }
 
+# a rule that is only a list of another rule: idents ::= ident, ...
+is_list_rule(r) := {
+    src := table_get(peg_sources, r, none)
+    is_mx(src) and (head(src) == 'Delimited or head(src) == 'Delimited1 or head(src) == 'Many)
+}
+
 val_pieces(elem, v) :=
-    if (typeof(elem) == 'symbol) {
+    if (typeof(elem) == 'symbol and is_list_rule(elem)) val_pieces(table_get(peg_sources, elem, none), v)
+    else if (typeof(elem) == 'symbol) {
         s := unparse_pp(elem, v)
         if (s == none) none else [s]
     } else if (not is_mx(elem)) none
@@ -427,13 +485,14 @@ fits(p, t) := {
     if (not is_mx(p)) ok = p == t
     else if (head(p) == 'Hole) ok = true
     else if (head(p) == 'Generic) ok = is_mx(t)
+    else if (is_unwrap(p)) ok = true
     else {
         ok = is_mx(t) and head(t) == head(p) and arity(t) == arity(p)
         i := 0
         while (ok and i < arity(p)) {
             q := arg(p, i)
             if (not is_mx(q)) ok = q == arg(t, i)
-            else if (head(q) != 'Hole) ok = is_mx(arg(t, i)) and head(arg(t, i)) == head(q)
+            else if (head(q) != 'Hole and not is_unwrap(q)) ok = is_mx(arg(t, i)) and head(arg(t, i)) == head(q)
             i = i + 1
         }
     }
@@ -523,10 +582,73 @@ arg_texts(t) := {
     if (ok) reverse(acc) else none
 }
 
+# the statements of a block. A block with fun in it has the names defined first (Def{f, none})
+# and the functions assigned where they were written (Set{f, Lambda{...}}): peg_block in syntax.pk.
+# The leading defs that are assigned later, in the same order, are written back as fun.
+is_fun_def(x) := is_mx(x) and head(x) == 'Def and arity(x) == 2 and typeof(arg(x, 0)) == 'symbol and arg(x, 1) == none
+is_fun_set(x, f) := is_mx(x) and head(x) == 'Set and arity(x) == 2 and arg(x, 0) == f and is_mx(arg(x, 1)) and head(arg(x, 1)) == 'Lambda
+    and arity(arg(x, 1)) == 2 and is_mx(arg(arg(x, 1), 0)) and head(arg(arg(x, 1), 0)) == 'Tuple
+    and not (un_strip('UnwrapReturn, arg(arg(x, 1), 1)) == arg(arg(x, 1), 1) and peg_scan(arg(arg(x, 1), 1), 'Return))
+
+first_of := (x :: _) -> x
+rest_of := (_ :: xs) -> xs
+
+leading_defs(items) := if (items != [] and is_fun_def(first_of(items))) first_of(items) :: leading_defs(rest_of(items)) else []
+
+# the position of the first Set of f as a function at or after i, or -1
+find_fun_set(items, f, i) :=
+    if (items == []) -1
+    else if (is_fun_set(first_of(items), f)) i
+    else find_fun_set(rest_of(items), f, i + 1)
+
+# how many of the leading defs are functions written in the same order
+fun_count(items) := {
+    defs := leading_defs(items)
+    m := length(defs)
+    rest := drop(items, m)
+    k := 0
+    pos := 0
+    go := true
+    each(d -> if (go) {
+        q := find_fun_set(drop(rest, pos), arg(d, 0), pos)
+        if (q < 0) go = false else {
+            k = k + 1
+            pos = q + 1
+        }
+    }, defs)
+    k
+}
+
+fun_text(x) := {
+    lam := arg(x, 1)
+    ps := list_pieces('pattern, ",", arg(lam, 0))
+    b := unparse_pp('expr, un_strip('UnwrapReturn, arg(lam, 1)))
+    if (ps == none or b == none) none
+    else strcat("fun ", strcat(symname(arg(x, 0)), strcat("(", strcat(un_render(ps), strcat(") ", b)))))
+}
+
+# the text of each statement, or none
+block_texts(items) := {
+    k := fun_count(items)
+    defs := take(items, k)
+    rest := drop(items, k)
+    acc := []
+    ok := true
+    pending := map(d -> arg(d, 0), defs)
+    each(x -> if (ok) {
+        s := if (pending != [] and is_fun_set(x, first_of(pending))) {
+                pending = rest_of(pending)
+                fun_text(x)
+            } else unparse_pp('expr, x)
+        if (s == none) ok = false else acc = s :: acc
+    }, rest)
+    if (ok) reverse(acc) else none
+}
+
 print_do(t) :=
     if (not (is_mx(t) and head(t) == 'Do)) none
     else {
-        ss := arg_texts(t)
+        ss := block_texts(args_of(t))
         if (ss == none) none
         else if (arity(t) == 0) "{}"
         else strcat("{\n", strcat(join("\n", map(indent, ss)), "\n}"))
@@ -553,3 +675,141 @@ print_if(t) :=
 
 unparse_custom('primary, 3, none, print_do)
 unparse_custom('primary, 3, 'expr, print_if)
+
+# print_do is also used for a block of the body of a match arm and for the arguments
+# of a hole of an f-string: they are parsed as expr.
+
+# === Syntax made by functions that cannot be run backwards ===
+
+# f"...{e}...": strcat("a", to_text(e)) and so on, in the shape that peg_interp makes
+is_call2(t, f) := is_mx(t) and head(t) == 'Apply and arity(t) == 2 and arg(t, 0) == f and is_mx(arg(t, 1)) and head(arg(t, 1)) == 'Tuple
+is_text_hole(x) := is_call2(x, 'to_text) and arity(arg(x, 1)) == 1
+is_text_lit(x) := typeof(x) == 'string and strlen(x) > 0
+
+# the pieces of an f-string as a list of S{text} and E{tree}, or none
+fstr_segs(t) :=
+    if (is_call2(t, 'strcat) and arity(arg(t, 1)) == 2) {
+        l := fstr_segs(arg(arg(t, 1), 0))
+        x := arg(arg(t, 1), 1)
+        if (l == none) none
+        else if (is_text_lit(x) and head(last(l)) != 'S) append(l, [S{x}])
+        else if (is_text_hole(x)) append(l, [E{arg(arg(x, 1), 0)}])
+        else none
+    } else if (is_text_hole(t)) [E{arg(arg(t, 1), 0)}]
+    else if (is_text_lit(t)) [S{t}]
+    else none
+
+# the text of s in f"..." : the escapes of a string, and {{ }} for the braces
+fstr_escape(s) := {
+    q := quote_str(s)
+    b := strbuf_new()
+    i := 1
+    while (i < strlen(q) - 1) {
+        c := ord(q, i)
+        strbuf_add(b, if (c == 123) "{{" else if (c == 125) "}}" else chr(c))
+        i = i + 1
+    }
+    strbuf_str(b)
+}
+
+print_fstr(t) := {
+    segs := if (is_call2(t, 'strcat) or is_text_hole(t)) fstr_segs(t) else none
+    if (segs == none) none
+    else {
+        acc := []
+        ok := true
+        each(sg -> if (ok) {
+            if (head(sg) == 'S) acc = fstr_escape(arg(sg, 0)) :: acc
+            else {
+                e := unparse_pp('expr, arg(sg, 0))
+                if (e == none) ok = false
+                else acc = strcat("{", strcat(if (starts_with(e, "{")) " " else "", strcat(e, "}"))) :: acc
+            }
+        }, segs)
+        if (ok) strcat("f\"", strcat(join("", reverse(acc)), "\"")) else none
+    }
+}
+
+# return with no value
+print_return0(t) := if (t == 'Perform{Return{none}}) "return" else none
+
+# match: the arms are Lambda{Tuple{pattern}, body} joined by Fusion, applied to the value (no guard).
+# With a guard, peg_match makes a block of functions %r0, %r1, ... that call the next one when
+# the pattern or the guard fails, applied to %v.
+match_arm := (Lambda{Tuple{p}, e}) -> Arm{p, NoGuard{}, e}
+           | (x) -> none
+
+fusion_arms(f) :=
+    if (is_mx(f) and head(f) == 'Fusion and arity(f) == 2) {
+        a := match_arm(arg(f, 0))
+        r := fusion_arms(arg(f, 1))
+        if (a == none or r == none) none else a :: r
+    } else {
+        a := match_arm(f)
+        if (a == none) none else [a]
+    }
+
+rname(i) := intern(strcat("%r", int_to_str(i)))
+
+# the arms of a match with guards: Arm{pattern, guard, body}
+guarded_arms(t) := {
+    lam := arg(t, 0)
+    v := arg(arg(lam, 0), 0)
+    d := arg(lam, 1)
+    n := arity(d) - 2
+    arms := []
+    ok := n >= 1 and symname(v) == "%v" and arg(d, 0) == mexpr('Def, Tuple{rname(n), 'Lambda{Tuple{}, none}})
+                 and arg(d, n + 1) == mexpr('Apply, Tuple{rname(0), Tuple{v}})
+    i := n - 1
+    guarded := false
+    while (ok and i >= 0) {
+        x := arg(d, n - i)
+        nxt := rname(i + 1)
+        if (is_mx(x) and head(x) == 'Def and arity(x) == 2 and arg(x, 0) == rname(i) and is_mx(arg(x, 1)) and head(arg(x, 1)) == 'Fusion
+            and arg(arg(x, 1), 1) == nxt and match_arm(arg(arg(x, 1), 0)) != none) {
+            a := match_arm(arg(arg(x, 1), 0))
+            body := arg(a, 2)
+            if (is_mx(body) and head(body) == 'If and arity(body) == 3 and arg(body, 2) == mexpr('Apply, Tuple{nxt, Tuple{v}})) {
+                guarded = true
+                arms = Arm{arg(a, 0), arg(body, 0), arg(body, 1)} :: arms
+            } else arms = a :: arms
+        } else ok = false
+        i = i - 1
+    }
+    if (ok and guarded) arms else none
+}
+
+arm_text(a) := {
+    p := unparse_pp('pattern, arg(a, 0))
+    g := if (is_mx(arg(a, 1)) and head(arg(a, 1)) == 'NoGuard) "" else unparse_pp('ternary, arg(a, 1))
+    e := unparse_pp('expr, arg(a, 2))
+    if (p == none or g == none or e == none) none
+    else strcat(p, strcat(if (g == "") "" else strcat(" if ", g), strcat(" -> ", e)))
+}
+
+is_applied(t) := is_mx(t) and head(t) == 'Apply and arity(t) == 2 and is_mx(arg(t, 1)) and head(arg(t, 1)) == 'Tuple and arity(arg(t, 1)) == 1
+
+is_guard_fun(f) := is_mx(f) and head(f) == 'Lambda and arity(f) == 2 and is_mx(arg(f, 0)) and head(arg(f, 0)) == 'Tuple and arity(arg(f, 0)) == 1
+                   and typeof(arg(arg(f, 0), 0)) == 'symbol and symname(arg(arg(f, 0), 0)) == "%v"
+                   and is_mx(arg(f, 1)) and head(arg(f, 1)) == 'Do
+
+match_arms(t) :=
+    if (not is_applied(t)) none
+    else if (is_mx(arg(t, 0)) and head(arg(t, 0)) == 'Fusion) fusion_arms(arg(t, 0))
+    else if (is_guard_fun(arg(t, 0))) guarded_arms(t)
+    else none
+
+print_match(t) := {
+    arms := match_arms(t)
+    if (arms == none) none
+    else {
+        s := unparse_pp('ternary, arg(arg(t, 1), 0))
+        ts := map(arm_text, arms)
+        if (s == none or any(x -> x == none, ts)) none
+        else strcat("match ", strcat(s, strcat(" {\n", strcat(join("\n", map(indent, ts)), "\n}"))))
+    }
+}
+
+unparse_custom('primary, 8, none, print_fstr)
+unparse_custom('sugar_primary, 6, 'expr, print_return0)
+unparse_custom('sugar_primary, 10, none, print_match)
