@@ -1,0 +1,39 @@
+# The N-queens puzzle by a nondeterminism effect
+
+append := (Nil{}, ys) -> ys | (Cons{x, xs}, ys) -> Cons{x, append(xs, ys)}
+concat_map := (f, Nil{}) -> Nil{} | (f, Cons{x, xs}) -> append(f(x), concat_map(f, xs))
+length := (Nil{}) -> 0 | (Cons{_, xs}) -> 1 + length(xs)
+range(a, b) := if a > b { [] } else { Cons{a, range(a + 1, b)} }
+
+choose(xs) := perform Choose{xs}
+fail() := perform Fail{}
+
+# the list of all results of f. The continuation of Choose is resumed for each candidate.
+all_results(f) := handle [f()] with
+      (Fail{}, k) -> []
+    | (Choose{xs}, k) -> concat_map(x -> k(x), xs)
+
+# the queen in column q is not attacked by qs (d columns away from the first of qs)
+safe := (q, Nil{}, d) -> true
+      | (q, Cons{x, xs}, d) -> q != x and q != x + d and q != x - d and safe(q, xs, d + 1)
+
+# place k more queens on an n x n board
+place(n, k, qs) := if k == 0 { qs } else {
+    q := choose(range(1, n))
+    if safe(q, qs, 1) { place(n, k - 1, Cons{q, qs}) } else { fail() }
+}
+
+queens(n) := all_results(() -> place(n, n, []))
+
+show := (Nil{}) -> none
+      | (Cons{x, Nil{}}) -> print(x)
+      | (Cons{x, xs}) -> { print(x); put(" "); show(xs) }
+
+for_each := (f, Nil{}) -> none | (f, Cons{x, xs}) -> { f(x); for_each(f, xs) }
+
+for_each(qs -> { show(qs); put("\n") }, queens(5))
+n := 4
+while n <= 7 {
+    put("queens("); print(n); put(") = "); println(length(queens(n)))
+    n = n + 1
+}

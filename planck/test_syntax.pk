@@ -1,0 +1,167 @@
+# tests for the syntax (planck/syntax.pk) and the packrat parser (planck/peg.pk)
+# Copyright (C) 2026 nineties
+
+passed := 0
+failed := 0
+
+check(actual, expected) := if actual == expected {
+    passed = passed + 1
+} else {
+    failed = failed + 1
+    put("Test failed: expected "); print(expected)
+    put(" but got "); println(actual)
+}
+
+# the tree of the first expression in s
+tree(s) := arg(peg_parse('toplevel, s), 0)
+# the rest of s after the first expression
+rest(s) := arg(peg_parse('toplevel, s), 1)
+
+# === Atoms ===
+check(tree("x"), 'x)
+check(tree("42"), 42)
+check(tree("-3"), -3)
+check(tree("0x1f"), 31)
+check(tree("0b101"), 5)
+check(tree("0o17"), 15)
+check(tree("010"), 10)
+check(tree("\"a\\tb\\n\""), "a\tb\n")
+check(tree("\"\\\"q\\\"\""), "\"q\"")
+check(tree("F{1, x}"), 'F{1, x})
+check(tree("()"), 'Tuple{})
+check(tree("(1)"), 1)
+check(tree("(1, x)"), 'Tuple{1, x})
+check(tree("[1, 2]"), 'Cons{1, Cons{2, Nil{}}})
+check(tree("[]"), 'Nil{})
+
+# === Operators ===
+check(tree("1 + 2 * 3"), 'Apply{add, Tuple{1, Apply{mul, Tuple{2, 3}}}})
+check(tree("(1 + 2) * 3"), 'Apply{mul, Tuple{Apply{add, Tuple{1, 2}}, 3}})
+check(tree("1 - 2 - 3"), 'Apply{sub, Tuple{Apply{sub, Tuple{1, 2}}, 3}})
+check(tree("8 / 4 % 3"), 'Apply{mod, Tuple{Apply{div, Tuple{8, 4}}, 3}})
+check(tree("a + 1 < b"), 'Apply{lt, Tuple{Apply{add, Tuple{a, 1}}, b}})
+check(tree("a <= b"), 'Apply{le, Tuple{a, b}})
+check(tree("a >= b"), 'Apply{ge, Tuple{a, b}})
+check(tree("a > b"), 'Apply{gt, Tuple{a, b}})
+check(tree("a == b"), 'Apply{eq, Tuple{a, b}})
+check(tree("a != b"), 'Apply{ne, Tuple{a, b}})
+check(tree("not a == b"), 'Apply{not, Tuple{Apply{eq, Tuple{a, b}}}})
+check(tree("a and b or c"), 'If{If{a, b, false}, true, c})
+check(tree("a or b and c"), 'If{a, true, If{b, c, false}})
+check(tree("c ? a : b"), 'If{c, a, b})
+check(tree("-x"), 'Apply{sub, Tuple{0, x}})
+check(tree("a - -1"), 'Apply{sub, Tuple{a, -1}})
+
+# === Calls, functions and definitions ===
+check(tree("f(x, 1)"), 'Apply{f, Tuple{x, 1}})
+check(tree("f()(x)"), 'Apply{Apply{f, Tuple{}}, Tuple{x}})
+check(tree("x -> x + 1"), 'Lambda{Tuple{x}, Apply{add, Tuple{x, 1}}})
+check(tree("(x, y) -> x"), 'Lambda{Tuple{x, y}, x})
+check(tree("() -> 1"), 'Lambda{Tuple{}, 1})
+check(tree("x -> y -> x"), 'Lambda{Tuple{x}, Lambda{Tuple{y}, x}})
+check(tree("(0) -> 1 | (n) -> n"), 'Fusion{Lambda{Tuple{0}, 1}, Lambda{Tuple{n}, n}})
+check(tree("(F{a}, 'none) -> a"), 'Lambda{Tuple{F{a}, Quote{none}}, a})
+check(tree("(x @ int) -> x"), 'Lambda{Tuple{_TypeOf{x, int}}, x})
+check(tree("x := 1"), 'Def{x, 1})
+check(tree("f(x) := x"), 'Def{f, Lambda{Tuple{x}, x}})
+check(tree("x = y"), 'Set{x, y})
+
+# === Quotation ===
+check(tree("'a"), 'Quote{a})
+check(tree("'(a + 1)"), 'Quote{Apply{add, Tuple{a, 1}}})
+check(tree("`F{!x}"), 'QuasiQuote{F{UnQuote{x}}})
+
+# === Blocks and control ===
+check(tree("{ a; b }"), 'Do{a, b})
+check(tree("{\n a\n b\n}"), 'Do{a, b})
+check(tree("{}"), 'Do{})
+check(tree("if a { b }"), 'If{a, Do{b}, none})
+check(tree("if a { b } else { c }"), 'If{a, Do{b}, Do{c}})
+check(tree("if a { b }\nelse if c { d }"), 'If{a, Do{b}, If{c, Do{d}, none}})
+check(tree("while a { b }"), 'While{a, Do{b}})
+check(tree("handle { a } with (E{}, k) -> k(1)"), 'Handle{Do{a}, Lambda{Tuple{E{}, k}, Apply{k, Tuple{1}}}})
+check(tree("perform E{x}"), 'Perform{E{x}})
+
+# === Lines and comments ===
+check(tree("a\n-1"), 'a)
+check(rest("a\n-1"), "-1")
+check(tree("a -\n1"), 'Apply{sub, Tuple{a, 1}})
+check(tree("a # comment\n+ 1"), 'Apply{add, Tuple{a, 1}})
+check(tree("f\n(x)"), 'f)
+check(rest("x := 1; y"), "y")
+check(tree(" \n# only a comment\n"), 'Eof{})
+check(head(tree("1 +")), 'SyntaxError)
+check(rest("1 2"), "2")
+check(head(tree("x := (1")), 'SyntaxError)
+check(head(tree("x := )")), 'SyntaxError)
+check(head(tree(")")), 'SyntaxError)
+check(head(tree("\"abc")), 'SyntaxError)
+
+# === Evaluation of the new syntax ===
+fib := (0) -> 0 | (1) -> 1 | (n) -> fib(n - 1) + fib(n - 2)
+check(fib(15), 610)
+check({ a := 2; b := 3; a * b }, 6)
+check(if 1 < 2 { "y" } else { "n" }, "y")
+check(if 1 > 2 { "y" }, none)
+n := 0
+i := 0
+while i < 5 { i = i + 1; n = n + i }
+check(n, 15)
+check(handle { 1 + perform Ask{} } with (Ask{}, k) -> k(41), 42)
+check((x -> y -> x - y)(10)(3), 7)
+check(not 1 == 2, true)
+check(1 == 1 and 2 == 3, false)
+check(false or 3 > 2, true)
+add3(a, b, c) := a + b + c
+check(add3(1, 2, 3), 6)
+len := (Nil{}) -> 0 | (Cons{_, xs}) -> 1 + len(xs)
+check(len([1, 2, 3]), 3)
+x := 5
+check(`F{!x, x}, 'F{5, x})
+check(Apply{add, Tuple{1, 2}}, 3)
+
+# === Packrat parser: grammar declarations ===
+num ::= integer
+check(arg(peg_parse('num, "12 rest"), 0), 12)
+check(arg(peg_parse('num, "12 rest"), 1), "rest")
+
+# direct left recursion is left associative
+diff ::= a:diff "-" b:num { a - b } | num
+check(arg(peg_parse('diff, "10 - 3 - 2"), 0), 5)
+
+# repetition, option, lookahead and keywords
+nums ::= "[" xs:num* "]" { xs }
+check(arg(peg_parse('nums, "[1 2 3]"), 0), 'Tuple{1, 2, 3})
+check(arg(peg_parse('nums, "[]"), 0), 'Tuple{})
+some ::= xs:num+ { xs }
+check(arg(peg_parse('some, "1 2"), 0), 'Tuple{1, 2})
+check(head(arg(peg_parse('some, "x"), 0)), 'SyntaxError)
+opt ::= a:num b:("," num)? { Tuple{a, b} }
+check(arg(peg_parse('opt, "1, 2"), 0), 'Tuple{1, Tuple{Tuple{",", 2}}})
+check(arg(peg_parse('opt, "1"), 0), 'Tuple{1, Tuple{}})
+notx ::= !"x" a:ident { a }
+check(arg(peg_parse('notx, "y"), 0), 'y)
+check(head(arg(peg_parse('notx, "x"), 0)), 'SyntaxError)
+andx ::= &"x" a:ident { a }
+check(arg(peg_parse('andx, "x"), 0), 'x)
+kw ::= 'go a:num { a }
+check(arg(peg_parse('kw, "go 1"), 0), 1)
+check(head(arg(peg_parse('kw, "gopher 1"), 0)), 'SyntaxError)
+pair ::= a:num "," b:num { Tuple{a, b} }
+       | a:num { Tuple{a} }
+check(arg(peg_parse('pair, "1, 2"), 0), 'Tuple{1, 2})
+check(arg(peg_parse('pair, "1"), 0), 'Tuple{1})
+
+# ... is the previous definition
+color ::= 'red { 1 }
+color ::= 'blue { 2 } | ...
+check(arg(peg_parse('color, "red"), 0), 1)
+check(arg(peg_parse('color, "blue"), 0), 2)
+
+# extend the syntax of planck
+primary ::= 'unless c:expr a:block 'else b:block { `If{!c, !b, !a} } | ...
+check(unless 1 > 2 { "a" } else { "b" }, "a")
+check(tree("unless c { a } else { b }"), 'If{c, Do{b}, Do{a}})
+
+put("Tests passed "); print(passed); put("/"); println(passed + failed)
+if failed > 0 { exit(1) }

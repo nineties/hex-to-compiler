@@ -363,9 +363,12 @@
     )
 
 ; make an m-expr from an array of n values
-(def MAX_ARITY 16)
+; (a local buffer of the stack must be smaller than 128 bytes, so the
+; buffer is global. mexprn is not reentrant.)
+(def MAX_ARITY 64)
+(char[] 264 mexprn_buf) ; m-expr with 64 arity at maximum
 (fun mexprn (h n vals)
-    (char[] 72 tmpobj)  ; m-expr with 16 arity at maximum
+    (var tmpobj mexprn_buf)
     (var i 0)
     (if (> n MAX_ARITY) (do
         (eputs "too many arguments for M-expr\n")
@@ -382,7 +385,12 @@
 
 (fun hash (e)
     (var t (gettag e))
-    (if (== t IntT) (return (* (fixnum_to_int e) 536870909)))
+    (var h 0)
+    (if (== t IntT) (do
+        ; the bucket is taken from the low bits, so mix the high bits into them
+        (= h (* (fixnum_to_int e) 536870909))
+        (return (^ h (>> h 15)))
+        ))
     (if (== t SymbolT) (return (symhash e)))
     (if (== t StringT) (return (strhash (str_text e))))
     (if (== t MexprT) (return (mexprhash e)))
@@ -418,6 +426,7 @@
 (long symbolS)
 (long mexprS)
 (long functionS)
+(long tableS)
 (long DefS)
 (long SetS)
 (long ApplyS)
@@ -466,6 +475,7 @@
     (= symbolS  (sym "symbol"))
     (= mexprS   (sym "mexpr"))
     (= functionS (sym "function"))
+    (= tableS   (sym "table"))
     (= DefS         (sym "Def"))
     (= SetS         (sym "Set"))
     (= ApplyS       (sym "Apply"))
@@ -516,6 +526,7 @@
     (if (== t SymbolT) (return symbolS))
     (if (== t MexprT) (return mexprS))
     (if (is_function v) (return functionS))
+    (if (== t StructT) (return tableS))
     (not_reachable "typeof")
     )
 
@@ -607,13 +618,14 @@
         (fputs chan ">")
         )
     (if (== t ContT) (fputs chan "<cont>")
+    (if (== t StructT) (fputs chan "<table>")
     (if (== t FusionT) (do
         (fprint chan (get e 1))
         (fputs chan "|")
         (fprint chan (get e 2))
         )
         (fputs chan "<?>")
-        ))))))))
+        )))))))))
     )
 (fun eprint (e) (fprint STDERR e))
 
@@ -779,7 +791,7 @@
 
     (while (== (getb raw) (char ",")) (do
         (+= raw 1) ; skip ,
-        (if (>= arity MAX_ARITY) (do
+        (if (>= arity 16) (do
             (set ret (syntax_error "too many arguments"))
             (return raw)
             ))
@@ -2020,6 +2032,116 @@
 
 (fun p_typeof (v) (return (typeof v)))
 
+; --- strings, symbols, tables and files (used by planck/peg.pk)
+
+; a string object for text of length n (text is not copied)
+(fun str_n (text n)
+    (var data (allocate 8))
+    (set data 0 (make_header StringT 0 n))
+    (set data 1 text)
+    (return data)
+    )
+
+(fun str_len (s) (return (get_header_arg s)))
+
+(fun p_strlen (s)
+    (expect StringT s)
+    (return (fixnum (str_len s)))
+    )
+
+; ord(s, i): the byte at i, or -1 when i is out of range
+(fun p_ord (s i)
+    (var n 0)
+    (expect StringT s)
+    (check_int "ord" i)
+    (= n (fixnum_to_int i))
+    (if (|| (< n 0) (>= n (str_len s))) (return (fixnum -1)))
+    (return (fixnum (getb (get s 1) n)))
+    )
+
+; substr(s, i, j): bytes from i to j-1. The text is shared when j is the end.
+(fun p_substr (s i j)
+    (var len 0)
+    (expect StringT s)
+    (check_int "substr" i)
+    (check_int "substr" j)
+    (= len (str_len s))
+    (= i (fixnum_to_int i))
+    (= j (fixnum_to_int j))
+    (if (|| (< i 0) (|| (> j len) (> i j))) (do
+        (eputs "substr: index out of range: ")
+        (eprint s)
+        (eputs " ")
+        (eputi i)
+        (eputs " ")
+        (eputi j)
+        (eputs "\n")
+        (exit 1)
+        ))
+    (if (== j len) (return (str_n (+ (get s 1) i) (- j i))))
+    (return (str_n (strndup (+ (get s 1) i) (- j i)) (- j i)))
+    )
+
+(fun p_strcat (a b)
+    (var n 0)
+    (var m 0)
+    (var text 0)
+    (expect StringT a)
+    (expect StringT b)
+    (= n (str_len a))
+    (= m (str_len b))
+    (= text (allocate (+ (+ n m) 1)))
+    (memcpy text (get a 1) n)
+    (memcpy (+ text n) (get b 1) m)
+    (setb text (+ n m) 0)
+    (return (str_n text (+ n m)))
+    )
+
+(fun p_intern (s)
+    (expect StringT s)
+    (return (sym (strndup (get s 1) (str_len s))))
+    )
+
+; push(m, x): the m-expr m with x appended
+(char[] 256 push_buf)
+(fun p_push (m x)
+    (var buf push_buf)
+    (var n 0)
+    (expect MexprT m)
+    (= n (get_header_arg m))
+    (if (>= n MAX_ARITY) (runtime_error "push: too many arguments: " m))
+    (memcpy buf (+ m 8) (* 4 n))
+    (set buf n x)
+    (return (mexprn (get m 1) (+ n 1) buf))
+    )
+
+; table: | header | hash table | (mutable, keys are compared by eq)
+(fun p_table ()
+    (var t (allocate 8))
+    (set t 0 (make_header StructT 1 0))
+    (set t 1 (make_table 0x400 hash values_equal))
+    (return t)
+    )
+
+(fun p_table_get (t k default)
+    (var v 0)
+    (expect StructT t)
+    (= v (table_lookup (get t 1) k))
+    (if v (return v))
+    (return default)
+    )
+
+(fun p_table_set (t k v)
+    (expect StructT t)
+    (if (! (table_update (get t 1) k v)) (table_insert (get t 1) k v))
+    (return v)
+    )
+
+(fun p_read_file (path)
+    (expect StringT path)
+    (return (read_file (get path 1)))
+    )
+
 (fun p_parse (s) (return (parse s)))
 
 (fun p_exit (n)
@@ -2058,6 +2180,16 @@
     (defprim "mexpr"   2 p_mexpr   PRIM_NATIVE)
     (defprim "typeof"  1 p_typeof  PRIM_NATIVE)
     (defprim "parse"   1 p_parse   PRIM_NATIVE)
+    (defprim "strlen"  1 p_strlen  PRIM_NATIVE)
+    (defprim "ord"     2 p_ord     PRIM_NATIVE)
+    (defprim "substr"  3 p_substr  PRIM_NATIVE)
+    (defprim "strcat"  2 p_strcat  PRIM_NATIVE)
+    (defprim "intern"  1 p_intern  PRIM_NATIVE)
+    (defprim "push"    2 p_push    PRIM_NATIVE)
+    (defprim "table"   0 p_table   PRIM_NATIVE)
+    (defprim "table_get" 3 p_table_get PRIM_NATIVE)
+    (defprim "table_set" 3 p_table_set PRIM_NATIVE)
+    (defprim "read_file" 1 p_read_file PRIM_NATIVE)
     (defprim "exit"    1 p_exit    PRIM_NATIVE)
     (defprim "eval"    1 0         PRIM_EVAL)
     )

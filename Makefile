@@ -54,6 +54,7 @@ test: pforth plisp.fs $(shell find plisp -name "*.lisp")
 # run tests of planck0 and compare outputs of examples with *.out
 test-planck0: planck0
 	./planck0 planck/test.pk
+	./planck0 planck/test_syntax.pk
 	@for f in $(PLANCK_EXAMPLES); do \
 		./planck0 $$f > tmp-example.out || exit 1; \
 		diff -u $${f%.pk}.out tmp-example.out || exit 1; \
