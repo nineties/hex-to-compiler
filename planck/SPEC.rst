@@ -76,6 +76,8 @@ M-expressions are expressions of this syntax too.
      - the arm applies when ``p`` matches and ``c`` is true
    * - ``"a\(e)b"``
      - ``Apply{strcat, Tuple{Apply{strcat, Tuple{"a", Apply{to_text, Tuple{e}}}}, "b"}}``
+   * - ``fun f(p, ...) e`` in a block
+     - ``Def{f, none}`` at the top of the block, and ``Set{f, Lambda{Tuple{p, ...}, e}}`` in its place
    * - ``handle e with h``
      - ``Handle{e, h}``
    * - ``perform e``
@@ -101,6 +103,12 @@ and ``t.f`` is the argument of ``t`` at the position of the field ``f`` in the d
 Values with different heads can have fields of the same name. Declaring ``T`` again replaces the names.
 A ``.`` follows its left operand with no space. A value whose head is not declared or has no field ``f`` stops the program with a message.
 
+``fun f(p, ...) e`` declares a function in a block, as ``f(p, ...) := e`` does, but all the ``fun`` of a block are
+declared at its top, so each function can call the functions declared after it. A function is assigned where its ``fun`` is,
+so it sees the variables declared before it in the block, and it can be called after that place.
+A ``fun`` is written only as an expression of a block. It is a variable of the function or the program that contains the block,
+like ``x := e``.
+
 ``for (p in e) a`` evaluates ``a`` for each element of the list or the vector ``e``, with the elements matched by the pattern ``p``,
 and has the value ``none``. The variables of ``a`` outside the loop are shared, so ``a`` can assign them.
 
@@ -124,7 +132,7 @@ and ``p :: q`` for ``Cons{p, q}``, e.g. ``(x :: xs) -> ...`` and ``f(x :: y :: r
 Lexical rules:
 
 * identifiers are ``[A-Za-z_][A-Za-z0-9_]*`` except the reserved words
-  ``if else while and or handle with perform match record for in return break``.
+  ``if else while and or handle with perform match record for in return break fun``.
 * integers are decimal (``10``, ``-3``), ``0x1f``, ``0o17`` or ``0b101``.
 * strings are ``"..."`` in one line with the escapes ``\a \b \t \n \v \f \r \" \' \\``.
   ``\(e)`` in a string embeds the value of the expression ``e``, which may contain strings.

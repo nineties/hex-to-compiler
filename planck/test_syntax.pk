@@ -422,6 +422,76 @@ x := 7
 for (x in [1, 2]) total = total + x
 check(x, 7)
 
+# === fun ===
+check(tree("{ fun f(x) x }"), 'Do{Def{f, none}, Set{f, Lambda{Tuple{x}, x}}})
+check(tree("{ a := 1; fun f() { a }; f() }"), 'Do{Def{f, none}, Def{a, 1}, Set{f, Lambda{Tuple{}, Do{a}}}, Apply{f, Tuple{}}})
+check(tree("{ fun f(x, y) x + y\n fun g() f(1, 2)\n g() }"), 'Do{Def{f, none}, Def{g, none}, Set{f, Lambda{Tuple{x, y}, Apply{add, Tuple{x, y}}}}, Set{g, Lambda{Tuple{}, Apply{f, Tuple{1, 2}}}}, Apply{g, Tuple{}}})
+check(tree("{ fun f(x :: xs) x }"), 'Do{Def{f, none}, Set{f, Lambda{Tuple{Cons{x, xs}}, x}}})
+check(tree("{ fun f() { return 1 } }"), `Do{Def{f, none}, Set{f, Lambda{Tuple{}, Handle{Do{Perform{Return{1}}}, !rh}}}})
+check(tree("{ a; b }"), 'Do{a, b})
+check(head(tree("fun f(x) x")), 'SyntaxError)
+check(head(tree("{ fun f x }")), 'SyntaxError)
+check(head(tree("{ fun (x) x }")), 'SyntaxError)
+
+check({
+    fun even(n) n == 0 ? true : odd(n - 1)
+    fun odd(n) n == 0 ? false : even(n - 1)
+    Tuple{even(10), odd(10), even(7)}
+}, Tuple{true, false, false})
+counter() := {
+    c := 0
+    fun inc() {
+        c = c + 1
+        c
+    }
+    inc()
+    inc()
+}
+check(counter(), 2)
+# a fun sees the variables declared before it, and funs call each other
+fact_sum(n) := {
+    base := 1
+    fun fact(m) m <= 1 ? base : m * fact(m - 1)
+    fun sum_to(m) m == 0 ? 0 : fact(m) + sum_to(m - 1)
+    sum_to(n)
+}
+check(fact_sum(4), 33)
+find_in(xs, y) := {
+    fun go(l) {
+        for (x in l) {
+            if (x == y) return true
+        }
+        false
+    }
+    go(xs)
+}
+check(find_in([1, 2, 3], 2), true)
+check(find_in([1, 2, 3], 5), false)
+# a recursive descent parser: sum := num ("+" num)* with parentheses
+parse_sum(toks) := {
+    pos := 0
+    fun peek() pos < length(toks) ? nth(toks, pos) : "eof"
+    fun atom() {
+        t := peek()
+        pos = pos + 1
+        if (t == "(") {
+            v := sum()
+            pos = pos + 1
+            v
+        } else t
+    }
+    fun sum() {
+        v := atom()
+        while (peek() == "+") {
+            pos = pos + 1
+            v = v + atom()
+        }
+        v
+    }
+    sum()
+}
+check(parse_sum([1, "+", "(", 2, "+", 3, ")", "+", 4]), 10)
+
 # === Packrat parser: grammar declarations ===
 num ::= integer
 check(arg(peg_parse('num, "12 rest"), 0), 12)

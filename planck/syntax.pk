@@ -22,6 +22,7 @@ Apply{table_set, Tuple{peg_reserved, "for", true}}
 Apply{table_set, Tuple{peg_reserved, "in", true}}
 Apply{table_set, Tuple{peg_reserved, "return", true}}
 Apply{table_set, Tuple{peg_reserved, "break", true}}
+Apply{table_set, Tuple{peg_reserved, "fun", true}}
 
 " identifier: [A-Za-z_][A-Za-z0-9_]* except the peg_reserved words "
 Def{peg_tok_ident, Lambda{Tuple{p}, Do{
@@ -243,8 +244,8 @@ Apply{define_rule, Tuple{Quote{postfix}, Quote{Choice{
     primary}}}}
 
 Apply{define_rule, Tuple{Quote{block}, Quote{
-    Act{Seq{"{", Many{Seq{expr, Option{";"}}}, "}"},
-        Lambda{Tuple{Tuple{_, es, _}}, Apply{mexpr, Tuple{Quote{Do}, Apply{peg_map_args, Tuple{peg_first, es}}}}}}}}}
+    Act{Seq{"{", Many{Seq{Choice{fun_decl, expr}, Option{";"}}}, "}"},
+        Lambda{Tuple{Tuple{_, es, _}}, Apply{peg_block, Tuple{es}}}}}}}
 
 " the condition is in parentheses, the body is any expression. "
 " else belongs to the nearest if, since the body takes it first. "
@@ -1003,6 +1004,79 @@ Apply{
     }}
 
 Apply{define_rule, Tuple{Quote{primary}, Quote{Choice{return_expr, break_expr, for_expr, Prev{}}}}}
+
+Def{
+    peg_block,
+    Lambda{
+        Tuple{es},
+        Do{
+            Def{items, Apply{peg_map_args, Tuple{peg_first, es}}},
+            Def{defs, Tuple{}},
+            Def{body, Tuple{}},
+            Def{i, 0},
+            While{
+                Apply{lt, Tuple{i, Apply{arity, Tuple{items}}}},
+                Do{
+                    Def{x, Apply{arg, Tuple{items, i}}},
+                    If{
+                        Apply{peg_is_head, Tuple{x, Quote{_Fun}}},
+                        Do{
+                            Set{
+                                defs,
+                                Apply{
+                                    push,
+                                    Tuple{defs, QuasiQuote{Def{UnQuote{Apply{arg, Tuple{x, 0}}}, none}}}
+                                }
+                            },
+                            Set{
+                                body,
+                                Apply{
+                                    push,
+                                    Tuple{
+                                        body,
+                                        QuasiQuote{
+                                            Set{
+                                                UnQuote{Apply{arg, Tuple{x, 0}}},
+                                                UnQuote{Apply{arg, Tuple{x, 1}}}
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        Set{body, Apply{push, Tuple{body, x}}}
+                    },
+                    Set{i, Apply{add, Tuple{i, 1}}}
+                }
+            },
+            Set{i, 0},
+            While{
+                Apply{lt, Tuple{i, Apply{arity, Tuple{body}}}},
+                Do{
+                    Set{defs, Apply{push, Tuple{defs, Apply{arg, Tuple{body, i}}}}},
+                    Set{i, Apply{add, Tuple{i, 1}}}
+                }
+            },
+            Apply{mexpr, Tuple{Quote{Do}, defs}}
+        }
+    }}
+
+Apply{define_rule, Tuple{Quote{patterns}, Quote{Delimited{pattern, ","}}}}
+
+Apply{
+    define_rule,
+    Tuple{
+        Quote{fun_decl},
+        Quote{
+            Act{
+                Seq{Key{"fun"}, ident, "(", patterns, ")", expr},
+                Lambda{
+                    Tuple{Tuple{_, f, _, ps, _, b}},
+                    Do{QuasiQuote{_Fun{UnQuote{f}, UnQuote{Apply{peg_lambda, Tuple{ps, b}}}}}}
+                }
+            }
+        }
+    }}
 
 " === Switch to the new syntax === "
 Def{parse_mexpr, parse}
