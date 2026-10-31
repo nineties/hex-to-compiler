@@ -1,0 +1,42 @@
+" Nondeterministic computation by multi-shot continuations "
+
+Def{range, Lambda{Tuple{a, b},
+    If{Apply{ge, Tuple{a, b}},
+        Nil{},
+        Cons{a, Apply{range, Tuple{Apply{add, Tuple{a, 1}}, b}}}}}}
+
+Def{append, Fusion{
+    Lambda{Tuple{Nil{}, ys}, ys},
+    Lambda{Tuple{Cons{x, xs}, ys}, Cons{x, Apply{append, Tuple{xs, ys}}}}}}
+
+Def{concat_map, Fusion{
+    Lambda{Tuple{f, Nil{}}, Nil{}},
+    Lambda{Tuple{f, Cons{x, xs}},
+        Apply{append, Tuple{Apply{f, Tuple{x}}, Apply{concat_map, Tuple{f, xs}}}}}}}
+
+Def{choose, Lambda{Tuple{xs}, Perform{Choose{xs}}}}
+Def{fail, Lambda{Tuple{}, Perform{Fail{}}}}
+
+" all_results{f} returns the list of all results of f. "
+" The continuation of Choose is resumed once for each candidate. "
+Def{all_results, Lambda{Tuple{f},
+    Handle{Cons{Apply{f, Tuple{}}, Nil{}},
+        Fusion{
+            Lambda{Tuple{Fail{}, k}, Nil{}},
+            Lambda{Tuple{Choose{xs}, k},
+                Apply{concat_map, Tuple{Lambda{Tuple{x}, Apply{k, Tuple{x}}}, xs}}}}}}}
+
+Apply{println, Tuple{Apply{all_results, Tuple{Lambda{Tuple{},
+    Tuple{
+        Apply{choose, Tuple{Cons{1, Cons{2, Nil{}}}}},
+        Apply{choose, Tuple{Cons{"a", Cons{"b", Cons{"c", Nil{}}}}}}}}}}}}
+
+" Pythagorean triples a <= b <= c < 16 "
+Def{sq, Lambda{Tuple{x}, Apply{mul, Tuple{x, x}}}}
+Apply{println, Tuple{Apply{all_results, Tuple{Lambda{Tuple{}, Do{
+    Def{a, Apply{choose, Tuple{Apply{range, Tuple{1, 16}}}}},
+    Def{b, Apply{choose, Tuple{Apply{range, Tuple{a, 16}}}}},
+    Def{c, Apply{choose, Tuple{Apply{range, Tuple{b, 16}}}}},
+    If{Apply{eq, Tuple{Apply{add, Tuple{Apply{sq, Tuple{a}}, Apply{sq, Tuple{b}}}}, Apply{sq, Tuple{c}}}},
+        Triple{a, b, c},
+        Apply{fail, Tuple{}}}}}}}}}
