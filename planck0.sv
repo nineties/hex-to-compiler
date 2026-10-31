@@ -2099,6 +2099,11 @@
     (return (sym (strndup (get s 1) (str_len s))))
     )
 
+; symname(s): the name of the symbol s as a string (the inverse of intern)
+(fun p_symname (s)
+    (return (str (sym_name s)))
+    )
+
 ; push(m, x): the m-expr m with x appended
 (char[] 256 push_buf)
 (fun p_push (m x)
@@ -2209,6 +2214,7 @@
     (defprim "substr"  3 p_substr  PRIM_NATIVE)
     (defprim "strcat"  2 p_strcat  PRIM_NATIVE)
     (defprim "intern"  1 p_intern  PRIM_NATIVE)
+    (defprim "symname" 1 p_symname PRIM_NATIVE)
     (defprim "push"    2 p_push    PRIM_NATIVE)
     (defprim "array"   1 p_array   PRIM_NATIVE)
     (defprim "array_get" 2 p_array_get PRIM_NATIVE)
