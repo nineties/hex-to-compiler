@@ -433,6 +433,8 @@
 (long PerformS)
 (long TupleS)
 (long SyntaxErrorS)
+(long readS)
+(long evalS)
 (long emptyTuple)
 
 (fun tup2 (a b) (return (mexpr2 TupleS a b)))
@@ -478,6 +480,8 @@
     (= PerformS     (sym "Perform"))
     (= TupleS       (sym "Tuple"))
     (= SyntaxErrorS (sym "SyntaxError"))
+    (= readS        (sym "read"))
+    (= evalS        (sym "eval"))
     (= emptyTuple   (mexpr0 TupleS))
     )
 
@@ -2049,6 +2053,7 @@
     (defprim "mexpr"   2 p_mexpr   PRIM_NATIVE)
     (defprim "typeof"  1 p_typeof  PRIM_NATIVE)
     (defprim "parse"   1 p_parse   PRIM_NATIVE)
+    (defprim "read"    1 p_parse   PRIM_NATIVE)
     (defprim "exit"    1 p_exit    PRIM_NATIVE)
     (defprim "eval"    1 0         PRIM_EVAL)
     )
@@ -2078,12 +2083,32 @@
     (return (str buf))
     )
 
+; The loop looks up the global variables `read` and `eval` every time, so
+; a program can replace them (Def{read, ...}, Def{eval, ...}) and the next
+; top-level expression is read/evaluated by the new definitions.
+;   read: String -> Tuple{m-expr, rest String}   (initially the builtin parse)
+;   eval: m-expr -> any value                    (initially the builtin eval)
+; Inside the VM, eval is always the builtin (PRIM_EVAL).
+(fun call_global (name arg)
+    (return (run_toplevel (compile_toplevel
+        (mexpr2 ApplyS name (mexpr1 TupleS arg)))))
+    )
+
 (fun interpret (path)
     (var text (read_file path))
     (var ret 0)
     (var e 0)
     (while (getb (skip_spaces (get text 1))) (do
-        (= ret (parse text))
+        (= ret (call_global readS text))
+        (if (|| (! (has_head TupleS ret))
+            (|| (!= (get_header_arg ret) 2)
+                (!= (gettag (tup_get ret 1)) StringT))) (do
+            (eputs path)
+            (eputs ": read must return Tuple{m-expr, string}, got ")
+            (eprint ret)
+            (eputs "\n")
+            (exit 1)
+            ))
         (= e (tup_get ret 0))
         (if (has_head SyntaxErrorS e) (do
             (eputs path)
@@ -2092,7 +2117,7 @@
             (eputs "\n")
             (exit 1)
             ))
-        (run_toplevel (compile_toplevel e))
+        (call_global evalS (mexpr1 QuoteS e))
         (= text (tup_get ret 1))
         ))
     )
