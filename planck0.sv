@@ -434,8 +434,8 @@
 (long TupleS)
 (long SyntaxErrorS)
 (long EofS)
-(long readS)
-(long evalS)
+(long parseS)
+(long interpretS)
 (long emptyTuple)
 
 (fun tup2 (a b) (return (mexpr2 TupleS a b)))
@@ -482,8 +482,8 @@
     (= TupleS       (sym "Tuple"))
     (= SyntaxErrorS (sym "SyntaxError"))
     (= EofS         (sym "Eof"))
-    (= readS        (sym "read"))
-    (= evalS        (sym "eval"))
+    (= parseS       (sym "parse"))
+    (= interpretS   (sym "interpret"))
     (= emptyTuple   (mexpr0 TupleS))
     )
 
@@ -2058,9 +2058,9 @@
     (defprim "mexpr"   2 p_mexpr   PRIM_NATIVE)
     (defprim "typeof"  1 p_typeof  PRIM_NATIVE)
     (defprim "parse"   1 p_parse   PRIM_NATIVE)
-    (defprim "read"    1 p_parse   PRIM_NATIVE)
     (defprim "exit"    1 p_exit    PRIM_NATIVE)
     (defprim "eval"    1 0         PRIM_EVAL)
+    (defprim "interpret" 1 0       PRIM_EVAL)
     )
 
 ; === Interpreter
@@ -2088,26 +2088,28 @@
     (return (str buf))
     )
 
-; The loop looks up the global variables `read` and `eval` every time, so
-; a program can replace them (Def{read, ...}, Def{eval, ...}) and the next
-; top-level expression is read/evaluated by the new definitions.
-;   read: String -> Tuple{m-expr, rest String}   (initially the builtin parse)
-;     When only white space is left, read returns Tuple{Eof{}, rest} and the
-;     loop stops. A replacement read should pass Eof{} through.
-;   eval: m-expr -> any value                    (initially the builtin eval)
-; Inside the VM, eval is always the builtin (PRIM_EVAL).
+; The loop looks up the global variables `parse` and `interpret` every time,
+; so a program can replace them (Def{parse, ...}, Def{interpret, ...}) and
+; the next top-level expression is parsed/interpreted by the new definitions.
+;   parse: String -> Tuple{m-expr, rest String}   (initially the builtin parse)
+;     When only white space is left, parse returns Tuple{Eof{}, rest} and the
+;     loop stops. A replacement parse should pass Eof{} through.
+;   interpret: m-expr -> any value                (initially the builtin eval)
+; `eval` is the same builtin under another name. It is not looked up by the
+; loop, so programs can call eval even after replacing interpret.
+; Inside the VM, eval and interpret are always the builtin (PRIM_EVAL).
 (fun call_global (name arg)
     (return (run_toplevel (compile_toplevel
         (mexpr2 ApplyS name (mexpr1 TupleS arg)))))
     )
 
-(fun interpret (path)
+(fun interpret_file (path)
     (var text (read_file path))
     (var ret 0)
     (var e 0)
     (var more 1)
     (while more (do
-        (= ret (call_global readS text))
+        (= ret (call_global parseS text))
         (if (|| (! (has_head TupleS ret))
             (|| (!= (get_header_arg ret) 2)
                 (!= (gettag (tup_get ret 1)) StringT))) (do
@@ -2126,7 +2128,7 @@
                 (eputs "\n")
                 (exit 1)
                 ))
-            (call_global evalS (mexpr1 QuoteS e))
+            (call_global interpretS (mexpr1 QuoteS e))
             (= text (tup_get ret 1))
             ))
         ))
@@ -2141,9 +2143,9 @@
     (init_vm)
     (init_prims)
 
-    (interpret "planck/init.pk")
+    (interpret_file "planck/init.pk")
     (while (< i argc) (do
-        (interpret (get argv i))
+        (interpret_file (get argv i))
         (+= i 1)
         ))
     )
