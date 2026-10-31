@@ -55,6 +55,7 @@ test: pforth plisp.fs $(shell find plisp -name "*.lisp")
 test-planck0: planck0
 	./planck0 planck/test.pk
 	./planck0 planck/test_syntax.pk
+	./planck0 planck/test_lib.pk
 	@for f in $(PLANCK_EXAMPLES); do \
 		./planck0 $$f > tmp-example.out || exit 1; \
 		diff -u $${f%.pk}.out tmp-example.out || exit 1; \

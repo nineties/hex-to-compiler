@@ -1,0 +1,63 @@
+# error: errors with positions in a source text
+# Copyright (C) 2026 nineties
+
+use("base")
+use("string")
+
+# line_col(src, pos) is Tuple{line, column} of the byte position pos. Both count from 1.
+line_col(src, pos) := {
+    line := 1
+    col := 1
+    i := 0
+    while (i < pos and i < strlen(src)) {
+        if (ord(src, i) == 10) {
+            line = line + 1
+            col = 1
+        } else col = col + 1
+        i = i + 1
+    }
+    Tuple{line, col}
+}
+
+# line_text(src, line) is the text of the line without the newline
+line_text(src, line) := {
+    i := 0
+    l := 1
+    while (l < line and i < strlen(src)) {
+        if (ord(src, i) == 10) l = l + 1
+        i = i + 1
+    }
+    j := i
+    while (j < strlen(src) and ord(src, j) != 10) j = j + 1
+    substr(src, i, j)
+}
+
+# loc_at(file, src, pos) is Loc{file, line, column}
+loc_at(file, src, pos) := {
+    lc := line_col(src, pos)
+    Loc{file, arg(lc, 0), arg(lc, 1)}
+}
+
+# show_loc(Loc{"a.txt", 3, 5}) is "a.txt:3:5"
+show_loc := (Loc{file, line, col}) ->
+    strcat(strcat(strcat(strcat(file, ":"), int_to_str(line)), ":"), int_to_str(col))
+
+# error_at(loc, msg) raises the effect Error{loc, msg}
+error_at(loc, msg) := perform Error{loc, msg}
+
+# catch_error(f) is Ok{f()}, or Err{loc, msg} when f() raised Error{loc, msg}
+catch_error(f) := handle Ok{f()} with (Error{loc, msg}, k) -> Err{loc, msg}
+
+# show_error(src, loc, msg) is "file:line:col: msg", the source line and a ^ under the column
+show_error(src, loc, msg) := {
+    b := strbuf_new()
+    strbuf_add(b, show_loc(loc))
+    strbuf_add(b, ": ")
+    strbuf_add(b, msg)
+    strbuf_add(b, "\n  ")
+    strbuf_add(b, line_text(src, arg(loc, 1)))
+    strbuf_add(b, "\n  ")
+    strbuf_add(b, str_repeat(" ", arg(loc, 2) - 1))
+    strbuf_add(b, "^")
+    strbuf_str(b)
+}

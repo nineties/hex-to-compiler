@@ -1,0 +1,72 @@
+# pretty: values as text
+# Copyright (C) 2026 nineties
+
+use("list")
+use("string")
+
+quote_str(s) := {
+    b := strbuf_new()
+    strbuf_add(b, "\"")
+    i := 0
+    while (i < strlen(s)) {
+        c := ord(s, i)
+        strbuf_add(b, if (c == 34) "\\\"" else if (c == 92) "\\\\" else if (c == 10) "\\n" else if (c == 9) "\\t" else chr(c))
+        i = i + 1
+    }
+    strbuf_add(b, "\"")
+    strbuf_str(b)
+}
+
+# is_list(x) is true for [a, b, ...]
+is_list := (Nil{}) -> true | (_ :: xs) -> is_list(xs) | (_) -> false
+
+# the elements of an m-expr or a list as a list
+elements(x) := if (head(x) == 'Cons and is_list(x)) list_elems(x) else args_of(x)
+
+list_elems := (Nil{}) -> [] | (x :: xs) -> x :: list_elems(xs)
+
+args_of(x) := {
+    r := []
+    i := arity(x) - 1
+    while (i >= 0) {
+        r = arg(x, i) :: r
+        i = i - 1
+    }
+    r
+}
+
+# show(x) is x as one line. It is the text that print writes, with [a, b] for lists.
+show(x) := {
+    t := typeof(x)
+    if (t == 'int) int_to_str(x)
+    else if (t == 'string) quote_str(x)
+    else if (t == 'symbol) symname(x)
+    else if (t == 'mexpr) {
+        if (x == []) "[]"
+        else if (head(x) == 'Cons and is_list(x)) strcat(strcat("[", join(", ", map(show, list_elems(x)))), "]")
+        else strcat(strcat(strcat(symname(head(x)), "{"), join(", ", map(show, args_of(x)))), "}")
+    }
+    else if (t == 'array) "<array>"
+    else "<function>"
+}
+
+# pretty(x, width) is x on several lines. A part that fits in width columns stays on one line,
+# and the others put every element on its own line, indented by 2 spaces.
+pretty(x, width) := pp(x, 0, width)
+
+pp(x, indent, width) := {
+    flat := show(x)
+    if (indent + strlen(flat) <= width or typeof(x) != 'mexpr or x == []) flat
+    else {
+        open := if (head(x) == 'Cons and is_list(x)) "[" else strcat(symname(head(x)), "{")
+        close := if (head(x) == 'Cons and is_list(x)) "]" else "}"
+        pad := str_repeat(" ", indent + 2)
+        parts := map(e -> strcat(pad, pp(e, indent + 2, width)), elements(x))
+        strcat(strcat(strcat(strcat(open, "\n"), join(",\n", parts)), strcat("\n", str_repeat(" ", indent))), close)
+    }
+}
+
+pprint(x) := {
+    put(pretty(x, 60))
+    put("\n")
+}
