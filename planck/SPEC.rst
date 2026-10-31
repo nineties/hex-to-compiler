@@ -2,10 +2,7 @@ Planck Language Specification
 =============================
 
 Planck is a language for symbolic and language processing.
-``planck0`` (`planck0.sv <https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv>`_)
-is an implementation of this specification.
-
-``planck0`` reads ``planck/init.pk``, then runs the files given on the command line in order.
+``planck/init.pk`` is loaded first, then the given files are run in order.
 Each top-level expression is parsed and evaluated one by one.
 
 Syntax
