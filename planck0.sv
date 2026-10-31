@@ -435,7 +435,7 @@
 (long SyntaxErrorS)
 (long EofS)
 (long parseS)
-(long interpretS)
+(long evalS)
 (long emptyTuple)
 
 (fun tup2 (a b) (return (mexpr2 TupleS a b)))
@@ -483,7 +483,7 @@
     (= SyntaxErrorS (sym "SyntaxError"))
     (= EofS         (sym "Eof"))
     (= parseS       (sym "parse"))
-    (= interpretS   (sym "interpret"))
+    (= evalS        (sym "eval"))
     (= emptyTuple   (mexpr0 TupleS))
     )
 
@@ -2060,7 +2060,6 @@
     (defprim "parse"   1 p_parse   PRIM_NATIVE)
     (defprim "exit"    1 p_exit    PRIM_NATIVE)
     (defprim "eval"    1 0         PRIM_EVAL)
-    (defprim "interpret" 1 0       PRIM_EVAL)
     )
 
 ; === Interpreter
@@ -2088,16 +2087,16 @@
     (return (str buf))
     )
 
-; The loop looks up the global variables `parse` and `interpret` every time,
-; so a program can replace them (Def{parse, ...}, Def{interpret, ...}) and
-; the next top-level expression is parsed/interpreted by the new definitions.
+; The loop looks up the global variables `parse` and `eval` every time, so
+; a program can replace them (Def{parse, ...}, Def{eval, ...}) and the next
+; top-level expression is parsed/evaluated by the new definitions. Apply{eval, ...}
+; in a program also calls the replaced eval.
 ;   parse: String -> Tuple{m-expr, rest String}   (initially the builtin parse)
 ;     When only white space is left, parse returns Tuple{Eof{}, rest} and the
 ;     loop stops. A replacement parse should pass Eof{} through.
-;   interpret: m-expr -> any value                (initially the builtin eval)
-; `eval` is the same builtin under another name. It is not looked up by the
-; loop, so programs can call eval even after replacing interpret.
-; Inside the VM, eval and interpret are always the builtin (PRIM_EVAL).
+;   eval: m-expr -> any value                     (initially the builtin eval)
+; Inside the VM, the builtin eval (PRIM_EVAL) is called through the global
+; variable like any other function.
 (fun call_global (name arg)
     (return (run_toplevel (compile_toplevel
         (mexpr2 ApplyS name (mexpr1 TupleS arg)))))
@@ -2128,7 +2127,7 @@
                 (eputs "\n")
                 (exit 1)
                 ))
-            (call_global interpretS (mexpr1 QuoteS e))
+            (call_global evalS (mexpr1 QuoteS e))
             (= text (tup_get ret 1))
             ))
         ))
