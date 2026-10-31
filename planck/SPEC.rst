@@ -152,8 +152,8 @@ Values
      - ``Head{a, ...}``
    * - ``function``
      - Lambda, Fusion, builtin function or continuation
-   * - ``table``
-     - Mutable table made by ``table()``
+   * - ``array``
+     - Mutable array made by ``array(n)``
 
 Special forms
 -------------
@@ -237,14 +237,14 @@ Builtin functions
      - ``head`` ``arity`` ``arg`` ``mexpr`` ``push`` ``typeof``
    * - Strings
      - ``strlen`` ``ord`` ``substr`` ``strcat`` ``intern``
-   * - Tables
-     - ``table`` ``table_get`` ``table_set``
+   * - Arrays
+     - ``array`` ``array_get`` ``array_set`` ``array_len`` ``hash``
    * - Files
      - ``read_file``
    * - Language
      - ``parse`` ``eval`` ``exit``
    * - ``planck/init.pk``
-     - ``true`` ``false`` ``none`` ``not`` ``load``
+     - ``true`` ``false`` ``none`` ``not`` ``load`` ``table`` ``table_get`` ``table_set``
    * - ``planck/peg.pk``
      - ``peg_parse`` ``define_rule``
    * - ``planck/syntax.pk``
@@ -254,7 +254,10 @@ Builtin functions
 * ``substr(s, i, j)``: the bytes from ``i`` to ``j - 1``. ``strcat(a, b)``: ``a`` followed by ``b``.
 * ``intern(s)``: the symbol named ``s``.
 * ``push(Head{a, ...}, x)``: ``Head{a, ..., x}``.
-* ``table()``: a new table. ``table_get(t, key, default)``, ``table_set(t, key, value)``.
+* ``array(n)``: a new array of ``n`` elements, all ``none``. ``array_get(a, i)``, ``array_set(a, i, x)`` (returns ``x``) and ``array_len(a)``.
+  An index outside ``0`` to ``n - 1`` is a runtime error.
+* ``hash(x)``: a non-negative integer. Values equal by ``eq`` have the same hash.
+* ``table()``: a new hash table, made of arrays. ``table_get(t, key, default)``, ``table_set(t, key, value)``.
   Keys are compared by ``eq``.
 * ``read_file(path)``: the contents of the file. ``load(path)``: parse and evaluate the file.
 * ``define_rule(name, e)``: define the rule by a parsing expression (see ``planck/peg.pk``).
