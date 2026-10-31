@@ -77,7 +77,24 @@ The performance of the initial plisp (built from hand-written machine code via F
 Stage3: Implementing Full-Scale Language Processor
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-TBD
+Stage3 starts with ``planck0``, an interim implementation of Planck written in ``sasm``.
+`planck0.sv <https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv>`_
+
+* **Syntax:** M-expressions only (symbols, integers, strings and ``Head{a, ...}``).
+* **Bytecode VM:** Expressions are compiled to bytecode and run by a small virtual machine.
+  Frames live in the heap, not on the machine stack.
+* **Algebraic Effects:** ``Handle`` and ``Perform``. A continuation is a pointer to a chain of frames,
+  and it can be resumed more than once.
+* **Replaceable parse and eval:** The top-level loop looks up the global variables ``parse`` and ``eval``
+  for every expression, so a program can replace them and the next expression is read and evaluated
+  by the new definitions.
+
+  * ``parse``: ``String -> Tuple{m-expr, rest of the string}``. It skips blanks by itself and returns
+    ``Tuple{Eof{}, ""}`` when only blanks are left.
+  * ``eval``: ``m-expr -> value``.
+
+Examples: `planck/examples <https://github.com/nineties/hex-to-compiler/tree/main/planck/examples>`_
+(`reader.pk <https://github.com/nineties/hex-to-compiler/blob/main/planck/examples/reader.pk>`_ replaces ``parse`` and ``eval``)
 
 Hot to Run
 ----------
@@ -90,6 +107,7 @@ For x86 Linux
    $ git clone https://github.com/nineties/hex-to-compiler.git
    $ cd hex-to-compiler
    $ make
+   $ make test-planck0   # planck/test.pk and planck/examples
 
 For Other Environments
 ~~~~~~~~~~~~~~~~~~~~~~
