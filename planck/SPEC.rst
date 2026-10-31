@@ -246,7 +246,7 @@ Builtin functions
    * - M-expressions
      - ``head`` ``arity`` ``arg`` ``mexpr`` ``push`` ``typeof``
    * - Strings
-     - ``strlen`` ``ord`` ``substr`` ``strcat`` ``intern``
+     - ``strlen`` ``ord`` ``substr`` ``strcat`` ``intern`` ``symname``
    * - Arrays
      - ``array`` ``array_get`` ``array_set`` ``array_len`` ``hash``
    * - Files
@@ -254,12 +254,13 @@ Builtin functions
    * - Language
      - ``parse`` ``eval`` ``exit``
    * - ``planck/init.pk``
-     - ``true`` ``false`` ``none`` ``not`` ``load`` ``table`` ``table_get`` ``table_set``
+     - ``true`` ``false`` ``none`` ``not`` ``load`` ``use`` ``table`` ``table_get`` ``table_set``
    * - ``planck/peg.pk``
      - ``peg_parse`` ``define_rule``
    * - ``planck/syntax.pk``
      - ``parse_mexpr`` (the parser of M-expressions)
 
+* ``symname(sym)``: the name of the symbol as a string (the inverse of ``intern``).
 * ``strlen(s)``: the number of bytes. ``ord(s, i)``: the byte at ``i``, or ``-1`` when ``i`` is out of range.
 * ``substr(s, i, j)``: the bytes from ``i`` to ``j - 1``. ``strcat(a, b)``: ``a`` followed by ``b``.
 * ``intern(s)``: the symbol named ``s``.
@@ -271,3 +272,76 @@ Builtin functions
   Keys are compared by ``eq``.
 * ``read_file(path)``: the contents of the file. ``load(path)``: parse and evaluate the file.
 * ``define_rule(name, e)``: define the rule by a parsing expression (see ``planck/peg.pk``).
+* ``use(name)``: ``load("planck/lib/<name>.pk")`` once.
+
+Libraries
+---------
+
+The files of ``planck/lib`` are written in the syntax above and are loaded by ``use("name")``.
+Each file uses the files it needs. Lists are ``Cons{x, xs}`` and ``Nil{}``, and a character is the integer that ``ord`` returns.
+
+.. list-table::
+   :header-rows: 1
+
+   * - Name
+     - Functions
+   * - ``base``
+     - ``panic(msg)`` prints ``msg`` and stops with status 1, ``assert(c, msg)``
+   * - ``list``
+     - ``length`` ``reverse`` ``append`` ``concat`` ``map`` ``filter`` ``concat_map`` ``each`` ``foldl`` ``foldr`` ``sum``
+       ``nth`` ``last`` ``take`` ``drop`` ``find`` ``any`` ``all`` ``member`` ``index_of`` ``zip`` ``range`` ``sort``
+   * - ``vector``
+     - ``vec_new`` ``vec_push`` ``vec_pop`` ``vec_get`` ``vec_set`` ``vec_len`` ``vec_to_list`` ``vec_from_list``
+   * - ``string``
+     - ``is_digit`` ``is_upper`` ``is_lower`` ``is_alpha`` ``is_alnum`` ``is_space`` ``is_ident_start`` ``is_ident_char``
+       ``chr`` ``char_at`` ``starts_with`` ``ends_with`` ``index_of_str`` ``str_repeat`` ``str_cmp`` ``str_less`` ``trim``
+       ``int_to_str`` ``str_to_int`` ``split`` ``join`` ``strbuf_new`` ``strbuf_add`` ``strbuf_str``
+   * - ``table``
+     - ``table_len`` ``table_has`` ``table_keys`` ``table_values`` ``table_items``
+       ``set_new`` ``set_add`` ``set_has`` ``set_len`` ``set_to_list`` ``set_from_list``
+   * - ``symbol``
+     - ``gensym`` ``gensym_reset``
+   * - ``error``
+     - ``line_col`` ``line_text`` ``loc_at`` ``show_loc`` ``error_at`` ``catch_error`` ``show_error``
+   * - ``pretty``
+     - ``quote_str`` ``show`` ``pretty`` ``pprint``
+
+List functions:
+
+* ``map(f, xs)``, ``filter(p, xs)`` and ``each(f, xs)`` call ``f`` from the first element to the last.
+* ``foldl(f, acc, xs)`` computes ``f(f(acc, x1), x2)``; ``foldr(f, init, xs)`` computes ``f(x1, f(x2, init))``.
+* ``nth(xs, i)`` counts from 0. ``take(xs, n)`` and ``drop(xs, n)`` split ``xs`` after ``n`` elements.
+* ``find(p, xs)`` is the first element with ``p(x)`` or ``none``. ``index_of(x, xs)`` is the position or ``-1``.
+* ``zip(xs, ys)`` is ``[Tuple{x, y}, ...]`` as long as the shorter list. ``range(a, b)`` is ``[a, ..., b - 1]``.
+* ``sort(less, xs)`` is a stable merge sort by ``less(a, b)``, e.g. ``sort(lt, xs)``.
+
+A vector is a growable array: ``vec_push(v, x)`` appends and returns ``x``, ``vec_pop(v)`` removes and returns the last element.
+``vec_get`` and ``vec_set`` stop the program for an index outside the elements.
+
+String functions:
+
+* ``chr(c)`` is the one-character string of a code from 32 to 126, 9, 10 or 13. ``char_at(s, i)`` is ``""`` outside ``s``.
+* ``index_of_str(s, sub, from)`` is the first position at or after ``from`` where ``sub`` occurs, or ``-1``.
+* ``str_cmp(a, b)`` is ``-1``, ``0`` or ``1`` by the byte order. ``trim(s)`` removes blanks at both ends.
+* ``str_to_int(s)`` reads an optional ``-`` and decimal digits, otherwise ``none``.
+* ``split(s, sep)`` is the list of the parts between the occurrences of ``sep``, which must not be empty.
+  ``join(sep, xs)`` is the inverse.
+* A string buffer collects pieces: ``strbuf_add(b, s)`` and ``strbuf_str(b)``.
+  The pieces are joined pairwise, so a long string is built without copying the same bytes over and over.
+
+``table_keys``, ``table_values`` and ``table_items`` (``[Tuple{key, value}, ...]``) list the entries in an unspecified order.
+A set is a table whose values are ``true``.
+
+``gensym("t")`` is the symbol ``t1``, then ``t2``, ``t3`` ... ``gensym_reset()`` restarts the count.
+
+Errors with positions:
+
+* ``line_col(src, pos)`` is ``Tuple{line, column}`` of the byte position ``pos``; both count from 1.
+  ``line_text(src, line)`` is the line without the newline.
+* ``loc_at(file, src, pos)`` is ``Loc{file, line, column}``, and ``show_loc`` writes it as ``file:line:column``.
+* ``error_at(loc, msg)`` performs ``Error{loc, msg}``. ``catch_error(f)`` is ``Ok{f()}``,
+  or ``Err{loc, msg}`` when ``f()`` performed ``Error{loc, msg}``.
+* ``show_error(src, loc, msg)`` is ``file:line:column: msg``, the source line and a ``^`` under the column.
+
+``show(x)`` is the text that ``print`` writes, with ``[a, b]`` for lists. ``pretty(x, width)`` keeps a part that fits in ``width``
+columns on one line and puts every element of the others on its own line, indented by 2 spaces. ``pprint(x)`` prints it with width 60.

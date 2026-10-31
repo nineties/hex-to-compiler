@@ -1,0 +1,210 @@
+# A calculator: lexer, parser, code generator and virtual machine written with planck/lib.
+# Input: lines of "let x = expr" and "expr" with + - * / ( ) and variables.
+# Output: the syntax tree, the three-address code and the value of every expression line.
+
+use("list")
+use("vector")
+use("string")
+use("table")
+use("symbol")
+use("error")
+use("pretty")
+
+cur_file := ""
+cur_src := ""
+here(p) := loc_at(cur_file, cur_src, p)
+
+# === Lexer: the source text to a vector of Tok{kind, value, position} ===
+lex(src) := {
+    toks := vec_new()
+    n := strlen(src)
+    i := 0
+    while (i < n) {
+        c := ord(src, i)
+        if (c == 10) {
+            vec_push(toks, Tok{'nl, "\n", i})
+            i = i + 1
+        } else if (is_space(c)) {
+            i = i + 1
+        } else if (is_digit(c)) {
+            j := i
+            while (j < n and is_digit(ord(src, j))) j = j + 1
+            vec_push(toks, Tok{'num, str_to_int(substr(src, i, j)), i})
+            i = j
+        } else if (is_ident_start(c)) {
+            j := i
+            while (j < n and is_ident_char(ord(src, j))) j = j + 1
+            vec_push(toks, Tok{'id, substr(src, i, j), i})
+            i = j
+        } else if (index_of_str("+-*/()=", chr(c), 0) >= 0) {
+            vec_push(toks, Tok{'op, chr(c), i})
+            i = i + 1
+        } else {
+            error_at(here(i), strcat("unexpected character ", quote_str(chr(c))))
+        }
+    }
+    vec_push(toks, Tok{'eof, "", n})
+    toks
+}
+
+tk(t) := arg(t, 0)
+tv(t) := arg(t, 1)
+tp(t) := arg(t, 2)
+
+# === Parser: tokens to [Let{name, e, pos}, Expr{e}, ...] ===
+# e is Num{n}, Var{name, pos}, Neg{e} or Bin{op, left, right, pos}
+parse_program(toks) := {
+    pos := 0
+    peek() := vec_get(toks, pos)
+    advance() := {
+        t := peek()
+        pos = pos + 1
+        t
+    }
+    at(kind, v) := tk(peek()) == kind and tv(peek()) == v
+    syntax_error(msg) := error_at(here(tp(peek())), msg)
+    expect_op(v) := if (at('op, v)) advance() else syntax_error(strcat(strcat("expected \"", v), "\""))
+
+    # expr is used by factor before it is defined
+    expr := none
+
+    # left associative chain: next (op next)*
+    chain(next, ops) := {
+        l := next()
+        while (tk(peek()) == 'op and member(tv(peek()), ops)) {
+            t := advance()
+            l = Bin{tv(t), l, next(), tp(t)}
+        }
+        l
+    }
+    factor() := {
+        t := peek()
+        if (tk(t) == 'num) {
+            advance()
+            Num{tv(t)}
+        } else if (tk(t) == 'id) {
+            advance()
+            Var{tv(t), tp(t)}
+        } else if (at('op, "(")) {
+            advance()
+            e := expr()
+            expect_op(")")
+            e
+        } else if (at('op, "-")) {
+            advance()
+            Neg{factor()}
+        } else syntax_error("expected an expression")
+    }
+    term() := chain(factor, ["*", "/"])
+    expr = () -> chain(term, ["+", "-"])
+    stmt() := if (at('id, "let")) {
+        advance()
+        t := peek()
+        if (tk(t) != 'id) syntax_error("expected a variable name")
+        advance()
+        expect_op("=")
+        Let{tv(t), expr(), tp(t)}
+    } else Expr{expr()}
+    skip_newlines() := while (tk(peek()) == 'nl) advance()
+
+    stmts := []
+    skip_newlines()
+    while (tk(peek()) != 'eof) {
+        stmts = stmt() :: stmts
+        if (tk(peek()) != 'eof and tk(peek()) != 'nl) syntax_error("expected the end of the line")
+        skip_newlines()
+    }
+    reverse(stmts)
+}
+
+# === Code generator: the tree to three-address code ===
+# Bin{dst, op, a, b, pos}, Copy{dst, a}, Print{a}. An operand is an integer or a symbol.
+# Temporary variables are %t1, %t2, ... which no source text can name.
+compile(stmts) := {
+    code := vec_new()
+    defined := set_new()
+    gensym_reset()
+    operand := (Num{n}) -> n
+             | (Var{x, p}) -> {
+                   if (not set_has(defined, intern(x))) error_at(here(p), strcat("undefined variable ", x))
+                   intern(x)
+               }
+             | (Neg{e}) -> {
+                   a := operand(e)
+                   t := gensym("%t")
+                   vec_push(code, Bin{t, "-", 0, a, 0})
+                   t
+               }
+             | (Bin{op, l, r, p}) -> {
+                   a := operand(l)
+                   b := operand(r)
+                   t := gensym("%t")
+                   vec_push(code, Bin{t, op, a, b, p})
+                   t
+               }
+    each((Let{x, e, p}) -> {
+             a := operand(e)
+             set_add(defined, intern(x))
+             vec_push(code, Copy{intern(x), a})
+         } | (Expr{e}) -> vec_push(code, Print{operand(e)}), stmts)
+    vec_to_list(code)
+}
+
+show_operand(o) := if (typeof(o) == 'int) int_to_str(o) else symname(o)
+show_instr := (Bin{d, op, a, b, _}) -> join(" ", [show_operand(d), "=", show_operand(a), op, show_operand(b)])
+            | (Copy{d, a}) -> join(" ", [show_operand(d), "=", show_operand(a)])
+            | (Print{a}) -> strcat("print ", show_operand(a))
+
+# === Virtual machine ===
+run_code(code) := {
+    vars := table()
+    ops := table()
+    table_set(ops, "+", add)
+    table_set(ops, "-", sub)
+    table_set(ops, "*", mul)
+    table_set(ops, "/", div)
+    val(o) := if (typeof(o) == 'int) o else table_get(vars, o, none)
+    each((Bin{d, op, a, b, p}) -> {
+             y := val(b)
+             if (op == "/" and y == 0) error_at(here(p), "division by zero")
+             table_set(vars, d, table_get(ops, op, none)(val(a), y))
+         } | (Copy{d, a}) -> table_set(vars, d, val(a))
+           | (Print{a}) -> { put("= "); println(val(a)) }, code)
+}
+
+calc(file, src, verbose) := {
+    cur_file = file
+    cur_src = src
+    r := catch_error(() -> {
+        toks := lex(src)
+        if (verbose) { put("tokens: "); println(vec_len(toks)) }
+        stmts := parse_program(toks)
+        if (verbose) {
+            put("syntax tree:\n")
+            each(pprint, stmts)
+        }
+        code := compile(stmts)
+        if (verbose) {
+            put("code:\n")
+            each(i -> { put("  "); put(show_instr(i)); put("\n") }, code)
+            put("run:\n")
+        }
+        run_code(code)
+    })
+    if (head(r) == 'Err) {
+        put("error: ")
+        put(show_error(src, arg(r, 0), arg(r, 1)))
+        put("\n")
+    }
+}
+
+put("--- planck/examples/calc.txt\n")
+src := read_file("planck/examples/calc.txt")
+put(src)
+calc("planck/examples/calc.txt", src, true)
+
+each(s -> {
+    put("--- ")
+    println(s)
+    calc("input", s, false)
+}, ["1 + $", "(1 + 2", "let a = 1\na + b", "10 / (5 - 5)", "let = 3", "2 3"])
