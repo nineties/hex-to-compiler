@@ -4,7 +4,7 @@
 # unparse(t) is a text that parses back to t with the rule expr.
 # The grammar is read from peg_sources (planck/peg.pk). An alternative of a rule
 #   Act{Seq{e1, e2, ...}, Lambda{Tuple{Tuple{l1, l2, ...}}, body}}
-# can be run backwards when body is a quasi-quotation (`Apply{add, Tuple{!a, !b}}`),
+# can be run backwards when body is a quasi-quotation (`Apply{_add, Tuple{!a, !b}}`),
 # Quote{c}, a label, or Tuple{labels}. Such an alternative is a template that
 # a tree is matched against. The labels bind the subtrees, and the elements of the sequence
 # are printed in order: texts as they are, rules by unparse_as(rule, subtree).
@@ -150,7 +150,7 @@ call_tmpl(c, labels) :=
         else if (f == 'peg_break and n == 0) `Perform{Break{}}
         else if (f == 'peg_continue and n == 0) `Perform{Continue{}}
         else if (f == 'peg_return and n == 1) `Perform{Return{!a}}
-        else if (f == 'peg_record and n == 2) `Apply{record_declare, Tuple{Quote{!a}, Quote{!b}}}
+        else if (f == 'peg_record and n == 2) `Apply{_record_declare, Tuple{Quote{!a}, Quote{!b}}}
         else bad
     }
 
@@ -681,14 +681,14 @@ unparse_custom('primary, 3, 'expr, print_if)
 
 # === Syntax made by functions that cannot be run backwards ===
 
-# f"...{e}...": strcat("a", to_text(e)) and so on, in the shape that peg_interp makes
+# f"...{e}...": _strcat("a", _to_text(e)) and so on, in the shape that peg_interp makes
 is_call2(t, f) := is_mx(t) and head(t) == 'Apply and arity(t) == 2 and arg(t, 0) == f and is_mx(arg(t, 1)) and head(arg(t, 1)) == 'Tuple
-is_text_hole(x) := is_call2(x, 'to_text) and arity(arg(x, 1)) == 1
+is_text_hole(x) := is_call2(x, '_to_text) and arity(arg(x, 1)) == 1
 is_text_lit(x) := typeof(x) == 'string and strlen(x) > 0
 
 # the pieces of an f-string as a list of S{text} and E{tree}, or none
 fstr_segs(t) :=
-    if (is_call2(t, 'strcat) and arity(arg(t, 1)) == 2) {
+    if (is_call2(t, '_strcat) and arity(arg(t, 1)) == 2) {
         l := fstr_segs(arg(arg(t, 1), 0))
         x := arg(arg(t, 1), 1)
         if (l == none) none
@@ -713,7 +713,7 @@ fstr_escape(s) := {
 }
 
 print_fstr(t) := {
-    segs := if (is_call2(t, 'strcat) or is_text_hole(t)) fstr_segs(t) else none
+    segs := if (is_call2(t, '_strcat) or is_text_hole(t)) fstr_segs(t) else none
     if (segs == none) none
     else {
         acc := []

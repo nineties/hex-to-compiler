@@ -31,7 +31,7 @@ M-expressions are expressions of this syntax too.
    * - ``f(p, ...) := e``
      - ``Def{f, Lambda{Tuple{p, ...}, e}}``
    * - ``record T(f, ...)``
-     - ``Apply{record_declare, Tuple{Quote{T}, Quote{Tuple{f, ...}}}}``
+     - ``Apply{_record_declare, Tuple{Quote{T}, Quote{Tuple{f, ...}}}}``
    * - ``x = e``
      - ``Set{x, e}``
    * - ``a[i] = e``
@@ -45,25 +45,25 @@ M-expressions are expressions of this syntax too.
    * - ``a or b``, ``a and b``
      - ``If{a, true, b}``, ``If{a, b, false}``
    * - ``not a``
-     - ``Apply{not, Tuple{a}}``
+     - ``Apply{_not, Tuple{a}}``
    * - ``a == b`` ``a != b`` ``a < b`` ``a <= b`` ``a > b`` ``a >= b``
-     - ``Apply{eq, Tuple{a, b}}`` and ``ne`` ``lt`` ``le`` ``gt`` ``ge``
+     - ``Apply{_eq, Tuple{a, b}}`` and ``_ne`` ``_lt`` ``_le`` ``_gt`` ``_ge``
    * - ``a :: b``
      - ``Cons{a, b}``
    * - ``a + b`` ``a - b`` ``a * b`` ``a / b`` ``a % b``
-     - ``Apply{add, Tuple{a, b}}`` and ``sub`` ``mul`` ``div`` ``mod``
+     - ``Apply{_add, Tuple{a, b}}`` and ``_sub`` ``_mul`` ``_div`` ``_mod``
    * - ``-a``
-     - ``Apply{sub, Tuple{0, a}}``
+     - ``Apply{_sub, Tuple{0, a}}``
    * - ``'e``, :literal:`\`e`, ``!e``
      - ``Quote{e}``, ``QuasiQuote{e}``, ``UnQuote{e}``
    * - ``f(a, ...)``
      - ``Apply{f, Tuple{a, ...}}``
    * - ``t.f``
-     - ``Apply{record_get, Tuple{t, Quote{f}}}``
+     - ``Apply{_record_get, Tuple{t, Quote{f}}}``
    * - ``a[i]``
-     - ``Apply{_index, Tuple{a, i}}``
+     - ``Apply{_index_get, Tuple{a, i}}``
    * - ``t[p -> a | q if c -> b]``
-     - ``Apply{_index, Tuple{t, f}}``, where ``f`` is the function of the arms (see Indexing and rewriting)
+     - ``Apply{_index_get, Tuple{t, f}}``, where ``f`` is the function of the arms (see Indexing and rewriting)
    * - ``p @ type``
      - ``_TypeOf{p, type}``
    * - ``{ e; ... }``
@@ -81,7 +81,7 @@ M-expressions are expressions of this syntax too.
    * - ``match e { p if c -> a; ... }``
      - the arm applies when ``p`` matches and ``c`` is true
    * - ``f"a{e}b"``
-     - ``Apply{strcat, Tuple{Apply{strcat, Tuple{"a", Apply{to_text, Tuple{e}}}}, "b"}}``
+     - ``Apply{_strcat, Tuple{Apply{_strcat, Tuple{"a", Apply{_to_text, Tuple{e}}}}, "b"}}``
    * - ``fun f(p, ...) e`` in a block
      - ``Def{f, none}`` at the top of the block, and ``Set{f, Lambda{Tuple{p, ...}, e}}`` in its place
    * - ``handle e with h``
@@ -160,11 +160,22 @@ A top-level expression ends with ``;``, a newline or the start of another expres
 A binary ``-`` must be on the same line as its left operand,
 so a line starting with ``-1`` is a new expression. Other binary operators may start a line.
 
+Names the sugar calls
+---------------------
+
+The functions a piece of sugar expands to are called by a name starting with ``_``,
+so that a variable named ``add`` or ``index_get`` in a program does not change the meaning of ``a + b`` or ``a[i]``.
+``_add`` ``_sub`` ``_mul`` ``_div`` ``_mod`` ``_lt`` ``_le`` ``_gt`` ``_ge`` ``_eq`` ``_ne`` ``_not`` ``_strcat`` ``_to_text``
+``_record_get`` ``_record_declare`` and ``_define_rule`` are the same functions as ``add``, ``sub`` ... ``define_rule``,
+and ``_index_get`` and ``_index_set`` are defined below.
+A program may call the names without ``_`` as ever.
+A tree made by the sugar has the names with ``_``: ``a + b`` is ``Apply{_add, Tuple{a, b}}``.
+
 Indexing and rewriting
 ----------------------
 
-``a[i]`` is ``_index(a, i)`` and ``a[i] = e`` is ``_index_set(a, i, e)``, whose value is the value of ``e``.
-``_index`` and ``_index_set`` are functions joined by ``|``, one for each kind of ``a``, tried in this order:
+``a[i]`` is ``_index_get(a, i)`` and ``a[i] = e`` is ``_index_set(a, i, e)``, whose value is the value of ``e``.
+``_index_get`` and ``_index_set`` are functions joined by ``|``, one for each kind of ``a``, tried in this order:
 
 .. list-table::
    :header-rows: 1
@@ -211,11 +222,11 @@ A string, a list, a tuple and an M-expression are immutable:
 An array, a table, a vector and a kind of a program (added in front) can be written.
 An index outside a string, a list or the arguments of an M-expression stops the program with a message,
 and so does ``a[i]`` or ``a[i] = e`` that no kind accepts.
-A program adds a kind of its own in front of the others by assigning ``_index`` and ``_index_set``:
+A program adds a kind of its own in front of the others by assigning ``_index_get`` and ``_index_set``:
 
 .. code-block::
 
-   _index = (Matrix{w, _, d}, (i, j)) -> d[i * w + j] | _index
+   _index_get = (Matrix{w, _, d}, (i, j)) -> d[i * w + j] | _index_get
    _index_set = (Matrix{w, _, d}, (i, j), e) -> { d[i * w + j] = e } | _index_set
    m := Matrix{2, 2, array(4)}
    m[(1, 0)] = 5
@@ -227,7 +238,7 @@ otherwise the arguments of the part are tried and its head is kept. A part that 
 .. code-block::
 
    t := '(x * 1 + 0 * y)
-   t[Apply{'mul, Tuple{a, 1}} -> a | Apply{'mul, Tuple{0, _}} -> 0]    # x + 0
+   t[Apply{'_mul, Tuple{a, 1}} -> a | Apply{'_mul, Tuple{0, _}} -> 0]    # x + 0
 
 ``t[p -> a | q -> b]`` is the expression ``p -> a | q -> b`` in brackets, so its arms are tried in order.
 An arm may have a guard as in ``match``: in ``t[p if c -> a | q -> b]`` the arm applies when ``p`` matches and ``c`` is true,
@@ -419,7 +430,7 @@ Builtin functions
    * - ``planck/peg.pk``
      - ``peg_parse`` ``define_rule``
    * - ``planck/syntax.pk``
-     - ``parse_mexpr`` ``to_text`` ``record_declare`` ``record_get`` ``peg_for`` ``_index`` ``_index_set`` ``subst``
+     - ``parse_mexpr`` ``to_text`` ``record_declare`` ``record_get`` ``peg_for`` ``_index_get`` ``_index_set`` ``subst`` and the names of "Names the sugar calls"
 
 * ``parse_mexpr(s)``: the parser of M-expressions, with the same arguments and result as ``parse``.
 * ``to_text(x)``: ``x`` for a string, the decimal text for an integer, and ``show(x)`` (``planck/lib/pretty.pk``) otherwise,
