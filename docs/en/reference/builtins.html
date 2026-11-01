@@ -42,8 +42,10 @@
 <tr><td>M-expressions</td><td><code>head</code> <code>arity</code> <code>arg</code> <code>mexpr</code> <code>push</code> <code>typeof</code></td></tr>
 <tr><td>Strings</td><td><code>strlen</code> <code>ord</code> <code>substr</code> <code>_strcat</code> <code>intern</code> <code>symname</code></td></tr>
 <tr><td>Arrays</td><td><code>array</code> <code>array_get</code> <code>array_set</code> <code>array_len</code> <code>hash</code></td></tr>
-<tr><td>Files</td><td><code>read_file</code></td></tr>
-<tr><td>Language</td><td><code>parse</code> <code>eval</code> <code>exit</code></td></tr>
+<tr><td>Plain arrays</td><td><code>u8_array</code> <code>u16_array</code> <code>i32_array</code> <code>plain_get</code> <code>plain_set</code> <code>plain_len</code> <code>plain_kind</code> <code>plain_copy</code></td></tr>
+<tr><td>Bit operations</td><td><code>bit_and</code> <code>bit_or</code> <code>bit_xor</code> <code>bit_not</code> <code>bit_shl</code> <code>bit_shr</code> <code>bit_sar</code></td></tr>
+<tr><td>Files</td><td><code>read_file</code> <code>read_bytes</code> <code>write_file</code> <code>chmod</code></td></tr>
+<tr><td>Language</td><td><code>parse</code> <code>eval</code> <code>exit</code> <code>command_args</code></td></tr>
 <tr><td><code>planck/init.pk</code></td><td><code>true</code> <code>false</code> <code>none</code> <code>_not</code> <code>load</code> <code>use</code> <code>table</code> <code>table_get</code> <code>table_set</code></td></tr>
 <tr><td><code>planck/peg.pk</code></td><td><code>peg_parse</code> <code>_define_rule</code></td></tr>
 <tr><td><code>planck/syntax.pk</code></td><td><code>parse_mexpr</code> <code>_to_text</code> <code>_record_declare</code> <code>_record_get</code> <code>peg_for</code> <code>_index_get</code> <code>_index_set</code> <code>subst</code></td></tr>
@@ -88,8 +90,8 @@ println(0x1f + 0b101)</pre>
 <li><code>push(Head{a, ...}, x)</code>: <code>Head{a, ..., x}</code>.</li>
 <li><code>mexpr(h, Tuple{a, ...})</code> builds the M-expression <code>h{a, ...}</code> with the head <code>h</code>.</li>
 <li><code>symname(sym)</code>: the name of the symbol as a string (the inverse of <code>intern</code>). <code>intern(s)</code>: the symbol named <code>s</code>.</li>
-<li><code>strlen(s)</code>: the number of bytes. <code>ord(s, i)</code>: the byte at <code>i</code>, or <code>-1</code> when <code>i</code> is out of range.</li>
-<li><code>substr(s, i, j)</code>: the bytes from <code>i</code> to <code>j - 1</code>. <code>_strcat(a, b)</code>: <code>a</code> followed by <code>b</code>.</li>
+<li><code>strlen(s)</code>: the number of characters. <code>ord(s, i)</code>: the code of the character at <code>i</code>, or <code>-1</code> when <code>i</code> is out of range. <code>s[i]</code>: the character at <code>i</code> as a string of length 1.</li>
+<li><code>substr(s, i, j)</code>: the characters from <code>i</code> to <code>j - 1</code>. <code>_strcat(a, b)</code>: <code>a</code> followed by <code>b</code>.</li>
 </ul>
 <div class="example">
 <p class="file">r_builtins.pk</p>
@@ -123,9 +125,53 @@ true</pre>
 <li><code>table()</code>: a new hash table <code>Table{a}</code>, where <code>a</code> is made of arrays. <code>table_get(t, key, default)</code>, <code>table_set(t, key, value)</code>. Keys are compared by <code>==</code>. <code>t[key]</code> and <code>t[key] = value</code> also read and write a table (see <a href="syntax.html#index">Indexing and rewriting</a>).</li>
 </ul>
 
+<h2>Plain arrays and bit operations</h2>
+<p>A plain array is an array of untagged integers. The element type is <code>u8</code> (0 to 255), <code>u16</code> (0 to 65535) or <code>i32</code> (an integer), and all elements are 0 when the array is made.</p>
+<ul>
+<li><code>u8_array(n)</code>, <code>u16_array(n)</code> and <code>i32_array(n)</code>: a new array of <code>n</code> elements. <code>a[i]</code> and <code>a[i] = x</code> read and write an element, as do <code>plain_get(a, i)</code> and <code>plain_set(a, i, x)</code> (returns <code>x</code>). A value that does not fit the type and an index out of range are runtime errors.</li>
+<li><code>plain_len(a)</code>: the number of elements. <code>plain_kind(a)</code>: <code>'u8</code>, <code>'u16</code> or <code>'i32</code>. <code>plain_copy(dst, di, src, si, n)</code> copies <code>n</code> elements of <code>src</code> from <code>si</code> to <code>dst</code> from <code>di</code>. The types must be the same, and the ranges may overlap in one array.</li>
+<li><code>bit_and(a, b)</code>, <code>bit_or(a, b)</code>, <code>bit_xor(a, b)</code> and <code>bit_not(a)</code> work bit by bit on 31-bit two's complement integers.</li>
+<li><code>bit_shl(a, k)</code> shifts left by <code>k</code> bits (0 to 31), drops the bits shifted out, and keeps the result in 31 bits. <code>bit_shr(a, k)</code> is the logical shift to the right, taking <code>a</code> as a 31-bit unsigned integer. <code>bit_sar(a, k)</code> is the arithmetic shift, which keeps the sign.</li>
+</ul>
+<div class="example">
+<p class="file">r_plain.pk</p>
+<pre class="pk">b := u8_array(4)
+b[0] = 72
+b[1] = 0
+b[2] = 255
+println(plain_len(b))
+println(b[2])
+println(plain_kind(b))
+write_file(&quot;tmp-plain.bin&quot;, b)
+c := read_bytes(&quot;tmp-plain.bin&quot;)
+println(c[1])
+println(plain_len(c))
+println(bit_and(0xff0, 0x3c))
+println(bit_xor(5, 3))
+println(bit_shl(1, 20))
+println(bit_shr(-1, 28))
+println(bit_sar(-256, 4))
+s := &quot;ab&quot;
+println(s[1])</pre>
+<p class="label">Output</p>
+<pre class="out">4
+255
+u8
+0
+4
+48
+6
+1048576
+7
+-16
+&quot;b&quot;</pre>
+</div>
+
 <h2>Files and language</h2>
 <ul>
-<li><code>read_file(path)</code>: the contents of the file. <code>load(path)</code>: parse and evaluate the file.</li>
+<li><code>read_file(path)</code>: the contents of the file, including bytes 0. <code>read_bytes(path)</code>: the same contents as a <code>u8</code> array. <code>write_file(path, x)</code> writes all bytes of the string or <code>u8</code> array <code>x</code> to the file, which is created or emptied; bytes 0 are written as they are. <code>chmod(path, mode)</code> sets the permissions (<code>493</code> is 755 in octal).</li>
+<li><code>command_args()</code>: the array of the strings after <code>--</code> in the arguments of planck0. For <code>planck0 a.pk -- x y</code> they are <code>"x"</code> and <code>"y"</code>, and with no <code>--</code> the array is empty. The arguments before <code>--</code> are read as files in order, as before.</li>
+<li><code>load(path)</code>: parse and evaluate the file.</li>
 <li><code>use(name)</code>: <code>load("planck/lib/&lt;name&gt;.pk")</code> once.</li>
 <li><code>parse</code> and <code>eval</code> are the functions used by the <a href="values.html">top level</a>. <code>exit(n)</code> ends the program with the status <code>n</code>.</li>
 <li><code>_define_rule(name, e)</code>: define the rule by a parsing expression (see <a href="../implementation/peg.html">The packrat parser</a>). <code>peg_parse</code> is in <a href="grammar.html">Grammar declarations</a>.</li>

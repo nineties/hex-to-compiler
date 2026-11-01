@@ -230,9 +230,13 @@ Indexing and rewriting
      - integer
      - ``array_get(a, i)``
      - ``array_set(a, i, e)``
+   * - plain array
+     - integer
+     - ``plain_get(a, i)``
+     - ``plain_set(a, i, e)``
    * - string
      - integer
-     - ``ord(s, i)``, the byte
+     - the character at ``i``, a string of length 1
      - stops, see below
    * - table
      - any value
@@ -261,7 +265,7 @@ Indexing and rewriting
 
 A string, a list, a tuple and an M-expression are immutable:
 ``a[i] = e`` on them stops the program with the message ``cannot assign to an element of a string, which is immutable: ...``.
-An array, a table, a vector and a kind of a program (added in front) can be written.
+An array, a plain array, a table, a vector and a kind of a program (added in front) can be written.
 An index outside a string, a list or the arguments of an M-expression stops the program with a message,
 and so does ``a[i]`` or ``a[i] = e`` that no kind accepts.
 A program adds a kind of its own in front of the others by assigning ``_index_get`` and ``_index_set``:
@@ -463,10 +467,14 @@ Builtin functions
      - ``strlen`` ``ord`` ``substr`` ``_strcat`` ``intern`` ``symname``
    * - Arrays
      - ``array`` ``array_get`` ``array_set`` ``array_len`` ``hash``
+   * - Plain arrays
+     - ``u8_array`` ``u16_array`` ``i32_array`` ``plain_get`` ``plain_set`` ``plain_len`` ``plain_kind`` ``plain_copy``
+   * - Bit operations
+     - ``bit_and`` ``bit_or`` ``bit_xor`` ``bit_not`` ``bit_shl`` ``bit_shr`` ``bit_sar``
    * - Files
-     - ``read_file``
+     - ``read_file`` ``read_bytes`` ``write_file`` ``chmod``
    * - Language
-     - ``parse`` ``eval`` ``exit``
+     - ``parse`` ``eval`` ``exit`` ``command_args``
    * - ``planck/init.pk``
      - ``true`` ``false`` ``none`` ``_not`` ``load`` ``use`` ``table`` ``table_get`` ``table_set``
    * - ``planck/peg.pk``
@@ -481,8 +489,9 @@ Builtin functions
 * ``_record_declare(name, fields)``: set the field names of the head ``name`` (``fields`` is ``Tuple{f, ...}``). ``_record_get(t, name)``: the field.
 * ``peg_for(xs, f)``: call ``f`` with each element of the list or vector ``xs``, and return ``none``.
 * ``symname(sym)``: the name of the symbol as a string (the inverse of ``intern``).
-* ``strlen(s)``: the number of bytes. ``ord(s, i)``: the byte at ``i``, or ``-1`` when ``i`` is out of range.
-* ``substr(s, i, j)``: the bytes from ``i`` to ``j - 1``. ``_strcat(a, b)``: ``a`` followed by ``b``.
+* ``strlen(s)``: the number of characters. ``ord(s, i)``: the code of the character at ``i``, or ``-1`` when ``i`` is out of range.
+  ``s[i]``: the character at ``i`` as a string of length 1.
+* ``substr(s, i, j)``: the characters from ``i`` to ``j - 1``. ``_strcat(a, b)``: ``a`` followed by ``b``.
 * ``intern(s)``: the symbol named ``s``.
 * ``push(Head{a, ...}, x)``: ``Head{a, ..., x}``.
 * ``array(n)``: a new array of ``n`` elements, all ``none``. ``array_get(a, i)``, ``array_set(a, i, x)`` (returns ``x``) and ``array_len(a)``.
@@ -490,7 +499,18 @@ Builtin functions
 * ``hash(x)``: a non-negative integer. Values equal by ``_eq`` have the same hash.
 * ``table()``: a new hash table ``Table{a}``, where ``a`` is made of arrays. ``table_get(t, key, default)``, ``table_set(t, key, value)``.
   Keys are compared by ``==``.
-* ``read_file(path)``: the contents of the file. ``load(path)``: parse and evaluate the file.
+* ``u8_array(n)``, ``u16_array(n)``, ``i32_array(n)``: a plain array of ``n`` elements, an array of untagged integers, all 0.
+  The element is 0 to 255, 0 to 65535 or an integer. ``a[i]`` and ``a[i] = x`` (``plain_get(a, i)``, ``plain_set(a, i, x)``) read and write an element;
+  a value that does not fit the type and an index outside ``0`` to ``n - 1`` are runtime errors.
+  ``plain_len(a)``: ``n``. ``plain_kind(a)``: ``'u8``, ``'u16`` or ``'i32``.
+  ``plain_copy(dst, di, src, si, n)`` copies ``n`` elements; the types must be the same and the ranges may overlap in one array.
+* ``bit_and(a, b)``, ``bit_or(a, b)``, ``bit_xor(a, b)``, ``bit_not(a)``: bit by bit on 31-bit two's complement integers.
+  ``bit_shl(a, k)`` shifts left by ``k`` (0 to 31) bits and keeps 31 bits. ``bit_shr(a, k)`` is the logical shift of ``a`` as a 31-bit unsigned integer.
+  ``bit_sar(a, k)`` is the arithmetic shift.
+* ``read_file(path)``: the contents of the file, including bytes 0. ``read_bytes(path)``: the same as a ``u8`` array.
+  ``write_file(path, x)``: write all bytes of the string or ``u8`` array ``x`` to the file, which is created or emptied. ``chmod(path, mode)``.
+* ``command_args()``: the array of the strings after ``--`` in the arguments of the program; empty with no ``--``.
+* ``load(path)``: parse and evaluate the file.
 * ``_define_rule(name, e)``: define the rule by a parsing expression (see ``planck/peg.pk``).
 * ``use(name)``: ``load("planck/lib/<name>.pk")`` once.
 
@@ -498,7 +518,7 @@ Libraries
 ---------
 
 The files of ``planck/lib`` are written in the syntax above and are loaded by ``use("name")``.
-Each file uses the files it needs. Lists are ``Cons{x, xs}`` and ``Nil{}``, and a character is the integer that ``ord`` returns.
+Each file uses the files it needs. Lists are ``Cons{x, xs}`` and ``Nil{}``, and the code of a character is the integer that ``ord`` returns.
 
 .. list-table::
    :header-rows: 1
@@ -516,6 +536,10 @@ Each file uses the files it needs. Lists are ``Cons{x, xs}`` and ``Nil{}``, and 
      - ``is_digit`` ``is_upper`` ``is_lower`` ``is_alpha`` ``is_alnum`` ``is_space`` ``is_ident_start`` ``is_ident_char``
        ``chr`` ``char_at`` ``starts_with`` ``ends_with`` ``index_of_str`` ``str_repeat`` ``str_cmp`` ``str_less`` ``trim``
        ``int_to_str`` ``str_to_int`` ``split`` ``join`` ``strbuf_new`` ``strbuf_add`` ``strbuf_str``
+   * - ``u64``
+     - ``u64`` ``u64_limbs`` ``u64_hex`` ``u64_to_hex`` ``u64_to_int`` ``u64_add`` ``u64_sub`` ``u64_neg`` ``u64_and`` ``u64_or`` ``u64_xor`` ``u64_not``
+       ``u64_shl`` ``u64_shr`` ``u64_sar`` ``u64_eq`` ``u64_ucmp`` ``u64_scmp`` ``u64_ult`` ``u64_slt``
+       ``u64_write_le`` ``u64_write_be`` ``u64_read_le`` ``u64_bytes_le``
    * - ``table``
      - ``table_len`` ``table_has`` ``table_keys`` ``table_values`` ``table_items``
        ``set_new`` ``set_add`` ``set_has`` ``set_len`` ``set_to_list`` ``set_from_list``
@@ -544,7 +568,7 @@ String functions:
 
 * ``chr(c)`` is the one-character string of a code from 32 to 126, 9, 10 or 13. ``char_at(s, i)`` is ``""`` outside ``s``.
 * ``index_of_str(s, part, from)`` is the first position at or after ``from`` where ``part`` occurs, or ``-1``.
-* ``str_cmp(a, b)`` is ``-1``, ``0`` or ``1`` by the byte order. ``trim(s)`` removes blanks at both ends.
+* ``str_cmp(a, b)`` is ``-1``, ``0`` or ``1`` by the character codes. ``trim(s)`` removes blanks at both ends.
 * ``str_to_int(s)`` reads an optional ``-`` and decimal digits, otherwise ``none``.
 * ``split(s, sep)`` is the list of the parts between the occurrences of ``sep``, which must not be empty.
   ``join(sep, xs)`` is the inverse.
@@ -553,6 +577,14 @@ String functions:
 
 ``table_keys``, ``table_values`` and ``table_items`` (``[Tuple{key, value}, ...]``) list the entries in an unspecified order.
 A set is a table whose values are ``true``.
+
+A 64-bit value (``use("u64")``) is a ``u16`` array of four 16-bit limbs, the lowest first, which is not changed after it is made.
+``u64(n)`` is the value of the integer ``n`` (sign-extended), ``u64_limbs(l3, l2, l1, l0)`` and ``u64_hex("0x...")`` (up to 16 digits) make one,
+and ``u64_to_hex(a)`` is ``0x`` and 16 digits. ``u64_to_int(a)`` stops the program unless the signed value fits in 31 bits.
+``u64_add``, ``u64_sub`` and ``u64_neg`` are modulo 2 to the 64th power. ``u64_shl``, ``u64_shr`` and ``u64_sar`` take 0 to 63 bits.
+``u64_ucmp`` and ``u64_scmp`` are ``-1``, ``0`` or ``1`` as unsigned and as signed, and ``u64_ult`` and ``u64_slt`` are the tests.
+``u64_write_le(buf, off, a)`` stores the 8 bytes of ``a`` into the ``u8`` array ``buf`` lowest first (``u64_write_be``: highest first),
+``u64_read_le(buf, off)`` reads them, and ``u64_bytes_le(a)`` is a ``u8`` array of them.
 
 ``gensym("t")`` is the symbol ``t1``, then ``t2``, ``t3`` ... ``gensym_reset()`` restarts the count.
 
