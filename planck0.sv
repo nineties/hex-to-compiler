@@ -1848,7 +1848,8 @@
 (fun op_fusion ()
     (var g (vm_pop))
     (var f (vm_pop))
-    (vm_push (fusion f g))
+    ; none | g is g, so that the first f(p) = e after fun f is the function itself.
+    (if (== f noneS) (vm_push g) (vm_push (fusion f g)))
     )
 
 (fun op_handle ()

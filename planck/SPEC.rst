@@ -29,7 +29,7 @@ M-expressions are expressions of this syntax too.
    * - ``x := e``
      - ``Def{x, e}``
    * - ``f(p, ...) := e``
-     - ``Do{Def{f, none}, Set{f, Lambda{Tuple{p, ...}, e}}}``
+     - ``Do{Def{f, none}, Set{f, Fusion{f, Lambda{Tuple{p, ...}, e}}}}``
    * - ``record T(f, ...)``
      - ``Apply{_record_declare, Tuple{Quote{T}, Quote{Tuple{f, ...}}}}``
    * - ``x = e``
@@ -85,7 +85,7 @@ M-expressions are expressions of this syntax too.
    * - ``fun f``
      - ``Def{f, none}``
    * - ``f(p, ...) = e``
-     - ``Set{f, Lambda{Tuple{p, ...}, e}}``
+     - ``Set{f, Fusion{f, Lambda{Tuple{p, ...}, e}}}``
    * - ``handle e with h``
      - ``Handle{e, h}``
    * - ``perform e``
@@ -134,13 +134,23 @@ so the functions made before also see the new value. With ``f = (x) -> 2`` inste
 
 A function definition ``f(p, ...) := e`` is the same as ``fun f`` followed by ``f(p, ...) = e``,
 and at the top level and in a block it is defined where it is written. Functions that call each other first declare the name with ``fun f``.
-``fun f`` defines a variable ``f`` whose value is ``none`` where it is written, and ``f(p, ...) = e`` later fills it by assigning a function.
-``f(p, ...) = e`` is the same assignment as ``f = (p, ...) -> e``. The functions written after the declaration see ``f``.
+``fun f`` defines a variable ``f`` whose value is ``none`` where it is written, and ``f(p, ...) = e`` later fills it.
+``f(p, ...) = e`` is the assignment ``f = f | (p, ...) -> e``: it adds the function after the functions of ``f``,
+so the functions are tried in the order they are written. ``none | g`` is ``g``,
+so the first ``f(p, ...) = e`` after ``fun f`` assigns the function ``(p, ...) -> e`` itself.
+The functions may have different numbers of parameters. The functions written after the declaration see ``f``.
 Calling ``f`` before it is filled calls ``none`` and stops the program::
 
    fun odd
    even(n) := if (n == 0) true else odd(n - 1)
    odd(n) = if (n == 0) false else even(n - 1)
+
+   fun fact
+   fact(0) = 1
+   fact(n) = n * fact(n - 1)   # fact(0) is 1
+
+When the value of ``f`` is a function with a guard, as after ``f = (n) if n > 0 -> 1``,
+a function added by ``f(p, ...) = e`` is not called when the guard is false, as ``h | g`` below.
 
 A variable definition ``x := e`` (also ``x := (p) -> e``) is defined where it is written,
 and the expressions before it see the ``x`` outside. The right-hand side ``e`` sees the previous ``x`` too.
@@ -434,7 +444,7 @@ Special forms
    * - ``Lambda{Tuple{pattern, ...}, body}``
      - Function
    * - ``Fusion{f, g}``
-     - Try ``f``, then ``g`` if no pattern of ``f`` matches
+     - Try ``f``, then ``g`` if no pattern of ``f`` matches. ``Fusion{none, g}`` is ``g``
    * - ``Quote{e}``, ``QuasiQuote{e}``, ``UnQuote{e}``
      - Quotation
    * - ``Handle{body, handler}``, ``Perform{v}``

@@ -39,7 +39,7 @@
 <table>
 <tr><th>Expression</th><th>M-expression</th></tr>
 <tr><td><code>x := e</code></td><td><code>Def{x, e}</code></td></tr>
-<tr><td><code>f(p, ...) := e</code></td><td><code>Do{Def{f, none}, Set{f, Lambda{Tuple{p, ...}, e}}}</code></td></tr>
+<tr><td><code>f(p, ...) := e</code></td><td><code>Do{Def{f, none}, Set{f, Fusion{f, Lambda{Tuple{p, ...}, e}}}}</code></td></tr>
 <tr><td><code>record T(f, ...)</code></td><td><code>Apply{_record_declare, Tuple{Quote{T}, Quote{Tuple{f, ...}}}}</code></td></tr>
 <tr><td><code>x = e</code></td><td><code>Set{x, e}</code></td></tr>
 <tr><td><code>a[i] = e</code></td><td><code>Apply{_index_set, Tuple{a, i, e}}</code></td></tr>
@@ -67,7 +67,7 @@
 <tr><td><code>match e { f }</code></td><td><code>Apply{f, Tuple{e}}</code></td></tr>
 <tr><td><code>f"a{e}b"</code></td><td class="wrap"><code>Apply{_strcat, Tuple{Apply{_strcat, Tuple{"a", Apply{_to_text, Tuple{e}}}}, "b"}}</code></td></tr>
 <tr><td><code>fun f</code></td><td><code>Def{f, none}</code></td></tr>
-<tr><td><code>f(p, ...) = e</code></td><td><code>Set{f, Lambda{Tuple{p, ...}, e}}</code></td></tr>
+<tr><td><code>f(p, ...) = e</code></td><td><code>Set{f, Fusion{f, Lambda{Tuple{p, ...}, e}}}</code></td></tr>
 <tr><td><code>handle e with h</code></td><td><code>Handle{e, h}</code></td></tr>
 <tr><td><code>perform e</code></td><td><code>Perform{e}</code></td></tr>
 <tr><td><code>()</code>, <code>(a, b, ...)</code></td><td><code>Tuple{}</code>, <code>Tuple{a, b, ...}</code></td></tr>
@@ -101,7 +101,7 @@ println(&#x27;(perform E{}))
 println(&#x27;(record T(a, b)))</pre>
 <p class="label">Output</p>
 <pre class="out">Def{x, 1}
-Do{Def{f, none}, Set{f, Lambda{Tuple{x}, Apply{_add, Tuple{x, 1}}}}}
+Do{Def{f, none}, Set{f, Fusion{f, Lambda{Tuple{x}, Apply{_add, Tuple{x, 1}}}}}}
 Set{x, 2}
 Fusion{f, g}
 Lambda{Tuple{x}, x}
@@ -142,10 +142,15 @@ Apply{_record_declare, Tuple{Quote{T}, Quote{Tuple{a, b}}}}</pre>
 <h2 id="scope">Scope of variables</h2>
 <p>Variables have lexical scope, and the variable a name refers to is decided before the expression runs. A variable in the body of a function is a parameter of that function or of a function around it, or a variable defined before it in those functions, and otherwise a variable defined before it at the top level (a global variable). The variables of the caller are not visible. If a name refers to no variable, the program stops with a message before the expression runs. A function keeps the variables of the place where it was made, and they are shared locations: an assignment to them after the function was made is seen by the function.</p>
 <p>The top-level definitions are resolved in the order they are written. A definition written later is not visible to the expressions before it. The body of a function definition <code>f(p, ...) := e</code> sees <code>f</code> itself. Defining the same name again makes a new variable. The functions made before keep referring to the old variable, and only the expressions after the definition see the new one. With <code>f(x) := 1</code>, <code>g() := f(0)</code> and <code>f(x) := 2</code> in this order, <code>g()</code> is <code>1</code>. To overwrite an existing variable, write <code>x = e</code>. It is an assignment to the same variable, so the functions made before also see the new value. With <code>f = (x) -&gt; 2</code> instead of <code>f(x) := 2</code>, <code>g()</code> is <code>2</code>.</p>
-<p>A function definition <code>f(p, ...) := e</code> is the same as <code>fun f</code> followed by <code>f(p, ...) = e</code>, and at the top level and in a block it is defined where it is written. Functions that call each other first declare the name with <code>fun f</code>. <code>fun f</code> defines a variable <code>f</code> whose value is <code>none</code> where it is written, and <code>f(p, ...) = e</code> later fills it by assigning a function. <code>f(p, ...) = e</code> is the same assignment as <code>f = (p, ...) -&gt; e</code>. The functions written after the declaration see <code>f</code>. Calling <code>f</code> before it is filled calls <code>none</code> and stops the program.</p>
+<p>A function definition <code>f(p, ...) := e</code> is the same as <code>fun f</code> followed by <code>f(p, ...) = e</code>, and at the top level and in a block it is defined where it is written. Functions that call each other first declare the name with <code>fun f</code>. <code>fun f</code> defines a variable <code>f</code> whose value is <code>none</code> where it is written, and <code>f(p, ...) = e</code> later fills it. <code>f(p, ...) = e</code> is the assignment <code>f = f | (p, ...) -&gt; e</code>: it adds the function after the functions of <code>f</code>, so the functions are tried in the order they are written. <code>none | g</code> is <code>g</code>, so the first <code>f(p, ...) = e</code> after <code>fun f</code> assigns the function <code>(p, ...) -&gt; e</code> itself. The functions may have different numbers of parameters. The functions written after the declaration see <code>f</code>. Calling <code>f</code> before it is filled calls <code>none</code> and stops the program.</p>
 <div class="example"><pre><code>fun odd
 even(n) := if (n == 0) true else odd(n - 1)
-odd(n) = if (n == 0) false else even(n - 1)</code></pre></div>
+odd(n) = if (n == 0) false else even(n - 1)
+
+fun fact
+fact(0) = 1
+fact(n) = n * fact(n - 1)   # fact(0) is 1</code></pre></div>
+<p>When the value of <code>f</code> is a function with a guard, as after <code>f = (n) if n &gt; 0 -&gt; 1</code>, a function added by <code>f(p, ...) = e</code> is not called when the guard is false, as <code>h | g</code> below.</p>
 <p>A variable definition <code>x := e</code> (also <code>x := (p) -&gt; e</code>) is defined where it is written, and the expressions before it see the <code>x</code> outside. The right-hand side <code>e</code> sees the previous <code>x</code> too. The new <code>x</code> is made after the right-hand side is evaluated, so <code>x</code> in the right-hand side is undefined if there is no previous <code>x</code>. A function that calls itself is written as <code>f(p, ...) := e</code>. This is the same at the top level and in a block.</p>
 <div class="example"><pre><code>x := 1
 x := x + 1   # x is 2</code></pre></div>
