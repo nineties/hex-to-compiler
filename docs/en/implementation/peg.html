@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The packrat parser | hex-to-compiler</title>
+<link rel="alternate" hreflang="ja" href="../../implementation/peg.html">
+<link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+<header class="site-header"><div class="inner">
+<a class="logo" href="../index.html">hex-to-compiler</a>
+<nav class="site-nav">
+<a href="../index.html">Overview</a>
+<a href="../tutorial/index.html">Tutorial</a>
+<a href="../reference/index.html">Reference</a>
+<a class="here" href="../implementation/index.html">Implementation</a>
+<a href="https://github.com/nineties/hex-to-compiler">GitHub</a>
+<a class="lang-switch" lang="ja" hreflang="ja" href="../../implementation/peg.html">日本語</a>
+</nav>
+</div></header>
+<div class="layout">
+<nav class="toc" aria-label="Implementation contents"><details open><summary>Implementation contents</summary>
+<h2>Implementation</h2>
+<ol>
+<li><a href="index.html">Overview</a></li>
+<li><a href="bootstrap.html">From machine code to planck0</a></li>
+<li><a href="planck0.html">planck0</a></li>
+<li><a href="init.html">init.pk and M-expressions</a></li>
+<li><a class="here" href="peg.html">The packrat parser</a></li>
+<li><a href="syntax.html">Defining the syntax</a></li>
+</ol></details></nav>
+<main>
+<h1>The packrat parser</h1>
+<p class="lead"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk">planck/peg.pk</a> (316 lines of M-expressions) is a parser that interprets a PEG. The grammar is M-expression data. The parser memoizes the result of each rule at each position.</p>
+
+<h2>The grammar as data</h2>
+<p>The forms of parsing expressions, the right-hand sides of rules, are at the top of the file.</p>
+<div class="example">
+<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L4-L21">planck/peg.pk:4–21</a></p>
+<pre class="pk">&quot; A grammar is data. A parsing expression is one of &quot;
+&quot;   \&quot;text\&quot;          the text, after blanks and comments &quot;
+&quot;   Tight{\&quot;text\&quot;}   the text, without skipping blanks &quot;
+&quot;   Key{\&quot;word\&quot;}     the word, not followed by a letter, a digit or _ &quot;
+&quot;   name            the rule name (a symbol) &quot;
+&quot;   f               a function: f(p) returns the new position or -1, and sets peg_pv &quot;
+&quot;   Seq{e, ...}     sequence. The value is Tuple{v, ...} &quot;
+&quot;   Choice{e, ...}  ordered choice &quot;
+&quot;   Many{e}, Many1{e}, Option{e}  the values are Tuple{v, ...}, Option gives Tuple{} or Tuple{v} &quot;
+&quot;   And{e}, Not{e}  lookahead &quot;
+&quot;   Delimited{e, sep}, Delimited1{e, sep}  e separated by sep. The value is Tuple{v, ...} &quot;
+&quot;   Same{}          succeeds when the next token is on the same line &quot;
+&quot;   Act{e, f}       applies f to the value of e. f is an expression evaluated by _define_rule &quot;
+&quot;   Prev{}          the previous definition of the rule (only as an alternative of _define_rule) &quot;
+&quot;   Fail{}          never matches &quot;
+
+&quot; Results of rules are memoized for each position. &quot;
+&quot; Direct left recursion (sum ::= sum \&quot;+\&quot; term | term) is handled by growing the seed. &quot;</pre>
+</div>
+<p>One or more repetitions of <code>"7"</code> are <code>Many1{"7"}</code>. To take their count as the value, write <code>Act{Many1{"7"}, t -> arity(t)}</code>. Giving it a name with <code>_define_rule</code> makes it a rule.</p>
+<div class="example">
+<p class="file">i_define.pk</p>
+<pre class="pk">_define_rule(&#x27;sevens, &#x27;Act{Many1{&quot;7&quot;}, t -&gt; arity(t)})
+println(peg_parse(&#x27;sevens, &quot;7 7 7 rest&quot;))
+println(sevens{| 7 7 7 7 |})</pre>
+<p class="label">Output</p>
+<pre class="out">Tuple{3, &quot;rest&quot;}
+4</pre>
+</div>
+<p>A rule defined without <code>::=</code> is also usable in <code>sevens{| ... |}</code>. <code>::=</code> itself is translated to a call of <code>_define_rule</code> (<a href="syntax.html#decl">Defining the syntax</a>).</p>
+
+<h2>Interpretation</h2>
+<p><code>peg_px(e, p)</code> tries the parsing expression <code>e</code> at the position <code>p</code>. On success it returns the next position and puts the value in <code>peg_pv</code>. A failure is <code>-1</code>.</p>
+<div class="example">
+<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L207-L212">planck/peg.pk:207–212</a></p>
+<pre class="pk">Def{peg_px, Lambda{Tuple{e, p}, Do{
+    Def{t, Apply{typeof, Tuple{e}}},
+    If{Apply{_eq, Tuple{t, Quote{string}}}, Apply{peg_lit, Tuple{e, Apply{peg_skip_ws, Tuple{p}}}},
+    If{Apply{_eq, Tuple{t, Quote{symbol}}}, Apply{peg_call_rule, Tuple{e, p}},
+    If{Apply{_eq, Tuple{t, Quote{function}}}, Apply{e, Tuple{p}},
+        Apply{Apply{table_get, Tuple{peg_handlers, Apply{head, Tuple{e}}, none}}, Tuple{e, p}}}}}}}}</pre>
+</div>
+<p>A string is matched after skipping whitespace. A symbol is called as a rule. A function is called as it is. For M-expressions such as <code>Seq</code> and <code>Choice</code>, the table <code>peg_handlers</code> gives the handler for each head (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L170-L205"><code>planck/peg.pk:170–205</code></a>). Tokens such as identifiers and integers are implemented as functions on the side of <a href="syntax.html">Defining the syntax</a>.</p>
+<p>At every failure, the parser records the farthest position reached in <code>peg_far</code> (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L57-L59"><code>planck/peg.pk:57–59</code></a>) and reports a syntax error at that position.</p>
+
+<h2>Memoization and direct left recursion</h2>
+<p>The parser memoizes the result of a rule for each (position, rule) pair (packrat parsing). Backtracking does not recompute the same rule at the same position.</p>
+<div class="example">
+<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L214-L220">planck/peg.pk:214–220</a></p>
+<pre class="pk">&quot; === Rules and memoization === &quot;
+&quot; The memo of position p is the array peg_memo[p] (made when first used), which holds &quot;
+&quot; three slots for each rule id: end position, value and left-recursion flag. &quot;
+&quot; The end position is none before the rule runs, -1 for failure and -2 while the rule is running. &quot;
+&quot; On left recursion (the rule is called again at the same position while it runs), &quot;
+&quot; the inner call fails, which is the seed. Then the rule is run again &quot;
+&quot; while it consumes more than the last result. &quot;</pre>
+</div>
+<p>The memo is an array for each position. For each rule it has three fields: the end position, the value and a left-recursion mark. <code>peg_call_rule</code> first looks up the memo (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L229-L245"><code>planck/peg.pk:229–245</code></a>).</p>
+<p>The memo also handles direct left recursion (<code>sum ::= sum "+" term | term</code>). While a rule runs, its memo entry is marked as running, and a recursive call at the same position fails. The parser stores the result obtained with this failure as a seed in the memo and runs the rule again. It repeats this as long as the rule reads more than before (seed growing).</p>
+<div class="example">
+<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L247-L265">planck/peg.pk:247–265</a></p>
+<pre class="pk">Def{peg_run_rule, Lambda{Tuple{r, p, row, b}, Do{
+    Def{body, Apply{table_get, Tuple{peg_rules, r, none}}},
+    Def{b1, Apply{_add, Tuple{b, 1}}},
+    Apply{array_set, Tuple{row, b, -2}},
+    Def{q, Apply{peg_px, Tuple{body, p}}},
+    Apply{array_set, Tuple{row, b, q}},
+    Apply{array_set, Tuple{row, b1, peg_pv}},
+    If{Apply{_eq, Tuple{Apply{array_get, Tuple{row, Apply{_add, Tuple{b, 2}}}}, true}}, Do{
+        Def{go, Apply{_ge, Tuple{q, 0}}},
+        While{go, Do{
+            Set{q, Apply{peg_px, Tuple{body, p}}},
+            If{Apply{_gt, Tuple{q, Apply{array_get, Tuple{row, b}}}},
+                Do{
+                    Apply{array_set, Tuple{row, b, q}},
+                    Apply{array_set, Tuple{row, b1, peg_pv}}},
+                Set{go, false}}}},
+        Set{peg_pv, Apply{array_get, Tuple{row, b1}}},
+        Apply{array_get, Tuple{row, b}}},
+    q}}}}</pre>
+</div>
+<p>As a result, <code>1 - 2 - 3</code> is <code>(1 - 2) - 3</code>.</p>
+
+<h2>Defining a rule</h2>
+<div class="example">
+<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L282-L291">planck/peg.pk:282–291</a></p>
+<pre class="pk">&quot; _define_rule(name, e) defines or replaces the rule &quot;
+Def{_define_rule, Lambda{Tuple{name, e}, Do{
+    If{Apply{_eq, Tuple{Apply{table_get, Tuple{peg_ids, name, none}}, none}}, Do{
+        Apply{table_set, Tuple{peg_ids, name, peg_nrules}},
+        Set{peg_nrules, Apply{peg_inc, Tuple{peg_nrules}}}}, none},
+    Def{old, Apply{table_get, Tuple{peg_rules, name, Fail{}}}},
+    Apply{table_set, Tuple{peg_sources, name, Apply{peg_subst_prev, Tuple{e, Apply{table_get, Tuple{peg_sources, name, Fail{}}}}}}},
+    Set{peg_version, Apply{peg_inc, Tuple{peg_version}}},
+    Apply{table_set, Tuple{peg_rules, name, Apply{peg_subst_prev, Tuple{Apply{peg_prepare, Tuple{e}}, old}}}},
+    name}}}</pre>
+</div>
+<p><code>_define_rule</code> numbers the rule, evaluates <code>f</code> of the action <code>Act{e, f}</code>, and enters the rule in the table. <code>Prev{}</code> in an alternative is replaced by the previous definition of the rule. The <code>...</code> of <code>::=</code> is this <code>Prev{}</code>.</p>
+<p>The form before evaluation is kept in <code>peg_sources</code>. Tools that read the grammar, such as <code>unparse</code>, use this table.</p>
+
+<h2>Entry point</h2>
+<p><code>peg_parse(rule, s)</code> rebuilds the memo, calls the rule and returns <code>Tuple{value, rest}</code> (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L300-L316"><code>planck/peg.pk:300–316</code></a>). On failure it returns <code>SyntaxError{...}</code> with the text from the position of <code>peg_far</code> to the end of the line.</p>
+
+<nav class="pager"><a class="prev" href="init.html"><small>Previous</small>init.pk and M-expressions</a><a class="next" href="syntax.html"><small>Next</small>Defining the syntax</a></nav>
+</main>
+</div>
+<footer><div class="inner"><a href="https://github.com/nineties/hex-to-compiler">github.com/nineties/hex-to-compiler</a></div></footer>
+<script src="../../assets/highlight.js"></script>
+</body>
+</html>

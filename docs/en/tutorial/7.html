@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>7. Extending the grammar | hex-to-compiler</title>
+<link rel="alternate" hreflang="ja" href="../../tutorial/7.html">
+<link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+<header class="site-header"><div class="inner">
+<a class="logo" href="../index.html">hex-to-compiler</a>
+<nav class="site-nav">
+<a href="../index.html">Overview</a>
+<a class="here" href="../tutorial/index.html">Tutorial</a>
+<a href="../reference/index.html">Reference</a>
+<a href="../implementation/index.html">Implementation</a>
+<a href="https://github.com/nineties/hex-to-compiler">GitHub</a>
+<a class="lang-switch" lang="ja" hreflang="ja" href="../../tutorial/7.html">日本語</a>
+</nav>
+</div></header>
+<div class="layout">
+<nav class="toc" aria-label="Tutorial contents"><details open><summary>Tutorial contents</summary>
+<h2>Tutorial</h2>
+<ol>
+<li><a href="index.html">Prerequisites and running</a></li>
+<li><a href="1.html">1. Expressions, bindings, functions</a></li>
+<li><a href="2.html">2. Values and M-expressions</a></li>
+<li><a href="3.html">3. Patterns and fusion</a></li>
+<li><a href="4.html">4. Libraries</a></li>
+<li><a href="5.html">5. Records, local functions, escapes</a></li>
+<li><a href="6.html">6. Algebraic effects</a></li>
+<li><a class="here" href="7.html">7. Extending the grammar</a></li>
+<li><a href="8.html">8. Quotation and the evaluator</a></li>
+<li><a href="9.html">9. Indexing and rewriting</a></li>
+</ol></details></nav>
+<main>
+<h1>7. Extending the grammar</h1>
+<p class="lead">The planck syntax is a set of PEG rules, and <code>::=</code> is an expression that defines or replaces a rule. The top-level expressions after the declaration are read with the new rule.</p>
+
+<h2>Adding syntax</h2>
+<div class="example">
+<p class="file">t7_unless.pk</p>
+<pre class="pk">primary ::= &#x27;unless &quot;(&quot; c:expr &quot;)&quot; a:expr { `If{!c, none, !a} } | ...
+
+unless (1 &gt; 2) put(&quot;1 &gt; 2 ではありません\n&quot;)
+unless (1 &lt; 2) put(&quot;ここは表示されません\n&quot;)</pre>
+<p class="label">Output</p>
+<pre class="out">1 &gt; 2 ではありません</pre>
+</div>
+<ul>
+<li>The last <code>...</code> in <code>primary ::= ... | ...</code> stands for the previous definition of the rule. The new alternative is added in front of the existing ones.</li>
+<li><code>'unless</code> is a word, <code>"("</code> is a string, and <code>c:expr</code> is an item that binds the value of the rule <code>expr</code> to the label <code>c</code>.</li>
+<li><code>{ ... }</code> is an action. Its value is the value of the rule. Here a quasiquote builds the syntax tree <code>If{c, none, a}</code>.</li>
+</ul>
+<p>The items and the action are on the same line as <code>::=</code> or <code>|</code>.</p>
+
+<h2>Binary operators</h2>
+<div class="example">
+<p class="file">t7_pipe.pk</p>
+<pre class="pk">union ::= x:union &quot;|&gt;&quot; f:arrow { `Apply{!f, Tuple{!x}} } | ...
+
+double(x) := 2 * x
+3 |&gt; double |&gt; double |&gt; println</pre>
+<p class="label">Output</p>
+<pre class="out">12</pre>
+</div>
+<p><code>union</code> is the rule of the fusion <code>|</code>. A rule may be directly left recursive, so <code>x:union "|&gt;" ...</code> associates to the left.</p>
+
+<h2>Syntax that takes a block</h2>
+<div class="example">
+<p class="file">t7_repeat.pk</p>
+<pre class="pk">repeat_fn(n, f) := while (n &gt; 0) { f(); n = n - 1 }
+
+primary ::= &#x27;repeat n:add_expr body:block { `repeat_fn(!n, () -&gt; !body) } | ...
+
+repeat 3 { put(&quot;planck!\n&quot;) }</pre>
+<p class="label">Output</p>
+<pre class="out">planck!
+planck!
+planck!</pre>
+</div>
+<p>The inside of a quasiquote is written in the ordinary syntax. <code>`repeat_fn(!n, () -&gt; !body)</code> embeds the block that was read into the tree of a call.</p>
+
+<h2>Another grammar</h2>
+<div class="example">
+<p class="file">t7_calc.pk</p>
+<pre class="pk">calc ::= a:calc &quot;+&quot; b:term { a + b } | a:calc &quot;-&quot; b:term { a - b } | term
+term ::= a:term &quot;*&quot; b:atom { a * b } | atom
+atom ::= integer | &quot;(&quot; e:calc &quot;)&quot; { e }
+
+println(calc{| 1 + 2 * (10 - 4) |})
+println(calc{| 100 - 20 - 3 |})
+
+println(peg_parse(&#x27;calc, &quot;6 * 7&quot;))
+println(peg_parse(&#x27;calc, &quot;1 + )&quot;))
+println(peg_parse(&#x27;calc, &quot;)&quot;))</pre>
+<p class="label">Output</p>
+<pre class="out">13
+77
+Tuple{42, &quot;&quot;}
+Tuple{1, &quot;+ )&quot;}
+Tuple{SyntaxError{&quot;unexpected input&quot;, &quot;)&quot;}, &quot;&quot;}</pre>
+</div>
+<p>An action can return any value, not only a tree. Results of rules are memoized for each position (packrat), and left recursion groups to the left.</p>
+<p><code>calc{| ... |}</code> is an expression whose text between <code>{|</code> and <code>|}</code> is read by the rule <code>calc</code>, at parse time. The value enters the tree as a constant. A string at run time is read by <code>peg_parse(rule, s)</code>, and the result is <code>Tuple{value, rest}</code>. When nothing can be read from the start, the value is <code>SyntaxError{...}</code>.</p>
+
+<p>The items are listed in <a href="../reference/grammar.html">Grammar declarations</a>. The rules of the planck syntax itself are in <a href="../implementation/syntax.html">Defining the syntax</a>.</p>
+
+<nav class="pager"><a class="prev" href="6.html"><small>Previous</small>6. Algebraic effects</a><a class="next" href="8.html"><small>Next</small>8. Quotation and the evaluator</a></nav>
+</main>
+</div>
+<footer><div class="inner"><a href="https://github.com/nineties/hex-to-compiler">github.com/nineties/hex-to-compiler</a></div></footer>
+<script src="../../assets/highlight.js"></script>
+</body>
+</html>

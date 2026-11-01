@@ -3,104 +3,115 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>6. レコードと流れの制御 | planck</title>
+<title>6. 代数的エフェクト | hex-to-compiler</title>
+<link rel="alternate" hreflang="en" href="../en/tutorial/6.html">
 <link rel="stylesheet" href="../assets/style.css">
 </head>
 <body>
 <header class="site-header"><div class="inner">
-<a class="logo" href="../index.html">planck<span>.</span></a>
+<a class="logo" href="../index.html">hex-to-compiler</a>
 <nav class="site-nav">
+<a href="../index.html">概要</a>
 <a class="here" href="../tutorial/index.html">チュートリアル</a>
 <a href="../reference/index.html">リファレンス</a>
 <a href="../implementation/index.html">処理系の実装</a>
 <a href="https://github.com/nineties/hex-to-compiler">GitHub</a>
+<a class="lang-switch" lang="en" hreflang="en" href="../en/tutorial/6.html">English</a>
 </nav>
 </div></header>
 <div class="layout">
 <nav class="toc" aria-label="チュートリアルの目次"><details open><summary>チュートリアルの目次</summary>
 <h2>チュートリアル</h2>
 <ol>
-<li><a href="index.html">はじめに</a></li>
-<li><a href="1.html">1. はじめの一歩</a></li>
-<li><a href="2.html">2. 変数と関数</a></li>
-<li><a href="3.html">3. 値のかたち</a></li>
-<li><a href="4.html">4. パターンで分ける</a></li>
-<li><a href="5.html">5. ライブラリを使う</a></li>
-<li><a class="here" href="6.html">6. レコードと流れの制御</a></li>
-<li><a href="7.html">7. エフェクト</a></li>
-<li><a href="8.html">8. 構文を広げる</a></li>
-<li><a href="9.html">9. プログラムはデータ</a></li>
+<li><a href="index.html">前提と実行</a></li>
+<li><a href="1.html">1. 式・束縛・関数</a></li>
+<li><a href="2.html">2. 値と M式</a></li>
+<li><a href="3.html">3. パターンと融合</a></li>
+<li><a href="4.html">4. ライブラリ</a></li>
+<li><a href="5.html">5. レコード・局所関数・脱出</a></li>
+<li><a class="here" href="6.html">6. 代数的エフェクト</a></li>
+<li><a href="7.html">7. 文法の拡張</a></li>
+<li><a href="8.html">8. クオートと評価器</a></li>
+<li><a href="9.html">9. 添字と置き換え</a></li>
 </ol></details></nav>
 <main>
-<h1>6. レコードと流れの制御</h1>
-<p class="lead">M式の引数に名前を付けるレコードと、ブロックの中の関数、途中で抜ける書き方を見ます。</p>
+<h1>6. 代数的エフェクト</h1>
+<p class="lead"><code>handle e with h</code> と <code>perform v</code> は深いハンドラの代数的エフェクトです。継続は多重に呼べて、例外・生成器・非決定計算を同じ仕組みで書けます。</p>
 
-<h2>レコード</h2>
-<p>M式の引数は位置で取り出しますが、数が増えると読みにくくなります。<code>record</code> で引数に名前を付けると、<code>p.x</code> のように名前で取り出せます。</p>
+<h2>例外</h2>
 <div class="example">
-<p class="file">t6_record.pk</p>
-<pre class="pk">record Point(x, y)
-p := Point{3, 4}
-println(p.x * p.x + p.y * p.y)
+<p class="file">t6_exception.pk</p>
+<pre class="pk">safe_div(a, b) := if (b == 0) perform Raise{&quot;division by zero&quot;} else a / b
 
-move(p, dx) := Point{p.x + dx, p.y}
-println(move(p, 10))</pre>
+try(f) := handle Ok{f()} with (Raise{msg}, k) -&gt; Error{msg}
+
+println(try(() -&gt; safe_div(10, 2)))
+println(try(() -&gt; safe_div(10, 0)))
+println(try(() -&gt; { put(&quot;before\n&quot;); safe_div(1, 0); put(&quot;after\n&quot;) }))</pre>
 <p class="label">出力</p>
-<pre class="out">25
-Point{13, 4}</pre>
+<pre class="out">Ok{5}
+Error{&quot;division by zero&quot;}
+before
+Error{&quot;division by zero&quot;}</pre>
 </div>
-<p><code>record Point(x, y)</code> は「頭が <code>Point</code> の M式の 0 番目を <code>x</code>、1 番目を <code>y</code> と呼ぶ」という宣言です。値はこれまでどおり <code>Point{3, 4}</code> で作ります。中身はただの M式なので、パターンで分けることもできます。</p>
-<p><code>.</code> の前に空白は入れません。</p>
+<p><code>perform v</code> は、<code>v</code> に合うパターンを持つ一番近いハンドラを <code>h(v, k)</code> で呼びます。<code>k</code> は <code>perform</code> の継続です。ハンドラの値が <code>handle</code> 式の値になり、<code>k</code> を呼ばなければ残りの計算は捨てられます（3つ目の例で <code>after</code> が出ない）。合うハンドラがなければ外側に回ります。</p>
 
-<h2>ブロックの中の関数</h2>
-<p>ブロックの中で <code>fun 名前(引数) 本体</code> と書くと、そのブロックの中だけの関数ができます。</p>
+<h2>再開</h2>
 <div class="example">
-<p class="file">t6_fun.pk</p>
-<pre class="pk">parity(n) := {
-    fun is_even(n) if (n == 0) true else is_odd(n - 1)
-    fun is_odd(n) if (n == 0) false else is_even(n - 1)
-    if (is_even(n)) &quot;even&quot; else &quot;odd&quot;
-}
-put(parity(10)); put(&quot;\n&quot;)
-put(parity(7)); put(&quot;\n&quot;)</pre>
-<p class="label">出力</p>
-<pre class="out">even
-odd</pre>
-</div>
-<p><code>fun</code> で作った関数は、ブロックの先頭で名前が用意されます。だから <code>is_even</code> は、あとに書いた <code>is_odd</code> を呼べます。ブロックの中で <code>名前(引数) := 本体</code> と書いた関数は、それより前に書いた関数からは呼べません。</p>
+<p class="file">t6_resume.pk</p>
+<pre class="pk">ask() := perform Ask{}
 
-<h2>途中で抜ける</h2>
+with_answer(v, f) := handle f() with (Ask{}, k) -&gt; k(v)
+
+println(with_answer(21, () -&gt; ask() * 2))
+println(with_answer(5, () -&gt; ask() + ask()))</pre>
+<p class="label">出力</p>
+<pre class="out">42
+10</pre>
+</div>
+<p><code>k(x)</code> は <code>perform</code> が <code>x</code> を返したものとして計算を再開します。ハンドラは深く、再開した先の <code>perform</code> も同じハンドラが受けます。</p>
+
+<h2>生成器</h2>
 <div class="example">
-<p class="file">t6_return.pk</p>
-<pre class="pk">find_first(p, xs) := {
-    for (x in xs) if (p(x)) return x
-    none
-}
-println(find_first(x -&gt; x &gt; 3, [1, 5, 2, 7]))
-println(find_first(x -&gt; x &gt; 9, [1, 5, 2, 7]))
+<p class="file">t6_generator.pk</p>
+<pre class="pk">walk := (Leaf{}) -&gt; none
+      | (Node{l, v, r}) -&gt; { walk(l); perform Yield{v}; walk(r) }
 
-n := 0
-odd_sum := 0
-while (true) {
-    n = n + 1
-    if (n &gt; 10) break
-    if (n % 2 == 0) continue
-    odd_sum = odd_sum + n
-}
-println(odd_sum)</pre>
+tree := Node{Node{Leaf{}, 1, Leaf{}}, 2, Node{Leaf{}, 3, Leaf{}}}
+
+handle walk(tree) with (Yield{v}, k) -&gt; { put(f&quot;yield {v}\n&quot;); k(none) }
+
+to_list(t) := handle { walk(t); [] } with (Yield{v}, k) -&gt; v :: k(none)
+use(&quot;pretty&quot;)
+put(f&quot;{to_list(tree)}\n&quot;)</pre>
 <p class="label">出力</p>
-<pre class="out">5
-none
-25</pre>
+<pre class="out">yield 1
+yield 2
+yield 3
+[1, 2, 3]</pre>
 </div>
-<p><code>return 値</code> は、それを含む関数をその場で終わらせ、値を返します。<code>for</code> の中に書いても、抜けるのは外の関数 <code>find_first</code> です。</p>
-<p><code>break</code> は一番内側の <code>while</code> か <code>for</code> を終わらせます。<code>continue</code> はその回の残りを飛ばして次の回に進みます。この例では 1 から 10 までの奇数をたしています。</p>
-<p><code>return</code> の値は <code>return</code> と同じ行に書き始めます。</p>
+<p>同じ <code>walk</code> に対して、ハンドラが値の使い方を決めます。2つ目は <code>v :: k(none)</code> で結果をリストに集めています。</p>
 
-<nav class="pager"><a class="prev" href="5.html"><small>前のページ</small>5. ライブラリを使う</a><a class="next" href="7.html"><small>次のページ</small>7. エフェクト</a></nav>
+<h2>多重再開</h2>
+<div class="example">
+<p class="file">t6_choose.pk</p>
+<pre class="pk">use(&quot;list&quot;)
+use(&quot;pretty&quot;)
+choose(xs) := perform Choose{xs}
+
+all_results(f) := handle [f()] with (Choose{xs}, k) -&gt; concat_map(x -&gt; k(x), xs)
+
+put(f&quot;{all_results(() -&gt; (choose([1, 2]), choose([&quot;a&quot;, &quot;b&quot;])))}\n&quot;)</pre>
+<p class="label">出力</p>
+<pre class="out">[Tuple{1, &quot;a&quot;}, Tuple{1, &quot;b&quot;}, Tuple{2, &quot;a&quot;}, Tuple{2, &quot;b&quot;}]</pre>
+</div>
+<p><code>k</code> は通常の関数で、何度でも呼べます。<code>handle</code> が値を返したあとでも呼べます。ここでは候補ごとに <code>k</code> を呼んで結果を連結しています。N クイーンを同じ方法で解いた例が <a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/examples/queens.pk">planck/examples/queens.pk</a> です。</p>
+<p>planck0 は仮想機械のフレームをヒープに置き、継続をフレームの鎖へのポインタとして表します。<code>k</code> を呼ぶたびに境界までのフレームを複製して実行します（<a href="../implementation/planck0.html#effects">planck0 のエフェクト</a>）。</p>
+
+<nav class="pager"><a class="prev" href="5.html"><small>前のページ</small>5. レコード・局所関数・脱出</a><a class="next" href="7.html"><small>次のページ</small>7. 文法の拡張</a></nav>
 </main>
 </div>
-<footer><div class="inner">planck — <a href="https://github.com/nineties/hex-to-compiler">nineties/hex-to-compiler</a></div></footer>
+<footer><div class="inner"><a href="https://github.com/nineties/hex-to-compiler">github.com/nineties/hex-to-compiler</a></div></footer>
 <script src="../assets/highlight.js"></script>
 </body>
 </html>

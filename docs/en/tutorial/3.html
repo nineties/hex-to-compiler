@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>3. Patterns and fusion | hex-to-compiler</title>
+<link rel="alternate" hreflang="ja" href="../../tutorial/3.html">
+<link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+<header class="site-header"><div class="inner">
+<a class="logo" href="../index.html">hex-to-compiler</a>
+<nav class="site-nav">
+<a href="../index.html">Overview</a>
+<a class="here" href="../tutorial/index.html">Tutorial</a>
+<a href="../reference/index.html">Reference</a>
+<a href="../implementation/index.html">Implementation</a>
+<a href="https://github.com/nineties/hex-to-compiler">GitHub</a>
+<a class="lang-switch" lang="ja" hreflang="ja" href="../../tutorial/3.html">日本語</a>
+</nav>
+</div></header>
+<div class="layout">
+<nav class="toc" aria-label="Tutorial contents"><details open><summary>Tutorial contents</summary>
+<h2>Tutorial</h2>
+<ol>
+<li><a href="index.html">Prerequisites and running</a></li>
+<li><a href="1.html">1. Expressions, bindings, functions</a></li>
+<li><a href="2.html">2. Values and M-expressions</a></li>
+<li><a class="here" href="3.html">3. Patterns and fusion</a></li>
+<li><a href="4.html">4. Libraries</a></li>
+<li><a href="5.html">5. Records, local functions, escapes</a></li>
+<li><a href="6.html">6. Algebraic effects</a></li>
+<li><a href="7.html">7. Extending the grammar</a></li>
+<li><a href="8.html">8. Quotation and the evaluator</a></li>
+<li><a href="9.html">9. Indexing and rewriting</a></li>
+</ol></details></nav>
+<main>
+<h1>3. Patterns and fusion</h1>
+<p class="lead">The parameters of a lambda are patterns. <code>f | g</code> (fusion) is a function that tries <code>g</code> when no pattern of <code>f</code> matches. Case analysis is written with it.</p>
+
+<div class="example">
+<p class="file">t3_fib.pk</p>
+<pre class="pk">fib := (0) -&gt; 0
+     | (1) -&gt; 1
+     | (n) -&gt; fib(n - 1) + fib(n - 2)
+println(fib(20))</pre>
+<p class="label">Output</p>
+<pre class="out">6765</pre>
+</div>
+<p>Fusion tries the lambdas from the left and calls the first one that matches. When none matches, the program stops with <code>matching failed</code>. <code>|</code> associates to the right.</p>
+
+<h2>Patterns</h2>
+<table>
+<tr><th>Pattern</th><th>Matches</th></tr>
+<tr><td><code>x</code>, <code>_</code></td><td>Any value. <code>x</code> binds it and <code>_</code> binds nothing</td></tr>
+<tr><td><code>0</code>, <code>"abc"</code></td><td>An equal integer or string</td></tr>
+<tr><td><code>'none</code></td><td>An equal symbol (<code>Quote{none}</code>)</td></tr>
+<tr><td><code>Head{p, ...}</code></td><td>An M-expression with the same head and arity whose arguments match <code>p, ...</code></td></tr>
+<tr><td><code>p :: q</code>, <code>[p, q]</code>, <code>[]</code></td><td>Patterns of <code>Cons</code> and <code>Nil</code></td></tr>
+<tr><td><code>p @ int</code></td><td>A value that matches <code>p</code> and whose <code>typeof</code> is <code>int</code></td></tr>
+</table>
+<div class="example">
+<p class="file">t3_list.pk</p>
+<pre class="pk">len := (Nil{}) -&gt; 0 | (_ :: xs) -&gt; 1 + len(xs)
+println(len([5, 6, 7]))
+
+sum := ([]) -&gt; 0 | (x :: xs) -&gt; x + sum(xs)
+println(sum([1, 2, 3, 4]))
+
+swap2 := ([a, b]) -&gt; [b, a] | (xs) -&gt; xs
+use(&quot;pretty&quot;)
+put(f&quot;{swap2([1, 2])} {swap2([1, 2, 3])}\n&quot;)</pre>
+<p class="label">Output</p>
+<pre class="out">3
+10
+[2, 1] [1, 2, 3]</pre>
+</div>
+<div class="example">
+<p class="file">t3_type.pk</p>
+<pre class="pk">describe := (n @ int) -&gt; f&quot;整数 {n}&quot;
+          | (s @ string) -&gt; f&quot;文字列 {s}&quot;
+          | (_) -&gt; &quot;そのほか&quot;
+put(describe(1)); put(&quot;\n&quot;)
+put(describe(&quot;abc&quot;)); put(&quot;\n&quot;)
+put(describe(&#x27;x)); put(&quot;\n&quot;)</pre>
+<p class="label">Output</p>
+<pre class="out">整数 1
+文字列 abc
+そのほか</pre>
+</div>
+
+<h2>Adding cases</h2>
+<div class="example">
+<p class="file">t3_extend.pk</p>
+<pre class="pk">greet := (_) -&gt; &quot;hello&quot;
+put(greet(&quot;en&quot;)); put(&quot;\n&quot;)
+
+greet = (&quot;ja&quot;) -&gt; &quot;こんにちは&quot; | greet
+put(greet(&quot;ja&quot;)); put(&quot;\n&quot;)
+put(greet(&quot;fr&quot;)); put(&quot;\n&quot;)</pre>
+<p class="label">Output</p>
+<pre class="out">hello
+こんにちは
+hello</pre>
+</div>
+<p>A fusion is a value, so a case can be put in front of an existing function and assigned back.</p>
+
+<h2>match</h2>
+<div class="example">
+<p class="file">t3_match.pk</p>
+<pre class="pk">classify(n) := match n {
+    0 -&gt; &quot;zero&quot;
+    n if n &lt; 0 -&gt; &quot;negative&quot;
+    n if n % 2 == 0 -&gt; &quot;even&quot;
+    _ -&gt; &quot;odd&quot;
+}
+put(classify(0)); put(&quot; &quot;)
+put(classify(-4)); put(&quot; &quot;)
+put(classify(6)); put(&quot; &quot;)
+put(classify(7)); put(&quot;\n&quot;)</pre>
+<p class="label">Output</p>
+<pre class="out">zero negative even odd</pre>
+</div>
+<p><code>match e { p -> a ... }</code> evaluates <code>e</code> once and tries the cases from the top. <code>p if c</code> is a guard: when <code>c</code> is false, the next case is tried.</p>
+
+<h2>Symbolic differentiation</h2>
+<div class="example">
+<p class="file">t3_deriv.pk</p>
+<pre class="pk">d := (n @ int, x) -&gt; 0
+   | (y @ symbol, x) -&gt; (if (y == x) 1 else 0)
+   | (Add{a, b}, x) -&gt; Add{d(a, x), d(b, x)}
+   | (Mul{a, b}, x) -&gt; Add{Mul{d(a, x), b}, Mul{a, d(b, x)}}
+
+println(d(&#x27;Add{x, 3}, &#x27;x))
+println(d(&#x27;Mul{x, y}, &#x27;x))</pre>
+<p class="label">Output</p>
+<pre class="out">Add{1, 0}
+Add{Mul{1, y}, Mul{x, 0}}</pre>
+</div>
+<p><code>'Add{x, 3}</code> is a quotation. It passes the M-expression without evaluating it (<a href="8.html">chapter 8</a>). An <code>if ... else ...</code> in the middle of a fusion is put in parentheses. The right side of <code>else</code> reads a whole expression, so without parentheses it would take in the following <code>| ...</code>. A version with simplification is <a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/examples/deriv.pk">planck/examples/deriv.pk</a>.</p>
+
+<nav class="pager"><a class="prev" href="2.html"><small>Previous</small>2. Values and M-expressions</a><a class="next" href="4.html"><small>Next</small>4. Libraries</a></nav>
+</main>
+</div>
+<footer><div class="inner"><a href="https://github.com/nineties/hex-to-compiler">github.com/nineties/hex-to-compiler</a></div></footer>
+<script src="../../assets/highlight.js"></script>
+</body>
+</html>

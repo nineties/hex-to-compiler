@@ -3,36 +3,39 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>packrat パーサ | planck</title>
+<title>packrat パーサ | hex-to-compiler</title>
+<link rel="alternate" hreflang="en" href="../en/implementation/peg.html">
 <link rel="stylesheet" href="../assets/style.css">
 </head>
 <body>
 <header class="site-header"><div class="inner">
-<a class="logo" href="../index.html">planck<span>.</span></a>
+<a class="logo" href="../index.html">hex-to-compiler</a>
 <nav class="site-nav">
+<a href="../index.html">概要</a>
 <a href="../tutorial/index.html">チュートリアル</a>
 <a href="../reference/index.html">リファレンス</a>
 <a class="here" href="../implementation/index.html">処理系の実装</a>
 <a href="https://github.com/nineties/hex-to-compiler">GitHub</a>
+<a class="lang-switch" lang="en" hreflang="en" href="../en/implementation/peg.html">English</a>
 </nav>
 </div></header>
 <div class="layout">
 <nav class="toc" aria-label="処理系の実装の目次"><details open><summary>処理系の実装の目次</summary>
 <h2>処理系の実装</h2>
 <ol>
-<li><a href="index.html">全体の地図</a></li>
+<li><a href="index.html">構成</a></li>
 <li><a href="bootstrap.html">機械語から planck0 まで</a></li>
-<li><a href="planck0.html">planck0 の中身</a></li>
+<li><a href="planck0.html">planck0</a></li>
 <li><a href="init.html">init.pk と M式</a></li>
 <li><a class="here" href="peg.html">packrat パーサ</a></li>
-<li><a href="syntax.html">構文を planck で書く</a></li>
+<li><a href="syntax.html">構文の定義</a></li>
 </ol></details></nav>
 <main>
 <h1>packrat パーサ</h1>
-<p class="lead"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk">planck/peg.pk</a> は PEG の文法を解釈するパーサです。文法はただのデータ（M式）で、規則の結果は位置ごとに覚えておきます。M式で 316 行あります。</p>
+<p class="lead"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk">planck/peg.pk</a>（M式で316行）は PEG を解釈実行するパーサです。文法は M式のデータで、規則の結果を位置ごとにメモ化します。</p>
 
-<h2>文法はデータ</h2>
-<p>構文解析式（規則の右辺）は M式です。どんな形があるかはファイルの先頭にまとまっています。</p>
+<h2>データとしての文法</h2>
+<p>構文解析式（規則の右辺）の形はファイルの先頭にあります。</p>
 <div class="example">
 <p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L4-L21">planck/peg.pk:4–21</a></p>
 <pre class="pk">&quot; A grammar is data. A parsing expression is one of &quot;
@@ -47,41 +50,41 @@
 &quot;   And{e}, Not{e}  lookahead &quot;
 &quot;   Delimited{e, sep}, Delimited1{e, sep}  e separated by sep. The value is Tuple{v, ...} &quot;
 &quot;   Same{}          succeeds when the next token is on the same line &quot;
-&quot;   Act{e, f}       applies f to the value of e. f is an expression evaluated by define_rule &quot;
-&quot;   Prev{}          the previous definition of the rule (only as an alternative of define_rule) &quot;
+&quot;   Act{e, f}       applies f to the value of e. f is an expression evaluated by _define_rule &quot;
+&quot;   Prev{}          the previous definition of the rule (only as an alternative of _define_rule) &quot;
 &quot;   Fail{}          never matches &quot;
 
 &quot; Results of rules are memoized for each position. &quot;
 &quot; Direct left recursion (sum ::= sum \&quot;+\&quot; term | term) is handled by growing the seed. &quot;</pre>
 </div>
-<p>たとえば「<code>"7"</code> が 1 回以上」は <code>Many1{"7"}</code>、「読めたら個数を数える」は <code>Act{Many1{"7"}, t -> arity(t)}</code> です。<code>define_rule</code> で名前を付けると、そのまま規則として使えます。</p>
+<p><code>"7"</code> の1回以上の繰り返しは <code>Many1{"7"}</code>、その個数を値にするなら <code>Act{Many1{"7"}, t -> arity(t)}</code> です。<code>_define_rule</code> で名前を付けると規則になります。</p>
 <div class="example">
 <p class="file">i_define.pk</p>
-<pre class="pk">define_rule(&#x27;sevens, &#x27;Act{Many1{&quot;7&quot;}, t -&gt; arity(t)})
+<pre class="pk">_define_rule(&#x27;sevens, &#x27;Act{Many1{&quot;7&quot;}, t -&gt; arity(t)})
 println(peg_parse(&#x27;sevens, &quot;7 7 7 rest&quot;))
 println(sevens{| 7 7 7 7 |})</pre>
 <p class="label">出力</p>
 <pre class="out">Tuple{3, &quot;rest&quot;}
 4</pre>
 </div>
-<p><code>::=</code> を使わずに規則を作りましたが、<code>sevens{| ... |}</code> でも読めます。<code>::=</code> も結局はこの <code>define_rule</code> の呼び出しになります（<a href="syntax.html#decl">構文を planck で書く</a>）。</p>
+<p><code>::=</code> を使わずに定義した規則も <code>sevens{| ... |}</code> で使えます。<code>::=</code> 自体も <code>_define_rule</code> の呼び出しに読み替えられます（<a href="syntax.html#decl">構文の定義</a>）。</p>
 
-<h2>式を解釈する</h2>
-<p><code>peg_px(e, p)</code> は、構文解析式 <code>e</code> を位置 <code>p</code> から試します。成功すれば次の位置を返して値を <code>peg_pv</code> に置き、失敗すれば <code>-1</code> を返します。</p>
+<h2>解釈実行</h2>
+<p><code>peg_px(e, p)</code> は構文解析式 <code>e</code> を位置 <code>p</code> から試し、成功すれば次の位置を返して値を <code>peg_pv</code> に置きます。失敗は <code>-1</code> です。</p>
 <div class="example">
 <p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L207-L212">planck/peg.pk:207–212</a></p>
 <pre class="pk">Def{peg_px, Lambda{Tuple{e, p}, Do{
     Def{t, Apply{typeof, Tuple{e}}},
-    If{Apply{eq, Tuple{t, Quote{string}}}, Apply{peg_lit, Tuple{e, Apply{peg_skip_ws, Tuple{p}}}},
-    If{Apply{eq, Tuple{t, Quote{symbol}}}, Apply{peg_call_rule, Tuple{e, p}},
-    If{Apply{eq, Tuple{t, Quote{function}}}, Apply{e, Tuple{p}},
+    If{Apply{_eq, Tuple{t, Quote{string}}}, Apply{peg_lit, Tuple{e, Apply{peg_skip_ws, Tuple{p}}}},
+    If{Apply{_eq, Tuple{t, Quote{symbol}}}, Apply{peg_call_rule, Tuple{e, p}},
+    If{Apply{_eq, Tuple{t, Quote{function}}}, Apply{e, Tuple{p}},
         Apply{Apply{table_get, Tuple{peg_handlers, Apply{head, Tuple{e}}, none}}, Tuple{e, p}}}}}}}}</pre>
 </div>
-<p>文字列なら空白を飛ばしてから照合し、シンボルなら規則を呼び、関数ならその関数に任せます。<code>Seq</code> や <code>Choice</code> のような M式は、頭ごとの処理を表 <code>peg_handlers</code> から引きます（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L170-L205"><code>planck/peg.pk:170–205</code></a>）。字句（識別子や整数）は関数で書けるので、<a href="syntax.html">構文</a>の側で速い関数を用意しています。</p>
-<p>失敗したときは、一番先まで進んだ位置を <code>peg_far</code> に覚えておきます（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L57-L59"><code>planck/peg.pk:57–59</code></a>）。構文エラーはその位置で知らせます。</p>
+<p>文字列は空白を読み飛ばしてから照合し、シンボルは規則として呼び、関数はそのまま呼びます。<code>Seq</code>・<code>Choice</code> などの M式は、頭ごとの処理を表 <code>peg_handlers</code> から引きます（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L170-L205"><code>planck/peg.pk:170–205</code></a>）。識別子や整数などの字句は、<a href="syntax.html">構文の定義</a>の側で関数として実装しています。</p>
+<p>失敗のたびに最も先まで進んだ位置を <code>peg_far</code> に記録し（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L57-L59"><code>planck/peg.pk:57–59</code></a>）、構文エラーはその位置で報告します。</p>
 
-<h2>メモ化と左再帰</h2>
-<p>同じ規則を同じ位置で何度試しても、結果は同じです。だから位置ごとに規則の結果を覚えておきます。これが packrat 構文解析です。後戻りしても、同じ仕事をくり返さずにすみます。</p>
+<h2>メモ化と直接左再帰</h2>
+<p>規則の結果を（位置, 規則）ごとにメモ化します（packrat 構文解析）。バックトラックしても同じ規則を同じ位置で再計算しません。</p>
 <div class="example">
 <p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L214-L220">planck/peg.pk:214–220</a></p>
 <pre class="pk">&quot; === Rules and memoization === &quot;
@@ -92,22 +95,22 @@ println(sevens{| 7 7 7 7 |})</pre>
 &quot; the inner call fails, which is the seed. Then the rule is run again &quot;
 &quot; while it consumes more than the last result. &quot;</pre>
 </div>
-<p>メモは位置ごとの配列で、規則ごとに「終わりの位置・値・左再帰の印」の 3 つの欄を持ちます。規則を呼ぶ <code>peg_call_rule</code> はまずメモを見ます（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L229-L245"><code>planck/peg.pk:229–245</code></a>）。</p>
-<p>左再帰（<code>sum ::= sum "+" term | term</code>）もこのメモで扱います。規則の実行中にメモの欄を「実行中」にしておき、同じ位置で自分がもう一度呼ばれたら失敗を返します。これが最初の種です。種で 1 回目の結果ができたら、その結果をメモに置いてもう一度規則を動かします。前より長く読めた間は、これをくり返します。</p>
+<p>メモは位置ごとの配列で、規則ごとに終了位置・値・左再帰の印の3欄を持ちます。<code>peg_call_rule</code> はまずメモを引きます（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L229-L245"><code>planck/peg.pk:229–245</code></a>）。</p>
+<p>直接左再帰（<code>sum ::= sum "+" term | term</code>）もメモで扱います。規則の実行中はメモを実行中の印にしておき、同じ位置で再帰呼び出しされたら失敗を返します。これを種として得た結果をメモに置いて規則を再実行し、前より長く読めた間はこれを繰り返します（seed growing）。</p>
 <div class="example">
 <p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L247-L265">planck/peg.pk:247–265</a></p>
 <pre class="pk">Def{peg_run_rule, Lambda{Tuple{r, p, row, b}, Do{
     Def{body, Apply{table_get, Tuple{peg_rules, r, none}}},
-    Def{b1, Apply{add, Tuple{b, 1}}},
+    Def{b1, Apply{_add, Tuple{b, 1}}},
     Apply{array_set, Tuple{row, b, -2}},
     Def{q, Apply{peg_px, Tuple{body, p}}},
     Apply{array_set, Tuple{row, b, q}},
     Apply{array_set, Tuple{row, b1, peg_pv}},
-    If{Apply{eq, Tuple{Apply{array_get, Tuple{row, Apply{add, Tuple{b, 2}}}}, true}}, Do{
-        Def{go, Apply{ge, Tuple{q, 0}}},
+    If{Apply{_eq, Tuple{Apply{array_get, Tuple{row, Apply{_add, Tuple{b, 2}}}}, true}}, Do{
+        Def{go, Apply{_ge, Tuple{q, 0}}},
         While{go, Do{
             Set{q, Apply{peg_px, Tuple{body, p}}},
-            If{Apply{gt, Tuple{q, Apply{array_get, Tuple{row, b}}}},
+            If{Apply{_gt, Tuple{q, Apply{array_get, Tuple{row, b}}}},
                 Do{
                     Apply{array_set, Tuple{row, b, q}},
                     Apply{array_set, Tuple{row, b1, peg_pv}}},
@@ -116,14 +119,14 @@ println(sevens{| 7 7 7 7 |})</pre>
         Apply{array_get, Tuple{row, b}}},
     q}}}}</pre>
 </div>
-<p>こうして <code>1 - 2 - 3</code> は <code>(1 - 2) - 3</code> のように左から積み上がります。</p>
+<p>この結果 <code>1 - 2 - 3</code> は <code>(1 - 2) - 3</code> になります。</p>
 
-<h2>規則を定義する</h2>
+<h2>規則の定義</h2>
 <div class="example">
 <p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L282-L291">planck/peg.pk:282–291</a></p>
-<pre class="pk">&quot; define_rule(name, e) defines or replaces the rule &quot;
-Def{define_rule, Lambda{Tuple{name, e}, Do{
-    If{Apply{eq, Tuple{Apply{table_get, Tuple{peg_ids, name, none}}, none}}, Do{
+<pre class="pk">&quot; _define_rule(name, e) defines or replaces the rule &quot;
+Def{_define_rule, Lambda{Tuple{name, e}, Do{
+    If{Apply{_eq, Tuple{Apply{table_get, Tuple{peg_ids, name, none}}, none}}, Do{
         Apply{table_set, Tuple{peg_ids, name, peg_nrules}},
         Set{peg_nrules, Apply{peg_inc, Tuple{peg_nrules}}}}, none},
     Def{old, Apply{table_get, Tuple{peg_rules, name, Fail{}}}},
@@ -132,16 +135,16 @@ Def{define_rule, Lambda{Tuple{name, e}, Do{
     Apply{table_set, Tuple{peg_rules, name, Apply{peg_subst_prev, Tuple{Apply{peg_prepare, Tuple{e}}, old}}}},
     name}}}</pre>
 </div>
-<p><code>define_rule</code> は規則に番号を振り、構文解析式の中の動作 <code>Act{e, f}</code> の <code>f</code> を評価してから表に入れます。選択肢の <code>Prev{}</code> は、その規則のそれまでの定義に置き換えます。<code>::=</code> の <code>...</code> はこれになります。</p>
-<p>評価する前の形は <code>peg_sources</code> にも残します。文法を読む道具、たとえば木を文字列に戻す <code>unparse</code> は、この表を読んで動きます。</p>
+<p><code>_define_rule</code> は規則に番号を振り、動作 <code>Act{e, f}</code> の <code>f</code> を評価してから表に入れます。選択肢の <code>Prev{}</code> はその規則の直前の定義に置き換えます。<code>::=</code> の <code>...</code> はこの <code>Prev{}</code> です。</p>
+<p>評価前の形は <code>peg_sources</code> に残します。<code>unparse</code> のように文法を読む道具はこの表を使います。</p>
 
 <h2>入口</h2>
-<p><code>peg_parse(rule, s)</code> は、メモを新しく作ってから規則を呼びます（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L300-L316"><code>planck/peg.pk:300–316</code></a>）。結果は <code>Tuple{値, 残り}</code> です。読めなかったときは <code>peg_far</code> の位置から行の終わりまでを添えて <code>SyntaxError{...}</code> を返します。</p>
+<p><code>peg_parse(rule, s)</code> はメモを作り直してから規則を呼び、<code>Tuple{値, 残り}</code> を返します（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L300-L316"><code>planck/peg.pk:300–316</code></a>）。失敗すると <code>peg_far</code> の位置から行末までを添えた <code>SyntaxError{...}</code> を返します。</p>
 
-<nav class="pager"><a class="prev" href="init.html"><small>前のページ</small>init.pk と M式</a><a class="next" href="syntax.html"><small>次のページ</small>構文を planck で書く</a></nav>
+<nav class="pager"><a class="prev" href="init.html"><small>前のページ</small>init.pk と M式</a><a class="next" href="syntax.html"><small>次のページ</small>構文の定義</a></nav>
 </main>
 </div>
-<footer><div class="inner">planck — <a href="https://github.com/nineties/hex-to-compiler">nineties/hex-to-compiler</a></div></footer>
+<footer><div class="inner"><a href="https://github.com/nineties/hex-to-compiler">github.com/nineties/hex-to-compiler</a></div></footer>
 <script src="../assets/highlight.js"></script>
 </body>
 </html>

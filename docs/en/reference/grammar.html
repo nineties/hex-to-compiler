@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Grammar declarations | hex-to-compiler</title>
+<link rel="alternate" hreflang="ja" href="../../reference/grammar.html">
+<link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+<header class="site-header"><div class="inner">
+<a class="logo" href="../index.html">hex-to-compiler</a>
+<nav class="site-nav">
+<a href="../index.html">Overview</a>
+<a href="../tutorial/index.html">Tutorial</a>
+<a class="here" href="../reference/index.html">Reference</a>
+<a href="../implementation/index.html">Implementation</a>
+<a href="https://github.com/nineties/hex-to-compiler">GitHub</a>
+<a class="lang-switch" lang="ja" hreflang="ja" href="../../reference/grammar.html">日本語</a>
+</nav>
+</div></header>
+<div class="layout">
+<nav class="toc" aria-label="Reference contents"><details open><summary>Reference contents</summary>
+<h2>Reference</h2>
+<ol>
+<li><a href="index.html">Contents</a></li>
+<li><a href="syntax.html">Syntax</a></li>
+<li><a href="values.html">Values, patterns, M-expressions</a></li>
+<li><a class="here" href="grammar.html">Grammar declarations</a></li>
+<li><a href="builtins.html">Builtin functions</a></li>
+<li><a href="library.html">Libraries</a></li>
+</ol></details></nav>
+<main>
+<h1>Grammar declarations</h1>
+<p class="lead"><code>::=</code> defines or replaces a rule of the grammar. The syntax of planck is made of the same rules, so a declaration extends the syntax of the following expressions.</p>
+
+<h2>::=</h2>
+<p><code>name ::= alternative | ...</code> defines or replaces the rule <code>name</code> of the grammar. The rules of the <a href="syntax.html">syntax</a> (<code>expr</code>, <code>primary</code>, <code>block</code>, <code>add_expr</code> ..., <code>ident</code>, <code>integer</code>, <code>string</code>) are rules of the same grammar. <code>...</code> as an alternative stands for the previous definition of the rule.</p>
+<div class="example">
+<p class="file">r_unless.pk</p>
+<pre class="pk">primary ::= &#x27;unless c:expr a:block &#x27;else b:block { `If{!c, !b, !a} } | ...
+
+unless (1 &gt; 2) { put(&quot;then\n&quot;) } else { put(&quot;else\n&quot;) }
+unless (1 &lt; 2) { put(&quot;then\n&quot;) } else { put(&quot;else\n&quot;) }</pre>
+<p class="label">Output</p>
+<pre class="out">then
+else</pre>
+</div>
+<p>An alternative is a sequence of items followed by an optional action <code>{ ... }</code>. The items and the action are on the same line as <code>::=</code> or <code>|</code>.</p>
+
+<h2>Items</h2>
+<table>
+<tr><th>Item</th><th>Matches</th></tr>
+<tr><td><code>"text"</code></td><td>the text, after blanks and comments</td></tr>
+<tr><td><code>'word</code></td><td>the word, not followed by <code>[A-Za-z0-9_]</code></td></tr>
+<tr><td><code>name</code></td><td>the rule</td></tr>
+<tr><td><code>(a | b ...)</code></td><td>a choice</td></tr>
+<tr><td><code>e*</code>, <code>e+</code>, <code>e?</code></td><td>zero or more, one or more, optional</td></tr>
+<tr><td><code>&amp;e</code>, <code>!e</code></td><td>lookahead: <code>e</code> matches / does not match, without consuming</td></tr>
+<tr><td><code>label:e</code></td><td><code>e</code>, and its value is the variable <code>label</code> in the action</td></tr>
+</table>
+
+<h2>Values and order</h2>
+<p>Alternatives are tried in order (PEG). The value of an alternative is the value of its action, the value of the item when there is one item, or <code>Tuple{v, ...}</code> of the items. <code>e*</code> and <code>e+</code> give <code>Tuple{v, ...}</code>, <code>e?</code> gives <code>Tuple{}</code> or <code>Tuple{v}</code>.</p>
+<p>Results of rules are memoized for each position (packrat parsing). A rule may be directly left recursive (<code>sum ::= a:sum "+" b:term { ... } | term</code>), which groups to the left.</p>
+<div class="example">
+<p class="file">t7_calc.pk</p>
+<pre class="pk">calc ::= a:calc &quot;+&quot; b:term { a + b } | a:calc &quot;-&quot; b:term { a - b } | term
+term ::= a:term &quot;*&quot; b:atom { a * b } | atom
+atom ::= integer | &quot;(&quot; e:calc &quot;)&quot; { e }
+
+println(calc{| 1 + 2 * (10 - 4) |})
+println(calc{| 100 - 20 - 3 |})
+
+println(peg_parse(&#x27;calc, &quot;6 * 7&quot;))
+println(peg_parse(&#x27;calc, &quot;1 + )&quot;))
+println(peg_parse(&#x27;calc, &quot;)&quot;))</pre>
+<p class="label">Output</p>
+<pre class="out">13
+77
+Tuple{42, &quot;&quot;}
+Tuple{1, &quot;+ )&quot;}
+Tuple{SyntaxError{&quot;unexpected input&quot;, &quot;)&quot;}, &quot;&quot;}</pre>
+</div>
+
+<h2>peg_parse</h2>
+<p><code>peg_parse(rule, s)</code> parses a prefix of <code>s</code> by the rule and returns <code>Tuple{value, rest}</code>, <code>Tuple{Eof{}, ""}</code> when only blanks are left, or <code>Tuple{SyntaxError{...}, ""}</code>.</p>
+
+<h2 id="text">Text of a rule</h2>
+<p><code>name{| text |}</code> is an expression whose text is read by the rule <code>name</code> when the expression is parsed. There is no space between <code>name</code> and <code>{|</code>.</p>
+<p>The text is read only by the rule (its strings, words and rules, with their blanks and comments), not by the tokens of the expressions around it. The rule decides where the text ends, and <code>|}</code> must follow, after blanks. So <code>|}</code> and <code>}</code> that the rule reads, for example in its strings or brackets, are a part of the text. A failure of the rule or a missing <code>|}</code> is a syntax error of the expression, at the farthest position the rule reached in the text.</p>
+<p>The value of the expression is the value of the rule, as a constant.</p>
+<div class="example">
+<p class="file">r_calc.pk</p>
+<pre class="pk">calc ::= a:calc &quot;+&quot; b:num { a + b } | num
+num ::= integer
+println(calc{| 1 + 2 + 3 |})        # 6。この行を読むときに計算される</pre>
+<p class="label">Output</p>
+<pre class="out">6</pre>
+</div>
+<p>The rule must be defined by an expression that is evaluated before the expression with the text is parsed.</p>
+
+<h2>Reading the grammar</h2>
+<p><code>peg_sources</code> is a table from a rule name to the parsing expression given to <code>_define_rule</code>, with the actions not evaluated (<code>...</code> replaced by the previous definition). <code>peg_version</code> increases at every <code>_define_rule</code>.</p>
+<div class="example">
+<p class="file">i_sources.pk</p>
+<pre class="pk">use(&quot;pretty&quot;)
+pprint(table_get(peg_sources, &#x27;add_expr, none))</pre>
+<p class="label">Output</p>
+<pre class="out">Choice{
+  Act{
+    Seq{add_expr, &quot;+&quot;, mul_expr},
+    Apply{peg_binop, Tuple{Quote{_add}}}
+  },
+  Act{
+    Seq{add_expr, minus, mul_expr},
+    Apply{peg_binop, Tuple{Quote{_sub}}}
+  },
+  mul_expr
+}</pre>
+</div>
+
+<nav class="pager"><a class="prev" href="values.html"><small>Previous</small>Values, patterns, M-expressions</a><a class="next" href="builtins.html"><small>Next</small>Builtin functions</a></nav>
+</main>
+</div>
+<footer><div class="inner"><a href="https://github.com/nineties/hex-to-compiler">github.com/nineties/hex-to-compiler</a></div></footer>
+<script src="../../assets/highlight.js"></script>
+</body>
+</html>

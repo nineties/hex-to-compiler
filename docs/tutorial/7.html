@@ -3,118 +3,114 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>7. エフェクト | planck</title>
+<title>7. 文法の拡張 | hex-to-compiler</title>
+<link rel="alternate" hreflang="en" href="../en/tutorial/7.html">
 <link rel="stylesheet" href="../assets/style.css">
 </head>
 <body>
 <header class="site-header"><div class="inner">
-<a class="logo" href="../index.html">planck<span>.</span></a>
+<a class="logo" href="../index.html">hex-to-compiler</a>
 <nav class="site-nav">
+<a href="../index.html">概要</a>
 <a class="here" href="../tutorial/index.html">チュートリアル</a>
 <a href="../reference/index.html">リファレンス</a>
 <a href="../implementation/index.html">処理系の実装</a>
 <a href="https://github.com/nineties/hex-to-compiler">GitHub</a>
+<a class="lang-switch" lang="en" hreflang="en" href="../en/tutorial/7.html">English</a>
 </nav>
 </div></header>
 <div class="layout">
 <nav class="toc" aria-label="チュートリアルの目次"><details open><summary>チュートリアルの目次</summary>
 <h2>チュートリアル</h2>
 <ol>
-<li><a href="index.html">はじめに</a></li>
-<li><a href="1.html">1. はじめの一歩</a></li>
-<li><a href="2.html">2. 変数と関数</a></li>
-<li><a href="3.html">3. 値のかたち</a></li>
-<li><a href="4.html">4. パターンで分ける</a></li>
-<li><a href="5.html">5. ライブラリを使う</a></li>
-<li><a href="6.html">6. レコードと流れの制御</a></li>
-<li><a class="here" href="7.html">7. エフェクト</a></li>
-<li><a href="8.html">8. 構文を広げる</a></li>
-<li><a href="9.html">9. プログラムはデータ</a></li>
+<li><a href="index.html">前提と実行</a></li>
+<li><a href="1.html">1. 式・束縛・関数</a></li>
+<li><a href="2.html">2. 値と M式</a></li>
+<li><a href="3.html">3. パターンと融合</a></li>
+<li><a href="4.html">4. ライブラリ</a></li>
+<li><a href="5.html">5. レコード・局所関数・脱出</a></li>
+<li><a href="6.html">6. 代数的エフェクト</a></li>
+<li><a class="here" href="7.html">7. 文法の拡張</a></li>
+<li><a href="8.html">8. クオートと評価器</a></li>
+<li><a href="9.html">9. 添字と置き換え</a></li>
 </ol></details></nav>
 <main>
-<h1>7. エフェクト</h1>
-<p class="lead"><code>perform</code> で「頼みごと」を投げ、<code>handle</code> で受け取ります。例外・生成器・やり直しの探索が、この 1 つの仕組みで書けます。</p>
+<h1>7. 文法の拡張</h1>
+<p class="lead">planck の構文は PEG の規則の集まりで、<code>::=</code> は規則を定義または置き換える式です。宣言の次のトップレベルの式から新しい規則で読みます。</p>
 
-<h2>例外を作る</h2>
+<h2>構文の追加</h2>
 <div class="example">
-<p class="file">t7_exception.pk</p>
-<pre class="pk">safe_div(a, b) := if (b == 0) perform Raise{&quot;division by zero&quot;} else a / b
+<p class="file">t7_unless.pk</p>
+<pre class="pk">primary ::= &#x27;unless &quot;(&quot; c:expr &quot;)&quot; a:expr { `If{!c, none, !a} } | ...
 
-try(f) := handle Ok{f()} with (Raise{msg}, k) -&gt; Error{msg}
-
-println(try(() -&gt; safe_div(10, 2)))
-println(try(() -&gt; safe_div(10, 0)))
-println(try(() -&gt; { put(&quot;before\n&quot;); safe_div(1, 0); put(&quot;after\n&quot;) }))</pre>
+unless (1 &gt; 2) put(&quot;1 &gt; 2 ではありません\n&quot;)
+unless (1 &lt; 2) put(&quot;ここは表示されません\n&quot;)</pre>
 <p class="label">出力</p>
-<pre class="out">Ok{5}
-Error{&quot;division by zero&quot;}
-before
-Error{&quot;division by zero&quot;}</pre>
+<pre class="out">1 &gt; 2 ではありません</pre>
 </div>
-<p><code>perform Raise{...}</code> は、計算を止めて外に頼みごとを投げます。投げる値は何でもよく、ここでは <code>Raise{メッセージ}</code> という M式にしました。</p>
-<p><code>handle 式 with ハンドラ</code> は式を計算します。その途中で <code>perform</code> されると、ハンドラが <code>(投げられた値, k)</code> を引数にして呼ばれます。ハンドラの値が <code>handle</code> 全体の値になります。</p>
-<p>3 つめの例では <code>before</code> は出ますが <code>after</code> は出ません。<code>perform</code> した所から先は捨てられたからです。</p>
+<ul>
+<li><code>primary ::= ... | ...</code> の末尾の <code>...</code> はその規則の直前の定義です。既存の規則の前に選択肢を足すことになります。</li>
+<li><code>'unless</code> は単語、<code>"("</code> は文字列、<code>c:expr</code> は規則 <code>expr</code> の値をラベル <code>c</code> に束縛する項目です。</li>
+<li><code>{ ... }</code> は動作で、その値が規則の値になります。ここでは準クオートで構文木 <code>If{c, none, a}</code> を作っています。</li>
+</ul>
+<p>項目と動作は <code>::=</code> や <code>|</code> と同じ行に書きます。</p>
 
-<h2>続きを再開する</h2>
-<p>ハンドラの 2 つめの引数 <code>k</code> は「<code>perform</code> した所から先の計算」です。<code>k(値)</code> と呼ぶと、<code>perform</code> がその値を返したことにして計算が再開します。</p>
+<h2>二項演算子</h2>
 <div class="example">
-<p class="file">t7_resume.pk</p>
-<pre class="pk">ask() := perform Ask{}
+<p class="file">t7_pipe.pk</p>
+<pre class="pk">union ::= x:union &quot;|&gt;&quot; f:arrow { `Apply{!f, Tuple{!x}} } | ...
 
-with_answer(v, f) := handle f() with (Ask{}, k) -&gt; k(v)
-
-println(with_answer(21, () -&gt; ask() * 2))
-println(with_answer(5, () -&gt; ask() + ask()))</pre>
+double(x) := 2 * x
+3 |&gt; double |&gt; double |&gt; println</pre>
 <p class="label">出力</p>
-<pre class="out">42
-10</pre>
+<pre class="out">12</pre>
 </div>
-<p><code>ask()</code> の所で止まり、ハンドラが <code>k(21)</code> で再開します。だから <code>ask() * 2</code> は 42 になります。ハンドラは再開した先でも有効です。2 つめの例では <code>ask()</code> が 2 回とも 5 を受け取っています。</p>
-<p>ハンドラのパターンに合わない値が投げられたときは、さらに外側の <code>handle</code> に回ります。</p>
+<p><code>union</code> は融合 <code>|</code> の規則です。直接の左再帰が書けるので、<code>x:union "|&gt;" ...</code> は左結合になります。</p>
 
-<h2>生成器</h2>
-<p>木をたどりながら値を 1 つずつ外に渡す生成器も、<code>perform</code> で書けます。</p>
+<h2>ブロックを取る構文</h2>
 <div class="example">
-<p class="file">t7_generator.pk</p>
-<pre class="pk">walk := (Leaf{}) -&gt; none
-      | (Node{l, v, r}) -&gt; { walk(l); perform Yield{v}; walk(r) }
+<p class="file">t7_repeat.pk</p>
+<pre class="pk">repeat_fn(n, f) := while (n &gt; 0) { f(); n = n - 1 }
 
-tree := Node{Node{Leaf{}, 1, Leaf{}}, 2, Node{Leaf{}, 3, Leaf{}}}
+primary ::= &#x27;repeat n:add_expr body:block { `repeat_fn(!n, () -&gt; !body) } | ...
 
-handle walk(tree) with (Yield{v}, k) -&gt; { put(f&quot;yield {v}\n&quot;); k(none) }
-
-to_list(t) := handle { walk(t); [] } with (Yield{v}, k) -&gt; v :: k(none)
-use(&quot;pretty&quot;)
-put(f&quot;{to_list(tree)}\n&quot;)</pre>
+repeat 3 { put(&quot;planck!\n&quot;) }</pre>
 <p class="label">出力</p>
-<pre class="out">yield 1
-yield 2
-yield 3
-[1, 2, 3]</pre>
+<pre class="out">planck!
+planck!
+planck!</pre>
 </div>
-<p><code>walk</code> は値を見つけるたびに <code>perform Yield{v}</code> します。受け取る側が使い方を決めます。1 つめは見つけた値を表示し、2 つめは <code>v :: k(none)</code> で残りの結果の前に足してリストにしています。</p>
+<p>準クオートの中は通常の構文で書けます。<code>`repeat_fn(!n, () -&gt; !body)</code> は呼び出しの木に、読んだブロックを埋め込みます。</p>
 
-<h2>何度も再開する</h2>
-<p><code>k</code> はふつうの関数なので、何度でも呼べます。候補を 1 つずつ試す探索が書けます。</p>
+<h2>別の文法</h2>
 <div class="example">
-<p class="file">t7_choose.pk</p>
-<pre class="pk">use(&quot;list&quot;)
-use(&quot;pretty&quot;)
-choose(xs) := perform Choose{xs}
+<p class="file">t7_calc.pk</p>
+<pre class="pk">calc ::= a:calc &quot;+&quot; b:term { a + b } | a:calc &quot;-&quot; b:term { a - b } | term
+term ::= a:term &quot;*&quot; b:atom { a * b } | atom
+atom ::= integer | &quot;(&quot; e:calc &quot;)&quot; { e }
 
-all_results(f) := handle [f()] with (Choose{xs}, k) -&gt; concat_map(x -&gt; k(x), xs)
+println(calc{| 1 + 2 * (10 - 4) |})
+println(calc{| 100 - 20 - 3 |})
 
-put(f&quot;{all_results(() -&gt; (choose([1, 2]), choose([&quot;a&quot;, &quot;b&quot;])))}\n&quot;)</pre>
+println(peg_parse(&#x27;calc, &quot;6 * 7&quot;))
+println(peg_parse(&#x27;calc, &quot;1 + )&quot;))
+println(peg_parse(&#x27;calc, &quot;)&quot;))</pre>
 <p class="label">出力</p>
-<pre class="out">[Tuple{1, &quot;a&quot;}, Tuple{1, &quot;b&quot;}, Tuple{2, &quot;a&quot;}, Tuple{2, &quot;b&quot;}]</pre>
+<pre class="out">13
+77
+Tuple{42, &quot;&quot;}
+Tuple{1, &quot;+ )&quot;}
+Tuple{SyntaxError{&quot;unexpected input&quot;, &quot;)&quot;}, &quot;&quot;}</pre>
 </div>
-<p><code>choose</code> は候補のリストを投げます。ハンドラは候補ごとに <code>k</code> を呼び、出てきた結果を全部つなげます。2 つの <code>choose</code> の組み合わせ 4 通りが全部出ています。</p>
-<p>この仕組みで N クイーン問題を解いた例が <a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/examples/queens.pk">planck/examples/queens.pk</a> にあります。</p>
+<p>動作は木でなく任意の値を返せます。規則は位置ごとにメモ化され（packrat）、左再帰は左結合です。</p>
+<p><code>calc{| ... |}</code> は <code>{|</code> と <code>|}</code> の間を規則 <code>calc</code> で読む式で、読むのは構文解析の時点です。値は定数として木に入ります。実行時の文字列は <code>peg_parse(rule, s)</code> で読み、結果は <code>Tuple{値, 残り}</code> です。先頭から読めなければ値は <code>SyntaxError{...}</code> です。</p>
 
-<nav class="pager"><a class="prev" href="6.html"><small>前のページ</small>6. レコードと流れの制御</a><a class="next" href="8.html"><small>次のページ</small>8. 構文を広げる</a></nav>
+<p>項目の一覧は<a href="../reference/grammar.html">文法の宣言</a>、planck 自身の構文の規則は<a href="../implementation/syntax.html">構文の定義</a>にあります。</p>
+
+<nav class="pager"><a class="prev" href="6.html"><small>前のページ</small>6. 代数的エフェクト</a><a class="next" href="8.html"><small>次のページ</small>8. クオートと評価器</a></nav>
 </main>
 </div>
-<footer><div class="inner">planck — <a href="https://github.com/nineties/hex-to-compiler">nineties/hex-to-compiler</a></div></footer>
+<footer><div class="inner"><a href="https://github.com/nineties/hex-to-compiler">github.com/nineties/hex-to-compiler</a></div></footer>
 <script src="../assets/highlight.js"></script>
 </body>
 </html>

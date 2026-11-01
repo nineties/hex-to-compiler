@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>2. Values and M-expressions | hex-to-compiler</title>
+<link rel="alternate" hreflang="ja" href="../../tutorial/2.html">
+<link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+<header class="site-header"><div class="inner">
+<a class="logo" href="../index.html">hex-to-compiler</a>
+<nav class="site-nav">
+<a href="../index.html">Overview</a>
+<a class="here" href="../tutorial/index.html">Tutorial</a>
+<a href="../reference/index.html">Reference</a>
+<a href="../implementation/index.html">Implementation</a>
+<a href="https://github.com/nineties/hex-to-compiler">GitHub</a>
+<a class="lang-switch" lang="ja" hreflang="ja" href="../../tutorial/2.html">日本語</a>
+</nav>
+</div></header>
+<div class="layout">
+<nav class="toc" aria-label="Tutorial contents"><details open><summary>Tutorial contents</summary>
+<h2>Tutorial</h2>
+<ol>
+<li><a href="index.html">Prerequisites and running</a></li>
+<li><a href="1.html">1. Expressions, bindings, functions</a></li>
+<li><a class="here" href="2.html">2. Values and M-expressions</a></li>
+<li><a href="3.html">3. Patterns and fusion</a></li>
+<li><a href="4.html">4. Libraries</a></li>
+<li><a href="5.html">5. Records, local functions, escapes</a></li>
+<li><a href="6.html">6. Algebraic effects</a></li>
+<li><a href="7.html">7. Extending the grammar</a></li>
+<li><a href="8.html">8. Quotation and the evaluator</a></li>
+<li><a href="9.html">9. Indexing and rewriting</a></li>
+</ol></details></nav>
+<main>
+<h1>2. Values and M-expressions</h1>
+<p class="lead">There are six kinds of values: integers, strings, symbols, M-expressions, functions and arrays. Data structures and programs are both M-expressions.</p>
+
+<div class="example">
+<p class="file">t2_types.pk</p>
+<pre class="pk">println(typeof(42))
+println(typeof(&quot;abc&quot;))
+println(typeof(&#x27;apple))
+println(typeof(true))
+println(typeof(Point{1, 2}))
+println(typeof(x -&gt; x))</pre>
+<p class="label">Output</p>
+<pre class="out">int
+string
+symbol
+symbol
+mexpr
+function</pre>
+</div>
+<table>
+<tr><th><code>typeof</code></th><th>Value</th></tr>
+<tr><td><code>int</code></td><td>Integer: <code>42</code>, <code>-1</code>, <code>0x1f</code></td></tr>
+<tr><td><code>string</code></td><td>A string as a sequence of bytes: <code>"abc"</code></td></tr>
+<tr><td><code>symbol</code></td><td><code>'apple</code>. <code>true</code>, <code>false</code> and <code>none</code> are symbols too</td></tr>
+<tr><td><code>mexpr</code></td><td><code>Head{a, ...}</code></td></tr>
+<tr><td><code>function</code></td><td>Lambda, fusion, builtin function or continuation</td></tr>
+<tr><td><code>array</code></td><td>A mutable array of fixed length made by <code>array(n)</code></td></tr>
+</table>
+
+<h2>Strings</h2>
+<div class="example">
+<p class="file">t2_strings.pk</p>
+<pre class="pk">s := &quot;planck&quot;
+println(strlen(s))
+println(substr(s, 0, 3))
+println(f&quot;{s}!&quot;)
+println(ord(s, 0))
+n := 3
+put(f&quot;{s} は {strlen(s)} 文字。n = {n}\n&quot;)</pre>
+<p class="label">Output</p>
+<pre class="out">6
+&quot;pla&quot;
+&quot;planck!&quot;
+112
+planck は 6 文字。n = 3</pre>
+</div>
+<p>Lengths and positions are in bytes, counted from 0. <code>substr(s, i, j)</code> is the half-open range <code>[i, j)</code>. <code>f"..."</code> embeds the value of <code>{expression}</code>.</p>
+
+<h2>M-expressions</h2>
+<div class="example">
+<p class="file">t2_mexpr.pk</p>
+<pre class="pk">p := Point{3, 4}
+println(p)
+println(head(p))
+println(arity(p))
+println(arg(p, 1))
+println(Point{1, 2} == Point{1, 2})
+println(push(p, 5))</pre>
+<p class="label">Output</p>
+<pre class="out">Point{3, 4}
+Point
+2
+4
+true
+Point{3, 4, 5}</pre>
+</div>
+<p><code>Head{a, ...}</code> is a tree made of a head symbol and a sequence of arguments. It needs no declaration. <code>==</code> compares by structure. planck0 interns M-expressions, so the comparison is a pointer comparison. There is no space between the head and <code>{</code>.</p>
+
+<h2>Lists and tuples</h2>
+<div class="example">
+<p class="file">t2_lists.pk</p>
+<pre class="pk">xs := [1, 2, 3]
+println(xs)
+ys := 0 :: xs
+println(ys)
+
+use(&quot;pretty&quot;)
+put(f&quot;{ys}\n&quot;)
+
+println(())
+println((1, &quot;a&quot;))</pre>
+<p class="label">Output</p>
+<pre class="out">Cons{1, Cons{2, Cons{3, Nil{}}}}
+Cons{0, Cons{1, Cons{2, Cons{3, Nil{}}}}}
+[0, 1, 2, 3]
+Tuple{}
+Tuple{1, &quot;a&quot;}</pre>
+</div>
+<p><code>[1, 2, 3]</code> is <code>Cons{1, Cons{2, Cons{3, Nil{}}}}</code>, and <code>x :: xs</code> is the syntax of <code>Cons{x, xs}</code>. <code>(a, b)</code> is <code>Tuple{a, b}</code>. <code>println</code> writes an M-expression in its own form. After <code>use("pretty")</code>, <code>f"..."</code> writes a list as <code>[...]</code>.</p>
+
+<nav class="pager"><a class="prev" href="1.html"><small>Previous</small>1. Expressions, bindings, functions</a><a class="next" href="3.html"><small>Next</small>3. Patterns and fusion</a></nav>
+</main>
+</div>
+<footer><div class="inner"><a href="https://github.com/nineties/hex-to-compiler">github.com/nineties/hex-to-compiler</a></div></footer>
+<script src="../../assets/highlight.js"></script>
+</body>
+</html>

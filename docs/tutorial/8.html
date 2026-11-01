@@ -3,116 +3,109 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>8. 構文を広げる | planck</title>
+<title>8. クオートと評価器 | hex-to-compiler</title>
+<link rel="alternate" hreflang="en" href="../en/tutorial/8.html">
 <link rel="stylesheet" href="../assets/style.css">
 </head>
 <body>
 <header class="site-header"><div class="inner">
-<a class="logo" href="../index.html">planck<span>.</span></a>
+<a class="logo" href="../index.html">hex-to-compiler</a>
 <nav class="site-nav">
+<a href="../index.html">概要</a>
 <a class="here" href="../tutorial/index.html">チュートリアル</a>
 <a href="../reference/index.html">リファレンス</a>
 <a href="../implementation/index.html">処理系の実装</a>
 <a href="https://github.com/nineties/hex-to-compiler">GitHub</a>
+<a class="lang-switch" lang="en" hreflang="en" href="../en/tutorial/8.html">English</a>
 </nav>
 </div></header>
 <div class="layout">
 <nav class="toc" aria-label="チュートリアルの目次"><details open><summary>チュートリアルの目次</summary>
 <h2>チュートリアル</h2>
 <ol>
-<li><a href="index.html">はじめに</a></li>
-<li><a href="1.html">1. はじめの一歩</a></li>
-<li><a href="2.html">2. 変数と関数</a></li>
-<li><a href="3.html">3. 値のかたち</a></li>
-<li><a href="4.html">4. パターンで分ける</a></li>
-<li><a href="5.html">5. ライブラリを使う</a></li>
-<li><a href="6.html">6. レコードと流れの制御</a></li>
-<li><a href="7.html">7. エフェクト</a></li>
-<li><a class="here" href="8.html">8. 構文を広げる</a></li>
-<li><a href="9.html">9. プログラムはデータ</a></li>
+<li><a href="index.html">前提と実行</a></li>
+<li><a href="1.html">1. 式・束縛・関数</a></li>
+<li><a href="2.html">2. 値と M式</a></li>
+<li><a href="3.html">3. パターンと融合</a></li>
+<li><a href="4.html">4. ライブラリ</a></li>
+<li><a href="5.html">5. レコード・局所関数・脱出</a></li>
+<li><a href="6.html">6. 代数的エフェクト</a></li>
+<li><a href="7.html">7. 文法の拡張</a></li>
+<li><a class="here" href="8.html">8. クオートと評価器</a></li>
+<li><a href="9.html">9. 添字と置き換え</a></li>
 </ol></details></nav>
 <main>
-<h1>8. 構文を広げる</h1>
-<p class="lead">planck の構文は文法の規則の集まりです。プログラムの中で <code>::=</code> を書くと、その規則を足したり置き換えたりできます。次の行からは新しい構文で読まれます。</p>
+<h1>8. クオートと評価器</h1>
+<p class="lead">ソースは M式に読まれてから評価されます。構文木は通常の値なので、組み立て・検査・評価・文字列への逆変換ができます。</p>
 
-<h2>unless を作る</h2>
+<h2>クオート</h2>
 <div class="example">
-<p class="file">t8_unless.pk</p>
-<pre class="pk">primary ::= &#x27;unless &quot;(&quot; c:expr &quot;)&quot; a:expr { `If{!c, none, !a} } | ...
+<p class="file">t8_quote.pk</p>
+<pre class="pk">e := &#x27;(1 + 2 * x)
+println(e)
+x := 10
+println(eval(e))
 
-unless (1 &gt; 2) put(&quot;1 &gt; 2 ではありません\n&quot;)
-unless (1 &lt; 2) put(&quot;ここは表示されません\n&quot;)</pre>
+n := 5
+println(`(n + !n))</pre>
 <p class="label">出力</p>
-<pre class="out">1 &gt; 2 ではありません</pre>
+<pre class="out">Apply{_add, Tuple{1, Apply{_mul, Tuple{2, x}}}}
+21
+Apply{_add, Tuple{n, 5}}</pre>
 </div>
-<p>1 行目が文法の宣言です。読み方は次のとおりです。</p>
-<ul>
-<li><code>primary ::= ... | ...</code> は、式の一番小さな単位を表す規則 <code>primary</code> を定義し直します。最後の <code>...</code> は「これまでの <code>primary</code>」です。だから新しい書き方を足しただけで、元の構文はそのまま使えます。</li>
-<li><code>'unless</code> は単語 <code>unless</code> に合います。<code>"("</code> は文字 <code>(</code> に合います。</li>
-<li><code>c:expr</code> は「規則 <code>expr</code> で読み、結果を <code>c</code> と呼ぶ」です。</li>
-<li>最後の <code>{ ... }</code> は、読めたときに作る値です。ここではプログラムの木を返しています。</li>
-</ul>
-<p><code>`If{!c, none, !a}</code> の <code>`</code> は「この M式を、<code>!</code> の所だけ埋めて作る」という印です（<a href="9.html">9 章</a>）。つまり <code>unless (c) a</code> を <code>If{c, none, a}</code> に読み替えています。<code>If</code> は <code>if</code> を読んだときにできる木です。</p>
-<p>規則の項目と <code>{ ... }</code> は <code>::=</code> や <code>|</code> と同じ行に書きます。</p>
+<p><code>'e</code> は <code>Quote{e}</code> で、<code>e</code> の構文木を値にします。演算子は組み込み関数の <code>Apply</code> になります。<code>`e</code> は準クオートで、<code>!e</code>（<code>UnQuote</code>）の所だけ評価して埋めます。<code>eval</code> は木をトップレベルの式としてその場でコンパイルし、実行します。</p>
 
-<h2>演算子を足す</h2>
+<h2>M式で書く</h2>
 <div class="example">
-<p class="file">t8_pipe.pk</p>
-<pre class="pk">union ::= x:union &quot;|&gt;&quot; f:arrow { `Apply{!f, Tuple{!x}} } | ...
-
-double(x) := 2 * x
-3 |&gt; double |&gt; double |&gt; println</pre>
+<p class="file">t8_mexpr.pk</p>
+<pre class="pk">Def{y, 3}
+Apply{println, Tuple{Apply{_mul, Tuple{y, y}}}}
+println(&#x27;Def{y, 3} == &#x27;(y := 3))</pre>
 <p class="label">出力</p>
-<pre class="out">12</pre>
+<pre class="out">9
+true</pre>
 </div>
-<p><code>x |&gt; f</code> を <code>f(x)</code> と読む演算子です。<code>union</code> は関数の融合 <code>|</code> の規則で、<code>x:union</code> と自分自身から始めているので左から順にまとまります。<code>3 |&gt; double |&gt; double</code> は <code>double(double(3))</code> です。</p>
+<p>M式はそのまま式として書けます。構文は M式への読み替えで、対応の一覧は<a href="../reference/syntax.html">構文</a>にあります。</p>
 
-<h2>ブロックを受け取る構文</h2>
+<h2>parse と eval の差し替え</h2>
 <div class="example">
-<p class="file">t8_repeat.pk</p>
-<pre class="pk">repeat_fn(n, f) := while (n &gt; 0) { f(); n = n - 1 }
-
-primary ::= &#x27;repeat n:add_expr body:block { `repeat_fn(!n, () -&gt; !body) } | ...
-
-repeat 3 { put(&quot;planck!\n&quot;) }</pre>
+<p class="file">t8_eval.pk</p>
+<pre class="pk">old_eval := eval
+eval = e -&gt; {
+    v := old_eval(e)
+    put(&quot;=&gt; &quot;)
+    println(v)
+    v
+}
+1 + 2
+&#x27;(a + b)
+Point{1, 2}</pre>
 <p class="label">出力</p>
-<pre class="out">planck!
-planck!
-planck!</pre>
+<pre class="out">=&gt; 3
+=&gt; Apply{_add, Tuple{a, b}}
+=&gt; Point{1, 2}</pre>
 </div>
-<p>作る木はふつうの構文でも書けます。<code>`repeat_fn(!n, () -> !body)</code> は、<code>repeat_fn(...)</code> という呼び出しの木を作ります。<code>!body</code> の所に、読み込んだブロックが入ります。</p>
+<p>トップレベルは式ごとに大域変数 <code>parse</code>（<code>文字列 -&gt; Tuple{M式, 残り}</code>）と <code>eval</code>（<code>M式 -&gt; 値</code>）を引き直します。差し替えると次の式から効きます。<code>planck/syntax.pk</code> も最後に <code>parse</code> を差し替えて planck の構文を入れています。</p>
 
-<h2>自分の文法で計算する</h2>
-<p>規則は planck の構文のためだけのものではありません。好きな文法を書いて、その場で読ませることもできます。</p>
+<h2>unparse</h2>
 <div class="example">
-<p class="file">t8_calc.pk</p>
-<pre class="pk">calc ::= a:calc &quot;+&quot; b:term { a + b } | a:calc &quot;-&quot; b:term { a - b } | term
-term ::= a:term &quot;*&quot; b:atom { a * b } | atom
-atom ::= integer | &quot;(&quot; e:calc &quot;)&quot; { e }
-
-println(calc{| 1 + 2 * (10 - 4) |})
-println(calc{| 100 - 20 - 3 |})
-
-println(peg_parse(&#x27;calc, &quot;6 * 7&quot;))
-println(peg_parse(&#x27;calc, &quot;1 + )&quot;))
-println(peg_parse(&#x27;calc, &quot;)&quot;))</pre>
+<p class="file">t8_unparse.pk</p>
+<pre class="pk">use(&quot;unparse&quot;)
+t := &#x27;(if (n &lt; 0) -n else n * (n + 1))
+println(t)
+put(unparse(t)); put(&quot;\n&quot;)</pre>
 <p class="label">出力</p>
-<pre class="out">13
-77
-Tuple{42, &quot;&quot;}
-Tuple{1, &quot;+ )&quot;}
-Tuple{SyntaxError{&quot;unexpected input&quot;, &quot;)&quot;}, &quot;&quot;}</pre>
+<pre class="out">If{Apply{_lt, Tuple{n, 0}}, Apply{_sub, Tuple{0, n}}, Apply{_mul, Tuple{n, Apply{_add, Tuple{n, 1}}}}}
+if (n &lt; 0) -n else n * (n + 1)</pre>
 </div>
-<p><code>calc ::= a:calc "+" b:term { a + b } | ...</code> では、<code>{ ... }</code> が木ではなく計算した値を返しています。左再帰（自分自身から始まる規則）が書けるので、<code>100 - 20 - 3</code> は左から順に計算されます。</p>
-<p><code>calc{| ... |}</code> は、<code>{|</code> と <code>|}</code> の間を規則 <code>calc</code> で読みます。読むのはプログラムを読み込んだ時で、値は定数として埋め込まれます。</p>
-<p>実行中に手に入った文字列は <code>peg_parse(規則, 文字列)</code> で読みます。結果は <code>Tuple{値, 読み残し}</code> です。<code>"1 + )"</code> は先頭の <code>1</code> だけが読めて、残りが読み残しになります。先頭から読めなければ値の所に <code>SyntaxError{...}</code> が入ります。</p>
+<p><code>unparse</code> は文法の規則を逆にたどって木を文字列に戻します。<code>::=</code> で足した規則で読める木も、その規則で戻ります。</p>
 
-<p>文法の書き方の一覧は<a href="../reference/grammar.html">リファレンスの文法の宣言</a>にあります。planck の構文の規則が全部ある所は<a href="../implementation/syntax.html">処理系の実装</a>で読めます。</p>
+<p>長めの例は <a href="https://github.com/nineties/hex-to-compiler/tree/main/planck/examples">planck/examples</a> にあります。処理系の側から見た同じ仕組みは<a href="../implementation/index.html">処理系の実装</a>にあります。</p>
 
-<nav class="pager"><a class="prev" href="7.html"><small>前のページ</small>7. エフェクト</a><a class="next" href="9.html"><small>次のページ</small>9. プログラムはデータ</a></nav>
+<nav class="pager"><a class="prev" href="7.html"><small>前のページ</small>7. 文法の拡張</a><a class="next" href="9.html"><small>次のページ</small>9. 添字と置き換え</a></nav>
 </main>
 </div>
-<footer><div class="inner">planck — <a href="https://github.com/nineties/hex-to-compiler">nineties/hex-to-compiler</a></div></footer>
+<footer><div class="inner"><a href="https://github.com/nineties/hex-to-compiler">github.com/nineties/hex-to-compiler</a></div></footer>
 <script src="../assets/highlight.js"></script>
 </body>
 </html>

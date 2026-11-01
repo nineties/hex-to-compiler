@@ -1,0 +1,34 @@
+<!--title 機械語から planck0 まで-->
+<h1>機械語から planck0 まで</h1>
+<p class="lead">16進ダンプ1枚の Forth から、sasm で書いた planck0 ができるまでです。</p>
+
+<h2>pforth</h2>
+<p><a href="@REPO@/blob/main/pforth.xxd">pforth.xxd</a> は201行の16進ダンプで、右側の注釈は <code>xxd -r -c 8</code> が無視します。戻したバイト列がそのまま32ビット x86 Linux の ELF 実行ファイルです。</p>
+<!--file pforth.xxd 1-11-->
+<p>辞書の初期状態は1文字の名前の組み込み語だけです。<code>k</code> は1文字読む、<code>t</code> は1文字書く、<code>f</code> は文字から語を引く、<code>x</code> は語を実行する、などです。</p>
+<!--file pforth.xxd 20-31-->
+<p>最初の解釈器は <code>k</code>・<code>f</code>・<code>x</code> を繰り返すだけです。この段階の Hello World は次のとおりです。</p>
+<!--file plisp.fs 71-79-->
+
+<h2>plisp</h2>
+<p><a href="@REPO@/blob/main/plisp.fs">plisp.fs</a> は pforth への入力です。先頭は1文字の語だけで書いた列で、空白と改行を何もしない語として、<code>\</code> を行コメントの語として登録します（[[plisp.fs#1-15]]）。以降は自己拡張で Forth を組み立てます。</p>
+<ul>
+<li>2番目の解釈器。名前で語を引き、コンパイル状態を持つ（[[plisp.fs#335-358]]）。</li>
+<li>条件分岐・ループ・再帰・構造体などの通常の Forth の語（[[plisp.fs#498-1380]]）。</li>
+<li>3番目の解釈器。辞書にない語を数として読み、数でもなければエラーを出して止まる（[[plisp.fs#1386-1447]]）。</li>
+</ul>
+<p>その Forth で Lisp インタプリタを書きます（[[plisp.fs#1684]] 以降）。リスト、ノード、リーダとプリンタ、評価器の順で、最後に <code>plisp/init.lisp</code> を読みます（[[plisp.fs#2435]]）。次のステージがアセンブラとコンパイラなので、構文木を直接扱えて内部 DSL を作りやすい Lisp を選んでいます。</p>
+
+<h2>asm と sasm</h2>
+<p>どちらも plisp の上で動く、次のステージへ渡るための道具です。性能と安全性より実装の単純さを優先しています。</p>
+<p><a href="@REPO@/blob/main/asm/core.lisp">asm/core.lisp</a> は x86 32ビットのアセンブラです。S式の命令列から ELF を直接書き出し、ヘッダ・コード・データを読み書き実行可能な1つの <code>PT_LOAD</code> に置きます。</p>
+<!--file asm/examples/hello.s 1-19-->
+<p><a href="@REPO@/blob/main/sasm/core.lisp">sasm/core.lisp</a> は構造化アセンブリ言語 sasm のコンパイラです。sasm は型のない C 風の言語で、変数・関数・<code>if</code>・<code>while</code> を持ち、plisp の内部 DSL として実装されています。レジスタ割り付けはせず、スタックへの push と pop を繰り返すコードを出して asm で機械語にします。</p>
+<!--file sasm/examples/fib.sv 1-14-->
+
+<h2>plisp2</h2>
+<p>Forth の上の plisp は以降のステージには遅すぎるため、同じ Lisp を sasm で書き直したのが <a href="@REPO@/blob/main/plisp2.sv">plisp2.sv</a> です。メモリ確保（[[plisp2.sv#6]]）、ノード（[[plisp2.sv#54]]）、リーダとプリンタ（[[plisp2.sv#302]]）、評価器（[[plisp2.sv#586]]）、組み込み関数（[[plisp2.sv#828]]）の順に並んでいます。</p>
+<p>plisp2 は plisp の上の sasm でコンパイルし、できた plisp2 の上で同じ sasm が <code>planck0.sv</code> をコンパイルします。</p>
+
+<h2>planck0</h2>
+<p><a href="@REPO@/blob/main/planck0.sv">planck0.sv</a>（2314行）も sasm で書かれています。中身は<a href="planck0.html">planck0</a>の頁にあります。</p>

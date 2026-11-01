@@ -3,153 +3,103 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>5. ライブラリを使う | planck</title>
+<title>5. レコード・局所関数・脱出 | hex-to-compiler</title>
+<link rel="alternate" hreflang="en" href="../en/tutorial/5.html">
 <link rel="stylesheet" href="../assets/style.css">
 </head>
 <body>
 <header class="site-header"><div class="inner">
-<a class="logo" href="../index.html">planck<span>.</span></a>
+<a class="logo" href="../index.html">hex-to-compiler</a>
 <nav class="site-nav">
+<a href="../index.html">概要</a>
 <a class="here" href="../tutorial/index.html">チュートリアル</a>
 <a href="../reference/index.html">リファレンス</a>
 <a href="../implementation/index.html">処理系の実装</a>
 <a href="https://github.com/nineties/hex-to-compiler">GitHub</a>
+<a class="lang-switch" lang="en" hreflang="en" href="../en/tutorial/5.html">English</a>
 </nav>
 </div></header>
 <div class="layout">
 <nav class="toc" aria-label="チュートリアルの目次"><details open><summary>チュートリアルの目次</summary>
 <h2>チュートリアル</h2>
 <ol>
-<li><a href="index.html">はじめに</a></li>
-<li><a href="1.html">1. はじめの一歩</a></li>
-<li><a href="2.html">2. 変数と関数</a></li>
-<li><a href="3.html">3. 値のかたち</a></li>
-<li><a href="4.html">4. パターンで分ける</a></li>
-<li><a class="here" href="5.html">5. ライブラリを使う</a></li>
-<li><a href="6.html">6. レコードと流れの制御</a></li>
-<li><a href="7.html">7. エフェクト</a></li>
-<li><a href="8.html">8. 構文を広げる</a></li>
-<li><a href="9.html">9. プログラムはデータ</a></li>
+<li><a href="index.html">前提と実行</a></li>
+<li><a href="1.html">1. 式・束縛・関数</a></li>
+<li><a href="2.html">2. 値と M式</a></li>
+<li><a href="3.html">3. パターンと融合</a></li>
+<li><a href="4.html">4. ライブラリ</a></li>
+<li><a class="here" href="5.html">5. レコード・局所関数・脱出</a></li>
+<li><a href="6.html">6. 代数的エフェクト</a></li>
+<li><a href="7.html">7. 文法の拡張</a></li>
+<li><a href="8.html">8. クオートと評価器</a></li>
+<li><a href="9.html">9. 添字と置き換え</a></li>
 </ol></details></nav>
 <main>
-<h1>5. ライブラリを使う</h1>
-<p class="lead">リスト・文字列・表を扱う関数は <code>planck/lib</code> のライブラリにあります。<code>use("名前")</code> で読み込みます。</p>
+<h1>5. レコード・局所関数・脱出</h1>
+<p class="lead"><code>record</code> は M式の引数に名前を付ける宣言です。<code>return</code>・<code>break</code>・<code>continue</code> はエフェクトとして実装されています。</p>
 
-<h2>リスト</h2>
+<h2>record</h2>
 <div class="example">
-<p class="file">t5_list.pk</p>
-<pre class="pk">use(&quot;list&quot;)
-use(&quot;pretty&quot;)
-xs := range(1, 11)
-put(f&quot;{xs}\n&quot;)
-put(f&quot;{map(x -&gt; x * x, xs)}\n&quot;)
-put(f&quot;{filter(x -&gt; x % 2 == 0, xs)}\n&quot;)
-println(foldl(add, 0, xs))
-put(f&quot;{sort(lt, [5, 3, 9, 1])}\n&quot;)
-put(f&quot;{zip([1, 2, 3], [&quot;a&quot;, &quot;b&quot;, &quot;c&quot;])}\n&quot;)</pre>
+<p class="file">t5_record.pk</p>
+<pre class="pk">record Point(x, y)
+p := Point{3, 4}
+println(p.x * p.x + p.y * p.y)
+
+move(p, dx) := Point{p.x + dx, p.y}
+println(move(p, 10))</pre>
 <p class="label">出力</p>
-<pre class="out">[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-[1, 4, 9, 16, 25, 36, 49, 64, 81, 100]
-[2, 4, 6, 8, 10]
-55
-[1, 3, 5, 9]
-[Tuple{1, &quot;a&quot;}, Tuple{2, &quot;b&quot;}, Tuple{3, &quot;c&quot;}]</pre>
+<pre class="out">25
+Point{13, 4}</pre>
 </div>
-<p><code>use("list")</code> でリストの関数が使えるようになります。<code>range(a, b)</code> は <code>a</code> から <code>b - 1</code> までのリスト、<code>map</code> は各要素に関数を当てたリスト、<code>filter</code> は条件に合う要素だけのリストです。<code>foldl(f, 初期値, xs)</code> は左から順に <code>f</code> でまとめます。ここでは組み込みのたし算 <code>add</code> をそのまま渡しています。</p>
-<p><code>sort(比べる関数, xs)</code> は並べ替えです。<code>lt</code> は <code>&lt;</code> と同じ働きの関数です。</p>
-<p>同じライブラリを何度 <code>use</code> しても、読み込むのは最初の 1 回だけです。</p>
+<p><code>record Point(x, y)</code> は頭 <code>Point</code> の0番目と1番目の引数に名前を付けるだけで、値は <code>Point{3, 4}</code> のままです。パターンでも分解できます。<code>.</code> の前に空白は置けません。</p>
 
-<h2>for で回す</h2>
+<h2>fun</h2>
 <div class="example">
-<p class="file">t5_for.pk</p>
-<pre class="pk">use(&quot;list&quot;)
-for (x in range(1, 4)) println(x * 10)
-
-total := 0
-for ((name, n) in [(&quot;apple&quot;, 3), (&quot;pear&quot;, 5)]) {
-    put(f&quot;{name}: {n}\n&quot;)
-    total = total + n
+<p class="file">t5_fun.pk</p>
+<pre class="pk">parity(n) := {
+    fun is_even(n) if (n == 0) true else is_odd(n - 1)
+    fun is_odd(n) if (n == 0) false else is_even(n - 1)
+    if (is_even(n)) &quot;even&quot; else &quot;odd&quot;
 }
-println(total)</pre>
+put(parity(10)); put(&quot;\n&quot;)
+put(parity(7)); put(&quot;\n&quot;)</pre>
 <p class="label">出力</p>
-<pre class="out">10
-20
-30
-apple: 3
-pear: 5
-8</pre>
+<pre class="out">even
+odd</pre>
 </div>
-<p><code>for (パターン in リスト) 本体</code> は、要素を 1 つずつパターンに当てて本体を動かします。2 つめの <code>for</code> のように、組を <code>(name, n)</code> で分けながら回すこともできます。本体からは外の変数 <code>total</code> を書き換えられます。</p>
+<p>ブロックの中の <code>fun</code> は名前をブロックの先頭で宣言するので、相互再帰が書けます。ブロック内の <code>f(x) := ...</code> は、それより前の式からは見えません。</p>
 
-<h2>文字列</h2>
+<h2>return・break・continue</h2>
 <div class="example">
-<p class="file">t5_string.pk</p>
-<pre class="pk">use(&quot;string&quot;)
-use(&quot;pretty&quot;)
-words := split(&quot;red,green,blue&quot;, &quot;,&quot;)
-put(f&quot;{words}\n&quot;)
-put(join(&quot; / &quot;, words)); put(&quot;\n&quot;)
-put(f&quot;[{trim(&quot;  hi  &quot;)}]\n&quot;)
-println(str_to_int(&quot;123&quot;) + 1)
-println(starts_with(&quot;planck&quot;, &quot;pl&quot;))</pre>
+<p class="file">t5_return.pk</p>
+<pre class="pk">find_first(p, xs) := {
+    for (x in xs) if (p(x)) return x
+    none
+}
+println(find_first(x -&gt; x &gt; 3, [1, 5, 2, 7]))
+println(find_first(x -&gt; x &gt; 9, [1, 5, 2, 7]))
+
+n := 0
+odd_sum := 0
+while (true) {
+    n = n + 1
+    if (n &gt; 10) break
+    if (n % 2 == 0) continue
+    odd_sum = odd_sum + n
+}
+println(odd_sum)</pre>
 <p class="label">出力</p>
-<pre class="out">[&quot;red&quot;, &quot;green&quot;, &quot;blue&quot;]
-red / green / blue
-[hi]
-124
-true</pre>
+<pre class="out">5
+none
+25</pre>
 </div>
-<p><code>split</code> で区切り、<code>join</code> でつなぎます。<code>trim</code> は両端の空白を落とします。<code>str_to_int</code> は数字の文字列を整数にします。</p>
+<p><code>return e</code> は囲む関数から抜けます。<code>for</code> の本体は関数ですが、その中の <code>return</code> は外の <code>find_first</code> から抜けます。<code>break</code>・<code>continue</code> は一番内側の <code>while</code> か <code>for</code> に効きます。</p>
+<p>構文解析の時点で、本体に <code>return</code> を含む関数は <code>Handle{body, (Return{v}, k) -> v}</code> に、<code>break</code> を含むループは <code>Break{}</code> のハンドラで包まれます（<a href="../reference/syntax.html">構文</a>）。<code>return</code> の値は <code>return</code> と同じ行から書きます。</p>
 
-<h2>表とベクタ</h2>
-<p>表（ハッシュ表）は <code>table()</code> で作ります。<code>table_get</code> と <code>table_set</code> は最初から使えます。<code>use("table")</code> を読むと、キーの一覧などが使えるようになります。</p>
-<div class="example">
-<p class="file">t5_table.pk</p>
-<pre class="pk">use(&quot;list&quot;)
-use(&quot;string&quot;)
-use(&quot;table&quot;)
-count := table()
-for (w in split(&quot;the cat and the hat&quot;, &quot; &quot;))
-    table_set(count, w, table_get(count, w, 0) + 1)
-for (k in sort(str_less, table_keys(count)))
-    put(f&quot;{k} {table_get(count, k, 0)}\n&quot;)
-
-use(&quot;vector&quot;)
-v := vec_new()
-vec_push(v, &quot;a&quot;)
-vec_push(v, &quot;b&quot;)
-println(vec_len(v))
-println(vec_get(v, 1))</pre>
-<p class="label">出力</p>
-<pre class="out">and 1
-cat 1
-hat 1
-the 2
-2
-&quot;b&quot;</pre>
-</div>
-<p><code>table_get(t, キー, 既定値)</code> は、キーがなければ既定値を返します。<code>table_keys</code> の順番は決まっていないので、ここでは <code>sort</code> で並べてから出しています。<code>str_less</code> は文字列を辞書の順で比べます。</p>
-<p>ベクタは後ろに要素を足していける配列です。<code>vec_push</code> で足し、<code>vec_get</code> で取り出します。</p>
-
-<h2>ライブラリの一覧</h2>
-<table>
-<tr><th>名前</th><th>中身</th></tr>
-<tr><td><code>list</code></td><td>リストの関数</td></tr>
-<tr><td><code>string</code></td><td>文字の判定・文字列の検索と分割</td></tr>
-<tr><td><code>table</code></td><td>表のキーと値の一覧・集合</td></tr>
-<tr><td><code>vector</code></td><td>伸びる配列</td></tr>
-<tr><td><code>symbol</code></td><td>新しいシンボルを作る <code>gensym</code></td></tr>
-<tr><td><code>error</code></td><td>位置つきのエラー</td></tr>
-<tr><td><code>pretty</code></td><td>値を文字列にする・複数行で整形する</td></tr>
-<tr><td><code>unparse</code></td><td>構文の木を文字列に戻す</td></tr>
-<tr><td><code>base</code></td><td><code>panic</code> と <code>assert</code></td></tr>
-</table>
-<p>関数ごとの説明は<a href="../reference/library.html">リファレンスのライブラリ</a>にあります。</p>
-
-<nav class="pager"><a class="prev" href="4.html"><small>前のページ</small>4. パターンで分ける</a><a class="next" href="6.html"><small>次のページ</small>6. レコードと流れの制御</a></nav>
+<nav class="pager"><a class="prev" href="4.html"><small>前のページ</small>4. ライブラリ</a><a class="next" href="6.html"><small>次のページ</small>6. 代数的エフェクト</a></nav>
 </main>
 </div>
-<footer><div class="inner">planck — <a href="https://github.com/nineties/hex-to-compiler">nineties/hex-to-compiler</a></div></footer>
+<footer><div class="inner"><a href="https://github.com/nineties/hex-to-compiler">github.com/nineties/hex-to-compiler</a></div></footer>
 <script src="../assets/highlight.js"></script>
 </body>
 </html>

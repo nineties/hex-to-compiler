@@ -1,0 +1,34 @@
+<!--title From machine code to planck0-->
+<h1>From machine code to planck0</h1>
+<p class="lead">This page follows the path from a one-page hex dump of Forth to planck0, which is written in sasm.</p>
+
+<h2>pforth</h2>
+<p><a href="@REPO@/blob/main/pforth.xxd">pforth.xxd</a> is a hex dump of 201 lines. <code>xxd -r -c 8</code> ignores the annotations on the right. The restored bytes are an executable ELF file. The current implementation produces a 32-bit x86 Linux ELF.</p>
+<!--file pforth.xxd 1-11-->
+<p>The initial dictionary has only builtin words with one-letter names. <code>k</code> reads a character, <code>t</code> writes a character, <code>f</code> looks up a word from a character, <code>x</code> executes a word, and so on.</p>
+<!--file pforth.xxd 20-31-->
+<p>The first interpreter only repeats <code>k</code>, <code>f</code> and <code>x</code>. Hello World at this point is as follows.</p>
+<!--file plisp.fs 71-79-->
+
+<h2>plisp</h2>
+<p><a href="@REPO@/blob/main/plisp.fs">plisp.fs</a> is the input to pforth. It begins with a sequence of one-letter words that registers whitespace and newlines as words that do nothing and <code>\</code> as the word for a line comment ([[plisp.fs#1-15]]). The rest builds Forth by self-extension.</p>
+<ul>
+<li>The second interpreter. It looks up words by name and has a compile state ([[plisp.fs#335-358]]).</li>
+<li>The usual Forth words: conditionals, loops, recursion, structures ([[plisp.fs#498-1380]]).</li>
+<li>The third interpreter. It reads a word that is not in the dictionary as a number, and stops with an error if it is not a number ([[plisp.fs#1386-1447]]).</li>
+</ul>
+<p>A Lisp interpreter is written in that Forth ([[plisp.fs#1684]] onward). It is written in the order of lists, nodes, the reader and printer, and the evaluator. At the end it reads <code>plisp/init.lisp</code> ([[plisp.fs#2435]]). The next stage is an assembler and a compiler, so the choice is a Lisp: it handles syntax trees directly and makes internal DSLs easy.</p>
+
+<h2>asm and sasm</h2>
+<p>Both run on plisp. They are tools for crossing to the next stage. They favor a simple implementation over performance and safety.</p>
+<p><a href="@REPO@/blob/main/asm/core.lisp">asm/core.lisp</a> is an assembler for 32-bit x86. It writes an ELF file directly from a list of S-expression instructions, and puts the header, code and data in one readable, writable and executable <code>PT_LOAD</code>.</p>
+<!--file asm/examples/hello.s 1-19-->
+<p><a href="@REPO@/blob/main/sasm/core.lisp">sasm/core.lisp</a> is the compiler of the structured assembly language sasm. sasm is an untyped C-like language with variables, functions, <code>if</code> and <code>while</code>, and is implemented as an internal DSL of plisp. It does not allocate registers. It emits code that repeats pushes and pops on the stack, and asm turns the code into machine code.</p>
+<!--file sasm/examples/fib.sv 1-14-->
+
+<h2>plisp2</h2>
+<p>plisp on Forth is too slow for the later stages. <a href="@REPO@/blob/main/plisp2.sv">plisp2.sv</a> is the same Lisp rewritten in sasm. It has, in order, memory allocation ([[plisp2.sv#6]]), nodes ([[plisp2.sv#54]]), the reader and printer ([[plisp2.sv#302]]), the evaluator ([[plisp2.sv#586]]) and builtin functions ([[plisp2.sv#828]]).</p>
+<p>plisp2 is compiled by sasm on plisp. The same sasm then compiles <code>planck0.sv</code> on the resulting plisp2.</p>
+
+<h2>planck0</h2>
+<p><a href="@REPO@/blob/main/planck0.sv">planck0.sv</a> (2314 lines) is also written in sasm. The page <a href="planck0.html">planck0</a> describes it.</p>

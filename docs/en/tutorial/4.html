@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>4. Libraries | hex-to-compiler</title>
+<link rel="alternate" hreflang="ja" href="../../tutorial/4.html">
+<link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+<header class="site-header"><div class="inner">
+<a class="logo" href="../index.html">hex-to-compiler</a>
+<nav class="site-nav">
+<a href="../index.html">Overview</a>
+<a class="here" href="../tutorial/index.html">Tutorial</a>
+<a href="../reference/index.html">Reference</a>
+<a href="../implementation/index.html">Implementation</a>
+<a href="https://github.com/nineties/hex-to-compiler">GitHub</a>
+<a class="lang-switch" lang="ja" hreflang="ja" href="../../tutorial/4.html">日本語</a>
+</nav>
+</div></header>
+<div class="layout">
+<nav class="toc" aria-label="Tutorial contents"><details open><summary>Tutorial contents</summary>
+<h2>Tutorial</h2>
+<ol>
+<li><a href="index.html">Prerequisites and running</a></li>
+<li><a href="1.html">1. Expressions, bindings, functions</a></li>
+<li><a href="2.html">2. Values and M-expressions</a></li>
+<li><a href="3.html">3. Patterns and fusion</a></li>
+<li><a class="here" href="4.html">4. Libraries</a></li>
+<li><a href="5.html">5. Records, local functions, escapes</a></li>
+<li><a href="6.html">6. Algebraic effects</a></li>
+<li><a href="7.html">7. Extending the grammar</a></li>
+<li><a href="8.html">8. Quotation and the evaluator</a></li>
+<li><a href="9.html">9. Indexing and rewriting</a></li>
+</ol></details></nav>
+<main>
+<h1>4. Libraries</h1>
+<p class="lead">The libraries in <code>planck/lib</code> are written in the planck syntax and loaded by <code>use("name")</code>. A second <code>use</code> of the same name does nothing.</p>
+
+<h2>Lists</h2>
+<div class="example">
+<p class="file">t4_list.pk</p>
+<pre class="pk">use(&quot;list&quot;)
+use(&quot;pretty&quot;)
+xs := range(1, 11)
+put(f&quot;{xs}\n&quot;)
+put(f&quot;{map(x -&gt; x * x, xs)}\n&quot;)
+put(f&quot;{filter(x -&gt; x % 2 == 0, xs)}\n&quot;)
+println(foldl((a, b) -&gt; a + b, 0, xs))
+put(f&quot;{sort((a, b) -&gt; a &lt; b, [5, 3, 9, 1])}\n&quot;)
+put(f&quot;{zip([1, 2, 3], [&quot;a&quot;, &quot;b&quot;, &quot;c&quot;])}\n&quot;)</pre>
+<p class="label">Output</p>
+<pre class="out">[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+[1, 4, 9, 16, 25, 36, 49, 64, 81, 100]
+[2, 4, 6, 8, 10]
+55
+[1, 3, 5, 9]
+[Tuple{1, &quot;a&quot;}, Tuple{2, &quot;b&quot;}, Tuple{3, &quot;c&quot;}]</pre>
+</div>
+<p>An operator cannot be passed as a function. Write a lambda such as <code>(a, b) -&gt; a + b</code> instead. <code>sort</code> is a stable merge sort.</p>
+
+<h2>for</h2>
+<div class="example">
+<p class="file">t4_for.pk</p>
+<pre class="pk">use(&quot;list&quot;)
+for (x in range(1, 4)) println(x * 10)
+
+total := 0
+for ((name, n) in [(&quot;apple&quot;, 3), (&quot;pear&quot;, 5)]) {
+    put(f&quot;{name}: {n}\n&quot;)
+    total = total + n
+}
+println(total)</pre>
+<p class="label">Output</p>
+<pre class="out">10
+20
+30
+apple: 3
+pear: 5
+8</pre>
+</div>
+<p><code>for (p in xs) body</code> matches the elements of a list or a vector against the pattern <code>p</code> in order. Its value is <code>none</code>. The body can assign to outer variables.</p>
+
+<h2>Strings</h2>
+<div class="example">
+<p class="file">t4_string.pk</p>
+<pre class="pk">use(&quot;string&quot;)
+use(&quot;pretty&quot;)
+words := split(&quot;red,green,blue&quot;, &quot;,&quot;)
+put(f&quot;{words}\n&quot;)
+put(join(&quot; / &quot;, words)); put(&quot;\n&quot;)
+put(f&quot;[{trim(&quot;  hi  &quot;)}]\n&quot;)
+println(str_to_int(&quot;123&quot;) + 1)
+println(starts_with(&quot;planck&quot;, &quot;pl&quot;))</pre>
+<p class="label">Output</p>
+<pre class="out">[&quot;red&quot;, &quot;green&quot;, &quot;blue&quot;]
+red / green / blue
+[hi]
+124
+true</pre>
+</div>
+
+<h2>Tables and vectors</h2>
+<div class="example">
+<p class="file">t4_table.pk</p>
+<pre class="pk">use(&quot;list&quot;)
+use(&quot;string&quot;)
+use(&quot;table&quot;)
+count := table()
+for (w in split(&quot;the cat and the hat&quot;, &quot; &quot;))
+    table_set(count, w, table_get(count, w, 0) + 1)
+for (k in sort(str_less, table_keys(count)))
+    put(f&quot;{k} {table_get(count, k, 0)}\n&quot;)
+
+use(&quot;vector&quot;)
+v := vec_new()
+vec_push(v, &quot;a&quot;)
+vec_push(v, &quot;b&quot;)
+println(vec_len(v))
+println(vec_get(v, 1))</pre>
+<p class="label">Output</p>
+<pre class="out">and 1
+cat 1
+hat 1
+the 2
+2
+&quot;b&quot;</pre>
+</div>
+<p><code>table()</code>, <code>table_get</code> and <code>table_set</code> are in <code>init.pk</code> and need no <code>use</code>. Keys are compared by <code>==</code>. The order of <code>table_keys</code> is unspecified. A vector is an array that grows at the end. Tables and vectors can also be read and written by <code>t[key]</code> and <code>v[i]</code> (<a href="9.html">chapter 9</a>).</p>
+
+<h2>Overview</h2>
+<table>
+<tr><th>Name</th><th>Contents</th></tr>
+<tr><td><code>list</code></td><td>List functions</td></tr>
+<tr><td><code>vector</code></td><td>A growable array</td></tr>
+<tr><td><code>string</code></td><td>Character tests, search, split and join, string buffers</td></tr>
+<tr><td><code>table</code></td><td>Listing a table, sets</td></tr>
+<tr><td><code>symbol</code></td><td><code>gensym</code></td></tr>
+<tr><td><code>error</code></td><td>Errors with source locations</td></tr>
+<tr><td><code>pretty</code></td><td>Converting values to strings and formatting to a width</td></tr>
+<tr><td><code>unparse</code></td><td>Turning a syntax tree back into a string by the grammar</td></tr>
+<tr><td><code>base</code></td><td><code>panic</code>, <code>assert</code></td></tr>
+</table>
+<p>Each function is described in the <a href="../reference/library.html">Reference: Libraries</a>.</p>
+
+<nav class="pager"><a class="prev" href="3.html"><small>Previous</small>3. Patterns and fusion</a><a class="next" href="5.html"><small>Next</small>5. Records, local functions, escapes</a></nav>
+</main>
+</div>
+<footer><div class="inner"><a href="https://github.com/nineties/hex-to-compiler">github.com/nineties/hex-to-compiler</a></div></footer>
+<script src="../../assets/highlight.js"></script>
+</body>
+</html>

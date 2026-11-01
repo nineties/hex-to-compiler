@@ -3,17 +3,20 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>値・パターン・M式 | planck</title>
+<title>値・パターン・M式 | hex-to-compiler</title>
+<link rel="alternate" hreflang="en" href="../en/reference/values.html">
 <link rel="stylesheet" href="../assets/style.css">
 </head>
 <body>
 <header class="site-header"><div class="inner">
-<a class="logo" href="../index.html">planck<span>.</span></a>
+<a class="logo" href="../index.html">hex-to-compiler</a>
 <nav class="site-nav">
+<a href="../index.html">概要</a>
 <a href="../tutorial/index.html">チュートリアル</a>
 <a class="here" href="../reference/index.html">リファレンス</a>
 <a href="../implementation/index.html">処理系の実装</a>
 <a href="https://github.com/nineties/hex-to-compiler">GitHub</a>
+<a class="lang-switch" lang="en" hreflang="en" href="../en/reference/values.html">English</a>
 </nav>
 </div></header>
 <div class="layout">
@@ -29,39 +32,40 @@
 </ol></details></nav>
 <main>
 <h1>値・パターン・M式</h1>
-<p class="lead">評価されるのは M式です。ここでは値の種類、M式の評価のされ方、パターン、エフェクト、トップレベルの決まりをまとめます。</p>
+<p class="lead">評価の対象は M式です。値の種類、特殊形式、パターン、エフェクト、トップレベルを定めます。</p>
 
 <h2>M式</h2>
-<p>M式の書き方はシンボル（<code>x</code>）・整数（<code>42</code>・<code>-1</code>）・文字列（<code>"abc"</code>）と <code>Head{a, b, ...}</code> です。トップレベルの式として置いた文字列は何もしないので、コメントとして使えます。</p>
+<p>M式はシンボル（<code>x</code>）・整数（<code>42</code>・<code>-1</code>）・文字列（<code>"abc"</code>）・<code>Head{a, b, ...}</code> のいずれかです。トップレベルに置いた文字列は効果を持たないので、コメントとして使えます。</p>
 
 <h2>値</h2>
 <table>
 <tr><th><code>typeof</code></th><th>値</th></tr>
 <tr><td><code>int</code></td><td>整数</td></tr>
 <tr><td><code>string</code></td><td>文字列</td></tr>
-<tr><td><code>symbol</code></td><td>シンボル。<code>true</code>・<code>false</code>・<code>none</code> は <code>planck/init.pk</code> で定義されるシンボルです</td></tr>
+<tr><td><code>symbol</code></td><td>シンボル。<code>true</code>・<code>false</code>・<code>none</code> は <code>planck/init.pk</code> が定義する</td></tr>
 <tr><td><code>mexpr</code></td><td><code>Head{a, ...}</code></td></tr>
 <tr><td><code>function</code></td><td>Lambda・Fusion・組み込み関数・継続</td></tr>
-<tr><td><code>array</code></td><td><code>array(n)</code> で作る書き換えられる配列</td></tr>
+<tr><td><code>array</code></td><td><code>array(n)</code> で作る固定長の可変配列</td></tr>
 </table>
+<p>書き換えられる値は配列だけです。文字列・整数・シンボル・M式は不変で、リスト（<code>Cons{x, xs}</code>）と組（<code>Tuple{a, ...}</code>）も M式なので不変です。表 <code>Table{a}</code> とベクタ <code>Vector{a}</code> は、配列を持つ M式として作られ、<code>a[i] = e</code> で書き換えられる種類です（<a href="syntax.html#index">添字と置き換え</a>）。</p>
 
 <h2>特殊形式</h2>
 <table>
 <tr><th>形</th><th>意味</th></tr>
-<tr><td><code>Def{x, e}</code> / <code>Set{x, e}</code></td><td>変数を定義する / 変数に代入する</td></tr>
-<tr><td><code>Apply{f, Tuple{a, ...}}</code></td><td><code>f</code> を呼ぶ</td></tr>
+<tr><td><code>Def{x, e}</code> / <code>Set{x, e}</code></td><td>変数の定義 / 代入</td></tr>
+<tr><td><code>Apply{f, Tuple{a, ...}}</code></td><td><code>f</code> の呼び出し</td></tr>
 <tr><td><code>Do{e, ...}</code></td><td>順に評価し、最後の値を返す</td></tr>
 <tr><td><code>If{c, a, b}</code></td><td><code>c</code> が <code>false</code> なら <code>b</code>、それ以外なら <code>a</code></td></tr>
-<tr><td><code>While{c, e}</code></td><td>くり返し</td></tr>
+<tr><td><code>While{c, e}</code></td><td>繰り返し</td></tr>
 <tr><td><code>Lambda{Tuple{pattern, ...}, body}</code></td><td>関数</td></tr>
 <tr><td><code>Fusion{f, g}</code></td><td><code>f</code> を試し、<code>f</code> のどのパターンも合わなければ <code>g</code></td></tr>
-<tr><td><code>Quote{e}</code>・<code>QuasiQuote{e}</code>・<code>UnQuote{e}</code></td><td>クォート</td></tr>
+<tr><td><code>Quote{e}</code>・<code>QuasiQuote{e}</code>・<code>UnQuote{e}</code></td><td>クオート・準クオート・アンクオート</td></tr>
 <tr><td><code>Handle{body, handler}</code>・<code>Perform{v}</code></td><td>代数的エフェクト</td></tr>
 <tr><td><code>Tuple{a, ...}</code></td><td>組</td></tr>
 </table>
-<p>これ以外の頭を持つ M式、たとえば <code>Cons{x, y}</code> はコンストラクタです。引数を評価し、同じ頭の M式を作ります。</p>
+<p>これ以外の頭の M式（<code>Cons{x, y}</code> など）はコンストラクタで、引数を評価して同じ頭の M式を作ります。</p>
 <div class="example">
-<p class="file">t3_mexpr.pk</p>
+<p class="file">t2_mexpr.pk</p>
 <pre class="pk">p := Point{3, 4}
 println(p)
 println(head(p))
@@ -79,17 +83,17 @@ Point{3, 4, 5}</pre>
 </div>
 
 <h2 id="patterns">パターン</h2>
-<p>引数のパターンは次のどれかです。</p>
+<p>引数のパターンは次のいずれかです。</p>
 <ul>
 <li>変数 <code>x</code>。<code>_</code> は何にでも合い、何も束縛しません</li>
-<li>整数か文字列。等しい値に合います</li>
+<li>整数・文字列。等しい値に合います</li>
 <li><code>Quote{v}</code>。等しい値に合います（例 <code>Quote{false}</code>）</li>
 <li><code>Head{p, ...}</code>。頭と引数の数が同じ M式に合います</li>
 <li><code>_TypeOf{p, type}</code>。<code>p</code> が合い、値の種類が <code>typeof</code> の示す <code>type</code> のときに合います</li>
 </ul>
 <p>構文では <code>'none</code> が <code>Quote{none}</code>、<code>x @ int</code> が <code>_TypeOf{x, int}</code>、<code>x :: xs</code> と <code>[a, b]</code> が <code>Cons</code> のパターンになります。</p>
 <div class="example">
-<p class="file">t4_type.pk</p>
+<p class="file">t3_type.pk</p>
 <pre class="pk">describe := (n @ int) -&gt; f&quot;整数 {n}&quot;
           | (s @ string) -&gt; f&quot;文字列 {s}&quot;
           | (_) -&gt; &quot;そのほか&quot;
@@ -103,10 +107,10 @@ put(describe(&#x27;x)); put(&quot;\n&quot;)</pre>
 </div>
 
 <h2>代数的エフェクト</h2>
-<p><code>Handle{body, handler}</code> は <code>body</code> を評価します。<code>Perform{v}</code> は、合うパターンを持つ一番近い <code>handler(v, k)</code> を呼びます。<code>k</code> は <code>Perform</code> の継続です。ハンドラは深く、継続の中でも有効なままです。どのパターンにも合わなければ、エフェクトは外側のハンドラに回ります。</p>
-<p><code>k</code> はふつうの関数で、何度でも呼べます。<code>Handle</code> が値を返したあとでも呼べます。再開した複数の計算の間で変数は共有されます。</p>
+<p><code>Handle{body, handler}</code> は <code>body</code> を評価します。<code>Perform{v}</code> は、合うパターンを持つ一番近い <code>handler(v, k)</code> を呼びます。<code>k</code> は <code>Perform</code> の継続です。ハンドラは深いハンドラで、継続の中でも有効です。どのパターンにも合わなければ、エフェクトは外側のハンドラに回ります。</p>
+<p><code>k</code> は通常の関数で、何度でも、<code>Handle</code> が値を返したあとでも呼べます。再開した複数の計算は変数を共有します。</p>
 <div class="example">
-<p class="file">t7_resume.pk</p>
+<p class="file">t6_resume.pk</p>
 <pre class="pk">ask() := perform Ask{}
 
 with_answer(v, f) := handle f() with (Ask{}, k) -&gt; k(v)
@@ -119,13 +123,13 @@ println(with_answer(5, () -&gt; ask() + ask()))</pre>
 </div>
 
 <h2>トップレベル</h2>
-<p>トップレベルの式を読むたびに、大域変数 <code>parse</code> と <code>eval</code> を引き直します。だからプログラムがこれらを差し替えると、次の式から新しい定義で処理されます。プログラムの中の <code>Apply{eval, ...}</code> も、差し替えた <code>eval</code> を呼びます。</p>
+<p>トップレベルの式を読むたびに大域変数 <code>parse</code> と <code>eval</code> を引き直すので、プログラムが差し替えると次の式から新しい定義で処理されます。プログラムの中の <code>Apply{eval, ...}</code> も、差し替えた <code>eval</code> を呼びます。</p>
 <ul>
 <li><code>parse</code>：<code>文字列 -> Tuple{M式, 文字列の残り}</code>。空白は自分で読み飛ばし、空白しか残っていなければ <code>Tuple{Eof{}, ""}</code> を返します。差し替える <code>parse</code> は <code>Eof{}</code> をそのまま通します。</li>
 <li><code>eval</code>：<code>M式 -> 値</code>。</li>
 </ul>
 <div class="example">
-<p class="file">t9_eval.pk</p>
+<p class="file">t8_eval.pk</p>
 <pre class="pk">old_eval := eval
 eval = e -&gt; {
     v := old_eval(e)
@@ -138,14 +142,14 @@ eval = e -&gt; {
 Point{1, 2}</pre>
 <p class="label">出力</p>
 <pre class="out">=&gt; 3
-=&gt; Apply{add, Tuple{a, b}}
+=&gt; Apply{_add, Tuple{a, b}}
 =&gt; Point{1, 2}</pre>
 </div>
 
 <nav class="pager"><a class="prev" href="syntax.html"><small>前のページ</small>構文</a><a class="next" href="grammar.html"><small>次のページ</small>文法の宣言</a></nav>
 </main>
 </div>
-<footer><div class="inner">planck — <a href="https://github.com/nineties/hex-to-compiler">nineties/hex-to-compiler</a></div></footer>
+<footer><div class="inner"><a href="https://github.com/nineties/hex-to-compiler">github.com/nineties/hex-to-compiler</a></div></footer>
 <script src="../assets/highlight.js"></script>
 </body>
 </html>

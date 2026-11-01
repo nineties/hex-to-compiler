@@ -1,0 +1,32 @@
+<!--title packrat パーサ-->
+<h1>packrat パーサ</h1>
+<p class="lead"><a href="@REPO@/blob/main/planck/peg.pk">planck/peg.pk</a>（M式で316行）は PEG を解釈実行するパーサです。文法は M式のデータで、規則の結果を位置ごとにメモ化します。</p>
+
+<h2>データとしての文法</h2>
+<p>構文解析式（規則の右辺）の形はファイルの先頭にあります。</p>
+<!--file planck/peg.pk 4-21-->
+<p><code>"7"</code> の1回以上の繰り返しは <code>Many1{"7"}</code>、その個数を値にするなら <code>Act{Many1{"7"}, t -> arity(t)}</code> です。<code>_define_rule</code> で名前を付けると規則になります。</p>
+<!--ex i_define-->
+<p><code>::=</code> を使わずに定義した規則も <code>sevens{| ... |}</code> で使えます。<code>::=</code> 自体も <code>_define_rule</code> の呼び出しに読み替えられます（<a href="syntax.html#decl">構文の定義</a>）。</p>
+
+<h2>解釈実行</h2>
+<p><code>peg_px(e, p)</code> は構文解析式 <code>e</code> を位置 <code>p</code> から試し、成功すれば次の位置を返して値を <code>peg_pv</code> に置きます。失敗は <code>-1</code> です。</p>
+<!--file planck/peg.pk 207-212-->
+<p>文字列は空白を読み飛ばしてから照合し、シンボルは規則として呼び、関数はそのまま呼びます。<code>Seq</code>・<code>Choice</code> などの M式は、頭ごとの処理を表 <code>peg_handlers</code> から引きます（[[planck/peg.pk#170-205]]）。識別子や整数などの字句は、<a href="syntax.html">構文の定義</a>の側で関数として実装しています。</p>
+<p>失敗のたびに最も先まで進んだ位置を <code>peg_far</code> に記録し（[[planck/peg.pk#57-59]]）、構文エラーはその位置で報告します。</p>
+
+<h2>メモ化と直接左再帰</h2>
+<p>規則の結果を（位置, 規則）ごとにメモ化します（packrat 構文解析）。バックトラックしても同じ規則を同じ位置で再計算しません。</p>
+<!--file planck/peg.pk 214-220-->
+<p>メモは位置ごとの配列で、規則ごとに終了位置・値・左再帰の印の3欄を持ちます。<code>peg_call_rule</code> はまずメモを引きます（[[planck/peg.pk#229-245]]）。</p>
+<p>直接左再帰（<code>sum ::= sum "+" term | term</code>）もメモで扱います。規則の実行中はメモを実行中の印にしておき、同じ位置で再帰呼び出しされたら失敗を返します。これを種として得た結果をメモに置いて規則を再実行し、前より長く読めた間はこれを繰り返します（seed growing）。</p>
+<!--file planck/peg.pk 247-265-->
+<p>この結果 <code>1 - 2 - 3</code> は <code>(1 - 2) - 3</code> になります。</p>
+
+<h2>規則の定義</h2>
+<!--file planck/peg.pk 282-291-->
+<p><code>_define_rule</code> は規則に番号を振り、動作 <code>Act{e, f}</code> の <code>f</code> を評価してから表に入れます。選択肢の <code>Prev{}</code> はその規則の直前の定義に置き換えます。<code>::=</code> の <code>...</code> はこの <code>Prev{}</code> です。</p>
+<p>評価前の形は <code>peg_sources</code> に残します。<code>unparse</code> のように文法を読む道具はこの表を使います。</p>
+
+<h2>入口</h2>
+<p><code>peg_parse(rule, s)</code> はメモを作り直してから規則を呼び、<code>Tuple{値, 残り}</code> を返します（[[planck/peg.pk#300-316]]）。失敗すると <code>peg_far</code> の位置から行末までを添えた <code>SyntaxError{...}</code> を返します。</p>

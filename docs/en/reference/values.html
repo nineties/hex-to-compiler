@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Values, patterns, M-expressions | hex-to-compiler</title>
+<link rel="alternate" hreflang="ja" href="../../reference/values.html">
+<link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+<header class="site-header"><div class="inner">
+<a class="logo" href="../index.html">hex-to-compiler</a>
+<nav class="site-nav">
+<a href="../index.html">Overview</a>
+<a href="../tutorial/index.html">Tutorial</a>
+<a class="here" href="../reference/index.html">Reference</a>
+<a href="../implementation/index.html">Implementation</a>
+<a href="https://github.com/nineties/hex-to-compiler">GitHub</a>
+<a class="lang-switch" lang="ja" hreflang="ja" href="../../reference/values.html">日本語</a>
+</nav>
+</div></header>
+<div class="layout">
+<nav class="toc" aria-label="Reference contents"><details open><summary>Reference contents</summary>
+<h2>Reference</h2>
+<ol>
+<li><a href="index.html">Contents</a></li>
+<li><a href="syntax.html">Syntax</a></li>
+<li><a class="here" href="values.html">Values, patterns, M-expressions</a></li>
+<li><a href="grammar.html">Grammar declarations</a></li>
+<li><a href="builtins.html">Builtin functions</a></li>
+<li><a href="library.html">Libraries</a></li>
+</ol></details></nav>
+<main>
+<h1>Values, patterns, M-expressions</h1>
+<p class="lead">The evaluator works on M-expressions. This page defines the kinds of values, the special forms, patterns, effects and the top level.</p>
+
+<h2>M-expressions</h2>
+<p>An M-expression is a symbol (<code>x</code>), an integer (<code>42</code>, <code>-1</code>), a string (<code>"abc"</code>) or <code>Head{a, b, ...}</code>. A string at the top level has no effect, so it can be used as a comment.</p>
+
+<h2>Values</h2>
+<table>
+<tr><th><code>typeof</code></th><th>Value</th></tr>
+<tr><td><code>int</code></td><td>Integer</td></tr>
+<tr><td><code>string</code></td><td>String</td></tr>
+<tr><td><code>symbol</code></td><td>Symbol (<code>true</code>, <code>false</code> and <code>none</code> are symbols defined in <code>planck/init.pk</code>)</td></tr>
+<tr><td><code>mexpr</code></td><td><code>Head{a, ...}</code></td></tr>
+<tr><td><code>function</code></td><td>Lambda, fusion, builtin function or continuation</td></tr>
+<tr><td><code>array</code></td><td>Mutable array of fixed length made by <code>array(n)</code></td></tr>
+</table>
+<p>An array is the only value that can be written. Integers, strings, symbols and M-expressions are immutable. A list (<code>Cons{x, xs}</code>) and a tuple (<code>Tuple{a, ...}</code>) are M-expressions, so they are immutable too. A table <code>Table{a}</code> and a vector <code>Vector{a}</code> are M-expressions that hold an array, and <code>a[i] = e</code> writes them (see <a href="syntax.html#index">Indexing and rewriting</a>).</p>
+
+<h2>Special forms</h2>
+<table>
+<tr><th>Form</th><th>Meaning</th></tr>
+<tr><td><code>Def{x, e}</code> / <code>Set{x, e}</code></td><td>Define / assign a variable</td></tr>
+<tr><td><code>Apply{f, Tuple{a, ...}}</code></td><td>Call <code>f</code></td></tr>
+<tr><td><code>Do{e, ...}</code></td><td>Evaluate in order, return the last</td></tr>
+<tr><td><code>If{c, a, b}</code></td><td><code>b</code> when <code>c</code> is <code>false</code>, otherwise <code>a</code></td></tr>
+<tr><td><code>While{c, e}</code></td><td>Loop</td></tr>
+<tr><td><code>Lambda{Tuple{pattern, ...}, body}</code></td><td>Function</td></tr>
+<tr><td><code>Fusion{f, g}</code></td><td>Try <code>f</code>, then <code>g</code> if no pattern of <code>f</code> matches</td></tr>
+<tr><td><code>Quote{e}</code>, <code>QuasiQuote{e}</code>, <code>UnQuote{e}</code></td><td>Quotation</td></tr>
+<tr><td><code>Handle{body, handler}</code>, <code>Perform{v}</code></td><td>Algebraic effects</td></tr>
+<tr><td><code>Tuple{a, ...}</code></td><td>Tuple</td></tr>
+</table>
+<p>An M-expression with any other head, such as <code>Cons{x, y}</code>, is a constructor: its arguments are evaluated and an M-expression with the same head is built.</p>
+<div class="example">
+<p class="file">t2_mexpr.pk</p>
+<pre class="pk">p := Point{3, 4}
+println(p)
+println(head(p))
+println(arity(p))
+println(arg(p, 1))
+println(Point{1, 2} == Point{1, 2})
+println(push(p, 5))</pre>
+<p class="label">Output</p>
+<pre class="out">Point{3, 4}
+Point
+2
+4
+true
+Point{3, 4, 5}</pre>
+</div>
+
+<h2 id="patterns">Patterns</h2>
+<p>A parameter pattern is one of:</p>
+<ul>
+<li>a variable <code>x</code>, or <code>_</code> (matches anything and binds nothing)</li>
+<li>an integer or a string (matches an equal value)</li>
+<li><code>Quote{v}</code> (matches an equal value, e.g. <code>Quote{false}</code>)</li>
+<li><code>Head{p, ...}</code> (matches an M-expression with the same head and arity)</li>
+<li><code>_TypeOf{p, type}</code> (<code>p</code> matches and the value has the type shown by <code>typeof</code>)</li>
+</ul>
+<p>In the syntax, <code>'none</code> is <code>Quote{none}</code>, <code>x @ int</code> is <code>_TypeOf{x, int}</code>, and <code>x :: xs</code> and <code>[a, b]</code> are patterns of <code>Cons</code>.</p>
+<div class="example">
+<p class="file">t3_type.pk</p>
+<pre class="pk">describe := (n @ int) -&gt; f&quot;整数 {n}&quot;
+          | (s @ string) -&gt; f&quot;文字列 {s}&quot;
+          | (_) -&gt; &quot;そのほか&quot;
+put(describe(1)); put(&quot;\n&quot;)
+put(describe(&quot;abc&quot;)); put(&quot;\n&quot;)
+put(describe(&#x27;x)); put(&quot;\n&quot;)</pre>
+<p class="label">Output</p>
+<pre class="out">整数 1
+文字列 abc
+そのほか</pre>
+</div>
+
+<h2>Algebraic effects</h2>
+<p><code>Handle{body, handler}</code> evaluates <code>body</code>. <code>Perform{v}</code> calls the nearest <code>handler(v, k)</code> that has a matching pattern, where <code>k</code> is the continuation of the <code>Perform</code>. Handlers are deep: they stay installed in the continuation. When no pattern matches, the effect goes to the outer handler.</p>
+<p><code>k</code> is an ordinary function and can be called any number of times, even after <code>Handle</code> has returned. Variables are shared between the resumed copies.</p>
+<div class="example">
+<p class="file">t6_resume.pk</p>
+<pre class="pk">ask() := perform Ask{}
+
+with_answer(v, f) := handle f() with (Ask{}, k) -&gt; k(v)
+
+println(with_answer(21, () -&gt; ask() * 2))
+println(with_answer(5, () -&gt; ask() + ask()))</pre>
+<p class="label">Output</p>
+<pre class="out">42
+10</pre>
+</div>
+
+<h2>Top level</h2>
+<p>The loop looks up the global variables <code>parse</code> and <code>eval</code> for every expression, so a program can replace them and the next expression is handled by the new definitions. <code>Apply{eval, ...}</code> in a program also calls the replaced <code>eval</code>.</p>
+<ul>
+<li><code>parse</code>: <code>String -&gt; Tuple{M-expression, rest String}</code>. It skips blanks itself and returns <code>Tuple{Eof{}, ""}</code> when only blanks are left. A replacement <code>parse</code> passes <code>Eof{}</code> through.</li>
+<li><code>eval</code>: <code>M-expression -&gt; value</code>.</li>
+</ul>
+<div class="example">
+<p class="file">t8_eval.pk</p>
+<pre class="pk">old_eval := eval
+eval = e -&gt; {
+    v := old_eval(e)
+    put(&quot;=&gt; &quot;)
+    println(v)
+    v
+}
+1 + 2
+&#x27;(a + b)
+Point{1, 2}</pre>
+<p class="label">Output</p>
+<pre class="out">=&gt; 3
+=&gt; Apply{_add, Tuple{a, b}}
+=&gt; Point{1, 2}</pre>
+</div>
+
+<nav class="pager"><a class="prev" href="syntax.html"><small>Previous</small>Syntax</a><a class="next" href="grammar.html"><small>Next</small>Grammar declarations</a></nav>
+</main>
+</div>
+<footer><div class="inner"><a href="https://github.com/nineties/hex-to-compiler">github.com/nineties/hex-to-compiler</a></div></footer>
+<script src="../../assets/highlight.js"></script>
+</body>
+</html>

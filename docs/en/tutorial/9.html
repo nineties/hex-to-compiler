@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>9. Indexing and rewriting | hex-to-compiler</title>
+<link rel="alternate" hreflang="ja" href="../../tutorial/9.html">
+<link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+<header class="site-header"><div class="inner">
+<a class="logo" href="../index.html">hex-to-compiler</a>
+<nav class="site-nav">
+<a href="../index.html">Overview</a>
+<a class="here" href="../tutorial/index.html">Tutorial</a>
+<a href="../reference/index.html">Reference</a>
+<a href="../implementation/index.html">Implementation</a>
+<a href="https://github.com/nineties/hex-to-compiler">GitHub</a>
+<a class="lang-switch" lang="ja" hreflang="ja" href="../../tutorial/9.html">日本語</a>
+</nav>
+</div></header>
+<div class="layout">
+<nav class="toc" aria-label="Tutorial contents"><details open><summary>Tutorial contents</summary>
+<h2>Tutorial</h2>
+<ol>
+<li><a href="index.html">Prerequisites and running</a></li>
+<li><a href="1.html">1. Expressions, bindings, functions</a></li>
+<li><a href="2.html">2. Values and M-expressions</a></li>
+<li><a href="3.html">3. Patterns and fusion</a></li>
+<li><a href="4.html">4. Libraries</a></li>
+<li><a href="5.html">5. Records, local functions, escapes</a></li>
+<li><a href="6.html">6. Algebraic effects</a></li>
+<li><a href="7.html">7. Extending the grammar</a></li>
+<li><a href="8.html">8. Quotation and the evaluator</a></li>
+<li><a class="here" href="9.html">9. Indexing and rewriting</a></li>
+</ol></details></nav>
+<main>
+<h1>9. Indexing and rewriting</h1>
+<p class="lead"><code>a[i]</code> and <code>a[i] = v</code> call <code>_index_get</code> and <code>_index_set</code>. These are functions joined by <code>|</code>, one for each kind of value, so a program can add its own kind. <code>t[p -&gt; e | ...]</code> rewrites a syntax tree.</p>
+
+<h2>Reading and writing</h2>
+<div class="example">
+<p class="file">t9_index.pk</p>
+<pre class="pk">record Point(x, y)
+a := array(3)
+a[0] = 10
+a[1] = a[0] + 5
+a[2] = a[1] * 2
+println(a[2])
+s := &quot;planck&quot;
+println(s[1])
+t := table()
+t[&#x27;x] = 1
+t[&#x27;y] = 2
+println(t[&#x27;x] + t[&#x27;y])
+println(t[&#x27;z])
+xs := [10, 20, 30]
+println(xs[1])
+p := Point{3, 4}
+println(p[0] + p[1])
+println(p[&#x27;y])</pre>
+<p class="label">Output</p>
+<pre class="out">30
+108
+3
+none
+20
+7
+4</pre>
+</div>
+<p>Indexing works on arrays, strings, tables, lists and M-expressions. For a string, <code>s[i]</code> is the <code>i</code>-th byte. A list is counted from 0. For an M-expression, an integer is a position and a symbol is a field declared by <code>record</code>. A missing key of a table gives <code>none</code>.</p>
+<p>Arrays, tables and vectors can be written. Strings, lists, tuples and M-expressions are immutable: <code>s[0] = 1</code> stops the program with <code>cannot assign to an element of a string, which is immutable: ...</code>. An index out of range also stops the program.</p>
+
+<h2>Adding a kind</h2>
+<div class="example">
+<p class="file">t9_kind.pk</p>
+<pre class="pk">_index_get = (Counts{t}, k) -&gt; table_get(t, k, 0) | _index_get
+_index_set = (Counts{t}, k, n) -&gt; table_set(t, k, n) | _index_set
+c := Counts{table()}
+for (w in [&quot;a&quot;, &quot;b&quot;, &quot;a&quot;, &quot;a&quot;]) c[w] = c[w] + 1
+println(c[&quot;a&quot;])
+println(c[&quot;b&quot;])
+println(c[&quot;z&quot;])</pre>
+<p class="label">Output</p>
+<pre class="out">3
+1
+0</pre>
+</div>
+<p>Put your own kind at the front of the fusion and pass the rest to the original <code>_index_get</code>. Here an M-expression with the head <code>Counts</code> is a table that counts a missing key as 0. <code>use("vector")</code> adds vectors in the same way.</p>
+
+<h2>Rewriting trees</h2>
+<div class="example">
+<p class="file">t9_rewrite.pk</p>
+<pre class="pk">use(&quot;unparse&quot;)
+step(e) := e[
+    Apply{&#x27;_add, Tuple{a @ int, b @ int}} -&gt; a + b
+  | Apply{&#x27;_mul, Tuple{a @ int, b @ int}} -&gt; a * b
+  | Apply{&#x27;_add, Tuple{a, 0}} -&gt; a
+  | Apply{&#x27;_mul, Tuple{a, 1}} -&gt; a
+]
+simplify(e) := {
+    println(unparse(e))
+    n := step(e)
+    while (n != e) {
+        e = n
+        println(unparse(e))
+        n = step(e)
+    }
+    e
+}
+simplify(&#x27;(x * 1 + (2 + 3) * 4 + 0))</pre>
+<p class="label">Output</p>
+<pre class="out">&quot;x * 1 + (2 + 3) * 4 + 0&quot;
+&quot;x * 1 + (2 + 3) * 4&quot;
+&quot;x + 5 * 4&quot;
+&quot;x + 20&quot;</pre>
+</div>
+<p><code>t[p -&gt; a | q -&gt; b]</code> is <code>subst(t, p -&gt; a | q -&gt; b)</code>. Each part of the tree <code>t</code> is tried from the root down. When the pattern of an arm matches, the part is replaced and its inside is not tried. When no arm matches, the arguments are tried in order. An arm can have a guard <code>p if c -&gt; a</code> as in <code>match</code>.</p>
+<p>A replacement leaves its inside untouched, so repeat until nothing changes. The head of an operator tree is a name with <code>_</code>, such as <code>'_add</code>. A quoted tree is written <code>('e)[f]</code>; <code>'t[f]</code> quotes <code>t[f]</code>.</p>
+
+<nav class="pager"><a class="prev" href="8.html"><small>Previous</small>8. Quotation and the evaluator</a></nav>
+</main>
+</div>
+<footer><div class="inner"><a href="https://github.com/nineties/hex-to-compiler">github.com/nineties/hex-to-compiler</a></div></footer>
+<script src="../../assets/highlight.js"></script>
+</body>
+</html>
