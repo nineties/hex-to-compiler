@@ -164,20 +164,39 @@ Apply{_define_rule, Tuple{Quote{expr}, Quote{Choice{
     Act{Seq{Key{"record"}, ident, "(", idents, ")"},
         Lambda{Tuple{Tuple{_, n, _, fs, _}}, Apply{peg_record, Tuple{n, fs}}}}}}}}
 
+" a function with a guard passes its arguments on to the functions after its | "
+" when the guard is false (peg_fuse) "
 Apply{_define_rule, Tuple{Quote{union}, Quote{Choice{
     Act{Seq{arrow, "|", union},
-        Lambda{Tuple{Tuple{f, _, g}}, QuasiQuote{Fusion{UnQuote{f}, UnQuote{g}}}}},
+        Lambda{Tuple{Tuple{f, _, g}}, Apply{peg_fuse, Tuple{f, g}}}},
     arrow}}}}
 
+" -> or the word if after the blanks at p, which are not consumed "
+Def{peg_tok_arrow_next, Lambda{Tuple{p}, Do{
+    Def{q, Apply{peg_skip_ws, Tuple{p}}},
+    Def{c, Apply{peg_char_at, Tuple{q}}},
+    Def{d, Apply{peg_char_at, Tuple{Apply{_add, Tuple{q, 1}}}}},
+    Set{peg_pv, none},
+    If{If{Apply{_eq, Tuple{c, 45}}, Apply{_eq, Tuple{d, 62}}, false}, p,
+    If{If{Apply{_eq, Tuple{c, 105}}, If{Apply{_eq, Tuple{d, 102}}, Apply{_not, Tuple{Apply{peg_is_alnum, Tuple{Apply{peg_char_at, Tuple{Apply{_add, Tuple{q, 2}}}}}}}}, false}, false}, p,
+        Apply{peg_fail, Tuple{p}}}}}}}
+
+Apply{_define_rule, Tuple{Quote{arrow_next}, peg_tok_arrow_next}}
+
 Apply{_define_rule, Tuple{Quote{params}, Quote{Choice{
-    Act{Seq{"(", Delimited{pattern, ","}, ")", And{"->"}}, Lambda{Tuple{Tuple{_, ps, _, _}}, ps}},
+    Act{Seq{"(", Delimited{pattern, ","}, ")", And{arrow_next}}, Lambda{Tuple{Tuple{_, ps, _, _}}, ps}},
     Act{pattern, Lambda{Tuple{x}, Tuple{x}}}}}}}
 
-" the parameters are read as patterns only when an expression and -> follow, "
-" since every text of a pattern is also a text of an expression "
+" the parameters are read as patterns only when an expression and -> or if follow, "
+" since every text of a pattern is also a text of an expression. The rule keeps the result for the position. "
+Apply{_define_rule, Tuple{Quote{lambda_ahead}, Quote{Seq{And{Seq{ternary, arrow_next}}}}}}
+
+" params if c -> e is a function with the guard c (peg_guard) "
 Apply{_define_rule, Tuple{Quote{arrow}, Quote{Choice{
-    Act{Seq{And{Seq{ternary, "->"}}, params, "->", arrow},
+    Act{Seq{lambda_ahead, params, "->", arrow},
         Lambda{Tuple{Tuple{_, ps, _, e}}, Apply{peg_lambda, Tuple{ps, e}}}},
+    Act{Seq{lambda_ahead, params, Key{"if"}, ternary, "->", arrow},
+        Lambda{Tuple{Tuple{_, ps, _, c, _, e}}, Apply{peg_guard, Tuple{ps, c, e}}}},
     ternary}}}}
 
 Apply{_define_rule, Tuple{Quote{ternary}, Quote{Choice{
@@ -254,15 +273,10 @@ Apply{_define_rule, Tuple{Quote{postfix}, Quote{Choice{
 " the = of an assignment, not == "
 Apply{_define_rule, Tuple{Quote{assign_op}, Quote{Seq{"=", Not{Tight{"="}}}}}}
 
-" the inside of a[...]: an expression, or arms with a guard as in t[p -> e | q if c -> g] "
-Apply{_define_rule, Tuple{Quote{index}, Quote{Choice{
-    Act{Seq{expr, And{"]"}}, Lambda{Tuple{Tuple{e, _}}, e}},
-    Act{Delimited1{rewrite_arm, "|"}, Lambda{Tuple{arms}, Apply{_peg_rewrite, Tuple{arms}}}}}}}}
-
-" an arm of t[...]: the body is up to -> so that | separates the arms "
-Apply{_define_rule, Tuple{Quote{rewrite_arm}, Quote{
-    Act{Seq{pattern, Option{Seq{Key{"if"}, ternary}}, "->", arrow},
-        Lambda{Tuple{Tuple{p, g, _, e}}, Do{Tuple{p, g, e}}}}}}}
+" the inside of a[...]: an expression. In t[p -> e | q if c -> g] the functions joined by | "
+" end with a function that gives peg_skip (_peg_rewrite) "
+Apply{_define_rule, Tuple{Quote{index}, Quote{
+    Act{expr, Lambda{Tuple{e}, Apply{_peg_rewrite, Tuple{e}}}}}}}
 
 Apply{_define_rule, Tuple{Quote{block}, Quote{
     Act{Seq{"{", Many{Seq{Choice{expr,
@@ -270,10 +284,21 @@ Apply{_define_rule, Tuple{Quote{block}, Quote{
                 Lambda{Tuple{Tuple{_, f, _, ps, _, b}}, QuasiQuote{_Fun{UnQuote{f}, UnQuote{Apply{peg_lambda, Tuple{ps, b}}}}}}}}, Option{";"}}}, "}"},
         Lambda{Tuple{Tuple{_, es, _}}, Apply{peg_block, Tuple{es}}}}}}}
 
-" the condition is in parentheses, the body is any expression. "
-" else belongs to the nearest if, since the body takes it first. "
+" a branch of if: an expression without | outside of brackets, "
+" so that a | after if (c) a else b goes on with the functions around the if "
+Apply{_define_rule, Tuple{Quote{branch}, Quote{Choice{
+    Act{Seq{And{Seq{postfix, ":="}}, ident, Tight{"("}, Delimited{pattern, ","}, ")", ":=", branch},
+        Lambda{Tuple{Tuple{_, f, _, ps, _, _, e}}, QuasiQuote{Def{UnQuote{f}, UnQuote{Apply{peg_lambda, Tuple{ps, e}}}}}}},
+    Act{Seq{ident, ":=", branch},
+        Lambda{Tuple{Tuple{x, _, e}}, QuasiQuote{Def{UnQuote{x}, UnQuote{e}}}}},
+    Act{Seq{ident, "=", Not{Tight{"="}}, branch},
+        Lambda{Tuple{Tuple{x, _, _, e}}, QuasiQuote{Set{UnQuote{x}, UnQuote{e}}}}},
+    arrow}}}}
+
+" the condition is in parentheses, the branches are branch. "
+" else belongs to the nearest if, since the branch takes it first. "
 Apply{_define_rule, Tuple{Quote{if_expr}, Quote{
-    Act{Seq{Key{"if"}, "(", expr, ")", expr, Option{Seq{Key{"else"}, expr}}},
+    Act{Seq{Key{"if"}, "(", expr, ")", branch, Option{Seq{Key{"else"}, branch}}},
         Fusion{
             Lambda{Tuple{Tuple{_, _, c, _, a, Tuple{}}}, QuasiQuote{If{UnQuote{c}, UnQuote{a}, none}}},
             Lambda{Tuple{Tuple{_, _, c, _, a, Tuple{Tuple{_, b}}}}, QuasiQuote{If{UnQuote{c}, UnQuote{a}, UnQuote{b}}}}}}}}}
@@ -451,187 +476,201 @@ Def{
         }
     }}
 
-Def{
-    peg_arm_lambda,
-    Lambda{
-        Tuple{a},
-        QuasiQuote{Lambda{Tuple{UnQuote{Apply{arg, Tuple{a, 0}}}}, UnQuote{Apply{arg, Tuple{a, 2}}}}}
-    }}
+" a function that matches no arguments: what follows p if c -> e when no | follows it "
 
-Def{peg_arm_guarded, Lambda{Tuple{a}, Apply{_gt, Tuple{Apply{arity, Tuple{Apply{arg, Tuple{a, 1}}}}, 0}}}}
+Def{_nomatch, Lambda{Tuple{_TypeOf{_, nomatch}}, none}}
 
-Def{peg_arm_guard, Lambda{Tuple{a}, Apply{arg, Tuple{Apply{arg, Tuple{Apply{arg, Tuple{a, 1}}, 0}}, 1}}}}
+Def{peg_g, Apply{intern, Tuple{"%g"}}}
+
+" Tuple{%v1, ..., %vn} "
 
 Def{
-    peg_match,
+    peg_vars,
     Lambda{
-        Tuple{s, arms},
+        Tuple{n},
         Do{
-            Def{n, Apply{arity, Tuple{arms}}},
-            Def{guarded, false},
-            Def{i, 0},
+            Def{vs, Tuple{}},
+            Def{i, 1},
             While{
-                Apply{_lt, Tuple{i, n}},
+                Apply{_le, Tuple{i, n}},
                 Do{
-                    If{Apply{peg_arm_guarded, Tuple{Apply{arg, Tuple{arms, i}}}}, Set{guarded, true}, none},
+                    Set{vs, Apply{push, Tuple{vs, Apply{intern, Tuple{Apply{_strcat, Tuple{"%v", Apply{peg_itoa, Tuple{i}}}}}}}}},
                     Set{i, Apply{_add, Tuple{i, 1}}}
                 }
             },
-            If{
-                Apply{_not, Tuple{guarded}},
-                Do{
-                    Def{f, Apply{peg_arm_lambda, Tuple{Apply{arg, Tuple{arms, Apply{_sub, Tuple{n, 1}}}}}}},
-                    Set{i, Apply{_sub, Tuple{n, 2}}},
-                    While{
-                        Apply{_ge, Tuple{i, 0}},
-                        Do{
-                            Set{
-                                f,
-                                QuasiQuote{
-                                    Fusion{
-                                        UnQuote{Apply{peg_arm_lambda, Tuple{Apply{arg, Tuple{arms, i}}}}},
-                                        UnQuote{f}
-                                    }
-                                }
-                            },
-                            Set{i, Apply{_sub, Tuple{i, 1}}}
+            vs
+        }
+    }}
+
+" (p, ...) if c -> e. The function takes the arguments as %v1, ... and calls %g with them "
+" when the parameters do not match or c is false. %g is _nomatch until peg_fuse puts a function there. "
+
+Def{
+    peg_guard,
+    Lambda{
+        Tuple{ps, c, e},
+        Do{
+            Def{vs, Apply{peg_vars, Tuple{Apply{arity, Tuple{ps}}}}},
+            Def{f, Apply{peg_lambda, Tuple{ps, QuasiQuote{If{UnQuote{c}, UnQuote{e}, Apply{UnQuote{peg_g}, UnQuote{vs}}}}}}},
+            QuasiQuote{
+                Apply{
+                    Lambda{
+                        Tuple{UnQuote{peg_g}},
+                        Fusion{
+                            Lambda{UnQuote{vs}, Apply{Fusion{UnQuote{f}, UnQuote{peg_g}}, UnQuote{vs}}},
+                            UnQuote{peg_g}
                         }
                     },
-                    QuasiQuote{Apply{UnQuote{f}, Tuple{UnQuote{s}}}}
-                },
-                Do{
-                    Def{v, Apply{intern, Tuple{"%v"}}},
-                    Def{
-                        rname,
-                        Lambda{
-                            Tuple{i},
-                            Apply{intern, Tuple{Apply{_strcat, Tuple{"%r", Apply{peg_itoa, Tuple{i}}}}}}
-                        }
-                    },
-                    Def{defs, Tuple{QuasiQuote{Def{UnQuote{Apply{rname, Tuple{n}}}, Lambda{Tuple{}, none}}}}},
-                    Set{i, Apply{_sub, Tuple{n, 1}}},
-                    While{
-                        Apply{_ge, Tuple{i, 0}},
-                        Do{
-                            Def{a, Apply{arg, Tuple{arms, i}}},
-                            Def{
-                                body,
-                                If{
-                                    Apply{peg_arm_guarded, Tuple{a}},
-                                    QuasiQuote{
-                                        If{
-                                            UnQuote{Apply{peg_arm_guard, Tuple{a}}},
-                                            UnQuote{Apply{arg, Tuple{a, 2}}},
-                                            Apply{
-                                                UnQuote{Apply{rname, Tuple{Apply{_add, Tuple{i, 1}}}}},
-                                                Tuple{UnQuote{v}}
-                                            }
-                                        }
-                                    },
-                                    Apply{arg, Tuple{a, 2}}
-                                }
-                            },
-                            Set{
-                                defs,
-                                Apply{
-                                    push,
-                                    Tuple{
-                                        defs,
-                                        QuasiQuote{
-                                            Def{
-                                                UnQuote{Apply{rname, Tuple{i}}},
-                                                Fusion{
-                                                    Lambda{
-                                                        Tuple{UnQuote{Apply{arg, Tuple{a, 0}}}},
-                                                        UnQuote{body}
-                                                    },
-                                                    UnQuote{Apply{rname, Tuple{Apply{_add, Tuple{i, 1}}}}}
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            },
-                            Set{i, Apply{_sub, Tuple{i, 1}}}
-                        }
-                    },
-                    QuasiQuote{
-                        Apply{
-                            Lambda{
-                                Tuple{UnQuote{v}},
-                                UnQuote{
-                                    Apply{
-                                        mexpr,
-                                        Tuple{
-                                            Quote{Do},
-                                            Apply{
-                                                push,
-                                                Tuple{
-                                                    defs,
-                                                    QuasiQuote{
-                                                        Apply{
-                                                            UnQuote{Apply{rname, Tuple{0}}},
-                                                            Tuple{UnQuote{v}}
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            },
-                            Tuple{UnQuote{s}}
-                        }
-                    }
+                    Tuple{_nomatch}
                 }
             }
         }
     }}
 
-" the arms of t[p -> e | q if c -> g] with a guard are made into a function as match does, "
-" which gives peg_skip when no arm applies, so that subst goes into the arguments "
+" f | g: g goes in the place of the last _nomatch of the functions with a guard in f "
+
+Def{
+    peg_fuse,
+    Fusion{
+        Lambda{
+            Tuple{Quote{_nomatch}, g},
+            g
+        },
+        Fusion{
+            Lambda{
+                Tuple{Apply{Lambda{Tuple{k}, Fusion{Lambda{vs, Apply{Fusion{a, k2}, vs2}}, k3}}, Tuple{r}}, g},
+                If{
+                    Apply{_eq, Tuple{k, peg_g}},
+                    QuasiQuote{
+                        Apply{
+                            Lambda{Tuple{UnQuote{k}}, Fusion{Lambda{UnQuote{vs}, Apply{Fusion{UnQuote{a}, UnQuote{k2}}, UnQuote{vs2}}}, UnQuote{k3}}},
+                            Tuple{UnQuote{Apply{peg_fuse, Tuple{r, g}}}}
+                        }
+                    },
+                    QuasiQuote{
+                        Fusion{
+                            Apply{
+                                Lambda{Tuple{UnQuote{k}}, Fusion{Lambda{UnQuote{vs}, Apply{Fusion{UnQuote{a}, UnQuote{k2}}, UnQuote{vs2}}}, UnQuote{k3}}},
+                                Tuple{UnQuote{r}}
+                            },
+                            UnQuote{g}
+                        }
+                    }
+                }
+            },
+            Fusion{
+                Lambda{
+                    Tuple{Fusion{a, b}, g},
+                    QuasiQuote{Fusion{UnQuote{a}, UnQuote{Apply{peg_fuse, Tuple{b, g}}}}}
+                },
+                Lambda{Tuple{f, g}, QuasiQuote{Fusion{UnQuote{f}, UnQuote{g}}}}
+            }
+        }
+    }}
+
+" t[f]: when a function in f has a guard, (_ -> '%skip) goes last with peg_fuse, "
+" so that a part that no function applies to gives peg_skip and subst goes into its arguments "
+
 Def{peg_skip, Apply{intern, Tuple{"%skip"}}}
+
+Def{
+    peg_guarded,
+    Fusion{
+        Lambda{Tuple{Fusion{_, g}}, Apply{peg_guarded, Tuple{g}}},
+        Fusion{
+            Lambda{
+                Tuple{Apply{Lambda{Tuple{k}, Fusion{Lambda{_, Apply{Fusion{_, _}, _}}, _}}, Tuple{_}}},
+                Apply{_eq, Tuple{k, peg_g}}
+            },
+            Lambda{Tuple{_}, false}
+        }
+    }}
 
 Def{
     _peg_rewrite,
     Lambda{
-        Tuple{arms},
-        Do{
-            Def{f, Apply{arg, Tuple{Apply{peg_match, Tuple{none, arms}}, 0}}},
-            If{
-                Apply{peg_is_head, Tuple{f, Quote{Lambda}}},
-                Do{
-                    Def{d, Apply{arg, Tuple{f, 1}}},
-                    Def{last, Apply{arg, Tuple{Apply{arg, Tuple{d, 0}}, 0}}},
-                    Def{r, Tuple{QuasiQuote{Def{UnQuote{last}, Lambda{Tuple{_}, Quote{UnQuote{peg_skip}}}}}}},
-                    Def{i, 1},
-                    While{
-                        Apply{_lt, Tuple{i, Apply{arity, Tuple{d}}}},
-                        Do{Set{r, Apply{push, Tuple{r, Apply{arg, Tuple{d, i}}}}}, Set{i, Apply{_add, Tuple{i, 1}}}}
-                    },
-                    Set{f, QuasiQuote{Lambda{UnQuote{Apply{arg, Tuple{f, 0}}}, UnQuote{Apply{mexpr, Tuple{Quote{Do}, r}}}}}}
-                },
-                none
-            },
-            f
+        Tuple{e},
+        If{
+            Apply{peg_guarded, Tuple{e}},
+            Apply{peg_fuse, Tuple{e, QuasiQuote{Lambda{Tuple{_}, Quote{UnQuote{peg_skip}}}}}},
+            e
         }
     }}
 
-Apply{
-    _define_rule,
-    Tuple{
-        Quote{match_arm},
-        Quote{
-            Act{
-                Seq{pattern, Option{Seq{Key{"if"}, ternary}}, "->", expr},
-                Lambda{Tuple{Tuple{p, g, _, e}}, Do{Tuple{p, g, e}}}
+" the body without the handler of return that peg_lambda put around it "
+
+Def{
+    peg_unret,
+    Lambda{
+        Tuple{b},
+        If{
+            If{
+                Apply{peg_is_head, Tuple{b, Quote{Handle}}},
+                If{
+                    Apply{_eq, Tuple{Apply{arity, Tuple{b}}, 2}},
+                    If{
+                        Apply{_eq, Tuple{Apply{arg, Tuple{b, 1}}, peg_ret_handler}},
+                        Apply{peg_scan, Tuple{Apply{arg, Tuple{b, 0}}, Quote{Return}}},
+                        false
+                    },
+                    false
+                },
+                false
+            },
+            Apply{arg, Tuple{b, 0}},
+            b
+        }
+    }}
+
+" the functions joined by | in match, with the handlers of return taken off their bodies, "
+" so that a return in an arm belongs to the function around the match "
+
+Def{
+    peg_arms,
+    Fusion{
+        Lambda{
+            Tuple{Fusion{f, g}},
+            QuasiQuote{Fusion{UnQuote{Apply{peg_arms, Tuple{f}}}, UnQuote{Apply{peg_arms, Tuple{g}}}}}
+        },
+        Fusion{
+            Lambda{Tuple{Lambda{ps, b}}, QuasiQuote{Lambda{UnQuote{ps}, UnQuote{Apply{peg_unret, Tuple{b}}}}}},
+            Fusion{
+                Lambda{
+                    Tuple{Apply{Lambda{Tuple{k}, Fusion{Lambda{vs, Apply{Fusion{f, k2}, vs2}}, k3}}, Tuple{g}}},
+                    If{
+                        If{
+                            Apply{_eq, Tuple{k, peg_g}},
+                            If{Apply{_eq, Tuple{k2, k}}, If{Apply{_eq, Tuple{k3, k}}, Apply{_eq, Tuple{vs2, vs}}, false}, false},
+                            false
+                        },
+                        QuasiQuote{
+                            Apply{
+                                Lambda{
+                                    Tuple{UnQuote{k}},
+                                    Fusion{
+                                        Lambda{
+                                            UnQuote{vs},
+                                            Apply{Fusion{UnQuote{Apply{peg_arms, Tuple{f}}}, UnQuote{k}}, UnQuote{vs}}
+                                        },
+                                        UnQuote{k}
+                                    }
+                                },
+                                Tuple{UnQuote{Apply{peg_arms, Tuple{g}}}}
+                            }
+                        },
+                        QuasiQuote{Apply{Lambda{Tuple{UnQuote{k}}, Fusion{Lambda{UnQuote{vs}, Apply{Fusion{UnQuote{f}, UnQuote{k2}}, UnQuote{vs2}}}, UnQuote{k3}}}, Tuple{UnQuote{g}}}}
+                    }
+                },
+                Lambda{Tuple{f}, f}
             }
         }
     }}
 
-Apply{
-    _define_rule,
-    Tuple{Quote{match_item}, Quote{Act{Seq{match_arm, Option{";"}}, Lambda{Tuple{Tuple{a, _}}, Do{a}}}}}}
+" match s { f } is f applied to s "
+
+Def{
+    peg_match,
+    Lambda{Tuple{s, f}, QuasiQuote{Apply{UnQuote{Apply{peg_arms, Tuple{f}}}, Tuple{UnQuote{s}}}}}}
 
 Def{
     _to_text,
@@ -1220,11 +1259,11 @@ Apply{
         Quote{
             Choice{
                 Act{
-                    Seq{Key{"match"}, ternary, "{", Many1{match_item}, "}"},
-                    Lambda{Tuple{Tuple{_, s, _, arms, _}}, Do{Apply{peg_match, Tuple{s, arms}}}}
+                    Seq{Key{"match"}, ternary, "{", union, "}"},
+                    Lambda{Tuple{Tuple{_, s, _, f, _}}, Do{Apply{peg_match, Tuple{s, f}}}}
                 },
                 Act{
-                    Seq{Key{"return"}, Option{Seq{same, expr}}},
+                    Seq{Key{"return"}, Option{Seq{same, arrow}}},
                     Lambda{Tuple{Tuple{_, v}}, Do{Apply{peg_return, Tuple{v}}}}
                 },
                 Act{Seq{Key{"break"}}, Lambda{Tuple{Tuple{_}}, Do{Apply{peg_break, Tuple{}}}}},

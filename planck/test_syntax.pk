@@ -180,21 +180,21 @@ check(`F{!x, x}, 'F{5, x})
 check(Apply{_add, Tuple{1, 2}}, 3)
 
 # === match ===
-check(tree("match x { A{a} -> a\n B{} -> 0 }"), 'Apply{Fusion{Lambda{Tuple{A{a}}, a}, Lambda{Tuple{B{}}, 0}}, Tuple{x}})
+check(tree("match x { A{a} -> a\n| B{} -> 0 }"), 'Apply{Fusion{Lambda{Tuple{A{a}}, a}, Lambda{Tuple{B{}}, 0}}, Tuple{x}})
 check(tree("match x { 1 -> 2 }"), 'Apply{Lambda{Tuple{1}, 2}, Tuple{x}})
-check(tree("match f(x) + 1 { y -> y; _ -> 0 }"), 'Apply{Fusion{Lambda{Tuple{y}, y}, Lambda{Tuple{_}, 0}}, Tuple{Apply{_add, Tuple{Apply{f, Tuple{x}}, 1}}}})
-check(tree("match l {\n  x :: xs -> x\n  Nil{} -> 0\n}"), 'Apply{Fusion{Lambda{Tuple{Cons{x, xs}}, x}, Lambda{Tuple{Nil{}}, 0}}, Tuple{l}})
-check(tree("match x {\n  -1 -> 1\n  (a, b) -> a\n}"), 'Apply{Fusion{Lambda{Tuple{-1}, 1}, Lambda{Tuple{Tuple{a, b}}, a}}, Tuple{x}})
+check(tree("match f(x) + 1 { y -> y | _ -> 0 }"), 'Apply{Fusion{Lambda{Tuple{y}, y}, Lambda{Tuple{_}, 0}}, Tuple{Apply{_add, Tuple{Apply{f, Tuple{x}}, 1}}}})
+check(tree("match l {\n  x :: xs -> x\n| Nil{} -> 0\n}"), 'Apply{Fusion{Lambda{Tuple{Cons{x, xs}}, x}, Lambda{Tuple{Nil{}}, 0}}, Tuple{l}})
+check(tree("match x {\n  -1 -> 1\n| ((a, b)) -> a\n}"), 'Apply{Fusion{Lambda{Tuple{-1}, 1}, Lambda{Tuple{Tuple{a, b}}, a}}, Tuple{x}})
 check(head(tree("match x { }")), 'SyntaxError)
 check(head(tree("match x A{} -> 1")), 'SyntaxError)
 check(head(tree("match x { a b }")), 'SyntaxError)
 
 shape(n) := match n {
     n if n < 0 -> "neg"
-    0 -> "zero"
-    n if n < 10 and n % 2 == 1 -> "small odd"
-    n if n < 10 -> "small even"
-    _ -> "big"
+  | 0 -> "zero"
+  | n if n < 10 and n % 2 == 1 -> "small odd"
+  | n if n < 10 -> "small even"
+  | _ -> "big"
 }
 check(shape(-5), "neg")
 check(shape(0), "zero")
@@ -202,33 +202,113 @@ check(shape(7), "small odd")
 check(shape(8), "small even")
 check(shape(70), "big")
 # a guard that is false goes on to the arms after it, with the same value
-check(match 5 { n if n > 10 -> "a"; n if n > 3 -> "b"; _ -> "c" }, "b")
-check(match 5 { 5 if false -> "a"; 5 -> "b" }, "b")
+check(match 5 { n if n > 10 -> "a" | n if n > 3 -> "b" | _ -> "c" }, "b")
+check(match 5 { 5 if false -> "a" | 5 -> "b" }, "b")
 tree_eval := (e) -> match e {
     Num{n} -> n
-    Neg{e} -> 0 - tree_eval(e)
-    Add{a, b} -> tree_eval(a) + tree_eval(b)
-    Mul{a, b} -> tree_eval(a) * tree_eval(b)
+  | Neg{e} -> 0 - tree_eval(e)
+  | Add{a, b} -> tree_eval(a) + tree_eval(b)
+  | Mul{a, b} -> tree_eval(a) * tree_eval(b)
 }
 check(tree_eval(Add{Num{2}, Mul{Num{3}, Neg{Num{4}}}}), -10)
-check(match [1, 2] { x :: xs -> x; Nil{} -> 0 }, 1)
-check(match 'a { 'a -> 1; 'b -> 2 }, 1)
+check(match [1, 2] { x :: xs -> x | Nil{} -> 0 }, 1)
+check(match 'a { 'a -> 1 | 'b -> 2 }, 1)
 k := 3
-check(match k { 3 -> match k + 1 { n if n > 3 -> "inner"; _ -> "no" }; _ -> "outer" }, "inner")
+check(match k { 3 -> match k + 1 { n if n > 3 -> "inner" | _ -> "no" } | _ -> "outer" }, "inner")
 # matching nested guards: each match has its own variables
-nest(a, b) := match a { x if x > 0 -> match b { y if y > 0 -> x + y; _ -> x }; _ -> 0 }
+nest(a, b) := match a { x if x > 0 -> match b { y if y > 0 -> x + y | _ -> x } | _ -> 0 }
 check(nest(1, 2), 3)
 check(nest(1, -2), 1)
 check(nest(-1, 2), 0)
 # the scrutinee is evaluated once
 calls := 0
 once() := { calls = calls + 1; 5 }
-check(match once() { n if n > 9 -> 1; n if n > 4 -> 2; _ -> 3 }, 2)
+check(match once() { n if n > 9 -> 1 | n if n > 4 -> 2 | _ -> 3 }, 2)
 check(calls, 1)
 # an arm may change variables of the outside
 acc := 0
-match 4 { n if n > 3 -> acc = acc + n; _ -> acc = 100 }
+match 4 { n if n > 3 -> { acc = acc + n } | _ -> { acc = 100 } }
 check(acc, 4)
+# the inside of match is a function joined by |, applied to the value
+check(tree("match x { 1 -> a | 2 -> b | _ -> c }"), 'Apply{Fusion{Lambda{Tuple{1}, a}, Fusion{Lambda{Tuple{2}, b}, Lambda{Tuple{_}, c}}}, Tuple{x}})
+check(tree("match x { f }"), 'Apply{f, Tuple{x}})
+inc := (x) -> x + 1
+check(match 4 { inc }, 5)
+check(match 4 { inc | _ -> 0 }, 5)
+check(head(tree("match x { 1 -> a; 2 -> b }")), 'SyntaxError)
+# a | at the start of a line goes on with the arms, and a comment may come between them
+check(tree("match x {\n    1 -> a   # one\n  | 2 -> b\n}"), tree("match x { 1 -> a | 2 -> b }"))
+check(tree("match x {\n    1 -> a\n    | 2 -> b\n}"), tree("match x { 1 -> a | 2 -> b }"))
+# a branch of if, and the value of return, end before |
+check(tree("match x { 0 -> if (c) 1 else 2 | n -> n }"), 'Apply{Fusion{Lambda{Tuple{0}, If{c, 1, 2}}, Lambda{Tuple{n}, n}}, Tuple{x}})
+check(tree("match x { 0 -> if (c) 1 | n -> n }"), 'Apply{Fusion{Lambda{Tuple{0}, If{c, 1, none}}, Lambda{Tuple{n}, n}}, Tuple{x}})
+check(tree("if (c) x = 1 else y := 2"), 'If{c, Set{x, 1}, Def{y, 2}})
+check(tree("if (c) (f | g) else h"), 'If{c, Fusion{f, g}, h})
+lev(n) := match n {
+    0 -> if (n == 0) "zero" else "?"
+  | n if n < 0 -> if (n < -9) "low" else "neg"
+  | _ -> "pos"
+}
+check(lev(0), "zero")
+check(lev(-3), "neg")
+check(lev(-30), "low")
+check(lev(4), "pos")
+first_pos(xs) := {
+    for (x in xs) match x { n if n > 0 -> return n | _ -> none }
+    0
+}
+check(first_pos([-1, 0, 7, 8]), 7)
+check(first_pos([-1]), 0)
+# a match in an arm, which is not the last one
+kind(a, b) := match a {
+    0 -> match b {
+        0 -> "both"
+      | _ -> "a"
+    }
+  | x if x > 0 -> match b { 0 -> "b" | _ -> "none" }
+  | _ -> "neg"
+}
+check(kind(0, 0), "both")
+check(kind(0, 1), "a")
+check(kind(1, 0), "b")
+check(kind(1, 1), "none")
+check(kind(-1, 0), "neg")
+# an arm takes one parameter, so a tuple pattern is in parentheses
+check(match (1, 2) { ((a, b)) -> a + b | _ -> 0 }, 3)
+check(match (1, 2) { (a, b) -> a + b | _ -> 0 }, 0)
+# patterns written as expressions with guards
+check(match '(x * x) { a * b if a == b -> a | _ -> 0 }, 'x)
+check(match '(x * y) { a * b if a == b -> a | a * b -> b | _ -> 0 }, 'y)
+check(match '(1 + 2) { a @ int + b @ int if a < b -> b - a | _ -> 0 }, 1)
+# a guard in a function outside of match: the functions after its | are tried when it is false
+sgn := n if n > 0 -> 1 | n if n < 0 -> -1 | _ -> 0
+check(sgn(5), 1)
+check(sgn(-3), -1)
+check(sgn(0), 0)
+bigger := (a, b) if a > b -> a | (a, b) -> b
+check(bigger(3, 1), 3)
+check(bigger(1, 3), 3)
+# the arguments of another number go to the functions after the guard
+ar := (a, b) if a > 0 -> "two" | (a) -> "one"
+check(ar(1, 1), "two")
+check(ar(1), "one")
+pos := n if n > 0 -> n
+check(pos(2), 2)
+# also in parentheses, and when the functions after it are joined in parentheses
+pg := (n if n > 0 -> "pos") | (_ -> "other")
+check(pg(-1), "other")
+pg2 := (n if n > 0 -> "pos" | n if n < -5 -> "low") | _ -> "other"
+check(pg2(-1), "other")
+check(pg2(-9), "low")
+check(tree("(n if c -> 1) | g"), tree("n if c -> 1 | g"))
+pg3 := (0 -> "zero" | n if n > 0 -> "pos") | _ -> "other"
+check(pg3(0), "zero")
+check(pg3(-1), "other")
+# a guard sees the variables of the parameters, and the body sees the variables outside
+lim := 10
+under := n if n < lim -> n + lim | n -> n
+check(under(3), 13)
+check(under(30), 30)
 
 # === String interpolation ===
 check(tree("f\"a{x}b\""), 'Apply{_strcat, Tuple{Apply{_strcat, Tuple{"a", Apply{_to_text, Tuple{x}}}}, "b"}})
@@ -373,7 +453,7 @@ check(tree("for (x in xs) break"), `Handle{Apply{peg_for, Tuple{xs, Lambda{Tuple
 check(tree("while (a) { while (b) break }"), `While{a, Do{Handle{While{b, Perform{Break{}}}, !bh}}})
 check(tree("f() := { g() := return 1; 2 }"), `Def{f, Lambda{Tuple{}, Do{Def{g, Lambda{Tuple{}, Handle{Perform{Return{1}}, !rh}}}, 2}}})
 check(tree("f() := for (x in xs) return x"), `Def{f, Lambda{Tuple{}, Handle{Apply{peg_for, Tuple{xs, Lambda{Tuple{x}, Perform{Return{x}}}}}, !rh}}})
-check(tree("f() := match x { 1 -> return 2; _ -> 3 }"), `Def{f, Lambda{Tuple{}, Handle{Apply{Fusion{Lambda{Tuple{1}, Perform{Return{2}}}, Lambda{Tuple{_}, 3}}, Tuple{x}}, !rh}}})
+check(tree("f() := match x { 1 -> return 2 | _ -> 3 }"), `Def{f, Lambda{Tuple{}, Handle{Apply{Fusion{Lambda{Tuple{1}, Perform{Return{2}}}, Lambda{Tuple{_}, 3}}, Tuple{x}}, !rh}}})
 check(tree("f() := '(return 1)"), 'Def{f, Lambda{Tuple{}, Quote{Perform{Return{1}}}}})
 ch := 'Lambda{Tuple{Continue{}, k}, none}
 check(tree("continue"), 'Perform{Continue{}})
@@ -489,7 +569,7 @@ check(log, 9)
 skip_neg(xs) := {
     r := Nil{}
     for (x in xs) {
-        match x { n if n < 0 -> continue; _ -> none }
+        match x { n if n < 0 -> continue | _ -> none }
         if (x == 99) return r
         r = Cons{x, r}
     }
@@ -528,7 +608,7 @@ outer() := {
     inner() + 10
 }
 check(outer(), 11)
-by_match(x) := match x { 0 -> return "zero"; _ -> "other" }
+by_match(x) := match x { 0 -> return "zero" | _ -> "other" }
 check(by_match(0), "zero")
 check(by_match(1), "other")
 check(map(x -> { if (x > 1) return x * 2; x }, [1, 2, 3]), [1, 4, 6])
@@ -715,7 +795,7 @@ check(tree("F{a + 1, g(b)} -> a"), 'Lambda{Tuple{F{Apply{Quote{_add}, Tuple{a, 1
 check(tree("(a + b, c) -> a"), 'Lambda{Tuple{Apply{Quote{_add}, Tuple{a, b}}, c}, a})
 check(tree("((a, b)) -> a"), 'Lambda{Tuple{Tuple{a, b}}, a})
 check(tree("f(a + b) := a"), 'Def{f, Lambda{Tuple{Apply{Quote{_add}, Tuple{a, b}}}, a}})
-check(tree("match e { a + 0 -> a; _ -> e }"), 'Apply{Fusion{Lambda{Tuple{Apply{Quote{_add}, Tuple{a, 0}}}, a}, Lambda{Tuple{_}, e}}, Tuple{e}})
+check(tree("match e { a + 0 -> a | _ -> e }"), 'Apply{Fusion{Lambda{Tuple{Apply{Quote{_add}, Tuple{a, 0}}}, a}, Lambda{Tuple{_}, e}}, Tuple{e}})
 # M-expressions are patterns as before: a variable in the place of the function binds it
 check(tree("Apply{f, Tuple{x}} -> f"), 'Lambda{Tuple{Apply{f, Tuple{x}}}, f})
 check(tree("Apply{'_add, Tuple{a @ int, b}} -> a"), 'Lambda{Tuple{Apply{Quote{_add}, Tuple{_TypeOf{a, int}, b}}}, a})
@@ -727,11 +807,11 @@ check(head(tree("a ? b : c -> a")), 'SyntaxError)
 # matching
 simp(e) := match e {
     a@int + b@int -> a + b
-    a + 0 -> a
-    0 + a -> a
-    x * y if x == y -> `sq(!x)
-    f(x) -> x
-    _ -> e
+  | a + 0 -> a
+  | 0 + a -> a
+  | x * y if x == y -> `sq(!x)
+  | f(x) -> x
+  | _ -> e
 }
 check(simp('(1 + 2)), 3)
 check(simp('(x + 0)), 'x)
@@ -741,19 +821,19 @@ check(simp('(z * w)), 'Apply{_mul, Tuple{z, w}})
 check(simp('(x + 1)), 'Apply{_add, Tuple{x, 1}})
 check(simp('f(5)), 5)
 check(simp('g(5)), 'Apply{g, Tuple{5}})
-check(match '((1 + 2) * 3) { (a + b) * c -> Tuple{a, b, c}; _ -> 0 }, Tuple{1, 2, 3})
-check(match '(1 + 2 * 3) { (a + b) * c -> 1; a + b * c -> 2; _ -> 0 }, 2)
-check(match '(-x) { -a -> a; _ -> 0 }, 'x)
-check(match '(not p) { not a -> a; _ -> 0 }, 'p)
-check(match '(p and q) { a or b -> 1; a and b -> b; _ -> 0 }, 'q)
-check(match '(a < b) { x > y -> 1; x < y -> 2; _ -> 0 }, 2)
-check(match '(a :: b) { x :: y -> y; _ -> 0 }, 'b)
-check(match '[1, 2] { [x] -> 1; [x, y] -> y; _ -> 0 }, 2)
-check(match [1, 2] { [x, y] -> x + y; _ -> 0 }, 3)
-check(match '(x + 1) { a@int + b@int -> 0; _ -> 1 }, 1)
-check(match 'F{1 + x} { F{a + b @ symbol} -> b; _ -> 0 }, 'x)
-check(match '(f(1)) { Apply{g, Tuple{x}} -> g; _ -> 0 }, 'f)
-check(match 'f(1, 2) { f(a) -> 1; f(a, b) -> b; _ -> 0 }, 2)
+check(match '((1 + 2) * 3) { (a + b) * c -> Tuple{a, b, c} | _ -> 0 }, Tuple{1, 2, 3})
+check(match '(1 + 2 * 3) { (a + b) * c -> 1 | a + b * c -> 2 | _ -> 0 }, 2)
+check(match '(-x) { -a -> a | _ -> 0 }, 'x)
+check(match '(not p) { not a -> a | _ -> 0 }, 'p)
+check(match '(p and q) { a or b -> 1 | a and b -> b | _ -> 0 }, 'q)
+check(match '(a < b) { x > y -> 1 | x < y -> 2 | _ -> 0 }, 2)
+check(match '(a :: b) { x :: y -> y | _ -> 0 }, 'b)
+check(match '[1, 2] { [x] -> 1 | [x, y] -> y | _ -> 0 }, 2)
+check(match [1, 2] { [x, y] -> x + y | _ -> 0 }, 3)
+check(match '(x + 1) { a@int + b@int -> 0 | _ -> 1 }, 1)
+check(match 'F{1 + x} { F{a + b @ symbol} -> b | _ -> 0 }, 'x)
+check(match '(f(1)) { Apply{g, Tuple{x}} -> g | _ -> 0 }, 'f)
+check(match 'f(1, 2) { f(a) -> 1 | f(a, b) -> b | _ -> 0 }, 2)
 swap(a + b) := `(!b + !a)
 check(swap('(1 + x)), 'Apply{_add, Tuple{x, 1}})
 check(((a - b) -> a)('(5 - 3)), 5)
@@ -897,6 +977,8 @@ rt2 := 'F{P{1, 1}, P{1, 2}}
 check(rt2[P{a, b} if a == b -> a], 'F{1, P{1, 2}})
 check(rt2[P{a, b} if a == b -> 'same | P{a, b} -> 'diff], 'F{same, diff})
 check(('P{P{3, 3}, 2})[P{a, b} if a == b -> a], 'P{3, 2})
+check(rt2[P{1, 2} -> 'x | P{a, b} if a == b -> a], 'F{1, x})
+check(('F{G{1}, P{2, 2}})[P{a, b} if a == b -> a | G{a} if a > 5 -> a], 'F{G{1}, 2})
 check(('(a + a + b))[Apply{_add, Tuple{a, b}} if a == b -> `(2 * !a)], '(2 * a + b))
 # any function
 rf := G{a} -> a

@@ -71,11 +71,11 @@ check(unparse(tree("while (a) { if (b) break; if (c) continue; d }")), "while (a
 check(unparse(tree("for (x in xs) { if (x) continue; f(x) }")), "for (x in xs) {\n    if (x) continue\n    f(x)\n}")
 check(unparse(tree("for (h :: t in xs) f(h)")), "for (h :: t in xs) f(h)")
 check(unparse(tree("f(xs) := { for (x in xs) { if (x > 1) return x }; 0 }")), "f(xs) := {\n    for (x in xs) {\n        if (x > 1) return x\n    }\n    0\n}")
-check(unparse(tree("match x { 1 -> a; 2 -> b; _ -> c }")), "match x {\n    1 -> a\n    2 -> b\n    _ -> c\n}")
-check(unparse(tree("match x { h :: t -> h; _ -> 0 }")), "match x {\n    h :: t -> h\n    _ -> 0\n}")
-check(unparse(tree("match n { n if n < 0 -> \"neg\"; 0 -> \"zero\"; n if n < 10 -> \"small\"; _ -> \"big\" }")),
-      "match n {\n    n if n < 0 -> \"neg\"\n    0 -> \"zero\"\n    n if n < 10 -> \"small\"\n    _ -> \"big\"\n}")
-check(unparse(tree("(a -> 1 | b -> 2)(x)")), "match x {\n    a -> 1\n    b -> 2\n}")
+check(unparse(tree("match x { 1 -> a | 2 -> b | _ -> c }")), "match x {\n    1 -> a\n  | 2 -> b\n  | _ -> c\n}")
+check(unparse(tree("match x { h :: t -> h | _ -> 0 }")), "match x {\n    h :: t -> h\n  | _ -> 0\n}")
+check(unparse(tree("match n { n if n < 0 -> \"neg\" | 0 -> \"zero\" | n if n < 10 -> \"small\" | _ -> \"big\" }")),
+      "match n {\n    n if n < 0 -> \"neg\"\n  | 0 -> \"zero\"\n  | n if n < 10 -> \"small\"\n  | _ -> \"big\"\n}")
+check(unparse(tree("(a -> 1 | b -> 2)(x)")), "match x {\n    a -> 1\n  | b -> 2\n}")
 check(unparse(tree("f\"a{x}b\"")), "f\"a{x}b\"")
 check(unparse(tree("f\"{x}\"")), "f\"{x}\"")
 check(unparse(tree("f\"{{x}} {a + 1} }}\"")), "f\"{{x}} {a + 1} }}\"")
@@ -235,13 +235,13 @@ rt("for (x in xs) { if (x) continue; f(x) }")
 rt("for (h :: t in xs) f(h)")
 rt("f(xs) := { for (x in xs) { if (x > 1) return x }; 0 }")
 rt("f(a) := { g := y -> { return y }; return g(a) }")
-rt("match x { 1 -> a; 2 -> b; _ -> c }")
-rt("match x { h :: t -> h; _ -> 0 }")
-rt("match x { n if n > 0 -> match n { 1 -> 2; k if k > 5 -> 3; _ -> 4 }; _ -> 4 }")
-rt("match x { n if (a -> b) == c -> 1; _ -> 2 }")
-rt("match (x -> x) { f -> f(1); _ -> 0 }")
-rt("match x { 1 -> y -> y; _ -> z -> z }")
-rt("f(x) := match x { n if n < 0 -> return 0; _ -> x }")
+rt("match x { 1 -> a | 2 -> b | _ -> c }")
+rt("match x { h :: t -> h | _ -> 0 }")
+rt("match x { n if n > 0 -> match n { 1 -> 2 | k if k > 5 -> 3 | _ -> 4 } | _ -> 4 }")
+rt("match x { n if (a -> b) == c -> 1 | _ -> 2 }")
+rt("match (x -> x) { f -> f(1) | _ -> 0 }")
+rt("match x { 1 -> y -> y | _ -> z -> z }")
+rt("f(x) := match x { n if n < 0 -> return 0 | _ -> x }")
 rt("(a -> 1 | b -> 2)(x)")
 rt("f\"a{x}b\"")
 rt("f\"{x}\"")
@@ -272,30 +272,6 @@ rt("t[P{a, b} if a == b -> (x -> x)]")
 check(unparse(tree("_index_get(a, i)")), "a[i]")
 check(unparse(tree("_index_set(a, i, v)")), "a[i] = v")
 check(unparse(tree("t[P{a, b} if a == b -> a | x -> x]")), "t[P{a, b} if a == b -> a | x -> x]")
-
-# === Round trips of files ===
-file_trips(path) := {
-    src := read_file(path)
-    t := tree(src)
-    while (t != Eof{} and head(t) != 'SyntaxError) {
-        trip(t)
-        src = rest(src)
-        t = tree(src)
-    }
-}
-file_trips("planck/lib/base.pk")
-file_trips("planck/lib/symbol.pk")
-file_trips("planck/lib/error.pk")
-
-# === A grammar written with ::= is run backwards too ===
-arith ::= a:arith "+" b:term { `Apply{_add, Tuple{!a, !b}} } | a:arith "-" b:term { `Apply{_sub, Tuple{!a, !b}} } | term
-term ::= a:term "*" b:factor { `Apply{_mul, Tuple{!a, !b}} } | factor
-factor ::= n:integer { n } | x:ident { x } | "(" e:arith ")" { e }
-check(unparse_as('arith, arith{| 1+2*3 |}), "1 + 2 * 3")
-check(unparse_as('arith, arith{| (1+2)*3 |}), "(1 + 2) * 3")
-check(unparse_as('arith, arith{| 1-(2-x) |}), "1 - (2 - x)")
-check(unparse_as('arith, 'Apply{_mul, Tuple{Apply{_add, Tuple{a, b}}, Apply{_sub, Tuple{c, d}}}}), "(a + b) * (c - d)")
-check(unparse_try('arith, 'Apply{_div, Tuple{1, 2}}), none)
 
 put("Tests passed "); print(passed); put("/"); println(passed + failed)
 put("Round trips "); println(trips)

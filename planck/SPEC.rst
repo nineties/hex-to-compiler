@@ -38,6 +38,8 @@ M-expressions are expressions of this syntax too.
      - ``Apply{_index_set, Tuple{a, i, e}}``
    * - ``f | g``
      - ``Fusion{f, g}``
+   * - ``(p, ...) if c -> e | g``, ``p if c -> e | g``
+     - a function that calls ``g`` with its arguments when they do not match the parameters or ``c`` is false
    * - ``(p, ...) -> e``, ``p -> e``
      - ``Lambda{Tuple{p, ...}, e}``
    * - ``c ? a : b``
@@ -76,10 +78,8 @@ M-expressions are expressions of this syntax too.
      - ``Apply{peg_for, Tuple{e, Lambda{Tuple{p}, a}}}``
    * - ``return e``, ``return``, ``break``, ``continue``
      - ``Perform{Return{e}}``, ``Perform{Return{none}}``, ``Perform{Break{}}``, ``Perform{Continue{}}``
-   * - ``match e { p -> a; ... }``
-     - ``Apply{Fusion{Lambda{Tuple{p}, a}, ...}, Tuple{e}}``
-   * - ``match e { p if c -> a; ... }``
-     - the arm applies when ``p`` matches and ``c`` is true
+   * - ``match e { f }``
+     - ``Apply{f, Tuple{e}}``
    * - ``f"a{e}b"``
      - ``Apply{_strcat, Tuple{Apply{_strcat, Tuple{"a", Apply{_to_text, Tuple{e}}}}, "b"}}``
    * - ``fun f(p, ...) e`` in a block
@@ -100,8 +100,9 @@ The rows are ordered from the loosest binding to the tightest.
 and comparisons do not group. ``::`` binds tighter than comparisons and looser than ``+ -``,
 so ``a + 1 :: b == c`` is ``Cons{a + 1, b} == c``. ``()`` groups an expression.
 
-The condition of ``if`` and ``while`` is in parentheses, and the body ``a``, ``b``, ``e`` is any expression;
-a block ``{ ... }`` is the usual body of several expressions.
+The condition of ``if`` and ``while`` is in parentheses. The body ``e`` of ``while`` is any expression,
+and the branches ``a`` and ``b`` of ``if`` are expressions without ``|`` outside of brackets,
+so ``if (c) a else b | g`` is ``(if (c) a else b) | g``. A block ``{ ... }`` is the usual body of several expressions.
 ``else`` belongs to the nearest ``if`` that has no ``else``, so ``if (a) if (b) x else y`` is ``if (a) { if (b) x else y }``.
 ``else if (c) ...`` is ``else`` followed by an ``if`` expression.
 An ``if`` is an expression: ``y = if (c) 1 else 2``.
@@ -125,6 +126,7 @@ like ``x := e``.
 and has the value ``none``. The variables of ``a`` outside the loop are shared, so ``a`` can assign them.
 
 ``return e`` ends the call of the function that contains it, with the value ``e`` (``none`` without ``e``; ``e`` must start on the same line).
+``e`` is an expression up to ``->``, without ``|``, ``:=`` and ``=`` outside of brackets.
 ``break`` ends the innermost ``while`` or ``for`` that contains it. They are effects:
 the function is translated to ``Handle{body, (Return{v}, k) -> v}`` when its body has a ``return``,
 and the loop to ``Handle{loop, (Break{}, k) -> none}`` when its body has a ``break``.
@@ -134,14 +136,28 @@ A ``continue`` outside of a loop stops the program with ``unhandled effect: Cont
 A ``return`` in a ``for`` body or in an arm of ``match`` belongs to the function around them,
 and one in a function written inside belongs to that function.
 
-``match`` evaluates ``e`` once and selects the first arm whose pattern ``p`` matches it.
-The arms are separated by ``;`` or newlines. The body ``a`` is any expression.
-The guard ``if c`` is evaluated after ``p`` matched, with the variables of ``p``; when it is false the arms after it are tried.
-``e`` and ``c`` are expressions up to ``?:``, so a lambda needs parentheses.
-When no arm applies the call fails as a call of a function with no matching pattern does.
-``match`` binds ``%v`` and ``%r0``, ``%r1`` ... in the arms with guards, which no identifier can name.
+``match e { f }`` evaluates ``e`` once and calls the function ``f`` with it.
+``f`` is an expression up to ``|``, usually functions of one parameter joined by ``|``, the arms,
+so the first arm whose pattern matches ``e`` is selected.
+An arm takes one parameter: ``(a, b) -> x`` takes two, and ``((a, b)) -> x`` takes a tuple.
+A ``|`` may start a line, and the arms after the first one are usually written so:
 
-Parameters ``p`` and the patterns of ``match`` and ``for`` are written as expressions up to ``or``,
+.. code-block::
+
+   match e {
+       p -> a
+     | q -> b
+   }
+
+The guard ``if c`` of ``(p, ...) if c -> e | g`` is evaluated after the parameters matched, with their variables.
+When it is false, or the arguments do not match the parameters, ``g`` is called with the same arguments,
+so ``g`` is the arms after it. Without ``| g`` the call fails as a call of a function with no matching pattern does.
+``g`` is what is joined after the function by ``|`` in the text, also when the function is in parentheses: ``(p if c -> a) | g``.
+A function with a guard that is given by a variable, as ``h | g`` after ``h := p if c -> a``, does not call ``g``.
+The guard and ``e`` of ``match`` are expressions up to ``?:``, so a lambda needs parentheses.
+The function binds variables whose names start with ``%``, which no identifier can name.
+
+Parameters ``p`` and the patterns of ``for`` are written as expressions up to ``or``,
 and are the M-expressions of the table above, which are matched as in Patterns below, with these rules:
 
 * the name of an operator or of a called function is a symbol: ``a + b`` is ``Apply{Quote{_add}, Tuple{a, b}}``,
@@ -159,9 +175,9 @@ and are the M-expressions of the table above, which are matched as in Patterns b
 
    simp(e) := match e {
        a @ int + b @ int -> a + b
-       a + 0 -> a
-       x * y if x == y -> `sq(!x)
-       _ -> e
+     | a + 0 -> a
+     | x * y if x == y -> `sq(!x)
+     | _ -> e
    }
    simp('(1 + 2))    # 3
    simp('(z * z))    # sq(z)
@@ -563,7 +579,7 @@ columns on one line and puts every element of the others on its own line, indent
 * Among the alternatives that match the tree, the one with the most nodes in the quasi-quotation that are not ``!x`` is used.
 * An alternative of a stronger rule where a weaker rule is wanted is put in the first ``"(" e ")"`` of the grammar, whose action is any.
   The alternative that is a rule name only links a rule to the rules it can be, and so decides which alternative needs parentheses.
-  An alternative that ends with a looser rule (``if (c) a else b`` ends with ``expr``) also needs them unless a rule at least as loose is wanted.
+  An alternative that ends with a looser rule (``while (c) e`` ends with ``expr``) also needs them unless a rule at least as loose is wanted.
 * ``unparse_custom(owner, spec, tail, f)`` adds an alternative of the rule ``owner``: ``f(t)`` is the text of ``t`` or ``none``,
   ``spec`` ranks it against the quasi-quotations and ``tail`` is the last rule of the text or ``none``.
   ``unparse`` prints ``Do{...}`` as ``{ }`` with one expression to a line indented by 4 spaces, and ``If`` as ``if (c) a else b``, in this way.

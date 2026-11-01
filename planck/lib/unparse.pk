@@ -146,6 +146,7 @@ call_tmpl(c, labels) :=
         b := un_hole(if (n > 1) arg(arg(c, 1), 1) else '_)
         d := un_hole(if (n > 2) arg(arg(c, 1), 2) else '_)
         if (f == 'peg_lambda and n == 2) `Lambda{!a, UnwrapReturn{!b}}
+        else if (f == 'peg_fuse and n == 2) `Fusion{!a, !b}
         else if (f == 'peg_while and n == 2) `UnwrapBreak{While{!a, UnwrapContinue{!b}}}
         else if (f == 'peg_for_tree and n == 3) `UnwrapBreak{Apply{peg_for, Tuple{!b, Lambda{Tuple{!a}, UnwrapContinue{!d}}}}}
         else if (f == 'peg_break and n == 0) `Perform{Break{}}
@@ -359,7 +360,7 @@ un_reach(r) := {
 }
 
 # an alternative is open when its last element is a rule that is looser than the rule of the alternative
-# (if (c) a else b ends with expr, which goes on to the right as far as it can)
+# (while (c) e ends with expr, which goes on to the right as far as it can)
 is_open(a) := alt_tail(a) != none and set_has(un_reach(alt_tail(a)), alt_owner(a)) and not set_has(un_reach(alt_owner(a)), alt_tail(a))
 
 # Cand{key, alt, paren or false}, the alternatives that can stand for rule r. The more concrete
@@ -665,8 +666,8 @@ print_if(t) :=
     if (not (is_mx(t) and head(t) == 'If and arity(t) == 3)) none
     else {
         c := unparse_pp('expr, arg(t, 0))
-        a := unparse_pp('expr, arg(t, 1))
-        b := if (arg(t, 2) == none) "" else unparse_pp('expr, arg(t, 2))
+        a := unparse_pp('branch, arg(t, 1))
+        b := if (arg(t, 2) == none) "" else unparse_pp('branch, arg(t, 2))
         if (c == none or a == none or b == none) none
         else {
             a2 := if (b != "" and has_open_if(arg(t, 1))) _strcat("(", _strcat(a, ")")) else a
@@ -675,10 +676,9 @@ print_if(t) :=
     }
 
 unparse_custom('primary, 3, none, print_do)
-unparse_custom('primary, 3, 'expr, print_if)
+unparse_custom('primary, 3, 'arrow, print_if)
 
-# print_do is also used for a block of the body of a match arm and for the arguments
-# of a hole of an f-string: they are parsed as expr.
+# print_do is also used for the arguments of a hole of an f-string: they are parsed as expr.
 
 # === Syntax made by functions that cannot be run backwards ===
 
@@ -734,120 +734,111 @@ print_fstr(t) := {
 # return with no value
 print_return0(t) := if (t == 'Perform{Return{none}}) "return" else none
 
-# match: the arms are Lambda{Tuple{pattern}, body} joined by Fusion, applied to the value (no guard).
-# With a guard, peg_match makes a block of functions %r0, %r1, ... that call the next one when
-# the pattern or the guard fails, applied to %v.
-match_arm := (Lambda{Tuple{p}, e}) -> Arm{p, NoGuard{}, e}
-           | (x) -> none
+# match e { f } is Apply{f, Tuple{e}}, printed so when f has two arms or more, or a guard. The arms of f are joined by Fusion: (p, ...) -> a is a Lambda,
+# and (p, ...) if c -> a | g is what peg_guard and peg_fuse in syntax.pk make, with g the arms after it or _nomatch:
+# Apply{Lambda{Tuple{%g}, Fusion{Lambda{vs, Apply{Fusion{Lambda{ps, If{c, a, Apply{%g, vs}}}, %g}, vs}}, %g}}, Tuple{g}}
+# A return in a body of the arms of match has no handler of its own.
 
-fusion_arms(f) :=
-    if (is_mx(f) and head(f) == 'Fusion and arity(f) == 2) {
-        a := match_arm(arg(f, 0))
-        r := fusion_arms(arg(f, 1))
+# Guard{params, guard, body, rest} of a function with a guard, or none
+guard_parts := (Apply{Lambda{Tuple{k}, Fusion{Lambda{vs, Apply{Fusion{Lambda{ps, b}, k2}, vs2}}, k3}}, Tuple{g}}) -> {
+                   b2 := un_strip('UnwrapReturn, b)
+                   ok := typeof(k) == 'symbol and symname(k) == "%g" and k2 == k and k3 == k and vs2 == vs
+                         and is_mx(b2) and head(b2) == 'If and arity(b2) == 3 and arg(b2, 2) == mexpr('Apply, Tuple{k, vs})
+                   if (ok) Guard{ps, arg(b2, 0), arg(b2, 1), g} else none
+               }
+             | (_) -> none
+
+# the parameters of an arm: p alone, or (p, ...) for other numbers and for a tuple written as (a, b)
+params_text(ps) := {
+    xs := list_pieces('pattern, ",", ps)
+    s := if (xs == none) none else un_render(xs)
+    if (s == none) none
+    else if (arity(ps) == 1 and not (is_mx(arg(ps, 0)) and head(arg(ps, 0)) == 'Tuple and starts_with(s, "("))) s
+    else _strcat("(", _strcat(s, ")"))
+}
+
+arm_text(ps, c, e) := {
+    p := params_text(ps)
+    g := if (c == NoGuard{}) "" else unparse_pp('ternary, c)
+    b := unparse_pp('arrow, e)
+    if (p == none or g == none or b == none) none
+    else _strcat(p, _strcat(if (g == "") "" else _strcat(" if ", g), _strcat(" -> ", b)))
+}
+
+# the texts of the arms of f in match, or none. A function with a guard is the last of a Fusion.
+match_arms(f) := {
+    gp := guard_parts(f)
+    if (gp != none) {
+        a := arm_text(arg(gp, 0), arg(gp, 1), arg(gp, 2))
+        r := if (arg(gp, 3) == '_nomatch) [] else match_arms(arg(gp, 3))
+        if (a == none or r == none) none else a :: r
+    } else if (is_mx(f) and head(f) == 'Fusion and arity(f) == 2) {
+        a := plain_arm(arg(f, 0))
+        r := match_arms(arg(f, 1))
         if (a == none or r == none) none else a :: r
     } else {
-        a := match_arm(f)
+        a := plain_arm(f)
         if (a == none) none else [a]
     }
-
-rname(i) := intern(_strcat("%r", int_to_str(i)))
-
-# the arms of a match with guards: Arm{pattern, guard, body}
-guarded_arms(t) := {
-    lam := arg(t, 0)
-    v := arg(arg(lam, 0), 0)
-    d := arg(lam, 1)
-    n := arity(d) - 2
-    arms := []
-    ok := n >= 1 and symname(v) == "%v" and arg(d, 0) == mexpr('Def, Tuple{rname(n), 'Lambda{Tuple{}, none}})
-                 and arg(d, n + 1) == mexpr('Apply, Tuple{rname(0), Tuple{v}})
-    i := n - 1
-    guarded := false
-    while (ok and i >= 0) {
-        x := arg(d, n - i)
-        nxt := rname(i + 1)
-        if (is_mx(x) and head(x) == 'Def and arity(x) == 2 and arg(x, 0) == rname(i) and is_mx(arg(x, 1)) and head(arg(x, 1)) == 'Fusion
-            and arg(arg(x, 1), 1) == nxt and match_arm(arg(arg(x, 1), 0)) != none) {
-            a := match_arm(arg(arg(x, 1), 0))
-            body := arg(a, 2)
-            if (is_mx(body) and head(body) == 'If and arity(body) == 3 and arg(body, 2) == mexpr('Apply, Tuple{nxt, Tuple{v}})) {
-                guarded = true
-                arms = Arm{arg(a, 0), arg(body, 0), arg(body, 1)} :: arms
-            } else arms = a :: arms
-        } else ok = false
-        i = i - 1
-    }
-    if (ok and guarded) arms else none
 }
 
-arm_text(a) := {
-    p := unparse_pp('pattern, arg(a, 0))
-    g := if (is_mx(arg(a, 1)) and head(arg(a, 1)) == 'NoGuard) "" else unparse_pp('ternary, arg(a, 1))
-    e := unparse_pp('expr, arg(a, 2))
-    if (p == none or g == none or e == none) none
-    else _strcat(p, _strcat(if (g == "") "" else _strcat(" if ", g), _strcat(" -> ", e)))
-}
+plain_arm := (Lambda{ps @ mexpr, e}) -> if (head(ps) == 'Tuple and un_strip('UnwrapReturn, e) == e) arm_text(ps, NoGuard{}, e) else none
+           | (_) -> none
 
 is_applied(t) := is_mx(t) and head(t) == 'Apply and arity(t) == 2 and is_mx(arg(t, 1)) and head(arg(t, 1)) == 'Tuple and arity(arg(t, 1)) == 1
 
-is_guard_fun(f) := is_mx(f) and head(f) == 'Lambda and arity(f) == 2 and is_mx(arg(f, 0)) and head(arg(f, 0)) == 'Tuple and arity(arg(f, 0)) == 1
-                   and typeof(arg(arg(f, 0), 0)) == 'symbol and symname(arg(arg(f, 0), 0)) == "%v"
-                   and is_mx(arg(f, 1)) and head(arg(f, 1)) == 'Do
-
-match_arms(t) :=
-    if (not is_applied(t)) none
-    else if (is_mx(arg(t, 0)) and head(arg(t, 0)) == 'Fusion) fusion_arms(arg(t, 0))
-    else if (is_guard_fun(arg(t, 0))) guarded_arms(t)
-    else none
-
+# the arms are on their own lines, and | starts the line of each arm after the first
 print_match(t) := {
-    arms := match_arms(t)
-    if (arms == none) none
+    f := if (is_applied(t)) arg(t, 0) else none
+    arms := if (f != none and (guard_parts(f) != none or (is_mx(f) and head(f) == 'Fusion))) match_arms(f) else none
+    s := if (arms == none) none else unparse_pp('ternary, arg(arg(t, 1), 0))
+    if (arms == none or s == none) none
     else {
-        s := unparse_pp('ternary, arg(arg(t, 1), 0))
-        ts := map(arm_text, arms)
-        if (s == none or any(x -> x == none, ts)) none
-        else _strcat("match ", _strcat(s, _strcat(" {\n", _strcat(join("\n", map(indent, ts)), "\n}"))))
+        lines := indent(first_of(arms)) :: map(a -> _strcat("  | ", join("\n    ", split(a, "\n"))), rest_of(arms))
+        _strcat("match ", _strcat(s, _strcat(" {\n", _strcat(join("\n", lines), "\n}"))))
     }
 }
 
-unparse_custom('primary, 8, none, print_fstr)
-unparse_custom('sugar_primary, 6, 'expr, print_return0)
-unparse_custom('sugar_primary, 10, none, print_match)
-
-# t[p -> e | q if c -> g] with a guard: the inside is the function that match makes of the arms,
-# with the last function giving peg_skip instead of failing (_peg_rewrite in syntax.pk)
-skip_lambda := mexpr('Lambda, Tuple{'Tuple{_}, mexpr('Quote, Tuple{peg_skip})})
-
-rewrite_arms(f) :=
-    if (not is_guard_fun(f)) none
+# p if c -> a | g outside of match
+print_guard(t) := {
+    gp := guard_parts(t)
+    if (gp == none) none
     else {
-        d := arg(f, 1)
-        n := arity(d) - 2
-        if (n < 1 or arg(d, 0) != mexpr('Def, Tuple{rname(n), skip_lambda})) none
+        a := arm_text(arg(gp, 0), arg(gp, 1), un_strip('UnwrapReturn, arg(gp, 2)))
+        r := if (arg(gp, 3) == '_nomatch) "" else unparse_pp('union, arg(gp, 3))
+        if (a == none or r == none) none
+        else if (r == "") a
+        else _strcat(a, _strcat(" | ", r))
+    }
+}
+
+# t[f]: when a function in f has a guard, the parser puts (_ -> '%skip) last (_peg_rewrite in syntax.pk).
+# f without it is printed as the functions of match are.
+skip_fun := mexpr('Lambda, Tuple{'Tuple{_}, mexpr('Quote, Tuple{peg_skip})})
+
+# f with the last (_ -> '%skip) taken off, or none when f does not end with it
+unskip(f) :=
+    if (guard_parts(f) != none) {
+        g := arg(arg(f, 1), 0)
+        r := if (g == skip_fun) '_nomatch else unskip(g)
+        if (r == none) none else mexpr('Apply, Tuple{arg(f, 0), Tuple{r}})
+    } else if (is_mx(f) and head(f) == 'Fusion and arity(f) == 2) {
+        if (arg(f, 1) == skip_fun) arg(f, 0)
         else {
-            r := Tuple{mexpr('Def, Tuple{rname(n), 'Lambda{Tuple{}, none}})}
-            i := 1
-            while (i < arity(d)) {
-                r = push(r, arg(d, i))
-                i = i + 1
-            }
-            guarded_arms(mexpr('Apply, Tuple{mexpr('Lambda, Tuple{arg(f, 0), mexpr('Do, r)}), Tuple{none}}))
+            r := unskip(arg(f, 1))
+            if (r == none) none else mexpr('Fusion, Tuple{arg(f, 0), r})
         }
+    } else none
+
+print_index(f) :=
+    if (not peg_guarded(f)) unparse_pp('expr, f)
+    else {
+        g := unskip(f)
+        if (g == none) none else unparse_pp('expr, g)
     }
 
-rewrite_arm_text(a) := {
-    p := unparse_pp('pattern, arg(a, 0))
-    g := if (is_mx(arg(a, 1)) and head(arg(a, 1)) == 'NoGuard) "" else unparse_pp('ternary, arg(a, 1))
-    e := unparse_pp('arrow, arg(a, 2))
-    if (p == none or g == none or e == none) none
-    else _strcat(p, _strcat(if (g == "") "" else _strcat(" if ", g), _strcat(" -> ", e)))
-}
-
-print_rewrite(f) := {
-    arms := rewrite_arms(f)
-    ts := if (arms == none) none else map(rewrite_arm_text, arms)
-    if (ts == none or any(x -> x == none, ts)) none else join(" | ", ts)
-}
-
-unparse_custom('index, 10, none, print_rewrite)
+unparse_custom('index, 10, none, print_index)
+unparse_custom('primary, 8, none, print_fstr)
+unparse_custom('sugar_primary, 6, 'arrow, print_return0)
+unparse_custom('sugar_primary, 10, none, print_match)
+unparse_custom('union, 12, 'union, print_guard)
