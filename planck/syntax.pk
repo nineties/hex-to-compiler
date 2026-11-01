@@ -152,8 +152,8 @@ Apply{_define_rule, Tuple{Quote{toplevel}, Quote{
 
 Apply{_define_rule, Tuple{Quote{expr}, Quote{Choice{
     syntax_decl,
-    Act{Seq{ident, Tight{"("}, Delimited{pattern, ","}, ")", ":=", expr},
-        Lambda{Tuple{Tuple{f, _, ps, _, _, e}}, QuasiQuote{Def{UnQuote{f}, UnQuote{Apply{peg_lambda, Tuple{ps, e}}}}}}},
+    Act{Seq{And{Seq{postfix, ":="}}, ident, Tight{"("}, Delimited{pattern, ","}, ")", ":=", expr},
+        Lambda{Tuple{Tuple{_, f, _, ps, _, _, e}}, QuasiQuote{Def{UnQuote{f}, UnQuote{Apply{peg_lambda, Tuple{ps, e}}}}}}},
     Act{Seq{ident, ":=", expr},
         Lambda{Tuple{Tuple{x, _, e}}, QuasiQuote{Def{UnQuote{x}, UnQuote{e}}}}},
     Act{Seq{ident, "=", Not{Tight{"="}}, expr},
@@ -170,12 +170,14 @@ Apply{_define_rule, Tuple{Quote{union}, Quote{Choice{
     arrow}}}}
 
 Apply{_define_rule, Tuple{Quote{params}, Quote{Choice{
-    Act{Seq{"(", Delimited{pattern, ","}, ")"}, Lambda{Tuple{Tuple{_, ps, _}}, ps}},
+    Act{Seq{"(", Delimited{pattern, ","}, ")", And{"->"}}, Lambda{Tuple{Tuple{_, ps, _, _}}, ps}},
     Act{pattern, Lambda{Tuple{x}, Tuple{x}}}}}}}
 
+" the parameters are read as patterns only when an expression and -> follow, "
+" since every text of a pattern is also a text of an expression "
 Apply{_define_rule, Tuple{Quote{arrow}, Quote{Choice{
-    Act{Seq{params, "->", arrow},
-        Lambda{Tuple{Tuple{ps, _, e}}, Apply{peg_lambda, Tuple{ps, e}}}},
+    Act{Seq{And{Seq{ternary, "->"}}, params, "->", arrow},
+        Lambda{Tuple{Tuple{_, ps, _, e}}, Apply{peg_lambda, Tuple{ps, e}}}},
     ternary}}}}
 
 Apply{_define_rule, Tuple{Quote{ternary}, Quote{Choice{
@@ -238,12 +240,6 @@ Apply{_define_rule, Tuple{Quote{unary}, Quote{Choice{
     Act{Seq{"!", unary},
         Lambda{Tuple{Tuple{_, a}}, Apply{mexpr, Tuple{Quote{UnQuote}, Tuple{a}}}}}}}}}
 
-" parameters of functions: x :: xs is a pattern too "
-Apply{_define_rule, Tuple{Quote{pattern}, Quote{Choice{
-    Act{Seq{unary, "::", pattern},
-        Lambda{Tuple{Tuple{a, _, b}}, QuasiQuote{Cons{UnQuote{a}, UnQuote{b}}}}},
-    unary}}}}
-
 Apply{_define_rule, Tuple{Quote{postfix}, Quote{Choice{
     Act{Seq{postfix, Tight{"("}, Delimited{expr, ","}, ")"},
         Lambda{Tuple{Tuple{f, _, args, _}}, QuasiQuote{Apply{UnQuote{f}, UnQuote{args}}}}},
@@ -305,6 +301,79 @@ Apply{_define_rule, Tuple{Quote{primary}, Quote{Choice{
     Act{Seq{"[", Delimited{expr, ","}, "]"},
         Lambda{Tuple{Tuple{_, es, _}}, Apply{peg_to_list, Tuple{es}}}},
     sugar_primary}}}}
+
+" === Patterns === "
+" A pattern is written as an expression up to or, and matches the tree of that expression: "
+" a + b is Apply{'_add, Tuple{a, b}} and f(x) is Apply{'f, Tuple{x}}. "
+" The names of operators and functions are symbols, the other identifiers are variables. "
+" p @ type is _TypeOf{p, type}, and the arguments of Head{p, ...} are patterns. "
+
+Apply{_define_rule, Tuple{Quote{pattern}, Quote{Choice{
+    Act{Seq{pat_and, Key{"or"}, pattern},
+        Lambda{Tuple{Tuple{a, _, b}}, QuasiQuote{If{UnQuote{a}, Quote{true}, UnQuote{b}}}}},
+    pat_and}}}}
+
+Apply{_define_rule, Tuple{Quote{pat_and}, Quote{Choice{
+    Act{Seq{pat_not, Key{"and"}, pat_and},
+        Lambda{Tuple{Tuple{a, _, b}}, QuasiQuote{If{UnQuote{a}, UnQuote{b}, Quote{false}}}}},
+    pat_not}}}}
+
+Apply{_define_rule, Tuple{Quote{pat_not}, Quote{Choice{
+    Act{Seq{Key{"not"}, pat_not},
+        Lambda{Tuple{Tuple{_, a}}, QuasiQuote{Apply{Quote{_not}, Tuple{UnQuote{a}}}}}},
+    pat_rel}}}}
+
+Apply{_define_rule, Tuple{Quote{pat_rel}, Quote{Choice{
+    Act{Seq{pat_cons, "==", pat_cons}, Apply{peg_binop, Tuple{Quote{Quote{_eq}}}}},
+    Act{Seq{pat_cons, "!=", pat_cons}, Apply{peg_binop, Tuple{Quote{Quote{_ne}}}}},
+    Act{Seq{pat_cons, "<=", pat_cons}, Apply{peg_binop, Tuple{Quote{Quote{_le}}}}},
+    Act{Seq{pat_cons, ">=", pat_cons}, Apply{peg_binop, Tuple{Quote{Quote{_ge}}}}},
+    Act{Seq{pat_cons, "<", pat_cons}, Apply{peg_binop, Tuple{Quote{Quote{_lt}}}}},
+    Act{Seq{pat_cons, ">", pat_cons}, Apply{peg_binop, Tuple{Quote{Quote{_gt}}}}},
+    pat_cons}}}}
+
+Apply{_define_rule, Tuple{Quote{pat_cons}, Quote{Choice{
+    Act{Seq{pat_add, "::", pat_cons},
+        Lambda{Tuple{Tuple{a, _, b}}, QuasiQuote{Cons{UnQuote{a}, UnQuote{b}}}}},
+    pat_add}}}}
+
+Apply{_define_rule, Tuple{Quote{pat_add}, Quote{Choice{
+    Act{Seq{pat_add, "+", pat_mul}, Apply{peg_binop, Tuple{Quote{Quote{_add}}}}},
+    Act{Seq{pat_add, minus, pat_mul}, Apply{peg_binop, Tuple{Quote{Quote{_sub}}}}},
+    pat_mul}}}}
+
+Apply{_define_rule, Tuple{Quote{pat_mul}, Quote{Choice{
+    Act{Seq{pat_mul, "*", pat_unary}, Apply{peg_binop, Tuple{Quote{Quote{_mul}}}}},
+    Act{Seq{pat_mul, "/", pat_unary}, Apply{peg_binop, Tuple{Quote{Quote{_div}}}}},
+    Act{Seq{pat_mul, "%", pat_unary}, Apply{peg_binop, Tuple{Quote{Quote{_mod}}}}},
+    pat_unary}}}}
+
+" 'e is the value of the expression e "
+Apply{_define_rule, Tuple{Quote{pat_unary}, Quote{Choice{
+    pat_postfix,
+    Act{Seq{"-", pat_unary},
+        Lambda{Tuple{Tuple{_, a}}, QuasiQuote{Apply{Quote{_sub}, Tuple{0, UnQuote{a}}}}}},
+    Act{Seq{"'", unary},
+        Lambda{Tuple{Tuple{_, a}}, Apply{mexpr, Tuple{Quote{Quote}, Tuple{a}}}}}}}}}
+
+Apply{_define_rule, Tuple{Quote{pat_postfix}, Quote{Choice{
+    Act{Seq{pat_postfix, "@", ident},
+        Lambda{Tuple{Tuple{x, _, t}}, QuasiQuote{_TypeOf{UnQuote{x}, UnQuote{t}}}}},
+    pat_primary}}}}
+
+Apply{_define_rule, Tuple{Quote{pat_primary}, Quote{Choice{
+    Act{Seq{ident, Tight{"("}, Delimited{pattern, ","}, ")"},
+        Lambda{Tuple{Tuple{f, _, args, _}}, QuasiQuote{Apply{Quote{UnQuote{f}}, UnQuote{args}}}}},
+    Act{Seq{ident, Tight{"{"}, Delimited{pattern, ","}, "}"},
+        Lambda{Tuple{Tuple{h, _, args, _}}, Apply{mexpr, Tuple{h, args}}}},
+    ident,
+    integer,
+    string,
+    Act{Seq{"(", ")"}, Lambda{Tuple{_}, Quote{Tuple{}}}},
+    Act{Seq{"(", Delimited1{pattern, ","}, ")"},
+        Lambda{Tuple{Tuple{_, ps, _}}, If{Apply{_eq, Tuple{Apply{arity, Tuple{ps}}, 1}}, Apply{peg_first, Tuple{ps}}, ps}}},
+    Act{Seq{"[", Delimited{pattern, ","}, "]"},
+        Lambda{Tuple{Tuple{_, ps, _}}, Apply{peg_to_list, Tuple{ps}}}}}}}}
 
 " === Grammar declarations === "
 " name ::= alt | alt ...  defines the rule. ... stands for the previous definition. "

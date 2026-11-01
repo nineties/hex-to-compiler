@@ -9,7 +9,8 @@
 # a tree is matched against. The labels bind the subtrees, and the elements of the sequence
 # are printed in order: texts as they are, rules by unparse_as(rule, subtree).
 # An alternative of a stronger rule where a weaker rule is wanted is put in the parentheses
-# of the grammar: "(" e ")".
+# of the grammar: "(" e ")". Each rule that has such an alternative gives the parentheses for
+# the rules that reach it (primary for expressions, pat_primary for patterns).
 
 use("base")
 use("list")
@@ -285,14 +286,14 @@ ug_extra := []
 ug_stack := []
 ug_alts := []
 ug_links := table()
-ug_paren := none
+ug_parens := []
 ug_reach := table()
 ug_cands := table()
 
 un_build() := {
     alts := []
     links := table()
-    paren := none
+    parens := []
     names := map(kv -> arg(kv, 0), sort((a, b) -> arg(a, 1) < arg(b, 1), table_items(peg_ids)))
     each(r -> {
         src := table_get(peg_sources, r, none)
@@ -302,10 +303,8 @@ un_build() := {
             each(a -> {
                 order := id * 100 + i
                 i = i + 1
-                if (paren == none) {
-                    p := find_paren(r, a)
-                    if (p != none) paren = p
-                }
+                p := find_paren(r, a)
+                if (p != none and not any(x -> arg(x, 0) == r, parens)) parens = p :: parens
                 if (typeof(a) == 'symbol) {
                     target := table_get(peg_sources, a, none)
                     if (typeof(target) == 'function) {
@@ -326,7 +325,7 @@ un_build() := {
     }, ug_extra)
     ug_alts = reverse(alts)
     ug_links = links
-    ug_paren = paren
+    ug_parens = reverse(parens)
     ug_reach = table()
     ug_cands = table()
     ug_version = peg_version
@@ -363,20 +362,22 @@ un_reach(r) := {
 # (if (c) a else b ends with expr, which goes on to the right as far as it can)
 is_open(a) := alt_tail(a) != none and set_has(un_reach(alt_tail(a)), alt_owner(a)) and not set_has(un_reach(alt_owner(a)), alt_tail(a))
 
-# Cand{key, alt, wrapped}, the alternatives that can stand for rule r. The more concrete
+# Cand{key, alt, paren or false}, the alternatives that can stand for rule r. The more concrete
 # template comes first. An alternative of a stronger rule needs parentheses.
 un_cands(r) := {
     c := table_get(ug_cands, r, none)
     if (c != none) c else {
         rr := un_reach(r)
-        wrap_ok := ug_paren != none and set_has(rr, arg(ug_paren, 0))
-        uni := if (ug_paren == none) set_new() else un_reach(arg(ug_paren, 1))
+        ps := filter(x -> set_has(rr, arg(x, 0)), ug_parens)
+        paren := if (ps == []) none else first_of(ps)
+        wrap_ok := paren != none
+        uni := if (paren == none) set_new() else un_reach(arg(paren, 1))
         out := []
         each(a -> {
             o := alt_owner(a)
             sp := alt_spec(a)
             if (set_has(rr, o) and (not is_open(a) or set_has(rr, alt_tail(a)))) out = Cand{(sp * 2 + 1) * 100000 - alt_order(a), a, false} :: out
-            else if (wrap_ok and sp > 0 and set_has(uni, o)) out = Cand{sp * 2 * 100000 - alt_order(a), a, true} :: out
+            else if (wrap_ok and sp > 0 and set_has(uni, o)) out = Cand{sp * 2 * 100000 - alt_order(a), a, paren} :: out
         }, ug_alts)
         res := sort((x, y) -> arg(x, 0) > arg(y, 0), out)
         table_set(ug_cands, r, res)
@@ -510,12 +511,12 @@ try_fit(a, wrapped, t) := {
     } else if (is_custom(tm)) {
         txt := arg(tm, 1)(t)
         if (txt == none) none
-        else if (wrapped) _strcat(arg(ug_paren, 2), _strcat(txt, arg(ug_paren, 3)))
+        else if (wrapped != false) _strcat(arg(wrapped, 2), _strcat(txt, arg(wrapped, 3)))
         else txt
     } else if (un_match(tm, t, env)) {
         ps := items_pieces(alt_items(a), env)
         if (ps == none) none
-        else if (wrapped) _strcat(arg(ug_paren, 2), _strcat(un_render(ps), arg(ug_paren, 3)))
+        else if (wrapped != false) _strcat(arg(wrapped, 2), _strcat(un_render(ps), arg(wrapped, 3)))
         else un_render(ps)
     } else none
 }
