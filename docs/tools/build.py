@@ -30,7 +30,6 @@ SECTIONS = {
             ("8", "8. レコード・局所関数・脱出"),
             ("9", "9. 変数の範囲"),
             ("10", "10. 添字と置き換え"),
-            ("11", "11. vasm: 所有と借用の検査"),
         ]),
         ("reference", "リファレンス", [
             ("index", "目次"),
@@ -48,6 +47,7 @@ SECTIONS = {
             ("init", "init.pk と M式"),
             ("peg", "packrat パーサ"),
             ("syntax", "構文の定義"),
+            ("vasm", "vasm の検査器"),
         ]),
     ],
     "en": [
@@ -63,7 +63,6 @@ SECTIONS = {
             ("8", "8. Records, local functions, escapes"),
             ("9", "9. Scope of variables"),
             ("10", "10. Indexing and rewriting"),
-            ("11", "11. vasm: checking ownership and borrows"),
         ]),
         ("reference", "Reference", [
             ("index", "Contents"),
@@ -81,6 +80,7 @@ SECTIONS = {
             ("init", "init.pk and M-expressions"),
             ("peg", "The packrat parser"),
             ("syntax", "Defining the syntax"),
+            ("vasm", "The vasm checker"),
         ]),
     ],
 }

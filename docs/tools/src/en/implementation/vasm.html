@@ -1,0 +1,58 @@
+<!--title The vasm checker-->
+<h1>The vasm checker</h1>
+<p class="lead"><a href="@REPO@/blob/main/planck/lib/vasm.pk">planck/lib/vasm.pk</a> (862 lines) is a library, written in planck, that reads and checks vasm, a low-level language close to machine instructions. <code>use("vasm")</code> loads it. The list of structs and functions written in <code>vasm{| ... |}</code> is checked for ownership and borrow violations, uses after free and reads of uninitialized registers, using type rules alone. The rules of the language are in <a href="../reference/vasm.html">vasm in the reference</a>.</p>
+
+<h2>Entry points</h2>
+<!--file planck/lib/vasm.pk 1-11-->
+<p><code>vasm{| ... |}</code> is read as <code>Module{[Struct{...}, Fn{...}, ...]}</code>. <code>vasm_check(m)</code> takes it and returns a list of <code>VasmErr{kind, Pos{d}, msg}</code>. <code>vasm_errors(file, m)</code> turns the positions into <code>Loc{file, line, column}</code> of the file, and <code>vasm_report(file, m)</code> writes them as <code>file:line:column: message</code>. A function without an error does not appear in the result, and a function has at most one error: the first. The examples on this page write the result line by line with the <code>report</code> function in each file.</p>
+
+<h2>Syntax</h2>
+<p>The syntax of vasm is declared with <code>::=</code> as rules of the <a href="peg.html">packrat parser</a> ([[planck/lib/vasm.pk#38-39]]). The keywords are collected in <code>vasm_kw</code>, and a name is an identifier that is not a keyword. The rule for statements lists one alternative for each head, and each result is an M-expression such as <code>Decl{...}</code>, <code>IfS{...}</code> or <code>Assign{...}</code>.</p>
+<!--file planck/lib/vasm.pk 123-134-->
+<p>Every result carries its position <code>at</code>. <code>vasm_here</code> is a rule that reads nothing and returns, as <code>Pos{d}</code>, the number of characters from the next token to the end of the text ([[planck/lib/vasm.pk#29-34]]). An error of the checker holds this <code>Pos</code>, and <code>vasm_errors</code> subtracts it from the length of the text to get the line and the column.</p>
+
+<h2>Types and the state of the checker</h2>
+<p>Types are M-expressions too. The integers are <code>I8{}</code> to <code>U64{}</code>, a box is <code>Own{u}</code>, a borrow is <code>Ref{'shr or 'mut, region, u}</code>, an array is <code>Arr{u}</code> and a struct is <code>Named{s}</code>.</p>
+<!--file planck/lib/vasm.pk 186-198-->
+<p>For each function, the checker keeps the declarations of the variables in <code>vasm_info</code> (name to type) and the state of the variables in a table of <code>Vs{status, loans}</code>. The <code>status</code> is one of initialized, uninitialized, moved, freed, a box whose contents are moved out, and a struct whose fields are moved out. The <code>loans</code> are the borrows that currently borrow the variable. <code>if</code> and <code>while</code> copy the table, check each branch, and compare the results afterwards.</p>
+<p>Whether a value is moved or copied depends on its type. <code>own</code> and a struct that owns something are <em>linear</em>: a use moves them, and they must be moved or freed exactly once. Integers, <code>bool</code>, structs that own nothing and shared borrows are copied.</p>
+<!--file planck/lib/vasm.pk 217-222-->
+
+<h2>Ownership</h2>
+<!--ex vasm_box-->
+<p><code>own i64</code> is the single owner of an integer allocated by <code>box</code>. The <code>[r]</code> of <code>bump</code> is a region parameter fixed at each call. For a call that passes a <code>&amp;mut</code> to a borrow parameter, <code>vasm_reborrows</code> treats the argument as borrowed again for the duration of the call, and does not move it ([[planck/lib/vasm.pk#511-517]]). This is why <code>m</code> can be used after the call.</p>
+<!--ex vasm_freed-->
+<p>Before a register is read, <code>vasm_need_init</code> looks up its state. An uninitialized, moved or freed register is an error of kind <code>'uninit</code>, <code>'moved</code> or <code>'freed</code> ([[planck/lib/vasm.pk#258-265]]). A freed <code>own</code> cannot be read or freed again, because <code>vasm_call</code> marks the argument of <code>free</code> as freed. Assigning <code>q</code> to <code>p</code> marks <code>q</code> as moved, and the ownership moves to <code>p</code>.</p>
+
+<h3>Automatic release</h3>
+<!--ex vasm_drop-->
+<p>A value that owns something is released automatically where its owner goes away, so none of the functions above is an error. Those places are the end of a block or a function, an overwrite, the result of a call that is discarded as a statement, and what is left inside a value passed to <code>free</code>. The release is an action at run time, and the checker counts nothing. <code>vasm_leak_all</code>, which would examine what is left at the end of a block or a function, is an empty function kept to mark where the release happens ([[planck/lib/vasm.pk#654-657]]). An overwrite only sets the state back to initialized in <code>vasm_assign</code> ([[planck/lib/vasm.pk#642-652]]). <code>free</code> is for releasing a value earlier.</p>
+
+<h2>Borrows and regions</h2>
+<!--ex vasm_borrow-->
+<p>The <code>Vs</code> of a borrowed variable holds <code>Loan{region, kind}</code>. <code>vasm_no_loans</code> rejects a move, a free or an assignment while the variable is borrowed, and <code>vasm_no_mut_loan</code> rejects a read or a write while it is borrowed with <code>&amp;mut</code> ([[planck/lib/vasm.pk#294-295]]). Any number of shared borrows can exist at once. A <code>&amp;mut</code> is exclusive: while it lives, the original value can be neither read, written nor freed. At the end of <code>region r { ... }</code>, <code>vasm_end_region</code> removes the loans of <code>r</code> ([[planck/lib/vasm.pk#691]]).</p>
+<!--ex vasm_escape-->
+<p><code>vasm_outlives(q, r)</code> decides which region is inside which. <code>q</code> outlives <code>r</code> if they are the same, or if <code>r</code> is a region opened in the function and <code>q</code> was opened before it. The region parameters of a function have no order among themselves.</p>
+<!--file planck/lib/vasm.pk 325-327-->
+<!--file planck/lib/vasm.pk 334-345-->
+<p><code>vasm_fits</code> decides whether the type of a borrow matches in an assignment or an argument. A borrow of an outer region can be used where a borrow of an inner region is expected, because the outer one lives longer, and the reverse is rejected. When the reverse puts the borrow in a register that lives outside the region opened in the function, <code>vasm_escapes</code> makes the error of kind <code>'escape</code>.</p>
+
+<h2>Branches and loops</h2>
+<!--file planck/lib/vasm.pk 659-684-->
+<p><code>if</code> checks both branches on copies of the state, and <code>vasm_merge</code> compares them. A value moved or freed in only one branch has no definite owner afterwards, which is an error of kind <code>'branch</code>. A branch that ends in <code>return</code> is marked with <code>.dead</code> and left out of the comparison. <code>while</code> checks the body twice, and <code>vasm_loop_same</code> looks at whether a value moved in the loop is given back before the next iteration (<code>'loop</code>).</p>
+
+<h2>Widths of integers</h2>
+<!--ex vasm_ints-->
+<p>The integer types are listed in the table <code>vasm_ints</code> (type, name, bits, signedness) ([[planck/lib/vasm.pk#159-166]]). Both operands of an operator have the same type, and <code>as</code> changes the width or the signedness. A literal starts as <code>Lit{n}</code>, which has no type, and its range is checked where it meets an integer type. The range is -32768 to 32767, narrowed to start at 0 for an unsigned type and to the range of the type for 8 bits (<code>vasm_lit_lo</code> and <code>vasm_lit_hi</code>, [[planck/lib/vasm.pk#167-170]]). A larger value is built with shifts and <code>|</code>.</p>
+
+<h2>Arrays and structs</h2>
+<!--ex vasm_array-->
+<p>The built-in functions are listed in the table <code>vasm_builtins</code> as types <code>Sig{regions, arguments, result}</code> with the type variable <code>T</code> ([[planck/lib/vasm.pk#224-232]]). <code>alloc(n, v)</code> makes an <code>own [T]</code> of <code>n</code> copies of <code>v</code>, and <code>len</code> returns the length. An index is an <code>i64</code>. Checking its range is left to run time, and the checker looks only at types and ownership. A struct is built by giving every field once. It is copied like an integer unless it owns something, and <code>vasm_owning</code> decides that by following the fields ([[planck/lib/vasm.pk#200-212]]).</p>
+
+<h3>Exchanging values that own</h3>
+<!--ex vasm_swap-->
+<p>A value that owns something cannot be copied out of an array element or the target of a pointer, because it would have two owners. <code>swap(p[i], v)</code> puts <code>v</code> in and returns the previous value. The parameter type <code>Place{T}</code> accepts only a place of the form <code>*p</code>, <code>p[i]</code> or <code>p.f</code>. Writing a field of a struct register, as in <code>img.body = b</code>, releases the previous value and puts the new one in.</p>
+
+<h2>Reporting errors</h2>
+<!--file planck/lib/vasm.pk 830-848-->
+<p>When the checker meets an error, <code>vasm_fail</code> performs the algebraic effect <code>VasmFail{at, kind, msg}</code> (<a href="../tutorial/5.html">Algebraic effects</a>). For each struct and function, <code>vasm_check</code> receives it with <code>handle</code>, makes a <code>VasmErr</code> and abandons the check, so a function has at most one error: the first. The kinds are in the table of the <a href="../reference/vasm.html">reference</a>.</p>
