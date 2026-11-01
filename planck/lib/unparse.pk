@@ -813,3 +813,40 @@ print_match(t) := {
 unparse_custom('primary, 8, none, print_fstr)
 unparse_custom('sugar_primary, 6, 'expr, print_return0)
 unparse_custom('sugar_primary, 10, none, print_match)
+
+# t[p -> e | q if c -> g] with a guard: the inside is the function that match makes of the arms,
+# with the last function giving peg_skip instead of failing (peg_rewrite in syntax.pk)
+skip_lambda := mexpr('Lambda, Tuple{'Tuple{_}, mexpr('Quote, Tuple{peg_skip})})
+
+rewrite_arms(f) :=
+    if (not is_guard_fun(f)) none
+    else {
+        d := arg(f, 1)
+        n := arity(d) - 2
+        if (n < 1 or arg(d, 0) != mexpr('Def, Tuple{rname(n), skip_lambda})) none
+        else {
+            r := Tuple{mexpr('Def, Tuple{rname(n), 'Lambda{Tuple{}, none}})}
+            i := 1
+            while (i < arity(d)) {
+                r = push(r, arg(d, i))
+                i = i + 1
+            }
+            guarded_arms(mexpr('Apply, Tuple{mexpr('Lambda, Tuple{arg(f, 0), mexpr('Do, r)}), Tuple{none}}))
+        }
+    }
+
+rewrite_arm_text(a) := {
+    p := unparse_pp('pattern, arg(a, 0))
+    g := if (is_mx(arg(a, 1)) and head(arg(a, 1)) == 'NoGuard) "" else unparse_pp('ternary, arg(a, 1))
+    e := unparse_pp('arrow, arg(a, 2))
+    if (p == none or g == none or e == none) none
+    else strcat(p, strcat(if (g == "") "" else strcat(" if ", g), strcat(" -> ", e)))
+}
+
+print_rewrite(f) := {
+    arms := rewrite_arms(f)
+    ts := if (arms == none) none else map(rewrite_arm_text, arms)
+    if (ts == none or any(x -> x == none, ts)) none else join(" | ", ts)
+}
+
+unparse_custom('index, 10, none, print_rewrite)

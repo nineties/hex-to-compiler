@@ -158,6 +158,8 @@ Apply{define_rule, Tuple{Quote{expr}, Quote{Choice{
         Lambda{Tuple{Tuple{x, _, e}}, QuasiQuote{Def{UnQuote{x}, UnQuote{e}}}}},
     Act{Seq{ident, "=", Not{Tight{"="}}, expr},
         Lambda{Tuple{Tuple{x, _, _, e}}, QuasiQuote{Set{UnQuote{x}, UnQuote{e}}}}},
+    Act{Seq{postfix, Tight{"["}, expr, "]", "=", Not{Tight{"="}}, expr},
+        Lambda{Tuple{Tuple{a, _, i, _, _, _, v}}, QuasiQuote{Apply{set, Tuple{UnQuote{a}, UnQuote{i}, UnQuote{v}}}}}},
     union,
     Act{Seq{Key{"record"}, ident, "(", idents, ")"},
         Lambda{Tuple{Tuple{_, n, _, fs, _}}, Apply{peg_record, Tuple{n, fs}}}}}}}}
@@ -249,7 +251,22 @@ Apply{define_rule, Tuple{Quote{postfix}, Quote{Choice{
         Lambda{Tuple{Tuple{x, _, t}}, QuasiQuote{_TypeOf{UnQuote{x}, UnQuote{t}}}}},
     Act{Seq{postfix, Tight{"."}, ident},
         Lambda{Tuple{Tuple{t, _, f}}, QuasiQuote{Apply{record_get, Tuple{UnQuote{t}, Quote{UnQuote{f}}}}}}},
+    Act{Seq{postfix, Tight{"["}, index, "]", Not{assign_op}},
+        Lambda{Tuple{Tuple{a, _, i, _, _}}, QuasiQuote{Apply{get, Tuple{UnQuote{a}, UnQuote{i}}}}}},
     primary}}}}
+
+" the = of an assignment, not == "
+Apply{define_rule, Tuple{Quote{assign_op}, Quote{Seq{"=", Not{Tight{"="}}}}}}
+
+" the inside of a[...]: an expression, or arms with a guard as in t[p -> e | q if c -> g] "
+Apply{define_rule, Tuple{Quote{index}, Quote{Choice{
+    Act{Seq{expr, And{"]"}}, Lambda{Tuple{Tuple{e, _}}, e}},
+    Act{Delimited1{rewrite_arm, "|"}, Lambda{Tuple{arms}, Apply{peg_rewrite, Tuple{arms}}}}}}}}
+
+" an arm of t[...]: the body is up to -> so that | separates the arms "
+Apply{define_rule, Tuple{Quote{rewrite_arm}, Quote{
+    Act{Seq{pattern, Option{Seq{Key{"if"}, ternary}}, "->", arrow},
+        Lambda{Tuple{Tuple{p, g, _, e}}, Do{Tuple{p, g, e}}}}}}}
 
 Apply{define_rule, Tuple{Quote{block}, Quote{
     Act{Seq{"{", Many{Seq{Choice{expr,
@@ -499,6 +516,35 @@ Def{
                     }
                 }
             }
+        }
+    }}
+
+" the arms of t[p -> e | q if c -> g] with a guard are made into a function as match does, "
+" which gives peg_skip when no arm applies, so that subst goes into the arguments "
+Def{peg_skip, Apply{intern, Tuple{"%skip"}}}
+
+Def{
+    peg_rewrite,
+    Lambda{
+        Tuple{arms},
+        Do{
+            Def{f, Apply{arg, Tuple{Apply{peg_match, Tuple{none, arms}}, 0}}},
+            If{
+                Apply{peg_is_head, Tuple{f, Quote{Lambda}}},
+                Do{
+                    Def{d, Apply{arg, Tuple{f, 1}}},
+                    Def{last, Apply{arg, Tuple{Apply{arg, Tuple{d, 0}}, 0}}},
+                    Def{r, Tuple{QuasiQuote{Def{UnQuote{last}, Lambda{Tuple{_}, Quote{UnQuote{peg_skip}}}}}}},
+                    Def{i, 1},
+                    While{
+                        Apply{lt, Tuple{i, Apply{arity, Tuple{d}}}},
+                        Do{Set{r, Apply{push, Tuple{r, Apply{arg, Tuple{d, i}}}}}, Set{i, Apply{add, Tuple{i, 1}}}}
+                    },
+                    Set{f, QuasiQuote{Lambda{UnQuote{Apply{arg, Tuple{f, 0}}}, UnQuote{Apply{mexpr, Tuple{Quote{Do}, r}}}}}}
+                },
+                none
+            },
+            f
         }
     }}
 
@@ -993,13 +1039,14 @@ Def{
         Tuple{xs, f},
         Do{
             If{
-                Apply{eq, Tuple{Apply{typeof, Tuple{xs}}, Quote{array}}},
+                Apply{peg_is_head, Tuple{xs, Quote{Vector}}},
                 Do{
                     Def{i, 0},
+                    Def{v, Apply{arg, Tuple{xs, 0}}},
                     While{
-                        Apply{lt, Tuple{i, Apply{array_get, Tuple{xs, 1}}}},
+                        Apply{lt, Tuple{i, Apply{array_get, Tuple{v, 1}}}},
                         Do{
-                            Apply{f, Tuple{Apply{array_get, Tuple{Apply{array_get, Tuple{xs, 0}}, i}}}},
+                            Apply{f, Tuple{Apply{array_get, Tuple{Apply{array_get, Tuple{v, 0}}, i}}}},
                             Set{i, Apply{add, Tuple{i, 1}}}
                         }
                     }
@@ -1116,6 +1163,192 @@ Apply{
                 Act{
                     Seq{Key{"for"}, "(", pattern, Key{"in"}, expr, ")", expr},
                     Lambda{Tuple{Tuple{_, _, x, _, xs, _, b}}, Do{Apply{peg_for_tree, Tuple{x, xs, b}}}}
+                }
+            }
+        }
+    }}
+
+" === a[i], a[i] = v and t[p -> e | ...] === "
+
+Def{
+    index_error,
+    Lambda{
+        Tuple{a, i},
+        Do{
+            Apply{put, Tuple{"index out of range: "}},
+            Apply{print, Tuple{i}},
+            Apply{put, Tuple{" in "}},
+            Apply{println, Tuple{a}},
+            Apply{exit, Tuple{1}}
+        }
+    }}
+
+Def{
+    index_check,
+    Lambda{
+        Tuple{a, i, n},
+        If{
+            If{Apply{lt, Tuple{i, 0}}, true, Apply{ge, Tuple{i, n}}},
+            Apply{index_error, Tuple{a, i}},
+            none
+        }
+    }}
+
+" subst(t, f) replaces the parts of t that f applies to. Each part is tried from the root down: "
+" when a pattern of f matches it, it is replaced by the value of f and its parts are not tried; "
+" otherwise its arguments are tried, and the head is kept. "
+Def{
+    subst,
+    Lambda{
+        Tuple{t, f},
+        Do{
+            Def{go, none},
+            Def{g, Fusion{f, Lambda{Tuple{_}, peg_skip}}},
+            Set{
+                go,
+                Lambda{
+                    Tuple{x},
+                    Do{
+                        Def{y, Apply{g, Tuple{x}}},
+                        If{
+                            Apply{ne, Tuple{y, peg_skip}},
+                            y,
+                            If{
+                                Apply{eq, Tuple{Apply{typeof, Tuple{x}}, Quote{mexpr}}},
+                                Do{
+                                    Def{r, Apply{mexpr, Tuple{Apply{head, Tuple{x}}, Tuple{}}}},
+                                    Def{i, 0},
+                                    While{
+                                        Apply{lt, Tuple{i, Apply{arity, Tuple{x}}}},
+                                        Do{
+                                            Set{
+                                                r,
+                                                Apply{
+                                                    push,
+                                                    Tuple{
+                                                        r,
+                                                        Apply{go, Tuple{Apply{arg, Tuple{x, i}}}}
+                                                    }
+                                                }
+                                            },
+                                            Set{i, Apply{add, Tuple{i, 1}}}
+                                        }
+                                    },
+                                    r
+                                },
+                                x
+                            }
+                        }
+                    }
+                }
+            },
+            Apply{go, Tuple{t}}
+        }
+    }}
+
+Def{
+    list_get,
+    Lambda{
+        Tuple{xs, i},
+        Do{
+            Def{ys, xs},
+            Def{n, i},
+            While{
+                If{
+                    Apply{gt, Tuple{n, 0}},
+                    Apply{eq, Tuple{Apply{head, Tuple{ys}}, Quote{Cons}}},
+                    false
+                },
+                Do{Set{ys, Apply{arg, Tuple{ys, 1}}}, Set{n, Apply{sub, Tuple{n, 1}}}}
+            },
+            If{
+                If{
+                    Apply{lt, Tuple{i, 0}},
+                    true,
+                    Apply{ne, Tuple{Apply{head, Tuple{ys}}, Quote{Cons}}}
+                },
+                Apply{index_error, Tuple{xs, i}},
+                none
+            },
+            Apply{arg, Tuple{ys, 0}}
+        }
+    }}
+
+" a[i] is get(a, i), a function for each kind of a joined by Fusion. A program adds its own kind in front: "
+" get = (Matrix{w, _, d}, (i, j)) -> d[i * w + j] | get "
+Def{
+    get,
+    Fusion{
+        Lambda{Tuple{_TypeOf{a, array}, _TypeOf{i, int}}, Apply{array_get, Tuple{a, i}}},
+        Fusion{
+            Lambda{
+                Tuple{_TypeOf{s, string}, _TypeOf{i, int}},
+                Do{
+                    Apply{index_check, Tuple{s, i, Apply{strlen, Tuple{s}}}},
+                    Apply{ord, Tuple{s, i}}
+                }
+            },
+            Fusion{
+                Lambda{Tuple{Table{t}, k}, Apply{table_get, Tuple{Table{t}, k, none}}},
+                Fusion{
+                    Lambda{Tuple{x, _TypeOf{f, function}}, Apply{subst, Tuple{x, f}}},
+                    Fusion{
+                        Lambda{
+                            Tuple{Cons{x, xs}, _TypeOf{i, int}},
+                            Apply{list_get, Tuple{Cons{x, xs}, i}}
+                        },
+                        Fusion{
+                            Lambda{
+                                Tuple{Nil{}, _TypeOf{i, int}},
+                                Apply{index_error, Tuple{Nil{}, i}}
+                            },
+                            Fusion{
+                                Lambda{
+                                    Tuple{_TypeOf{t, mexpr}, _TypeOf{f, symbol}},
+                                    Apply{record_get, Tuple{t, f}}
+                                },
+                                Fusion{
+                                    Lambda{
+                                        Tuple{_TypeOf{t, mexpr}, _TypeOf{i, int}},
+                                        Do{
+                                            Apply{index_check, Tuple{t, i, Apply{arity, Tuple{t}}}},
+                                            Apply{arg, Tuple{t, i}}
+                                        }
+                                    },
+                                    Lambda{
+                                        Tuple{a, i},
+                                        Do{
+                                            Apply{put, Tuple{"no get for "}},
+                                            Apply{print, Tuple{a}},
+                                            Apply{put, Tuple{" and "}},
+                                            Apply{println, Tuple{i}},
+                                            Apply{exit, Tuple{1}}
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }}
+
+" a[i] = v is set(a, i, v) "
+Def{
+    set,
+    Fusion{
+        Lambda{Tuple{_TypeOf{a, array}, _TypeOf{i, int}, v}, Apply{array_set, Tuple{a, i, v}}},
+        Fusion{
+            Lambda{Tuple{Table{t}, k, v}, Apply{table_set, Tuple{Table{t}, k, v}}},
+            Lambda{
+                Tuple{a, i, v},
+                Do{
+                    Apply{put, Tuple{"no set for "}},
+                    Apply{print, Tuple{a}},
+                    Apply{put, Tuple{" and "}},
+                    Apply{println, Tuple{i}},
+                    Apply{exit, Tuple{1}}
                 }
             }
         }

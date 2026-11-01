@@ -699,5 +699,92 @@ primary ::= 'unless c:expr a:block 'else b:block { `If{!c, !b, !a} } | ...
 check(unless 1 > 2 { "a" } else { "b" }, "a")
 check(tree("unless c { a } else { b }"), 'If{c, Do{b}, Do{a}})
 
+# === a[i], a[i] = v and t[p -> e | ...] ===
+check(tree("a[i]"), 'Apply{get, Tuple{a, i}})
+check(tree("a[i][j]"), 'Apply{get, Tuple{Apply{get, Tuple{a, i}}, j}})
+check(tree("f(x)[i].g"), 'Apply{record_get, Tuple{Apply{get, Tuple{Apply{f, Tuple{x}}, i}}, Quote{g}}})
+check(tree("a[i](x)"), 'Apply{Apply{get, Tuple{a, i}}, Tuple{x}})
+check(tree("-a[i]"), 'Apply{sub, Tuple{0, Apply{get, Tuple{a, i}}}})
+check(tree("a[i] = v"), 'Apply{set, Tuple{a, i, v}})
+check(tree("a[i][j] = v"), 'Apply{set, Tuple{Apply{get, Tuple{a, i}}, j, v}})
+check(tree("a[i] = b[j] = v"), 'Apply{set, Tuple{a, i, Apply{set, Tuple{b, j, v}}}})
+check(tree("a[i] == v"), 'Apply{eq, Tuple{Apply{get, Tuple{a, i}}, v}})
+check(tree("t[x -> 1 | y -> 2]"), 'Apply{get, Tuple{t, Fusion{Lambda{Tuple{x}, 1}, Lambda{Tuple{y}, 2}}}})
+# [ right after the expression, without a space, is an index. Otherwise it is a list.
+check(tree("a\n[1, 2]"), 'a)
+check(rest("a\n[1, 2]"), "[1, 2]")
+check(tree("a [1]"), 'a)
+check(rest("a [1]"), "[1]")
+check(tree("{ a\n[1] }"), 'Do{a, Cons{1, Nil{}}})
+check(head(tree("f(a [1])")), 'SyntaxError)
+
+# arrays
+ia := array(3)
+ia[0] = 5
+check(ia[0], 5)
+check(ia[1] = 7, 7)
+ia[2] = ia[0] + ia[1]
+check(ia[2], 12)
+check(array_get(ia, 2), 12)
+ib := array(2)
+ib[1] = array(2)
+ib[1][0] = "x"
+check(ib[1][0], "x")
+# tables: a missing key is none
+it := table()
+it["a"] = 1
+it['b] = 2
+it["a"] = it["a"] + 10
+check(it["a"], 11)
+check(it['b], 2)
+check(it["z"], none)
+check(table_get(it, "a", 0), 11)
+fk := x -> x
+it[fk] = 3
+check(it[fk], 3)
+# strings: the byte
+check("abc"[0], 97)
+check("abc"[2], 99)
+# lists: the element
+check([10, 20, 30][0], 10)
+check([10, 20, 30][2], 30)
+# M-expressions: the argument, and the field of a record by its name
+check(F{1, 2}[1], 2)
+check(('(f(x, y)))[1][0], 'x)
+record IP(x, y)
+check(IP{1, 2}['y], 2)
+check(IP{1, 2}[0], 1)
+# a kind of value of the program: get and set are extended in front
+get = (Matrix{w, _, d}, (i, j)) -> d[i * w + j] | get
+set = (Matrix{w, _, d}, (i, j), v) -> { d[i * w + j] = v } | set
+im := Matrix{3, 2, array(6)}
+im[(1, 2)] = 8
+check(im[(1, 2)], 8)
+check(array_get(arg(im, 2), 5), 8)
+check(im[0], 3)
+check([1, 2][1], 2)
+
+# rewriting: the arms are tried in order, from the root down
+rt1 := 'F{G{1}, H{2}}
+check(rt1[G{a} -> 'first | G{1} -> 'second], 'F{first, H{2}})
+check(rt1[G{1} -> 'second | G{a} -> 'first], 'F{second, H{2}})
+# a replaced part is not rewritten again
+check(('F{G{G{1}}})[G{a} -> K{a}], 'F{K{G{1}}})
+# a part that no arm matches: its arguments are rewritten, the head is kept
+check(('F{1, G{2}, K{G{3}, G}})[G{a} -> a], 'F{1, 2, K{3, G}})
+check(('G{1})[G{a} -> a], 1)
+check(('F{1})[G{a} -> a], 'F{1})
+check([1, 2, 3][x @ int -> x * 10], [10, 20, 30])
+check(('(x * 1 + y))[Apply{'mul, Tuple{a, 1}} -> a], '(x + y))
+# guards: when the guard is false the next arm is tried, and then the arguments
+rt2 := 'F{P{1, 1}, P{1, 2}}
+check(rt2[P{a, b} if a == b -> a], 'F{1, P{1, 2}})
+check(rt2[P{a, b} if a == b -> 'same | P{a, b} -> 'diff], 'F{same, diff})
+check(('P{P{3, 3}, 2})[P{a, b} if a == b -> a], 'P{3, 2})
+check(('(a + a + b))[Apply{'add, Tuple{a, b}} if a == b -> `(2 * !a)], '(2 * a + b))
+# any function
+rf := G{a} -> a
+check(('F{G{1}})[rf], 'F{1})
+
 put("Tests passed "); print(passed); put("/"); println(passed + failed)
 if (failed > 0) exit(1)
