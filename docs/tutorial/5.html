@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>5. レコード・局所関数・脱出 | hex-to-compiler</title>
+<title>5. 代数的エフェクト | hex-to-compiler</title>
 <link rel="alternate" hreflang="en" href="../en/tutorial/5.html">
 <link rel="stylesheet" href="../assets/style.css">
 </head>
@@ -28,73 +28,85 @@
 <li><a href="2.html">2. 値と M式</a></li>
 <li><a href="3.html">3. パターンと融合</a></li>
 <li><a href="4.html">4. ライブラリ</a></li>
-<li><a class="here" href="5.html">5. レコード・局所関数・脱出</a></li>
-<li><a href="6.html">6. 代数的エフェクト</a></li>
+<li><a class="here" href="5.html">5. 代数的エフェクト</a></li>
+<li><a href="6.html">6. クオートと評価器</a></li>
 <li><a href="7.html">7. 文法の拡張</a></li>
-<li><a href="8.html">8. クオートと評価器</a></li>
+<li><a href="8.html">8. レコード・局所関数・脱出</a></li>
 <li><a href="9.html">9. 添字と置き換え</a></li>
 </ol></details></nav>
 <main>
-<h1>5. レコード・局所関数・脱出</h1>
-<p class="lead"><code>record</code> は M式の引数に名前を付ける宣言です。<code>return</code>・<code>break</code>・<code>continue</code> はエフェクトとして実装されています。</p>
+<h1>5. 代数的エフェクト</h1>
+<p class="lead"><code>handle e with h</code> と <code>perform v</code> は深いハンドラの代数的エフェクトです。継続は多重に呼べて、例外・生成器・非決定計算を同じ仕組みで書けます。</p>
 
-<h2>record</h2>
+<h2>例外</h2>
 <div class="example">
-<p class="file">t5_record.pk</p>
-<pre class="pk">record Point(x, y)
-p := Point{3, 4}
-println(p.x * p.x + p.y * p.y)
+<p class="file">t5_exception.pk</p>
+<pre class="pk">safe_div(a, b) := if (b == 0) perform Raise{&quot;division by zero&quot;} else a / b
 
-move(p, dx) := Point{p.x + dx, p.y}
-println(move(p, 10))</pre>
+try(f) := handle Ok{f()} with (Raise{msg}, k) -&gt; Error{msg}
+
+println(try(() -&gt; safe_div(10, 2)))
+println(try(() -&gt; safe_div(10, 0)))
+println(try(() -&gt; { put(&quot;before\n&quot;); safe_div(1, 0); put(&quot;after\n&quot;) }))</pre>
 <p class="label">出力</p>
-<pre class="out">25
-Point{13, 4}</pre>
+<pre class="out">Ok{5}
+Error{&quot;division by zero&quot;}
+before
+Error{&quot;division by zero&quot;}</pre>
 </div>
-<p><code>record Point(x, y)</code> は頭 <code>Point</code> の0番目と1番目の引数に名前を付けるだけで、値は <code>Point{3, 4}</code> のままです。パターンでも分解できます。<code>.</code> の前に空白は置けません。</p>
+<p><code>perform v</code> は、<code>v</code> に合うパターンを持つ一番近いハンドラを <code>h(v, k)</code> で呼びます。<code>k</code> は <code>perform</code> の継続です。ハンドラの値が <code>handle</code> 式の値になり、<code>k</code> を呼ばなければ残りの計算は捨てられます（3つ目の例で <code>after</code> が出ない）。合うハンドラがなければ外側に回ります。</p>
 
-<h2>fun</h2>
+<h2>再開</h2>
 <div class="example">
-<p class="file">t5_fun.pk</p>
-<pre class="pk">parity(n) := {
-    fun is_even(n) if (n == 0) true else is_odd(n - 1)
-    fun is_odd(n) if (n == 0) false else is_even(n - 1)
-    if (is_even(n)) &quot;even&quot; else &quot;odd&quot;
-}
-put(parity(10)); put(&quot;\n&quot;)
-put(parity(7)); put(&quot;\n&quot;)</pre>
-<p class="label">出力</p>
-<pre class="out">even
-odd</pre>
-</div>
-<p>ブロックの中の <code>fun</code> は名前をブロックの先頭で宣言するので、相互再帰が書けます。ブロック内の <code>f(x) := ...</code> は、それより前の式からは見えません。</p>
+<p class="file">t5_resume.pk</p>
+<pre class="pk">ask() := perform Ask{}
 
-<h2>return・break・continue</h2>
+with_answer(v, f) := handle f() with (Ask{}, k) -&gt; k(v)
+
+println(with_answer(21, () -&gt; ask() * 2))
+println(with_answer(5, () -&gt; ask() + ask()))</pre>
+<p class="label">出力</p>
+<pre class="out">42
+10</pre>
+</div>
+<p><code>k(x)</code> は <code>perform</code> が <code>x</code> を返したものとして計算を再開します。ハンドラは深く、再開した先の <code>perform</code> も同じハンドラが受けます。</p>
+
+<h2>生成器</h2>
 <div class="example">
-<p class="file">t5_return.pk</p>
-<pre class="pk">find_first(p, xs) := {
-    for (x in xs) if (p(x)) return x
-    none
-}
-println(find_first(x -&gt; x &gt; 3, [1, 5, 2, 7]))
-println(find_first(x -&gt; x &gt; 9, [1, 5, 2, 7]))
+<p class="file">t5_generator.pk</p>
+<pre class="pk">walk := (Leaf{}) -&gt; none
+      | (Node{l, v, r}) -&gt; { walk(l); perform Yield{v}; walk(r) }
 
-n := 0
-odd_sum := 0
-while (true) {
-    n = n + 1
-    if (n &gt; 10) break
-    if (n % 2 == 0) continue
-    odd_sum = odd_sum + n
-}
-println(odd_sum)</pre>
+tree := Node{Node{Leaf{}, 1, Leaf{}}, 2, Node{Leaf{}, 3, Leaf{}}}
+
+handle walk(tree) with (Yield{v}, k) -&gt; { put(f&quot;yield {v}\n&quot;); k(none) }
+
+to_list(t) := handle { walk(t); [] } with (Yield{v}, k) -&gt; v :: k(none)
+use(&quot;pretty&quot;)
+put(f&quot;{to_list(tree)}\n&quot;)</pre>
 <p class="label">出力</p>
-<pre class="out">5
-none
-25</pre>
+<pre class="out">yield 1
+yield 2
+yield 3
+[1, 2, 3]</pre>
 </div>
-<p><code>return e</code> は囲む関数から抜けます。<code>for</code> の本体は関数ですが、その中の <code>return</code> は外の <code>find_first</code> から抜けます。<code>break</code>・<code>continue</code> は一番内側の <code>while</code> か <code>for</code> に効きます。</p>
-<nav class="pager"><a class="prev" href="4.html"><small>前のページ</small>4. ライブラリ</a><a class="next" href="6.html"><small>次のページ</small>6. 代数的エフェクト</a></nav>
+<p>同じ <code>walk</code> に対して、ハンドラが値の使い方を決めます。2つ目は <code>v :: k(none)</code> で結果をリストに集めています。</p>
+
+<h2>多重再開</h2>
+<div class="example">
+<p class="file">t5_choose.pk</p>
+<pre class="pk">use(&quot;list&quot;)
+use(&quot;pretty&quot;)
+choose(xs) := perform Choose{xs}
+
+all_results(f) := handle [f()] with (Choose{xs}, k) -&gt; concat_map(x -&gt; k(x), xs)
+
+put(f&quot;{all_results(() -&gt; (choose([1, 2]), choose([&quot;a&quot;, &quot;b&quot;])))}\n&quot;)</pre>
+<p class="label">出力</p>
+<pre class="out">[Tuple{1, &quot;a&quot;}, Tuple{1, &quot;b&quot;}, Tuple{2, &quot;a&quot;}, Tuple{2, &quot;b&quot;}]</pre>
+</div>
+<p><code>k</code> は通常の関数で、何度でも呼べます。<code>handle</code> が値を返したあとでも呼べます。ここでは候補ごとに <code>k</code> を呼んで結果を連結しています。N クイーンを同じ方法で解いたサンプルが <a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/examples/queens.pk">planck/examples/queens.pk</a> です。</p>
+<nav class="pager"><a class="prev" href="4.html"><small>前のページ</small>4. ライブラリ</a><a class="next" href="6.html"><small>次のページ</small>6. クオートと評価器</a></nav>
 </main>
 </div>
 <footer><div class="inner"><a href="https://github.com/nineties/hex-to-compiler">github.com/nineties/hex-to-compiler</a></div></footer>
