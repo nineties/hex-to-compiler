@@ -141,24 +141,133 @@ Apply{_record_declare, Tuple{Quote{T}, Quote{Tuple{a, b}}}}</pre>
 
 <h2 id="scope">変数の範囲</h2>
 <p>変数は静的（字句的）に決まり、名前がどの変数を指すかは式を実行する前に決まります。関数の本体の変数は、その関数か外側の関数の引数、またはそれらの関数でそれより前に定義した変数で、どれでもなければトップレベルでそれより前に定義した変数（大域変数）です。呼んだ側の変数は見えません。どの変数も指さない名前があると、その式を実行する前にメッセージを出してプログラムが止まります。関数は作られた場所の変数を持ち、変数は共有の場所なので、関数を作ったあとの代入も関数から見えます。</p>
-<p>トップレベルの定義は書いた順に決まります。後ろに書いた定義はそれより前の式から見えません。関数の定義 <code>f(p, ...) := e</code> の本体からは <code>f</code> 自身が見えます。同じ名前を <code>x := e</code> か <code>fun f</code> でもう一度定義すると新しい変数になります。前に作った関数は前の変数を指したままで、新しい変数が見えるのは定義より後ろの式だけです。<code>f(x) := 1</code>、<code>g() := f(0)</code>、<code>f := (x) -&gt; 2</code> の順に書くと、<code>g()</code> は <code>1</code> です。今ある変数を上書きするときは <code>x = e</code> と書きます。これは同じ変数への代入なので、前に作った関数からも新しい値が見えます。<code>f := (x) -&gt; 2</code> の代わりに <code>f = (x) -&gt; 2</code> と書くと、<code>g()</code> は <code>2</code> です。</p>
-<p>関数の定義 <code>f(p, ...) := e</code> は、書いた場所の変数に <code>f</code> がすでにあれば <code>f(p, ...) = e</code> と同じで、なければ <code>fun f</code> と <code>f(p, ...) = e</code> を続けて書いたのと同じです。後者は書いた場所で新しい <code>f</code> を定義します。場所の変数は、トップレベルでは同じファイルで定義した大域変数で、関数の中ではその関数の引数とその関数でそれより前に定義した変数です。別のファイル（<code>use</code> で読んだライブラリや <code>planck/init.pk</code>）で定義した大域変数や組み込み関数はその場所の変数ではないので、プログラムのトップレベルの <code>f(p, ...) := e</code> は新しい <code>f</code> を定義してそれを隠します。別のファイルで定義した <code>f</code> に場合を足すときは <code>f(p, ...) = e</code> と書きます。外側の関数の変数や、関数の中から見た大域変数もその場所の変数ではないので、そこでの <code>f(p, ...) := e</code> は新しい <code>f</code> を定義し、外の <code>f</code> は変わりません。トップレベルの <code>if</code> の枝や <code>while</code> の本体では、場所の変数はその枝や本体でそれより前に定義した変数です。同じ場所に書いた <code>f</code> の定義は1つの関数になり、書いた順に試されます。</p>
-<div class="example"><pre><code>fib(0) := 0
+<div class="example">
+<p class="file">t1_scope.pk</p>
+<pre class="pk">n := 5
+read_n() := n
+caller() := {
+    n := 100
+    read_n()
+}
+println(caller())
+
+x := 1
+get() := x
+x := x + 1
+println(Tuple{x, get()})
+x = 10
+println(Tuple{x, get()})</pre>
+<p class="label">出力</p>
+<pre class="out">5
+Tuple{2, 1}
+Tuple{10, 1}</pre>
+</div>
+<div class="example">
+<p class="file">e_undefined.pk</p>
+<pre class="pk">println(&quot;start&quot;)
+println(later)
+later := 2</pre>
+<p class="label">出力</p>
+<pre class="out">&quot;start&quot;
+undefined variable: later</pre>
+</div>
+
+<h3>定義と代入</h3>
+<p>トップレベルの定義は書いた順に決まります。後ろに書いた定義はそれより前の式から見えません。関数の定義 <code>f(p, ...) := e</code> の本体からは <code>f</code> 自身が見えます。</p>
+<p>同じ名前を <code>x := e</code> か <code>fun f</code> でもう一度定義すると新しい変数になります。前に作った関数は前の変数を指したままで、新しい変数が見えるのは定義より後ろの式だけです。今ある変数を上書きするときは <code>x = e</code> と書きます。これは同じ変数への代入なので、前に作った関数からも新しい値が見えます。次の例の前半は <code>f := (x) -&gt; 2</code> で新しい <code>f</code> を作るので <code>g()</code> は <code>1</code>、後半は <code>h = (x) -&gt; 2</code> で代入するので <code>k()</code> は <code>2</code> です。</p>
+<div class="example">
+<p class="file">r_scope_redefine.pk</p>
+<pre class="pk">f(x) := 1
+g() := f(0)
+f := (x) -&gt; 2
+println(g())
+
+h(x) := 1
+k() := h(0)
+h = (x) -&gt; 2
+println(k())</pre>
+<p class="label">出力</p>
+<pre class="out">1
+2</pre>
+</div>
+<p>変数の定義 <code>x := e</code>（<code>x := (p) -&gt; e</code> も）は書いた場所で定義され、それより前の式からは外側の <code>x</code> が見えます。右辺 <code>e</code> から見えるのも前の <code>x</code> です。新しい <code>x</code> は右辺を評価したあとに作るので、前の <code>x</code> がなければ右辺の <code>x</code> は未定義です。ブロックの変数は、ブロックを含む関数かプログラムの変数です。</p>
+
+<h3>関数に定義が加わるとき</h3>
+<p>関数の定義 <code>f(p, ...) := e</code> は、書いた場所の変数に <code>f</code> がすでにあれば <code>f(p, ...) = e</code> と同じで、なければ <code>fun f</code> と <code>f(p, ...) = e</code> を続けて書いたのと同じです。後者は書いた場所で新しい <code>f</code> を定義します。同じ場所に書いた <code>f</code> の定義は1つの関数になり、書いた順に試されます。</p>
+<p>場所の変数は、トップレベルでは同じファイルで定義した大域変数で、関数の中ではその関数の引数とその関数でそれより前に定義した変数です。トップレベルの <code>if</code> の枝や <code>while</code> の本体では、その枝や本体でそれより前に定義した変数です。外側の関数の変数や、関数の中から見た大域変数は、その場所の変数ではありません。したがって、そこでの <code>f(p, ...) := e</code> は新しい <code>f</code> を定義し、外の <code>f</code> は変わりません。</p>
+<div class="example">
+<p class="file">r_scope_same.pk</p>
+<pre class="pk">fib(0) := 0
 fib(1) := 1
-fib(n) := fib(n - 1) + fib(n - 2)</code></pre></div>
-<p>互いに呼び合う関数は、先に <code>fun f</code> で名前だけを宣言します。<code>fun f</code> は値が <code>none</code> の変数 <code>f</code> を書いた場所で定義し、あとで <code>f(p, ...) = e</code> で埋めます。<code>f(p, ...) = e</code> は代入 <code>f = f | (p, ...) -&gt; e</code> で、<code>f</code> の関数の後ろに関数を足します。関数は書いた順に試されます。<code>none | g</code> は <code>g</code> なので、<code>fun f</code> のあとの最初の <code>f(p, ...) = e</code> は関数 <code>(p, ...) -&gt; e</code> そのものを代入します。引数の数が違う関数も足せます。宣言のあとに書いた関数からは <code>f</code> が見えます。埋める前に <code>f</code> を呼ぶと、<code>none</code> を呼ぶことになってプログラムが止まります。</p>
-<div class="example"><pre><code>fun odd
+fib(n) := fib(n - 1) + fib(n - 2)
+println(fib(20))
+
+x := 1
+x := x + 1
+println(x)</pre>
+<p class="label">出力</p>
+<pre class="out">6765
+2</pre>
+</div>
+<div class="example">
+<p class="file">t8_place.pk</p>
+<pre class="pk">fib(0) := 0
+fib(1) := 1
+fib(n) := fib(n - 1) + fib(n - 2)
+println(fib(10))
+
+name(x) := &quot;outer&quot;
+inner() := {
+    name(0) := &quot;inner&quot;
+    name(0)
+}
+println(Tuple{inner(), name(0), name(1)})</pre>
+<p class="label">出力</p>
+<pre class="out">55
+Tuple{&quot;inner&quot;, &quot;outer&quot;, &quot;outer&quot;}</pre>
+</div>
+<p>別のファイル（<code>use</code> で読んだライブラリや <code>planck/init.pk</code>）で定義した大域変数や組み込み関数も、その場所の変数ではありません。プログラムのトップレベルの <code>f(p, ...) := e</code> は新しい <code>f</code> を定義してそれを隠します。別のファイルで定義した <code>f</code> に定義を追加するときは <code>f(p, ...) = e</code> と書きます。</p>
+<div class="example">
+<p class="file">t8_library.pk</p>
+<pre class="pk">use(&quot;list&quot;)
+last(Tuple{a, b}) = b
+println(Tuple{last([1, 2, 3]), last(Tuple{4, 5})})
+sum(xs) := &quot;mine&quot;
+println(sum([1, 2]))</pre>
+<p class="label">出力</p>
+<pre class="out">Tuple{3, 5}
+&quot;mine&quot;</pre>
+</div>
+
+<h3>互いに呼び合う関数</h3>
+<p>互いに呼び合う関数は、先に <code>fun f</code> で名前だけを宣言します。<code>fun f</code> は値が <code>none</code> の変数 <code>f</code> を書いた場所で定義し、あとで <code>f(p, ...) = e</code> で埋めます。<code>f(p, ...) = e</code> は代入 <code>f = f | (p, ...) -&gt; e</code> で、<code>f</code> の関数の後ろに関数を足します。関数は書いた順に試されます。<code>none | g</code> は <code>g</code> なので、<code>fun f</code> のあとの最初の <code>f(p, ...) = e</code> は関数 <code>(p, ...) -&gt; e</code> そのものを代入します。引数の数が違う関数も足せます。宣言のあとに書いた関数からは <code>f</code> が見えます。</p>
+<div class="example">
+<p class="file">r_scope_fun.pk</p>
+<pre class="pk">fun odd
 even(n) := if (n == 0) true else odd(n - 1)
 odd(n) = if (n == 0) false else even(n - 1)
+println(Tuple{even(10), odd(7)})
 
 fun fact
 fact(0) = 1
-fact(n) = n * fact(n - 1)   # fact(0) は 1</code></pre></div>
-<p><code>f = (n) if n &gt; 0 -&gt; 1</code> のあとのように <code>f</code> の値がガード付きの関数のときは、ガードが偽でも <code>f(p, ...) = e</code> で足した関数は呼ばれません。下の <code>h | g</code> と同じです。</p>
-<p>変数の定義 <code>x := e</code>（<code>x := (p) -&gt; e</code> も）は書いた場所で定義され、それより前の式からは外側の <code>x</code> が見えます。右辺 <code>e</code> から見えるのも前の <code>x</code> です。新しい <code>x</code> は右辺を評価したあとに作るので、前の <code>x</code> がなければ右辺の <code>x</code> は未定義です。自分を呼ぶ関数は <code>f(p, ...) := e</code> で書きます。トップレベルでもブロックの中でも同じです。</p>
-<div class="example"><pre><code>x := 1
-x := x + 1   # x は 2</code></pre></div>
-<p>ブロックの変数は、ブロックを含む関数かプログラムの変数です。</p>
+fact(n) = n * fact(n - 1)
+println(fact(5))</pre>
+<p class="label">出力</p>
+<pre class="out">Tuple{true, true}
+120</pre>
+</div>
+<p>埋める前に <code>f</code> を呼ぶと、<code>none</code> を呼ぶことになってプログラムが止まります。</p>
+<div class="example">
+<p class="file">e_call_before_fill.pk</p>
+<pre class="pk">fun f
+println(&quot;run&quot;)
+f()
+f() = 1</pre>
+<p class="label">出力</p>
+<pre class="out">&quot;run&quot;
+not a function: none</pre>
+</div>
+<p><code>f</code> の値がガード付きの関数のとき（<code>f = (n) if n &gt; 0 -&gt; 1</code> のあと）は、ガードが偽でも <code>f(p, ...) = e</code> で追加した関数は呼ばれません。下の <code>h | g</code> と同じです。</p>
 
 <h2 id="names">糖衣が呼ぶ名前</h2>
 <p>糖衣が読み替える先の関数は名前が <code>_</code> で始まり、<code>_</code> のない同名の関数はありません。したがってプログラムの <code>add</code> や <code>index_get</code> という変数は、<code>a + b</code> や <code>a[i]</code> の意味を変えません。</p>

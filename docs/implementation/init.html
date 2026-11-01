@@ -32,7 +32,7 @@
 </ol></details></nav>
 <main>
 <h1>init.pk と M式</h1>
-<p class="lead">planck0 が最初に読むのが <a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/init.pk">planck/init.pk</a> です。この時点のリーダは M式しか読まないので、111行すべて M式で書かれています。以降で使う関数と表を定義します。</p>
+<p class="lead">planck0 が最初に読むのが <a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/init.pk">planck/init.pk</a> です。この時点のリーダは M式しか読まないので、114行すべて M式で書かれています。以降で使う関数と表を定義します。</p>
 
 <h2>M式だけで書く</h2>
 <p>演算子も <code>if</code> の構文もないので、すべて特殊形式と関数呼び出しで書きます。<code>not</code> が呼ぶ <code>_not</code> の定義は次のとおりです。</p>
@@ -49,7 +49,7 @@ Def{_not, Fusion{
 <h2>表</h2>
 <p>planck0 の組み込みは配列と <code>hash</code> までで、ハッシュ表は init.pk が配列で実装します（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/init.pk#L18-L77"><code>planck/init.pk:18–77</code></a>）。</p>
 <div class="example">
-<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/init.pk#L18-L26">planck/init.pk:18–26</a></p>
+<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/init.pk#L18-L25">planck/init.pk:18–25</a></p>
 <pre class="pk">&quot; A table is Table{a}, where a is an array | buckets | number of entries |. Each bucket is a chain of entries &quot;
 &quot; | key | value | next entry or none | hash of the key |. Keys are compared by eq. &quot;
 &quot; The number of buckets doubles when there are more entries than buckets. &quot;
@@ -57,16 +57,16 @@ Def{table, Lambda{Tuple{}, Do{
     Def{t, Apply{array, Tuple{2}}},
     Apply{array_set, Tuple{t, 0, Apply{array, Tuple{16}}}},
     Apply{array_set, Tuple{t, 1, 0}},
-    Table{t}}}}
-</pre>
+    Table{t}}}}</pre>
 </div>
 <p>表は <code>Table{a}</code> で、<code>a</code> はバケットの配列と項目数を持つ配列です。項目数がバケット数を超えるとバケットを倍にします。キーは <code>==</code> と同じ比較で比べます。パーサのメモ表、規則の表、<code>use</code> の読み込み済みの記録などに使います。</p>
 
 <h2>ファイルを読む</h2>
-<p><code>load</code> は planck0 の <code>interpret_file</code> と同じく、その時点の <code>parse</code> と <code>eval</code> でファイルを1式ずつ評価します。</p>
+<p><code>load</code> は planck0 の <code>interpret_file</code> と同じく、その時点の <code>parse</code> と <code>eval</code> でファイルを1式ずつ評価します。評価の間は <code>_set_file</code> でそのファイルを読み込み中のファイルにするので、ファイルのトップレベルで定義した大域変数は、どのファイルで定義したかが分かります（<a href="../reference/syntax.html#scope">変数の範囲</a>）。</p>
 <div class="example">
-<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/init.pk#L81-L99">planck/init.pk:81–99</a></p>
-<pre class="pk">&quot; The top-level definitions of the file are made while path is the file being loaded. &quot;
+<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/init.pk#L80-L102">planck/init.pk:80–102</a></p>
+<pre class="pk">&quot; load(path) parses and evaluates the file by the current parse and eval. &quot;
+&quot; The top-level definitions of the file are made while path is the file being loaded. &quot;
 Def{load, Lambda{Tuple{path}, Do{
     Def{s, Apply{read_file, Tuple{path}}},
     Def{prev, Apply{_set_file, Tuple{path}}},
@@ -84,18 +84,21 @@ Def{load, Lambda{Tuple{path}, Do{
                 Apply{println, Tuple{e}},
                 Apply{exit, Tuple{1}}},
             Do{
-                Apply{eval, Tuple{e}},</pre>
+                Apply{eval, Tuple{e}},
+                Set{s, Apply{arg, Tuple{r, 1}}}}}}}},
+    Apply{_set_file, Tuple{prev}},
+    none}}}</pre>
 </div>
-<p><code>use</code> は読み込み済みを記録する <code>load</code> です（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/init.pk#L103-L106"><code>planck/init.pk:103–106</code></a>）。</p>
+<p><code>use</code> は読み込み済みを記録する <code>load</code> です（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/init.pk#L104-L109"><code>planck/init.pk:104–109</code></a>）。</p>
 
 <h2>構文に切り替える</h2>
 <p>末尾で packrat パーサと構文を読み込みます。</p>
 <div class="example">
-<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/init.pk#L108-L111">planck/init.pk:108–111</a></p>
-<pre class="pk">    Apply{table_set, Tuple{used_libs, name, true}},
-    Apply{load, Tuple{Apply{_strcat, Tuple{Apply{_strcat, Tuple{&quot;planck/lib/&quot;, name}}, &quot;.pk&quot;}}}}}}}}
-
-&quot; === Syntax === &quot;</pre>
+<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/init.pk#L111-L114">planck/init.pk:111–114</a></p>
+<pre class="pk">&quot; === Syntax === &quot;
+&quot; planck/syntax.pk replaces parse. The files after it are read by the new syntax. &quot;
+Apply{load, Tuple{&quot;planck/peg.pk&quot;}}
+Apply{load, Tuple{&quot;planck/syntax.pk&quot;}}</pre>
 </div>
 <p><code>planck/peg.pk</code> は M式で書いたパーサ（<a href="peg.html">packrat パーサ</a>）、<code>planck/syntax.pk</code> はそのパーサで planck の構文を定義して <code>parse</code> を差し替えるファイルです（<a href="syntax.html">構文の定義</a>）。以降に読むファイルは、<code>planck/lib</code> も利用者のプログラムも planck の構文で読まれます。</p>
 
