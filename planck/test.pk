@@ -105,8 +105,9 @@ Def{fact, Fusion{
 Apply{check, Tuple{Quote{Apply{fact, Tuple{10}}}, 3628800}}
 
 " mutual recursion of global functions "
+Fun{is_odd}
 Def{is_even, Fusion{Lambda{Tuple{0}, true}, Lambda{Tuple{n}, Apply{is_odd, Tuple{Apply{_sub, Tuple{n, 1}}}}}}}
-Def{is_odd, Fusion{Lambda{Tuple{0}, false}, Lambda{Tuple{n}, Apply{is_even, Tuple{Apply{_sub, Tuple{n, 1}}}}}}}
+Set{is_odd, Fusion{Lambda{Tuple{0}, false}, Lambda{Tuple{n}, Apply{is_even, Tuple{Apply{_sub, Tuple{n, 1}}}}}}}
 Apply{check, Tuple{Quote{Apply{is_even, Tuple{10}}}, true}}
 Apply{check, Tuple{Quote{Apply{is_odd, Tuple{7}}}, true}}
 
@@ -280,6 +281,41 @@ Def{evals_1, evals}
 Def{evals_2, evals}
 Def{eval, old_eval}
 Apply{check, Tuple{Quote{Tuple{evals_0, evals_1, evals_2}}, Tuple{1, 2, 3}}}
+
+" === Names are resolved in the order they are written === "
+
+" defining a name again makes a new variable: the function made before keeps the old one "
+Def{nm_f, Lambda{Tuple{x}, 1}}
+Def{nm_g, Lambda{Tuple{}, Apply{nm_f, Tuple{0}}}}
+Def{nm_f, Lambda{Tuple{x}, 2}}
+Apply{check, Tuple{Quote{Tuple{Apply{nm_g, Tuple{}}, Apply{nm_f, Tuple{0}}}}, Tuple{1, 2}}}
+
+" Set assigns the variable that the function made before refers to "
+Def{nm_h, Lambda{Tuple{}, Apply{nm_f, Tuple{0}}}}
+Set{nm_f, Lambda{Tuple{x}, 3}}
+Apply{check, Tuple{Quote{Tuple{Apply{nm_g, Tuple{}}, Apply{nm_h, Tuple{}}, Apply{nm_f, Tuple{0}}}}, Tuple{1, 3, 3}}}
+
+" a definition sees itself, and Fun declares a name without a value to be filled by Set "
+Def{nm_up, Lambda{Tuple{n}, If{Apply{_eq, Tuple{n, 0}}, 0, Apply{_add, Tuple{1, Apply{nm_up, Tuple{Apply{_sub, Tuple{n, 1}}}}}}}}}
+Apply{check, Tuple{Quote{Apply{nm_up, Tuple{5}}}, 5}}
+Fun{nm_od}
+Def{nm_ev, Lambda{Tuple{n}, If{Apply{_eq, Tuple{n, 0}}, true, Apply{nm_od, Tuple{Apply{_sub, Tuple{n, 1}}}}}}}
+Set{nm_od, Lambda{Tuple{n}, If{Apply{_eq, Tuple{n, 0}}, false, Apply{nm_ev, Tuple{Apply{_sub, Tuple{n, 1}}}}}}}
+Apply{check, Tuple{Quote{Tuple{Apply{nm_ev, Tuple{10}}, Apply{nm_od, Tuple{10}}}}, Tuple{true, false}}}
+
+" the same in a function: the variables of a block are those of the function "
+Def{nm_blk, Lambda{Tuple{n}, Do{
+    Fun{od},
+    Def{ev, Lambda{Tuple{m}, If{Apply{_eq, Tuple{m, 0}}, true, Apply{od, Tuple{Apply{_sub, Tuple{m, 1}}}}}}},
+    Set{od, Lambda{Tuple{m}, If{Apply{_eq, Tuple{m, 0}}, false, Apply{ev, Tuple{Apply{_sub, Tuple{m, 1}}}}}}},
+    Apply{ev, Tuple{n}}}}}
+Apply{check, Tuple{Quote{Tuple{Apply{nm_blk, Tuple{10}}, Apply{nm_blk, Tuple{7}}}}, Tuple{true, false}}}
+
+" a variable defined in a function is not visible to the function called from it "
+Def{nm_v, "global"}
+Def{nm_see, Lambda{Tuple{}, nm_v}}
+Def{nm_call, Lambda{Tuple{}, Do{Def{nm_v, "local"}, Apply{nm_see, Tuple{}}}}}
+Apply{check, Tuple{Quote{Apply{nm_call, Tuple{}}}, "global"}}
 
 " === Arrays and tables === "
 Def{arr, Apply{array, Tuple{3}}}

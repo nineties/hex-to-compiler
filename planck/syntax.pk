@@ -23,6 +23,7 @@ Apply{table_set, Tuple{peg_reserved, "in", true}}
 Apply{table_set, Tuple{peg_reserved, "return", true}}
 Apply{table_set, Tuple{peg_reserved, "break", true}}
 Apply{table_set, Tuple{peg_reserved, "continue", true}}
+Apply{table_set, Tuple{peg_reserved, "fun", true}}
 
 " identifier: [A-Za-z_][A-Za-z0-9_]* except the peg_reserved words and the f of f\"...\" "
 Def{peg_tok_ident, Lambda{Tuple{p}, Do{
@@ -141,319 +142,9 @@ Def{peg_to_list, Lambda{Tuple{t}, Do{
         Set{r, QuasiQuote{Cons{UnQuote{Apply{arg, Tuple{t, i}}}, UnQuote{r}}}}}},
     r}}}
 
-" === Expressions === "
-" from the loosest: definition and assignment, | , ->, ?:, or, and, not, "
-" comparison, ::, + -, * / %, unary - ' ` !, call and @, primary "
+" === Functions of the syntax sugar === "
 
-" a top-level expression ends with ; or a newline, or another expression follows "
-Apply{_define_rule, Tuple{Quote{toplevel}, Quote{
-    Act{Seq{expr, Choice{";", Not{Same{}}, And{expr}}}, peg_first}}}}
-
-Apply{_define_rule, Tuple{Quote{expr}, Quote{Choice{
-    syntax_decl,
-    Act{Seq{And{Seq{postfix, ":="}}, ident, Tight{"("}, Delimited{pattern, ","}, ")", ":=", expr},
-        Lambda{Tuple{Tuple{_, f, _, ps, _, _, e}}, QuasiQuote{Def{UnQuote{f}, UnQuote{Apply{peg_lambda, Tuple{ps, e}}}}}}},
-    Act{Seq{ident, ":=", expr},
-        Lambda{Tuple{Tuple{x, _, e}}, QuasiQuote{Def{UnQuote{x}, UnQuote{e}}}}},
-    Act{Seq{ident, "=", Not{Tight{"="}}, expr},
-        Lambda{Tuple{Tuple{x, _, _, e}}, QuasiQuote{Set{UnQuote{x}, UnQuote{e}}}}},
-    Act{Seq{postfix, Tight{"["}, expr, "]", "=", Not{Tight{"="}}, expr},
-        Lambda{Tuple{Tuple{a, _, i, _, _, _, v}}, QuasiQuote{Apply{_index_set, Tuple{UnQuote{a}, UnQuote{i}, UnQuote{v}}}}}},
-    union,
-    Act{Seq{Key{"record"}, ident, "(", idents, ")"},
-        Lambda{Tuple{Tuple{_, n, _, fs, _}}, Apply{peg_record, Tuple{n, fs}}}}}}}}
-
-" a function with a guard passes its arguments on to the functions after its | "
-" when the guard is false (peg_fuse) "
-Apply{_define_rule, Tuple{Quote{union}, Quote{Choice{
-    Act{Seq{arrow, "|", union},
-        Lambda{Tuple{Tuple{f, _, g}}, Apply{peg_fuse, Tuple{f, g}}}},
-    arrow}}}}
-
-" -> or the word if after the blanks at p, which are not consumed "
-Def{peg_tok_arrow_next, Lambda{Tuple{p}, Do{
-    Def{q, Apply{peg_skip_ws, Tuple{p}}},
-    Def{c, Apply{peg_char_at, Tuple{q}}},
-    Def{d, Apply{peg_char_at, Tuple{Apply{_add, Tuple{q, 1}}}}},
-    Set{peg_pv, none},
-    If{If{Apply{_eq, Tuple{c, 45}}, Apply{_eq, Tuple{d, 62}}, false}, p,
-    If{If{Apply{_eq, Tuple{c, 105}}, If{Apply{_eq, Tuple{d, 102}}, Apply{_not, Tuple{Apply{peg_is_alnum, Tuple{Apply{peg_char_at, Tuple{Apply{_add, Tuple{q, 2}}}}}}}}, false}, false}, p,
-        Apply{peg_fail, Tuple{p}}}}}}}
-
-Apply{_define_rule, Tuple{Quote{arrow_next}, peg_tok_arrow_next}}
-
-Apply{_define_rule, Tuple{Quote{params}, Quote{Choice{
-    Act{Seq{"(", Delimited{pattern, ","}, ")", And{arrow_next}}, Lambda{Tuple{Tuple{_, ps, _, _}}, ps}},
-    Act{pattern, Lambda{Tuple{x}, Tuple{x}}}}}}}
-
-" the parameters are read as patterns only when an expression and -> or if follow, "
-" since every text of a pattern is also a text of an expression. The rule keeps the result for the position. "
-Apply{_define_rule, Tuple{Quote{lambda_ahead}, Quote{Seq{And{Seq{ternary, arrow_next}}}}}}
-
-" params if c -> e is a function with the guard c (peg_guard) "
-Apply{_define_rule, Tuple{Quote{arrow}, Quote{Choice{
-    Act{Seq{lambda_ahead, params, "->", arrow},
-        Lambda{Tuple{Tuple{_, ps, _, e}}, Apply{peg_lambda, Tuple{ps, e}}}},
-    Act{Seq{lambda_ahead, params, Key{"if"}, ternary, "->", arrow},
-        Lambda{Tuple{Tuple{_, ps, _, c, _, e}}, Apply{peg_guard, Tuple{ps, c, e}}}},
-    ternary}}}}
-
-Apply{_define_rule, Tuple{Quote{ternary}, Quote{Choice{
-    Act{Seq{or_expr, "?", or_expr, ":", ternary},
-        Lambda{Tuple{Tuple{c, _, a, _, b}}, QuasiQuote{If{UnQuote{c}, UnQuote{a}, UnQuote{b}}}}},
-    or_expr}}}}
-
-Apply{_define_rule, Tuple{Quote{or_expr}, Quote{Choice{
-    Act{Seq{and_expr, Key{"or"}, or_expr},
-        Lambda{Tuple{Tuple{a, _, b}}, QuasiQuote{If{UnQuote{a}, true, UnQuote{b}}}}},
-    and_expr}}}}
-
-Apply{_define_rule, Tuple{Quote{and_expr}, Quote{Choice{
-    Act{Seq{not_expr, Key{"and"}, and_expr},
-        Lambda{Tuple{Tuple{a, _, b}}, QuasiQuote{If{UnQuote{a}, UnQuote{b}, false}}}},
-    not_expr}}}}
-
-Apply{_define_rule, Tuple{Quote{not_expr}, Quote{Choice{
-    Act{Seq{Key{"not"}, not_expr},
-        Lambda{Tuple{Tuple{_, a}}, QuasiQuote{Apply{_not, Tuple{UnQuote{a}}}}}},
-    rel_expr}}}}
-
-Apply{_define_rule, Tuple{Quote{rel_expr}, Quote{Choice{
-    Act{Seq{cons_expr, "==", cons_expr}, Apply{peg_binop, Tuple{Quote{_eq}}}},
-    Act{Seq{cons_expr, "!=", cons_expr}, Apply{peg_binop, Tuple{Quote{_ne}}}},
-    Act{Seq{cons_expr, "<=", cons_expr}, Apply{peg_binop, Tuple{Quote{_le}}}},
-    Act{Seq{cons_expr, ">=", cons_expr}, Apply{peg_binop, Tuple{Quote{_ge}}}},
-    Act{Seq{cons_expr, "<", cons_expr}, Apply{peg_binop, Tuple{Quote{_lt}}}},
-    Act{Seq{cons_expr, ">", cons_expr}, Apply{peg_binop, Tuple{Quote{_gt}}}},
-    cons_expr}}}}
-
-" x :: xs is Cons{x, xs}. It groups to the right. "
-Apply{_define_rule, Tuple{Quote{cons_expr}, Quote{Choice{
-    Act{Seq{add_expr, "::", cons_expr},
-        Lambda{Tuple{Tuple{a, _, b}}, QuasiQuote{Cons{UnQuote{a}, UnQuote{b}}}}},
-    add_expr}}}}
-
-" a binary - must be on the same line as its left operand "
-Apply{_define_rule, Tuple{Quote{minus}, Quote{Seq{Same{}, "-", Not{Tight{">"}}}}}}
-
-Apply{_define_rule, Tuple{Quote{add_expr}, Quote{Choice{
-    Act{Seq{add_expr, "+", mul_expr}, Apply{peg_binop, Tuple{Quote{_add}}}},
-    Act{Seq{add_expr, minus, mul_expr}, Apply{peg_binop, Tuple{Quote{_sub}}}},
-    mul_expr}}}}
-
-Apply{_define_rule, Tuple{Quote{mul_expr}, Quote{Choice{
-    Act{Seq{mul_expr, "*", unary}, Apply{peg_binop, Tuple{Quote{_mul}}}},
-    Act{Seq{mul_expr, "/", unary}, Apply{peg_binop, Tuple{Quote{_div}}}},
-    Act{Seq{mul_expr, "%", unary}, Apply{peg_binop, Tuple{Quote{_mod}}}},
-    unary}}}}
-
-Apply{_define_rule, Tuple{Quote{unary}, Quote{Choice{
-    postfix,
-    Act{Seq{"-", unary},
-        Lambda{Tuple{Tuple{_, a}}, QuasiQuote{Apply{_sub, Tuple{0, UnQuote{a}}}}}},
-    Act{Seq{"'", unary},
-        Lambda{Tuple{Tuple{_, a}}, Apply{mexpr, Tuple{Quote{Quote}, Tuple{a}}}}},
-    Act{Seq{"`", unary},
-        Lambda{Tuple{Tuple{_, a}}, Apply{mexpr, Tuple{Quote{QuasiQuote}, Tuple{a}}}}},
-    Act{Seq{"!", unary},
-        Lambda{Tuple{Tuple{_, a}}, Apply{mexpr, Tuple{Quote{UnQuote}, Tuple{a}}}}}}}}}
-
-Apply{_define_rule, Tuple{Quote{postfix}, Quote{Choice{
-    Act{Seq{postfix, Tight{"("}, Delimited{expr, ","}, ")"},
-        Lambda{Tuple{Tuple{f, _, args, _}}, QuasiQuote{Apply{UnQuote{f}, UnQuote{args}}}}},
-    Act{Seq{postfix, "@", ident},
-        Lambda{Tuple{Tuple{x, _, t}}, QuasiQuote{_TypeOf{UnQuote{x}, UnQuote{t}}}}},
-    Act{Seq{postfix, Tight{"."}, ident},
-        Lambda{Tuple{Tuple{t, _, f}}, QuasiQuote{Apply{_record_get, Tuple{UnQuote{t}, Quote{UnQuote{f}}}}}}},
-    Act{Seq{postfix, Tight{"["}, index, "]", Not{assign_op}},
-        Lambda{Tuple{Tuple{a, _, i, _, _}}, QuasiQuote{Apply{_index_get, Tuple{UnQuote{a}, UnQuote{i}}}}}},
-    primary}}}}
-
-" the = of an assignment, not == "
-Apply{_define_rule, Tuple{Quote{assign_op}, Quote{Seq{"=", Not{Tight{"="}}}}}}
-
-" the inside of a[...]: an expression. In t[p -> e | q if c -> g] the functions joined by | "
-" end with a function that gives peg_skip (_peg_rewrite) "
-Apply{_define_rule, Tuple{Quote{index}, Quote{
-    Act{expr, Lambda{Tuple{e}, Apply{_peg_rewrite, Tuple{e}}}}}}}
-
-" a function definition f(p, ...) := e of a block is marked _Fun so that peg_block "
-" defines all of them at the top of the block "
-Apply{_define_rule, Tuple{Quote{block}, Quote{
-    Act{Seq{"{", Many{Seq{Choice{
-            Act{Seq{And{Seq{postfix, ":="}}, ident, Tight{"("}, Delimited{pattern, ","}, ")", ":=", expr},
-                Lambda{Tuple{Tuple{_, f, _, ps, _, _, b}}, QuasiQuote{_Fun{UnQuote{f}, UnQuote{Apply{peg_lambda, Tuple{ps, b}}}}}}},
-            expr}, Option{";"}}}, "}"},
-        Lambda{Tuple{Tuple{_, es, _}}, Apply{peg_block, Tuple{es}}}}}}}
-
-" a branch of if: an expression without | outside of brackets, "
-" so that a | after if (c) a else b goes on with the functions around the if "
-Apply{_define_rule, Tuple{Quote{branch}, Quote{Choice{
-    Act{Seq{And{Seq{postfix, ":="}}, ident, Tight{"("}, Delimited{pattern, ","}, ")", ":=", branch},
-        Lambda{Tuple{Tuple{_, f, _, ps, _, _, e}}, QuasiQuote{Def{UnQuote{f}, UnQuote{Apply{peg_lambda, Tuple{ps, e}}}}}}},
-    Act{Seq{ident, ":=", branch},
-        Lambda{Tuple{Tuple{x, _, e}}, QuasiQuote{Def{UnQuote{x}, UnQuote{e}}}}},
-    Act{Seq{ident, "=", Not{Tight{"="}}, branch},
-        Lambda{Tuple{Tuple{x, _, _, e}}, QuasiQuote{Set{UnQuote{x}, UnQuote{e}}}}},
-    arrow}}}}
-
-" the condition is in parentheses, the branches are branch. "
-" else belongs to the nearest if, since the branch takes it first. "
-Apply{_define_rule, Tuple{Quote{if_expr}, Quote{
-    Act{Seq{Key{"if"}, "(", expr, ")", branch, Option{Seq{Key{"else"}, branch}}},
-        Fusion{
-            Lambda{Tuple{Tuple{_, _, c, _, a, Tuple{}}}, QuasiQuote{If{UnQuote{c}, UnQuote{a}, none}}},
-            Lambda{Tuple{Tuple{_, _, c, _, a, Tuple{Tuple{_, b}}}}, QuasiQuote{If{UnQuote{c}, UnQuote{a}, UnQuote{b}}}}}}}}}
-
-Apply{_define_rule, Tuple{Quote{primary}, Quote{Choice{
-    if_expr,
-    Act{Seq{Key{"while"}, "(", expr, ")", expr},
-        Lambda{Tuple{Tuple{_, _, c, _, b}}, Apply{peg_while, Tuple{c, b}}}},
-    Act{Seq{Key{"handle"}, expr, Key{"with"}, union},
-        Lambda{Tuple{Tuple{_, b, _, h}}, QuasiQuote{Handle{UnQuote{b}, UnQuote{h}}}}},
-    Act{Seq{Key{"perform"}, unary},
-        Lambda{Tuple{Tuple{_, v}}, QuasiQuote{Perform{UnQuote{v}}}}},
-    block,
-    embed,
-    Act{Seq{ident, Tight{"{"}, Delimited{expr, ","}, "}"},
-        Lambda{Tuple{Tuple{h, _, args, _}}, Apply{mexpr, Tuple{h, args}}}},
-    Act{Seq{istr_open, Many{Seq{istr_text, istr_hole, expr, "}"}}, istr_text, istr_close},
-        Lambda{Tuple{Tuple{_, parts, last, _}}, Apply{peg_interp, Tuple{parts, last}}}},
-    ident,
-    integer,
-    string,
-    Act{Seq{"(", ")"}, Lambda{Tuple{_}, Quote{Tuple{}}}},
-    Act{Seq{"(", Delimited1{expr, ","}, ")"},
-        Lambda{Tuple{Tuple{_, es, _}}, If{Apply{_eq, Tuple{Apply{arity, Tuple{es}}, 1}}, Apply{peg_first, Tuple{es}}, es}}},
-    Act{Seq{"[", Delimited{expr, ","}, "]"},
-        Lambda{Tuple{Tuple{_, es, _}}, Apply{peg_to_list, Tuple{es}}}},
-    sugar_primary}}}}
-
-" === Patterns === "
-" A pattern is written as an expression up to or, and matches the tree of that expression: "
-" a + b is Apply{'_add, Tuple{a, b}} and f(x) is Apply{'f, Tuple{x}}. "
-" The names of operators and functions are symbols, the other identifiers are variables. "
-" p @ type is _TypeOf{p, type}, and the arguments of Head{p, ...} are patterns. "
-
-Apply{_define_rule, Tuple{Quote{pattern}, Quote{Choice{
-    Act{Seq{pat_and, Key{"or"}, pattern},
-        Lambda{Tuple{Tuple{a, _, b}}, QuasiQuote{If{UnQuote{a}, Quote{true}, UnQuote{b}}}}},
-    pat_and}}}}
-
-Apply{_define_rule, Tuple{Quote{pat_and}, Quote{Choice{
-    Act{Seq{pat_not, Key{"and"}, pat_and},
-        Lambda{Tuple{Tuple{a, _, b}}, QuasiQuote{If{UnQuote{a}, UnQuote{b}, Quote{false}}}}},
-    pat_not}}}}
-
-Apply{_define_rule, Tuple{Quote{pat_not}, Quote{Choice{
-    Act{Seq{Key{"not"}, pat_not},
-        Lambda{Tuple{Tuple{_, a}}, QuasiQuote{Apply{Quote{_not}, Tuple{UnQuote{a}}}}}},
-    pat_rel}}}}
-
-Apply{_define_rule, Tuple{Quote{pat_rel}, Quote{Choice{
-    Act{Seq{pat_cons, "==", pat_cons}, Apply{peg_binop, Tuple{Quote{Quote{_eq}}}}},
-    Act{Seq{pat_cons, "!=", pat_cons}, Apply{peg_binop, Tuple{Quote{Quote{_ne}}}}},
-    Act{Seq{pat_cons, "<=", pat_cons}, Apply{peg_binop, Tuple{Quote{Quote{_le}}}}},
-    Act{Seq{pat_cons, ">=", pat_cons}, Apply{peg_binop, Tuple{Quote{Quote{_ge}}}}},
-    Act{Seq{pat_cons, "<", pat_cons}, Apply{peg_binop, Tuple{Quote{Quote{_lt}}}}},
-    Act{Seq{pat_cons, ">", pat_cons}, Apply{peg_binop, Tuple{Quote{Quote{_gt}}}}},
-    pat_cons}}}}
-
-Apply{_define_rule, Tuple{Quote{pat_cons}, Quote{Choice{
-    Act{Seq{pat_add, "::", pat_cons},
-        Lambda{Tuple{Tuple{a, _, b}}, QuasiQuote{Cons{UnQuote{a}, UnQuote{b}}}}},
-    pat_add}}}}
-
-Apply{_define_rule, Tuple{Quote{pat_add}, Quote{Choice{
-    Act{Seq{pat_add, "+", pat_mul}, Apply{peg_binop, Tuple{Quote{Quote{_add}}}}},
-    Act{Seq{pat_add, minus, pat_mul}, Apply{peg_binop, Tuple{Quote{Quote{_sub}}}}},
-    pat_mul}}}}
-
-Apply{_define_rule, Tuple{Quote{pat_mul}, Quote{Choice{
-    Act{Seq{pat_mul, "*", pat_unary}, Apply{peg_binop, Tuple{Quote{Quote{_mul}}}}},
-    Act{Seq{pat_mul, "/", pat_unary}, Apply{peg_binop, Tuple{Quote{Quote{_div}}}}},
-    Act{Seq{pat_mul, "%", pat_unary}, Apply{peg_binop, Tuple{Quote{Quote{_mod}}}}},
-    pat_unary}}}}
-
-" 'e is the value of the expression e "
-Apply{_define_rule, Tuple{Quote{pat_unary}, Quote{Choice{
-    pat_postfix,
-    Act{Seq{"-", pat_unary},
-        Lambda{Tuple{Tuple{_, a}}, QuasiQuote{Apply{Quote{_sub}, Tuple{0, UnQuote{a}}}}}},
-    Act{Seq{"'", unary},
-        Lambda{Tuple{Tuple{_, a}}, Apply{mexpr, Tuple{Quote{Quote}, Tuple{a}}}}}}}}}
-
-Apply{_define_rule, Tuple{Quote{pat_postfix}, Quote{Choice{
-    Act{Seq{pat_postfix, "@", ident},
-        Lambda{Tuple{Tuple{x, _, t}}, QuasiQuote{_TypeOf{UnQuote{x}, UnQuote{t}}}}},
-    pat_primary}}}}
-
-Apply{_define_rule, Tuple{Quote{pat_primary}, Quote{Choice{
-    Act{Seq{ident, Tight{"("}, Delimited{pattern, ","}, ")"},
-        Lambda{Tuple{Tuple{f, _, args, _}}, QuasiQuote{Apply{Quote{UnQuote{f}}, UnQuote{args}}}}},
-    Act{Seq{ident, Tight{"{"}, Delimited{pattern, ","}, "}"},
-        Lambda{Tuple{Tuple{h, _, args, _}}, Apply{mexpr, Tuple{h, args}}}},
-    ident,
-    integer,
-    string,
-    Act{Seq{"(", ")"}, Lambda{Tuple{_}, Quote{Tuple{}}}},
-    Act{Seq{"(", Delimited1{pattern, ","}, ")"},
-        Lambda{Tuple{Tuple{_, ps, _}}, If{Apply{_eq, Tuple{Apply{arity, Tuple{ps}}, 1}}, Apply{peg_first, Tuple{ps}}, ps}}},
-    Act{Seq{"[", Delimited{pattern, ","}, "]"},
-        Lambda{Tuple{Tuple{_, ps, _}}, Apply{peg_to_list, Tuple{ps}}}}}}}}
-
-" === Grammar declarations === "
-" name ::= alt | alt ...  defines the rule. ... stands for the previous definition. "
-" An alternative is a sequence of items and an optional action { ... }. "
-" An item is label:element or element, and must be on the same line. "
-" The action is a block, and the labels are its variables. "
-
-Apply{_define_rule, Tuple{Quote{syntax_decl}, Quote{
-    Act{Seq{ident, "::=", g_choice},
-        Lambda{Tuple{Tuple{n, _, e}},
-            QuasiQuote{Apply{_define_rule, Tuple{UnQuote{Apply{mexpr, Tuple{Quote{Quote}, Tuple{n}}}},
-                                                UnQuote{Apply{mexpr, Tuple{Quote{Quote}, Tuple{e}}}}}}}}}}}}
-
-Apply{_define_rule, Tuple{Quote{g_choice}, Quote{
-    Act{Delimited1{g_alt, "|"},
-        Lambda{Tuple{es}, If{Apply{_eq, Tuple{Apply{arity, Tuple{es}}, 1}}, Apply{peg_first, Tuple{es}},
-            Apply{mexpr, Tuple{Quote{Choice}, es}}}}}}}}
-
-Apply{_define_rule, Tuple{Quote{g_alt}, Quote{Choice{
-    Act{"...", Lambda{Tuple{_}, Quote{Prev{}}}},
-    Act{Seq{Many1{g_item}, Option{Seq{Same{}, block}}},
-        Lambda{Tuple{Tuple{items, act}}, Do{
-            Def{labels, Apply{peg_map_args, Tuple{peg_first, items}}},
-            Def{elems, Apply{peg_map_args, Tuple{Lambda{Tuple{t}, Apply{arg, Tuple{t, 1}}}, items}}},
-            Def{seq, Apply{mexpr, Tuple{Quote{Seq}, elems}}},
-            If{Apply{_eq, Tuple{act, Tuple{}}},
-                If{Apply{_eq, Tuple{Apply{arity, Tuple{elems}}, 1}}, Apply{peg_first, Tuple{elems}}, seq},
-                QuasiQuote{Act{UnQuote{seq},
-                    Lambda{Tuple{UnQuote{labels}}, UnQuote{Apply{arg, Tuple{Apply{peg_first, Tuple{act}}, 1}}}}}}}}}}}}}}
-
-Apply{_define_rule, Tuple{Quote{g_item}, Quote{Choice{
-    Act{Seq{Same{}, ident, Tight{":"}, g_suffix},
-        Lambda{Tuple{Tuple{_, l, _, e}}, Tuple{l, e}}},
-    Act{Seq{Same{}, g_suffix},
-        Lambda{Tuple{Tuple{_, e}}, Tuple{Quote{_}, e}}}}}}}
-
-Apply{_define_rule, Tuple{Quote{g_suffix}, Quote{Choice{
-    Act{Seq{g_primary, Tight{"*"}}, Lambda{Tuple{Tuple{e, _}}, Many{e}}},
-    Act{Seq{g_primary, Tight{"+"}}, Lambda{Tuple{Tuple{e, _}}, Many1{e}}},
-    Act{Seq{g_primary, Tight{"?"}}, Lambda{Tuple{Tuple{e, _}}, Option{e}}},
-    Act{Seq{"&", g_primary}, Lambda{Tuple{Tuple{_, e}}, And{e}}},
-    Act{Seq{"!", g_primary}, Lambda{Tuple{Tuple{_, e}}, Not{e}}},
-    g_primary}}}}
-
-Apply{_define_rule, Tuple{Quote{g_primary}, Quote{Choice{
-    string,
-    keyword,
-    Act{Seq{ident, Not{Choice{"::=", Tight{":"}}}}, peg_first},
-    Act{Seq{"(", g_choice, ")"}, Lambda{Tuple{Tuple{_, e, _}}, e}}}}}}
-
-" === Sugar === "
-
-" Rules and functions of the syntax sugar. The rules call the functions peg_* in their actions. "
+" The functions peg_* and the rules of the syntax sugar. They come before the grammar since the actions of its rules call them. "
 
 " the decimal text of an integer "
 
@@ -483,6 +174,126 @@ Def{
 Def{_nomatch, Lambda{Tuple{_TypeOf{_, nomatch}}, none}}
 
 Def{peg_g, Apply{intern, Tuple{"%g"}}}
+
+Def{peg_ret_handler, QuasiQuote{Lambda{Tuple{Return{v}, k}, v}}}
+
+Def{peg_break_handler, QuasiQuote{Lambda{Tuple{Break{}, k}, none}}}
+
+Def{peg_continue_handler, QuasiQuote{Lambda{Tuple{Continue{}, k}, none}}}
+
+Def{
+    peg_catches,
+    Lambda{
+        Tuple{h, tag},
+        If{
+            Apply{peg_is_head, Tuple{h, Quote{Lambda}}},
+            If{
+                Apply{_gt, Tuple{Apply{arity, Tuple{Apply{arg, Tuple{h, 0}}}}, 0}},
+                Apply{peg_is_head, Tuple{Apply{arg, Tuple{Apply{arg, Tuple{h, 0}}, 0}}, tag}},
+                false
+            },
+            false
+        }
+    }}
+
+Def{
+    peg_scan,
+    Lambda{
+        Tuple{e, tag},
+        Do{
+            If{
+                Apply{_ne, Tuple{Apply{typeof, Tuple{e}}, Quote{mexpr}}},
+                false,
+                Do{
+                    Def{h, Apply{head, Tuple{e}}},
+                    If{
+                        If{Apply{_eq, Tuple{h, Quote{Quote}}}, true, Apply{_eq, Tuple{h, Quote{QuasiQuote}}}},
+                        false,
+                        If{
+                            If{
+                                Apply{_eq, Tuple{h, Quote{Perform}}},
+                                If{
+                                    Apply{_eq, Tuple{Apply{arity, Tuple{e}}, 1}},
+                                    Apply{peg_is_head, Tuple{Apply{arg, Tuple{e, 0}}, tag}},
+                                    false
+                                },
+                                false
+                            },
+                            true,
+                            If{
+                                If{
+                                    Apply{_eq, Tuple{h, Quote{Handle}}},
+                                    If{
+                                        Apply{_eq, Tuple{Apply{arity, Tuple{e}}, 2}},
+                                        Apply{peg_catches, Tuple{Apply{arg, Tuple{e, 1}}, tag}},
+                                        false
+                                    },
+                                    false
+                                },
+                                Apply{peg_scan, Tuple{Apply{arg, Tuple{e, 1}}, tag}},
+                                Do{
+                                    Def{i, 0},
+                                    Def{r, false},
+                                    While{
+                                        If{
+                                            Apply{_not, Tuple{r}},
+                                            Apply{_lt, Tuple{i, Apply{arity, Tuple{e}}}},
+                                            false
+                                        },
+                                        Do{
+                                            Set{r, Apply{peg_scan, Tuple{Apply{arg, Tuple{e, i}}, tag}}},
+                                            Set{i, Apply{_add, Tuple{i, 1}}}
+                                        }
+                                    },
+                                    r
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }}
+
+Def{peg_nret, 0}
+
+Def{peg_nbrk, 0}
+
+Def{peg_ncnt, 0}
+
+Def{peg_parse_plain, peg_parse}
+
+Set{
+    peg_parse,
+    Lambda{
+        Tuple{r, s},
+        Do{Set{peg_nret, 0}, Set{peg_nbrk, 0}, Set{peg_ncnt, 0}, Apply{peg_parse_plain, Tuple{r, s}}}
+    }}
+
+Def{
+    peg_wrap,
+    Lambda{
+        Tuple{body, tag, handler},
+        If{Apply{peg_scan, Tuple{body, tag}}, QuasiQuote{Handle{UnQuote{body}, UnQuote{handler}}}, body}
+    }}
+
+Def{
+    peg_lambda,
+    Lambda{
+        Tuple{ps, body},
+        QuasiQuote{
+            Lambda{
+                UnQuote{ps},
+                UnQuote{
+                    If{
+                        Apply{_gt, Tuple{peg_nret, 0}},
+                        Apply{peg_wrap, Tuple{body, Quote{Return}, peg_ret_handler}},
+                        body
+                    }
+                }
+            }
+        }
+    }}
 
 " Tuple{%v1, ..., %vn} "
 
@@ -673,6 +484,10 @@ Def{
 Def{
     peg_match,
     Lambda{Tuple{s, f}, QuasiQuote{Apply{UnQuote{Apply{peg_arms, Tuple{f}}}, Tuple{UnQuote{s}}}}}}
+
+" show(x) is defined in lib/pretty.pk (show(x) = ...); f\"{x}\" calls it for a value that is not a string or an integer "
+
+Fun{show}
 
 Def{
     _to_text,
@@ -985,125 +800,6 @@ Def{
     peg_record,
     Lambda{Tuple{n, fs}, QuasiQuote{Apply{_record_declare, Tuple{Quote{UnQuote{n}}, Quote{UnQuote{fs}}}}}}}
 
-Def{peg_ret_handler, QuasiQuote{Lambda{Tuple{Return{v}, k}, v}}}
-
-Def{peg_break_handler, QuasiQuote{Lambda{Tuple{Break{}, k}, none}}}
-
-Def{peg_continue_handler, QuasiQuote{Lambda{Tuple{Continue{}, k}, none}}}
-
-Def{
-    peg_catches,
-    Lambda{
-        Tuple{h, tag},
-        If{
-            Apply{peg_is_head, Tuple{h, Quote{Lambda}}},
-            If{
-                Apply{_gt, Tuple{Apply{arity, Tuple{Apply{arg, Tuple{h, 0}}}}, 0}},
-                Apply{peg_is_head, Tuple{Apply{arg, Tuple{Apply{arg, Tuple{h, 0}}, 0}}, tag}},
-                false
-            },
-            false
-        }
-    }}
-
-Def{
-    peg_scan,
-    Lambda{
-        Tuple{e, tag},
-        Do{
-            If{
-                Apply{_ne, Tuple{Apply{typeof, Tuple{e}}, Quote{mexpr}}},
-                false,
-                Do{
-                    Def{h, Apply{head, Tuple{e}}},
-                    If{
-                        If{Apply{_eq, Tuple{h, Quote{Quote}}}, true, Apply{_eq, Tuple{h, Quote{QuasiQuote}}}},
-                        false,
-                        If{
-                            If{
-                                Apply{_eq, Tuple{h, Quote{Perform}}},
-                                If{
-                                    Apply{_eq, Tuple{Apply{arity, Tuple{e}}, 1}},
-                                    Apply{peg_is_head, Tuple{Apply{arg, Tuple{e, 0}}, tag}},
-                                    false
-                                },
-                                false
-                            },
-                            true,
-                            If{
-                                If{
-                                    Apply{_eq, Tuple{h, Quote{Handle}}},
-                                    If{
-                                        Apply{_eq, Tuple{Apply{arity, Tuple{e}}, 2}},
-                                        Apply{peg_catches, Tuple{Apply{arg, Tuple{e, 1}}, tag}},
-                                        false
-                                    },
-                                    false
-                                },
-                                Apply{peg_scan, Tuple{Apply{arg, Tuple{e, 1}}, tag}},
-                                Do{
-                                    Def{i, 0},
-                                    Def{r, false},
-                                    While{
-                                        If{
-                                            Apply{_not, Tuple{r}},
-                                            Apply{_lt, Tuple{i, Apply{arity, Tuple{e}}}},
-                                            false
-                                        },
-                                        Do{
-                                            Set{r, Apply{peg_scan, Tuple{Apply{arg, Tuple{e, i}}, tag}}},
-                                            Set{i, Apply{_add, Tuple{i, 1}}}
-                                        }
-                                    },
-                                    r
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }}
-
-Def{peg_nret, 0}
-
-Def{peg_nbrk, 0}
-
-Def{peg_ncnt, 0}
-
-Def{peg_parse_plain, peg_parse}
-
-Def{
-    peg_parse,
-    Lambda{
-        Tuple{r, s},
-        Do{Set{peg_nret, 0}, Set{peg_nbrk, 0}, Set{peg_ncnt, 0}, Apply{peg_parse_plain, Tuple{r, s}}}
-    }}
-
-Def{
-    peg_wrap,
-    Lambda{
-        Tuple{body, tag, handler},
-        If{Apply{peg_scan, Tuple{body, tag}}, QuasiQuote{Handle{UnQuote{body}, UnQuote{handler}}}, body}
-    }}
-
-Def{
-    peg_lambda,
-    Lambda{
-        Tuple{ps, body},
-        QuasiQuote{
-            Lambda{
-                UnQuote{ps},
-                UnQuote{
-                    If{
-                        Apply{_gt, Tuple{peg_nret, 0}},
-                        Apply{peg_wrap, Tuple{body, Quote{Return}, peg_ret_handler}},
-                        body
-                    }
-                }
-            }
-        }
-    }}
 
 Def{
     peg_loop,
@@ -1194,87 +890,325 @@ Def{
     peg_continue,
     Lambda{Tuple{}, Do{Set{peg_ncnt, Apply{_add, Tuple{peg_ncnt, 1}}}, QuasiQuote{Perform{Continue{}}}}}}
 
-" whether the tuple defs has Def{f, none} "
-Def{
-    peg_has_def,
-    Lambda{
-        Tuple{defs, f},
-        Do{
-            Def{i, 0},
-            Def{found, false},
-            While{
-                If{Apply{_not, Tuple{found}}, Apply{_lt, Tuple{i, Apply{arity, Tuple{defs}}}}, false},
-                Do{
-                    If{Apply{_eq, Tuple{Apply{arg, Tuple{Apply{arg, Tuple{defs, i}}, 0}}, f}}, Set{found, true}, none},
-                    Set{i, Apply{_add, Tuple{i, 1}}}
-                }
-            },
-            found
-        }
-    }}
-
-" the expressions of a block. Each function definition f(p, ...) := e (_Fun) defines f "
-" at the top of the block (Def{f, none}, once for each name) and assigns it in its place "
-" (Set{f, ...}), so the functions of a block see each other. "
+" the expressions of a block "
 Def{
     peg_block,
     Lambda{
         Tuple{es},
-        Do{
-            Def{items, Apply{peg_map_args, Tuple{peg_first, es}}},
-            Def{defs, Tuple{}},
-            Def{body, Tuple{}},
-            Def{i, 0},
-            While{
-                Apply{_lt, Tuple{i, Apply{arity, Tuple{items}}}},
-                Do{
-                    Def{x, Apply{arg, Tuple{items, i}}},
-                    If{
-                        Apply{peg_is_head, Tuple{x, Quote{_Fun}}},
-                        Do{
-                            If{
-                                Apply{peg_has_def, Tuple{defs, Apply{arg, Tuple{x, 0}}}},
-                                none,
-                                Set{
-                                    defs,
-                                    Apply{
-                                        push,
-                                        Tuple{defs, QuasiQuote{Def{UnQuote{Apply{arg, Tuple{x, 0}}}, none}}}
-                                    }
-                                }
-                            },
-                            Set{
-                                body,
-                                Apply{
-                                    push,
-                                    Tuple{
-                                        body,
-                                        QuasiQuote{
-                                            Set{
-                                                UnQuote{Apply{arg, Tuple{x, 0}}},
-                                                UnQuote{Apply{arg, Tuple{x, 1}}}
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        },
-                        Set{body, Apply{push, Tuple{body, x}}}
-                    },
-                    Set{i, Apply{_add, Tuple{i, 1}}}
-                }
-            },
-            Set{i, 0},
-            While{
-                Apply{_lt, Tuple{i, Apply{arity, Tuple{body}}}},
-                Do{
-                    Set{defs, Apply{push, Tuple{defs, Apply{arg, Tuple{body, i}}}}},
-                    Set{i, Apply{_add, Tuple{i, 1}}}
-                }
-            },
-            Apply{mexpr, Tuple{Quote{Do}, defs}}
-        }
-    }}
+        Apply{mexpr, Tuple{Quote{Do}, Apply{peg_map_args, Tuple{peg_first, es}}}}}}
+
+" === Expressions === "
+" from the loosest: definition and assignment, | , ->, ?:, or, and, not, "
+" comparison, ::, + -, * / %, unary - ' ` !, call and @, primary "
+
+" a top-level expression ends with ; or a newline, or another expression follows "
+Apply{_define_rule, Tuple{Quote{toplevel}, Quote{
+    Act{Seq{expr, Choice{";", Not{Same{}}, And{expr}}}, peg_first}}}}
+
+Apply{_define_rule, Tuple{Quote{expr}, Quote{Choice{
+    syntax_decl,
+    Act{Seq{And{Seq{postfix, ":="}}, ident, Tight{"("}, Delimited{pattern, ","}, ")", ":=", expr},
+        Lambda{Tuple{Tuple{_, f, _, ps, _, _, e}}, QuasiQuote{Def{UnQuote{f}, UnQuote{Apply{peg_lambda, Tuple{ps, e}}}}}}},
+    Act{Seq{ident, ":=", expr},
+        Lambda{Tuple{Tuple{x, _, e}}, QuasiQuote{Def{UnQuote{x}, UnQuote{e}}}}},
+    Act{Seq{And{Seq{postfix, "=", Not{Tight{"="}}}}, ident, Tight{"("}, Delimited{pattern, ","}, ")", "=", Not{Tight{"="}}, expr},
+        Lambda{Tuple{Tuple{_, f, _, ps, _, _, _, e}}, QuasiQuote{Set{UnQuote{f}, UnQuote{Apply{peg_lambda, Tuple{ps, e}}}}}}},
+    Act{Seq{ident, "=", Not{Tight{"="}}, expr},
+        Lambda{Tuple{Tuple{x, _, _, e}}, QuasiQuote{Set{UnQuote{x}, UnQuote{e}}}}},
+    Act{Seq{Key{"fun"}, ident, Not{Tight{"("}}},
+        Lambda{Tuple{Tuple{_, f, _}}, QuasiQuote{Fun{UnQuote{f}}}}},
+    Act{Seq{postfix, Tight{"["}, expr, "]", "=", Not{Tight{"="}}, expr},
+        Lambda{Tuple{Tuple{a, _, i, _, _, _, v}}, QuasiQuote{Apply{_index_set, Tuple{UnQuote{a}, UnQuote{i}, UnQuote{v}}}}}},
+    union,
+    Act{Seq{Key{"record"}, ident, "(", idents, ")"},
+        Lambda{Tuple{Tuple{_, n, _, fs, _}}, Apply{peg_record, Tuple{n, fs}}}}}}}}
+
+" a function with a guard passes its arguments on to the functions after its | "
+" when the guard is false (peg_fuse) "
+Apply{_define_rule, Tuple{Quote{union}, Quote{Choice{
+    Act{Seq{arrow, "|", union},
+        Lambda{Tuple{Tuple{f, _, g}}, Apply{peg_fuse, Tuple{f, g}}}},
+    arrow}}}}
+
+" -> or the word if after the blanks at p, which are not consumed "
+Def{peg_tok_arrow_next, Lambda{Tuple{p}, Do{
+    Def{q, Apply{peg_skip_ws, Tuple{p}}},
+    Def{c, Apply{peg_char_at, Tuple{q}}},
+    Def{d, Apply{peg_char_at, Tuple{Apply{_add, Tuple{q, 1}}}}},
+    Set{peg_pv, none},
+    If{If{Apply{_eq, Tuple{c, 45}}, Apply{_eq, Tuple{d, 62}}, false}, p,
+    If{If{Apply{_eq, Tuple{c, 105}}, If{Apply{_eq, Tuple{d, 102}}, Apply{_not, Tuple{Apply{peg_is_alnum, Tuple{Apply{peg_char_at, Tuple{Apply{_add, Tuple{q, 2}}}}}}}}, false}, false}, p,
+        Apply{peg_fail, Tuple{p}}}}}}}
+
+Apply{_define_rule, Tuple{Quote{arrow_next}, peg_tok_arrow_next}}
+
+Apply{_define_rule, Tuple{Quote{params}, Quote{Choice{
+    Act{Seq{"(", Delimited{pattern, ","}, ")", And{arrow_next}}, Lambda{Tuple{Tuple{_, ps, _, _}}, ps}},
+    Act{pattern, Lambda{Tuple{x}, Tuple{x}}}}}}}
+
+" the parameters are read as patterns only when an expression and -> or if follow, "
+" since every text of a pattern is also a text of an expression. The rule keeps the result for the position. "
+Apply{_define_rule, Tuple{Quote{lambda_ahead}, Quote{Seq{And{Seq{ternary, arrow_next}}}}}}
+
+" params if c -> e is a function with the guard c (peg_guard) "
+Apply{_define_rule, Tuple{Quote{arrow}, Quote{Choice{
+    Act{Seq{lambda_ahead, params, "->", arrow},
+        Lambda{Tuple{Tuple{_, ps, _, e}}, Apply{peg_lambda, Tuple{ps, e}}}},
+    Act{Seq{lambda_ahead, params, Key{"if"}, ternary, "->", arrow},
+        Lambda{Tuple{Tuple{_, ps, _, c, _, e}}, Apply{peg_guard, Tuple{ps, c, e}}}},
+    ternary}}}}
+
+Apply{_define_rule, Tuple{Quote{ternary}, Quote{Choice{
+    Act{Seq{or_expr, "?", or_expr, ":", ternary},
+        Lambda{Tuple{Tuple{c, _, a, _, b}}, QuasiQuote{If{UnQuote{c}, UnQuote{a}, UnQuote{b}}}}},
+    or_expr}}}}
+
+Apply{_define_rule, Tuple{Quote{or_expr}, Quote{Choice{
+    Act{Seq{and_expr, Key{"or"}, or_expr},
+        Lambda{Tuple{Tuple{a, _, b}}, QuasiQuote{If{UnQuote{a}, true, UnQuote{b}}}}},
+    and_expr}}}}
+
+Apply{_define_rule, Tuple{Quote{and_expr}, Quote{Choice{
+    Act{Seq{not_expr, Key{"and"}, and_expr},
+        Lambda{Tuple{Tuple{a, _, b}}, QuasiQuote{If{UnQuote{a}, UnQuote{b}, false}}}},
+    not_expr}}}}
+
+Apply{_define_rule, Tuple{Quote{not_expr}, Quote{Choice{
+    Act{Seq{Key{"not"}, not_expr},
+        Lambda{Tuple{Tuple{_, a}}, QuasiQuote{Apply{_not, Tuple{UnQuote{a}}}}}},
+    rel_expr}}}}
+
+Apply{_define_rule, Tuple{Quote{rel_expr}, Quote{Choice{
+    Act{Seq{cons_expr, "==", cons_expr}, Apply{peg_binop, Tuple{Quote{_eq}}}},
+    Act{Seq{cons_expr, "!=", cons_expr}, Apply{peg_binop, Tuple{Quote{_ne}}}},
+    Act{Seq{cons_expr, "<=", cons_expr}, Apply{peg_binop, Tuple{Quote{_le}}}},
+    Act{Seq{cons_expr, ">=", cons_expr}, Apply{peg_binop, Tuple{Quote{_ge}}}},
+    Act{Seq{cons_expr, "<", cons_expr}, Apply{peg_binop, Tuple{Quote{_lt}}}},
+    Act{Seq{cons_expr, ">", cons_expr}, Apply{peg_binop, Tuple{Quote{_gt}}}},
+    cons_expr}}}}
+
+" x :: xs is Cons{x, xs}. It groups to the right. "
+Apply{_define_rule, Tuple{Quote{cons_expr}, Quote{Choice{
+    Act{Seq{add_expr, "::", cons_expr},
+        Lambda{Tuple{Tuple{a, _, b}}, QuasiQuote{Cons{UnQuote{a}, UnQuote{b}}}}},
+    add_expr}}}}
+
+" a binary - must be on the same line as its left operand "
+Apply{_define_rule, Tuple{Quote{minus}, Quote{Seq{Same{}, "-", Not{Tight{">"}}}}}}
+
+Apply{_define_rule, Tuple{Quote{add_expr}, Quote{Choice{
+    Act{Seq{add_expr, "+", mul_expr}, Apply{peg_binop, Tuple{Quote{_add}}}},
+    Act{Seq{add_expr, minus, mul_expr}, Apply{peg_binop, Tuple{Quote{_sub}}}},
+    mul_expr}}}}
+
+Apply{_define_rule, Tuple{Quote{mul_expr}, Quote{Choice{
+    Act{Seq{mul_expr, "*", unary}, Apply{peg_binop, Tuple{Quote{_mul}}}},
+    Act{Seq{mul_expr, "/", unary}, Apply{peg_binop, Tuple{Quote{_div}}}},
+    Act{Seq{mul_expr, "%", unary}, Apply{peg_binop, Tuple{Quote{_mod}}}},
+    unary}}}}
+
+Apply{_define_rule, Tuple{Quote{unary}, Quote{Choice{
+    postfix,
+    Act{Seq{"-", unary},
+        Lambda{Tuple{Tuple{_, a}}, QuasiQuote{Apply{_sub, Tuple{0, UnQuote{a}}}}}},
+    Act{Seq{"'", unary},
+        Lambda{Tuple{Tuple{_, a}}, Apply{mexpr, Tuple{Quote{Quote}, Tuple{a}}}}},
+    Act{Seq{"`", unary},
+        Lambda{Tuple{Tuple{_, a}}, Apply{mexpr, Tuple{Quote{QuasiQuote}, Tuple{a}}}}},
+    Act{Seq{"!", unary},
+        Lambda{Tuple{Tuple{_, a}}, Apply{mexpr, Tuple{Quote{UnQuote}, Tuple{a}}}}}}}}}
+
+Apply{_define_rule, Tuple{Quote{postfix}, Quote{Choice{
+    Act{Seq{postfix, Tight{"("}, Delimited{expr, ","}, ")"},
+        Lambda{Tuple{Tuple{f, _, args, _}}, QuasiQuote{Apply{UnQuote{f}, UnQuote{args}}}}},
+    Act{Seq{postfix, "@", ident},
+        Lambda{Tuple{Tuple{x, _, t}}, QuasiQuote{_TypeOf{UnQuote{x}, UnQuote{t}}}}},
+    Act{Seq{postfix, Tight{"."}, ident},
+        Lambda{Tuple{Tuple{t, _, f}}, QuasiQuote{Apply{_record_get, Tuple{UnQuote{t}, Quote{UnQuote{f}}}}}}},
+    Act{Seq{postfix, Tight{"["}, index, "]", Not{assign_op}},
+        Lambda{Tuple{Tuple{a, _, i, _, _}}, QuasiQuote{Apply{_index_get, Tuple{UnQuote{a}, UnQuote{i}}}}}},
+    primary}}}}
+
+" the = of an assignment, not == "
+Apply{_define_rule, Tuple{Quote{assign_op}, Quote{Seq{"=", Not{Tight{"="}}}}}}
+
+" the inside of a[...]: an expression. In t[p -> e | q if c -> g] the functions joined by | "
+" end with a function that gives peg_skip (_peg_rewrite) "
+Apply{_define_rule, Tuple{Quote{index}, Quote{
+    Act{expr, Lambda{Tuple{e}, Apply{_peg_rewrite, Tuple{e}}}}}}}
+
+Apply{_define_rule, Tuple{Quote{block}, Quote{
+    Act{Seq{"{", Many{Seq{expr, Option{";"}}}, "}"},
+        Lambda{Tuple{Tuple{_, es, _}}, Apply{peg_block, Tuple{es}}}}}}}
+
+" a branch of if: an expression without | outside of brackets, "
+" so that a | after if (c) a else b goes on with the functions around the if "
+Apply{_define_rule, Tuple{Quote{branch}, Quote{Choice{
+    Act{Seq{And{Seq{postfix, ":="}}, ident, Tight{"("}, Delimited{pattern, ","}, ")", ":=", branch},
+        Lambda{Tuple{Tuple{_, f, _, ps, _, _, e}}, QuasiQuote{Def{UnQuote{f}, UnQuote{Apply{peg_lambda, Tuple{ps, e}}}}}}},
+    Act{Seq{ident, ":=", branch},
+        Lambda{Tuple{Tuple{x, _, e}}, QuasiQuote{Def{UnQuote{x}, UnQuote{e}}}}},
+    Act{Seq{And{Seq{postfix, "=", Not{Tight{"="}}}}, ident, Tight{"("}, Delimited{pattern, ","}, ")", "=", Not{Tight{"="}}, branch},
+        Lambda{Tuple{Tuple{_, f, _, ps, _, _, _, e}}, QuasiQuote{Set{UnQuote{f}, UnQuote{Apply{peg_lambda, Tuple{ps, e}}}}}}},
+    Act{Seq{ident, "=", Not{Tight{"="}}, branch},
+        Lambda{Tuple{Tuple{x, _, _, e}}, QuasiQuote{Set{UnQuote{x}, UnQuote{e}}}}},
+    arrow}}}}
+
+" the condition is in parentheses, the branches are branch. "
+" else belongs to the nearest if, since the branch takes it first. "
+Apply{_define_rule, Tuple{Quote{if_expr}, Quote{
+    Act{Seq{Key{"if"}, "(", expr, ")", branch, Option{Seq{Key{"else"}, branch}}},
+        Fusion{
+            Lambda{Tuple{Tuple{_, _, c, _, a, Tuple{}}}, QuasiQuote{If{UnQuote{c}, UnQuote{a}, none}}},
+            Lambda{Tuple{Tuple{_, _, c, _, a, Tuple{Tuple{_, b}}}}, QuasiQuote{If{UnQuote{c}, UnQuote{a}, UnQuote{b}}}}}}}}}
+
+Apply{_define_rule, Tuple{Quote{primary}, Quote{Choice{
+    if_expr,
+    Act{Seq{Key{"while"}, "(", expr, ")", expr},
+        Lambda{Tuple{Tuple{_, _, c, _, b}}, Apply{peg_while, Tuple{c, b}}}},
+    Act{Seq{Key{"handle"}, expr, Key{"with"}, union},
+        Lambda{Tuple{Tuple{_, b, _, h}}, QuasiQuote{Handle{UnQuote{b}, UnQuote{h}}}}},
+    Act{Seq{Key{"perform"}, unary},
+        Lambda{Tuple{Tuple{_, v}}, QuasiQuote{Perform{UnQuote{v}}}}},
+    block,
+    embed,
+    Act{Seq{ident, Tight{"{"}, Delimited{expr, ","}, "}"},
+        Lambda{Tuple{Tuple{h, _, args, _}}, Apply{mexpr, Tuple{h, args}}}},
+    Act{Seq{istr_open, Many{Seq{istr_text, istr_hole, expr, "}"}}, istr_text, istr_close},
+        Lambda{Tuple{Tuple{_, parts, last, _}}, Apply{peg_interp, Tuple{parts, last}}}},
+    ident,
+    integer,
+    string,
+    Act{Seq{"(", ")"}, Lambda{Tuple{_}, Quote{Tuple{}}}},
+    Act{Seq{"(", Delimited1{expr, ","}, ")"},
+        Lambda{Tuple{Tuple{_, es, _}}, If{Apply{_eq, Tuple{Apply{arity, Tuple{es}}, 1}}, Apply{peg_first, Tuple{es}}, es}}},
+    Act{Seq{"[", Delimited{expr, ","}, "]"},
+        Lambda{Tuple{Tuple{_, es, _}}, Apply{peg_to_list, Tuple{es}}}},
+    sugar_primary}}}}
+
+" === Patterns === "
+" A pattern is written as an expression up to or, and matches the tree of that expression: "
+" a + b is Apply{'_add, Tuple{a, b}} and f(x) is Apply{'f, Tuple{x}}. "
+" The names of operators and functions are symbols, the other identifiers are variables. "
+" p @ type is _TypeOf{p, type}, and the arguments of Head{p, ...} are patterns. "
+
+Apply{_define_rule, Tuple{Quote{pattern}, Quote{Choice{
+    Act{Seq{pat_and, Key{"or"}, pattern},
+        Lambda{Tuple{Tuple{a, _, b}}, QuasiQuote{If{UnQuote{a}, Quote{true}, UnQuote{b}}}}},
+    pat_and}}}}
+
+Apply{_define_rule, Tuple{Quote{pat_and}, Quote{Choice{
+    Act{Seq{pat_not, Key{"and"}, pat_and},
+        Lambda{Tuple{Tuple{a, _, b}}, QuasiQuote{If{UnQuote{a}, UnQuote{b}, Quote{false}}}}},
+    pat_not}}}}
+
+Apply{_define_rule, Tuple{Quote{pat_not}, Quote{Choice{
+    Act{Seq{Key{"not"}, pat_not},
+        Lambda{Tuple{Tuple{_, a}}, QuasiQuote{Apply{Quote{_not}, Tuple{UnQuote{a}}}}}},
+    pat_rel}}}}
+
+Apply{_define_rule, Tuple{Quote{pat_rel}, Quote{Choice{
+    Act{Seq{pat_cons, "==", pat_cons}, Apply{peg_binop, Tuple{Quote{Quote{_eq}}}}},
+    Act{Seq{pat_cons, "!=", pat_cons}, Apply{peg_binop, Tuple{Quote{Quote{_ne}}}}},
+    Act{Seq{pat_cons, "<=", pat_cons}, Apply{peg_binop, Tuple{Quote{Quote{_le}}}}},
+    Act{Seq{pat_cons, ">=", pat_cons}, Apply{peg_binop, Tuple{Quote{Quote{_ge}}}}},
+    Act{Seq{pat_cons, "<", pat_cons}, Apply{peg_binop, Tuple{Quote{Quote{_lt}}}}},
+    Act{Seq{pat_cons, ">", pat_cons}, Apply{peg_binop, Tuple{Quote{Quote{_gt}}}}},
+    pat_cons}}}}
+
+Apply{_define_rule, Tuple{Quote{pat_cons}, Quote{Choice{
+    Act{Seq{pat_add, "::", pat_cons},
+        Lambda{Tuple{Tuple{a, _, b}}, QuasiQuote{Cons{UnQuote{a}, UnQuote{b}}}}},
+    pat_add}}}}
+
+Apply{_define_rule, Tuple{Quote{pat_add}, Quote{Choice{
+    Act{Seq{pat_add, "+", pat_mul}, Apply{peg_binop, Tuple{Quote{Quote{_add}}}}},
+    Act{Seq{pat_add, minus, pat_mul}, Apply{peg_binop, Tuple{Quote{Quote{_sub}}}}},
+    pat_mul}}}}
+
+Apply{_define_rule, Tuple{Quote{pat_mul}, Quote{Choice{
+    Act{Seq{pat_mul, "*", pat_unary}, Apply{peg_binop, Tuple{Quote{Quote{_mul}}}}},
+    Act{Seq{pat_mul, "/", pat_unary}, Apply{peg_binop, Tuple{Quote{Quote{_div}}}}},
+    Act{Seq{pat_mul, "%", pat_unary}, Apply{peg_binop, Tuple{Quote{Quote{_mod}}}}},
+    pat_unary}}}}
+
+" 'e is the value of the expression e "
+Apply{_define_rule, Tuple{Quote{pat_unary}, Quote{Choice{
+    pat_postfix,
+    Act{Seq{"-", pat_unary},
+        Lambda{Tuple{Tuple{_, a}}, QuasiQuote{Apply{Quote{_sub}, Tuple{0, UnQuote{a}}}}}},
+    Act{Seq{"'", unary},
+        Lambda{Tuple{Tuple{_, a}}, Apply{mexpr, Tuple{Quote{Quote}, Tuple{a}}}}}}}}}
+
+Apply{_define_rule, Tuple{Quote{pat_postfix}, Quote{Choice{
+    Act{Seq{pat_postfix, "@", ident},
+        Lambda{Tuple{Tuple{x, _, t}}, QuasiQuote{_TypeOf{UnQuote{x}, UnQuote{t}}}}},
+    pat_primary}}}}
+
+Apply{_define_rule, Tuple{Quote{pat_primary}, Quote{Choice{
+    Act{Seq{ident, Tight{"("}, Delimited{pattern, ","}, ")"},
+        Lambda{Tuple{Tuple{f, _, args, _}}, QuasiQuote{Apply{Quote{UnQuote{f}}, UnQuote{args}}}}},
+    Act{Seq{ident, Tight{"{"}, Delimited{pattern, ","}, "}"},
+        Lambda{Tuple{Tuple{h, _, args, _}}, Apply{mexpr, Tuple{h, args}}}},
+    ident,
+    integer,
+    string,
+    Act{Seq{"(", ")"}, Lambda{Tuple{_}, Quote{Tuple{}}}},
+    Act{Seq{"(", Delimited1{pattern, ","}, ")"},
+        Lambda{Tuple{Tuple{_, ps, _}}, If{Apply{_eq, Tuple{Apply{arity, Tuple{ps}}, 1}}, Apply{peg_first, Tuple{ps}}, ps}}},
+    Act{Seq{"[", Delimited{pattern, ","}, "]"},
+        Lambda{Tuple{Tuple{_, ps, _}}, Apply{peg_to_list, Tuple{ps}}}}}}}}
+
+" === Grammar declarations === "
+" name ::= alt | alt ...  defines the rule. ... stands for the previous definition. "
+" An alternative is a sequence of items and an optional action { ... }. "
+" An item is label:element or element, and must be on the same line. "
+" The action is a block, and the labels are its variables. "
+
+Apply{_define_rule, Tuple{Quote{syntax_decl}, Quote{
+    Act{Seq{ident, "::=", g_choice},
+        Lambda{Tuple{Tuple{n, _, e}},
+            QuasiQuote{Apply{_define_rule, Tuple{UnQuote{Apply{mexpr, Tuple{Quote{Quote}, Tuple{n}}}},
+                                                UnQuote{Apply{mexpr, Tuple{Quote{Quote}, Tuple{e}}}}}}}}}}}}
+
+Apply{_define_rule, Tuple{Quote{g_choice}, Quote{
+    Act{Delimited1{g_alt, "|"},
+        Lambda{Tuple{es}, If{Apply{_eq, Tuple{Apply{arity, Tuple{es}}, 1}}, Apply{peg_first, Tuple{es}},
+            Apply{mexpr, Tuple{Quote{Choice}, es}}}}}}}}
+
+Apply{_define_rule, Tuple{Quote{g_alt}, Quote{Choice{
+    Act{"...", Lambda{Tuple{_}, Quote{Prev{}}}},
+    Act{Seq{Many1{g_item}, Option{Seq{Same{}, block}}},
+        Lambda{Tuple{Tuple{items, act}}, Do{
+            Def{labels, Apply{peg_map_args, Tuple{peg_first, items}}},
+            Def{elems, Apply{peg_map_args, Tuple{Lambda{Tuple{t}, Apply{arg, Tuple{t, 1}}}, items}}},
+            Def{seq, Apply{mexpr, Tuple{Quote{Seq}, elems}}},
+            If{Apply{_eq, Tuple{act, Tuple{}}},
+                If{Apply{_eq, Tuple{Apply{arity, Tuple{elems}}, 1}}, Apply{peg_first, Tuple{elems}}, seq},
+                QuasiQuote{Act{UnQuote{seq},
+                    Lambda{Tuple{UnQuote{labels}}, UnQuote{Apply{arg, Tuple{Apply{peg_first, Tuple{act}}, 1}}}}}}}}}}}}}}
+
+Apply{_define_rule, Tuple{Quote{g_item}, Quote{Choice{
+    Act{Seq{Same{}, ident, Tight{":"}, g_suffix},
+        Lambda{Tuple{Tuple{_, l, _, e}}, Tuple{l, e}}},
+    Act{Seq{Same{}, g_suffix},
+        Lambda{Tuple{Tuple{_, e}}, Tuple{Quote{_}, e}}}}}}}
+
+Apply{_define_rule, Tuple{Quote{g_suffix}, Quote{Choice{
+    Act{Seq{g_primary, Tight{"*"}}, Lambda{Tuple{Tuple{e, _}}, Many{e}}},
+    Act{Seq{g_primary, Tight{"+"}}, Lambda{Tuple{Tuple{e, _}}, Many1{e}}},
+    Act{Seq{g_primary, Tight{"?"}}, Lambda{Tuple{Tuple{e, _}}, Option{e}}},
+    Act{Seq{"&", g_primary}, Lambda{Tuple{Tuple{_, e}}, And{e}}},
+    Act{Seq{"!", g_primary}, Lambda{Tuple{Tuple{_, e}}, Not{e}}},
+    g_primary}}}}
+
+Apply{_define_rule, Tuple{Quote{g_primary}, Quote{Choice{
+    string,
+    keyword,
+    Act{Seq{ident, Not{Choice{"::=", Tight{":"}}}}, peg_first},
+    Act{Seq{"(", g_choice, ")"}, Lambda{Tuple{Tuple{_, e, _}}, e}}}}}}
+
+" === Rules of the syntax sugar === "
 
 Apply{_define_rule, Tuple{Quote{same}, Quote{Same{}}}}
 
@@ -1588,5 +1522,5 @@ Apply{_define_rule, Tuple{Quote{embed}, peg_tok_embed}}
 
 " === Switch to the new syntax === "
 Def{parse_mexpr, parse}
-Def{parse, Lambda{Tuple{s}, Apply{peg_parse, Tuple{Quote{toplevel}, s}}}}
+Set{parse, Lambda{Tuple{s}, Apply{peg_parse, Tuple{Quote{toplevel}, s}}}}
 

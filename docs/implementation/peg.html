@@ -70,23 +70,23 @@ println(sevens{| 7 7 7 7 |})</pre>
 <p><code>::=</code> を使わずに定義した規則も <code>sevens{| ... |}</code> で使えます。<code>::=</code> 自体も <code>_define_rule</code> の呼び出しに読み替えられます（<a href="syntax.html#decl">構文の定義</a>）。</p>
 
 <h2>解釈実行</h2>
-<p><code>peg_px(e, p)</code> は構文解析式 <code>e</code> を位置 <code>p</code> から試し、成功すれば次の位置を返して値を <code>peg_pv</code> に置きます。失敗は <code>-1</code> です。</p>
+<p><code>peg_px(e, p)</code> は構文解析式 <code>e</code> を位置 <code>p</code> から試し、成功すれば次の位置を返して値を <code>peg_pv</code> に置きます。失敗は <code>-1</code> です。<code>peg_px</code>・<code>peg_call_rule</code>・<code>peg_run_rule</code> は互いに呼び合うので、頭の <code>Fun</code> で名前を宣言し、あとで <code>Set</code> で定義します（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L114-L119"><code>planck/peg.pk:114–119</code></a>）。</p>
 <div class="example">
-<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L207-L212">planck/peg.pk:207–212</a></p>
-<pre class="pk">Def{peg_px, Lambda{Tuple{e, p}, Do{
+<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L212-L217">planck/peg.pk:212–217</a></p>
+<pre class="pk">Set{peg_px, Lambda{Tuple{e, p}, Do{
     Def{t, Apply{typeof, Tuple{e}}},
     If{Apply{_eq, Tuple{t, Quote{string}}}, Apply{peg_lit, Tuple{e, Apply{peg_skip_ws, Tuple{p}}}},
     If{Apply{_eq, Tuple{t, Quote{symbol}}}, Apply{peg_call_rule, Tuple{e, p}},
     If{Apply{_eq, Tuple{t, Quote{function}}}, Apply{e, Tuple{p}},
         Apply{Apply{table_get, Tuple{peg_handlers, Apply{head, Tuple{e}}, none}}, Tuple{e, p}}}}}}}}</pre>
 </div>
-<p>文字列は空白を読み飛ばしてから照合し、シンボルは規則として呼び、関数はそのまま呼びます。<code>Seq</code>・<code>Choice</code> などの M式は、頭ごとの処理を表 <code>peg_handlers</code> から引きます（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L170-L205"><code>planck/peg.pk:170–205</code></a>）。識別子や整数などの字句は、<a href="syntax.html">構文の定義</a>の側で関数として実装しています。</p>
+<p>文字列は空白を読み飛ばしてから照合し、シンボルは規則として呼び、関数はそのまま呼びます。<code>Seq</code>・<code>Choice</code> などの M式は、頭ごとの処理を表 <code>peg_handlers</code> から引きます（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L175-L210"><code>planck/peg.pk:175–210</code></a>）。識別子や整数などの字句は、<a href="syntax.html">構文の定義</a>の側で関数として実装しています。</p>
 <p>失敗のたびに最も先まで進んだ位置を <code>peg_far</code> に記録し（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L57-L59"><code>planck/peg.pk:57–59</code></a>）、構文エラーはその位置で報告します。</p>
 
 <h2>メモ化と直接左再帰</h2>
 <p>規則の結果を（位置, 規則）ごとにメモ化します（packrat 構文解析）。バックトラックしても同じ規則を同じ位置で再計算しません。</p>
 <div class="example">
-<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L214-L220">planck/peg.pk:214–220</a></p>
+<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L219-L225">planck/peg.pk:219–225</a></p>
 <pre class="pk">&quot; === Rules and memoization === &quot;
 &quot; The memo of position p is the array peg_memo[p] (made when first used), which holds &quot;
 &quot; three slots for each rule id: end position, value and left-recursion flag. &quot;
@@ -95,11 +95,11 @@ println(sevens{| 7 7 7 7 |})</pre>
 &quot; the inner call fails, which is the seed. Then the rule is run again &quot;
 &quot; while it consumes more than the last result. &quot;</pre>
 </div>
-<p>メモは位置ごとの配列で、規則ごとに終了位置・値・左再帰の印の3欄を持ちます。<code>peg_call_rule</code> はまずメモを引きます（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L229-L245"><code>planck/peg.pk:229–245</code></a>）。</p>
+<p>メモは位置ごとの配列で、規則ごとに終了位置・値・左再帰の印の3欄を持ちます。<code>peg_call_rule</code> はまずメモを引きます（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L234-L250"><code>planck/peg.pk:234–250</code></a>）。</p>
 <p>直接左再帰（<code>sum ::= sum "+" term | term</code>）もメモで扱います。規則の実行中はメモを実行中の印にしておき、同じ位置で再帰呼び出しされたら失敗を返します。これを種として得た結果をメモに置いて規則を再実行し、前より長く読めた間はこれを繰り返します（seed growing）。</p>
 <div class="example">
-<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L247-L265">planck/peg.pk:247–265</a></p>
-<pre class="pk">Def{peg_run_rule, Lambda{Tuple{r, p, row, b}, Do{
+<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L252-L270">planck/peg.pk:252–270</a></p>
+<pre class="pk">Set{peg_run_rule, Lambda{Tuple{r, p, row, b}, Do{
     Def{body, Apply{table_get, Tuple{peg_rules, r, none}}},
     Def{b1, Apply{_add, Tuple{b, 1}}},
     Apply{array_set, Tuple{row, b, -2}},
@@ -123,7 +123,7 @@ println(sevens{| 7 7 7 7 |})</pre>
 
 <h2>規則の定義</h2>
 <div class="example">
-<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L282-L291">planck/peg.pk:282–291</a></p>
+<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L287-L296">planck/peg.pk:287–296</a></p>
 <pre class="pk">&quot; _define_rule(name, e) defines or replaces the rule &quot;
 Def{_define_rule, Lambda{Tuple{name, e}, Do{
     If{Apply{_eq, Tuple{Apply{table_get, Tuple{peg_ids, name, none}}, none}}, Do{
@@ -139,7 +139,7 @@ Def{_define_rule, Lambda{Tuple{name, e}, Do{
 <p>評価前の形は <code>peg_sources</code> に残します。<code>unparse</code> のように文法を読む道具はこの表を使います。</p>
 
 <h2>入口</h2>
-<p><code>peg_parse(rule, s)</code> はメモを作り直してから規則を呼び、<code>Tuple{値, 残り}</code> を返します（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L300-L316"><code>planck/peg.pk:300–316</code></a>）。失敗すると <code>peg_far</code> の位置から行末までを添えた <code>SyntaxError{...}</code> を返します。</p>
+<p><code>peg_parse(rule, s)</code> はメモを作り直してから規則を呼び、<code>Tuple{値, 残り}</code> を返します（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L305-L321"><code>planck/peg.pk:305–321</code></a>）。失敗すると <code>peg_far</code> の位置から行末までを添えた <code>SyntaxError{...}</code> を返します。</p>
 
 <nav class="pager"><a class="prev" href="init.html"><small>前のページ</small>init.pk と M式</a><a class="next" href="syntax.html"><small>次のページ</small>構文の定義</a></nav>
 </main>

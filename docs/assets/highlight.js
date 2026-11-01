@@ -1,6 +1,6 @@
 // planck のコードに色を付ける。<pre class="pk"> の中身を字句に分けて span で囲む。
 (function () {
-  var kw = /^(if|else|while|and|or|not|handle|with|perform|match|record|for|in|return|break|continue)$/;
+  var kw = /^(if|else|while|and|or|not|handle|with|perform|match|record|for|in|return|break|continue|fun)$/;
   var re = /(#[^\n]*)|(f?"(?:[^"\\\n]|\\.)*")|(\b0[xob][0-9a-fA-F]+\b|\b\d+\b)|('[A-Za-z_][A-Za-z0-9_]*)|([A-Za-z_][A-Za-z0-9_]*)(?=\{)|([A-Za-z_][A-Za-z0-9_]*)/g;
   function esc(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
   function paint(src) {

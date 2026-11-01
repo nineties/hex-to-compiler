@@ -4,9 +4,9 @@
 
 <h2>トップレベル</h2>
 <p><code>main</code> は準備をしてから <code>planck/init.pk</code> を読み、続いて最初の引数のプログラムファイルを読みます。</p>
-<!--file planck0.sv 2597-2609-->
-<p>ファイルは <code>interpret_file</code> が読みます（[[planck0.sv#2566-2595]]）。式ごとに大域変数 <code>parse</code> と <code>eval</code> を <code>call_global</code> で呼び直します。<code>call_global</code> は <code>Apply{名前, Tuple{引数}}</code> を組み立ててコンパイルし、実行します（[[planck0.sv#2561-2564]]）。このため <code>parse</code> を差し替えると次の式から新しい <code>parse</code> で読まれ、planck の構文はこの仕組みで入ります。</p>
-<!--file planck0.sv 2551-2560-->
+<!--file planck0.sv 2642-2654-->
+<p>ファイルは <code>interpret_file</code> が読みます（[[planck0.sv#2611-2640]]）。式ごとに大域変数 <code>parse</code> と <code>eval</code> を <code>call_global</code> で呼び直します。<code>call_global</code> は <code>Apply{名前, Tuple{引数}}</code> を組み立ててコンパイルし、実行します（[[planck0.sv#2606-2609]]）。このため <code>parse</code> を差し替えると次の式から新しい <code>parse</code> で読まれ、planck の構文はこの仕組みで入ります。</p>
+<!--file planck0.sv 2595-2605-->
 
 <h2>値の表現</h2>
 <p>値は32ビットの1語です。最下位ビットが1なら1ビット左シフトした整数、0ならヒープ上のオブジェクトへのポインタです。オブジェクトは先頭の1語のヘッダに種類と長さを持ちます。</p>
@@ -15,32 +15,33 @@
 <p>ヒープは起動時に <code>mmap2</code> で確保する1GB の領域で、先頭から順に切り出します。GC はありません（[[planck0.sv#36-67]]）。</p>
 
 <h2>M式のリーダ</h2>
-<p>組み込みの <code>parse</code> が読むのは、シンボル・整数・文字列と、シンボルの直後に <code>{</code> が続く <code>Head{...}</code> の4種類です（[[planck0.sv#784-874]]）。M式の引数は16個までです。</p>
-<!--file planck0.sv 830-862-->
+<p>組み込みの <code>parse</code> が読むのは、シンボル・整数・文字列と、シンボルの直後に <code>{</code> が続く <code>Head{...}</code> の4種類です（[[planck0.sv#799-889]]）。M式の引数は16個までです。</p>
+<!--file planck0.sv 845-877-->
 <p>planck の構文が入ったあとも、このリーダは <code>parse_mexpr</code> として残ります。</p>
 <!--ex i_parse-->
 
 <h2>コンパイラ</h2>
-<p><code>compile</code> は整数と文字列を定数に、シンボルを変数の参照にし、M式を <code>compile_mexpr</code> に渡します（[[planck0.sv#1445-1460]]）。</p>
-<p><code>compile_mexpr</code> は頭で分岐します（[[planck0.sv#1270-1443]]）。<code>Apply</code>・<code>Def</code>・<code>Set</code>・<code>Do</code>・<code>If</code>・<code>While</code>・<code>Lambda</code>・<code>Fusion</code>・<code>Quote</code>・<code>QuasiQuote</code>・<code>Handle</code>・<code>Perform</code> が特殊形式で、それ以外の頭は引数を評価して同じ頭の M式を作るコンストラクタになります。</p>
-<p>局所変数はコンパイル時に（環境の深さ, 位置）の組に解決します。トップレベルの <code>Def</code> と束縛されていない名前は大域変数で、実行時に表を引きます。トップレベルの関数が自分自身を参照できるのはこのためです。</p>
+<p><code>compile</code> は整数と文字列を定数に、シンボルを変数の参照にし、M式を <code>compile_mexpr</code> に渡します（[[planck0.sv#1492-1507]]）。</p>
+<p><code>compile_mexpr</code> は頭で分岐します（[[planck0.sv#1303-1490]]）。<code>Apply</code>・<code>Def</code>・<code>Fun</code>・<code>Set</code>・<code>Do</code>・<code>If</code>・<code>While</code>・<code>Lambda</code>・<code>Fusion</code>・<code>Quote</code>・<code>QuasiQuote</code>・<code>Handle</code>・<code>Perform</code> が特殊形式で、それ以外の頭は引数を評価して同じ頭の M式を作るコンストラクタになります。</p>
+<p>局所変数はコンパイル時に（環境の深さ, 位置）の組に解決します。大域変数は欄（値と名前の2語）で、コンパイラは名前から最新の欄を引く表 <code>global_table</code> を持ちます。トップレベルの <code>Def</code> は新しい欄を作って表の項目を差し替え（[[planck0.sv#466-474]]）、命令 <code>GLOAD</code>・<code>GDEF</code>・<code>GSET</code> には名前でなく欄を埋め込みます（[[planck0.sv#1156-1183]]）。名前が指す変数は式を実行する前に決まり、前にコンパイルした関数は前の欄を指したままです。<code>Set</code> は今の欄に書き込みます。局所にも大域にも見つからない名前は、その式を実行する前にメッセージを出して止まります。</p>
+<p><code>Def</code> は本体をコンパイルする前に欄を作るので、関数は自分自身を参照できます。<code>Fun{f}</code> は値のない欄（関数の中では値のない位置）を作るだけで、値は後の <code>Set</code> が入れます。値のない変数を読むと、実行時にメッセージを出して止まります。</p>
 
 <h2>仮想機械</h2>
 <p>命令は18個です。設計はソース中の注釈にあります。</p>
-<!--file planck0.sv 875-948-->
+<!--file planck0.sv 890-967-->
 <p>フレームは機械のスタックでなくヒープに置き、仮想機械は自分自身を再帰呼び出ししません。計算の状態は現在のフレームからトップレベルまでのフレームの鎖だけで表せるので、継続はこの鎖へのポインタで済みます。</p>
 
 <h2>呼び出しとパターン照合</h2>
-<p>呼び出しでは <code>select</code> が引数に合う関数を選びます（[[planck0.sv#1616-1644]]）。<code>Fusion</code> は左、失敗すれば右を試します。<code>Lambda</code> は引数の数を比べてからパターンを順に照合します。</p>
-<!--file planck0.sv 1571-1601-->
-<p><code>match_pat</code> は、変数なら新しい環境の次の位置に値を書き、<code>Quote</code> なら等価性を比べ、<code>_TypeOf</code> なら種類を確かめてから内側を照合します。M式のパターンは頭と引数の数を比べ、引数ごとに再帰します。合う関数がなければ <code>matching failed</code> で止まります（[[planck0.sv#1698-1710]]）。</p>
-<p>組み込みの <code>eval</code> は、M式をトップレベルの式としてコンパイルし、新しいフレームで実行します（[[planck0.sv#1675-1679]]）。</p>
+<p>呼び出しでは <code>select</code> が引数に合う関数を選びます（[[planck0.sv#1663-1691]]）。<code>Fusion</code> は左、失敗すれば右を試します。<code>Lambda</code> は引数の数を比べてからパターンを順に照合します。</p>
+<!--file planck0.sv 1618-1648-->
+<p><code>match_pat</code> は、変数なら新しい環境の次の位置に値を書き、<code>Quote</code> なら等価性を比べ、<code>_TypeOf</code> なら種類を確かめてから内側を照合します。M式のパターンは頭と引数の数を比べ、引数ごとに再帰します。合う関数がなければ <code>matching failed</code> で止まります（[[planck0.sv#1745-1757]]）。</p>
+<p>組み込みの <code>eval</code> は、M式をトップレベルの式としてコンパイルし、新しいフレームで実行します（[[planck0.sv#1722-1726]]）。</p>
 
 <h2>組み込み関数</h2>
-<p>組み込み関数は <code>init_prims</code> が <code>defprim</code> で大域の表に登録します。名前・引数の数・実装の関数・種類を渡します（[[planck0.sv#2459-2467]]）。演算子と文字列の連結は糖衣の呼ぶ名前で登録され、<code>_add</code>・<code>_sub</code>・<code>_mul</code>・<code>_div</code>・<code>_mod</code>・<code>_lt</code>・<code>_le</code>・<code>_gt</code>・<code>_ge</code>・<code>_eq</code>・<code>_ne</code>・<code>_strcat</code> のように <code>_</code> で始まります（[[planck0.sv#2469-2524]]）。<code>_</code> のない <code>add</code> や <code>strcat</code> は登録しないので、プログラムの同名の変数が演算子の意味を変えません。</p>
+<p>組み込み関数は <code>init_prims</code> が <code>defprim</code> で大域の表に欄を作って登録します。名前・引数の数・実装の関数・種類を渡します（[[planck0.sv#2503-2511]]）。演算子と文字列の連結は糖衣の呼ぶ名前で登録され、<code>_add</code>・<code>_sub</code>・<code>_mul</code>・<code>_div</code>・<code>_mod</code>・<code>_lt</code>・<code>_le</code>・<code>_gt</code>・<code>_ge</code>・<code>_eq</code>・<code>_ne</code>・<code>_strcat</code> のように <code>_</code> で始まります（[[planck0.sv#2513-2568]]）。<code>_</code> のない <code>add</code> や <code>strcat</code> は登録しないので、プログラムの同名の変数が演算子の意味を変えません。</p>
 
 <h2 id="effects">エフェクト</h2>
-<p><code>Handle</code> は本体を新しいフレームで実行し、そのフレームにハンドラを記録します（[[planck0.sv#1825-1832]]）。<code>Perform</code> は現在のフレームから呼び出し元へ鎖をたどり、ハンドラを持つフレームを探します。</p>
-<!--file planck0.sv 1842-1864-->
+<p><code>Handle</code> は本体を新しいフレームで実行し、そのフレームにハンドラを記録します（[[planck0.sv#1869-1876]]）。<code>Perform</code> は現在のフレームから呼び出し元へ鎖をたどり、ハンドラを持つフレームを探します。</p>
+<!--file planck0.sv 1886-1908-->
 <p>見つけたら継続 <code>k</code>（現在のフレームと境界のフレームの組）を作り、ハンドラを <code>(v, k)</code> で照合します。合わなければさらに外側を探します。ハンドラの値は境界のフレームの呼び出し元に返り、<code>Handle</code> 式の値になります。</p>
-<p><code>k</code> を呼ぶと、現在のフレームから境界までを複製し、複製を実行します（<code>resume</code>、[[planck0.sv#1646-1663]]）。元のフレームは実行しないので、同じ <code>k</code> を何度でも呼べます（多重継続）。</p>
+<p><code>k</code> を呼ぶと、現在のフレームから境界までを複製し、複製を実行します（<code>resume</code>、[[planck0.sv#1693-1710]]）。元のフレームは実行しないので、同じ <code>k</code> を何度でも呼べます（多重継続）。</p>

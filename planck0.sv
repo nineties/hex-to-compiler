@@ -429,6 +429,7 @@
 (long plainS)
 (long DefS)
 (long SetS)
+(long FunS)
 (long ApplyS)
 (long DoS)
 (long IfS)
@@ -456,7 +457,20 @@
     (return (get e (+ 2 i)))
     )
 
-(long global_table) ; global variables (sym -> data)
+(long global_table) ; global variables (sym -> cell of the latest definition)
+
+; A cell is a global variable: | value | sym |. The value is 0 until the
+; definition runs. Definitions are in the order they are compiled: define_global
+; makes a new cell for the name, and the code compiled after it refers to the
+; new cell.
+(fun define_global (sym)
+    (var cell (allocate 8))
+    (set cell 0 0)
+    (set cell 1 sym)
+    (if (! (table_update global_table sym cell))
+        (table_insert global_table sym cell))
+    (return cell)
+    )
 
 (fun init_tables ()
     (= symtable (make_table 0x10000 strhash streq))
@@ -479,6 +493,7 @@
     (= plainS   (sym "plain"))
     (= DefS         (sym "Def"))
     (= SetS         (sym "Set"))
+    (= FunS         (sym "Fun"))
     (= ApplyS       (sym "Apply"))
     (= DoS          (sym "Do"))
     (= IfS          (sym "If"))
@@ -891,8 +906,12 @@
 ;   never a valid value. Variables are shared locations: closures and
 ;   continuations refer to the same environment.
 ;
-;   Variables defined by top-level Def, and names that are not bound
-;   lexically, are global variables looked up in global_table at run time.
+;   Variables defined by top-level Def are global variables. A global variable
+;   is a cell (| value | sym |). The compiler finds the cell of a name in
+;   global_table, which holds the latest definition at that time, and puts it
+;   in the instruction. Def makes a new cell, so the code compiled before it
+;   keeps the old one. A name which is neither bound lexically nor defined at
+;   the top level is an error at compile time.
 ;
 ; frame (internal, allocated in the heap):
 ;   | caller | code | pc | env | sp | handler | size | operand stack ... |
@@ -910,9 +929,9 @@
 ;   CONST v         push v
 ;   LOAD d i sym    push slot i of the d-th parent environment
 ;   STORE d i       store the stack top to slot i of the d-th parent env
-;   GLOAD sym       push the global variable sym
-;   GDEF sym        define the global variable sym with the stack top
-;   GSET sym        update the global variable sym with the stack top
+;   GLOAD cell      push the value of the global variable cell
+;   GDEF cell       define the global variable cell with the stack top
+;   GSET cell       update the global variable cell with the stack top
 ;   POP             discard the stack top
 ;   JMP off         jump
 ;   JF off          pop, jump if it is false
@@ -1133,8 +1152,21 @@
     (stack_effect 1)
     )
 
+;  the cell of the global variable sym, or stop if there is none
+(fun global_cell (sym)
+    (var cell (table_lookup global_table sym))
+    (if (! cell) (do
+        (eputs "undefined variable: ")
+        (eprint sym)
+        (eputs "\n")
+        (exit 1)
+        ))
+    (return cell)
+    )
+
 (fun compile_var (sym)
     (var ent (cenv_lookup sym))
+    (var cell 0)
     (if ent
         (do
             (emit OP_LOAD)
@@ -1143,8 +1175,9 @@
             (emit sym)
             )
         (do
+            (= cell (global_cell sym))
             (emit OP_GLOAD)
-            (emit sym)
+            (emit cell)
             ))
     (stack_effect 1)
     )
@@ -1274,6 +1307,7 @@
     (var n 0)
     (var x 0)
     (var ent 0)
+    (var cell 0)
     (var slot 0)
     (var saved 0)
     (var l0 0)
@@ -1303,9 +1337,12 @@
         (= x (get e 2))
         (if (is_global_scope)
             (do
+                ; The new variable is visible from its definition
+                ; so that recursive functions can be defined.
+                (= cell (define_global x))
                 (compile (get e 3) 0)
                 (emit OP_GDEF)
-                (emit x)
+                (emit cell)
                 )
             (do
                 ; The variable is visible from its definition
@@ -1316,6 +1353,16 @@
                 (emit 0)
                 (emit slot)
                 ))
+        (return 0)
+        ))
+    (if (== head FunS) (do
+        (if (|| (!= arity 1) (!= (gettag (get e 2)) SymbolT)) (malformed e))
+        (= x (get e 2))
+        ; The variable has no value until it is assigned.
+        (if (is_global_scope)
+            (define_global x)
+            (cenv_add x))
+        (emit_const noneS)
         (return 0)
         ))
     (if (== head SetS) (do
@@ -1331,7 +1378,7 @@
                 )
             (do
                 (emit OP_GSET)
-                (emit x)
+                (emit (global_cell x))
                 ))
         (return 0)
         ))
@@ -1754,23 +1801,20 @@
     )
 
 (fun op_gload ()
-    (var s (fetch))
-    (var v (table_lookup global_table s))
-    (if (! v) (runtime_error "undefined variable: " s))
+    (var cell (fetch))
+    (var v (get cell 0))
+    (if (! v) (runtime_error "undefined variable: " (get cell 1)))
     (vm_push v)
     )
 
 (fun op_gdef ()
-    (var s (fetch))
-    (var v (get (- vm_sp 4)))
-    (if (! (table_update global_table s v))
-        (table_insert global_table s v))
+    (var cell (fetch))
+    (set cell 0 (get (- vm_sp 4)))
     )
 
 (fun op_gset ()
-    (var s (fetch))
-    (if (! (table_update global_table s (get (- vm_sp 4))))
-        (runtime_error "undefined variable: " s))
+    (var cell (fetch))
+    (set cell 0 (get (- vm_sp 4)))
     )
 
 (fun op_pop () (-= vm_sp 4))
@@ -2463,7 +2507,7 @@
     (set prim 1 fn)
     (set prim 2 s)
     (set prim 3 kind)
-    (table_insert global_table s prim)
+    (set (define_global s) 0 prim)
     )
 
 (fun init_prims ()
@@ -2549,9 +2593,10 @@
     )
 
 ; The loop looks up the global variables `parse` and `eval` every time, so
-; a program can replace them (Def{parse, ...}, Def{eval, ...}) and the next
+; a program can replace them (Def{parse, ...}, Def{eval, ...} or Set) and the next
 ; top-level expression is parsed/evaluated by the new definitions. Apply{eval, ...}
-; in a program also calls the replaced eval.
+; in the code compiled after the replacement also calls the replaced eval; the code
+; compiled before keeps the old one unless the replacement is Set{eval, ...}.
 ;   parse: String -> Tuple{m-expr, rest String}   (initially the builtin parse)
 ;     When only white space is left, parse returns Tuple{Eof{}, rest} and the
 ;     loop stops. A replacement parse should pass Eof{} through.
