@@ -1,0 +1,43 @@
+<!--title planck0 の中身-->
+<h1>planck0 の中身</h1>
+<p class="lead">planck0 は M式だけを読む小さな処理系です。M式を 1 つ読むたびにバイトコードにして、自前の仮想機械で動かします。ファイルは <a href="@REPO@/blob/main/planck0.sv">planck0.sv</a> の 1 本です。</p>
+
+<h2>全体の流れ</h2>
+<p><code>main</code> は準備をしてから <code>planck/init.pk</code> を読み、続いてコマンドラインのファイルを順に読みます。</p>
+<!--file planck0.sv 2300-2314-->
+<p>ファイルを読むのは <code>interpret_file</code> です（[[planck0.sv#2269-2298]]）。大事なのは、1 つの式ごとに大域変数 <code>parse</code> と <code>eval</code> を呼び直している点です。<code>call_global</code> は「<code>Apply{名前, Tuple{引数}}</code> という M式を作ってコンパイルし、動かす」だけの関数です（[[planck0.sv#2264-2267]]）。だからプログラムが <code>parse</code> を差し替えると、次の式からは新しい <code>parse</code> で読まれます。planck の構文はこの仕組みの上に乗っています。</p>
+<!--file planck0.sv 2254-2263-->
+
+<h2>値の表し方</h2>
+<p>値は 32 ビットの 1 語です。最下位ビットが 1 なら小さな整数で、値を 1 つずらして入れます。0 ならヒープ上の物を指します。ヒープの物は先頭に 1 語のヘッダを持ち、そこに種類と長さが入っています。</p>
+<!--file planck0.sv 69-91-->
+<p>シンボルと M式は intern されます。同じ中身の M式はメモリ上でも 1 つなので、比較がポインタの比較ですみます（[[planck0.sv#327-336]]）。</p>
+<p>ヒープは起動時に 1GB を確保し、前から順に切り出します。GC はありません（[[planck0.sv#36-67]]）。</p>
+
+<h2>M式のリーダ</h2>
+<p>組み込みの <code>parse</code> は M式だけを読みます。シンボル・整数・文字列と、シンボルのあとに <code>{</code> が続く <code>Head{...}</code> の 4 つです（[[planck0.sv#766-856]]）。M式の引数は 16 個までです。</p>
+<!--file planck0.sv 812-844-->
+<p>この <code>parse</code> は、planck の構文が入ったあとも <code>parse_mexpr</code> という名前で残ります。</p>
+<!--ex i_parse-->
+
+<h2>コンパイラ</h2>
+<p>M式はバイトコードにコンパイルしてから動かします。<code>compile</code> は整数と文字列を定数に、シンボルを変数の読み出しに、M式を <code>compile_mexpr</code> に回します（[[planck0.sv#1427-1442]]）。</p>
+<p><code>compile_mexpr</code> は頭を見て分かれます（[[planck0.sv#1252-1425]]）。<code>Apply</code>・<code>Def</code>・<code>Set</code>・<code>Do</code>・<code>If</code>・<code>While</code>・<code>Lambda</code>・<code>Fusion</code>・<code>Quote</code>・<code>QuasiQuote</code>・<code>Handle</code>・<code>Perform</code> が特殊形式で、それ以外の頭は引数を評価して同じ頭の M式を作るコンストラクタになります。</p>
+<p>変数はコンパイルの時に「何段外の環境の何番目か」に解決します。<code>Def</code> でトップレベルに作った変数と、どこにも束縛されていない名前は大域変数で、実行時に表を引きます。関数がトップレベルの自分自身を呼べるのはこのためです。</p>
+
+<h2>仮想機械</h2>
+<p>仮想機械の命令は 18 個です。設計はファイルの中の長い注釈にまとまっています。</p>
+<!--file planck0.sv 857-930-->
+<p>要点は、フレームを機械のスタックではなくヒープに置いていることです。仮想機械は自分自身を再帰で呼びません。今の計算の状態は「今のフレームからトップレベルのフレームまでの鎖」だけで表せます。継続はこの鎖へのポインタなので、作るのも呼ぶのも軽くすみます。</p>
+
+<h2>呼び出しとパターン照合</h2>
+<p>関数を呼ぶと、<code>select</code> が引数に合う関数を選びます（[[planck0.sv#1598-1626]]）。<code>Fusion</code> なら左を試し、だめなら右を試します。<code>Lambda</code> なら引数の数を比べてから、パターンを 1 つずつ照合します。</p>
+<!--file planck0.sv 1553-1583-->
+<p><code>match_pat</code> は、変数なら新しい環境の次の場所に値を書き、<code>Quote</code> なら等しさを比べ、<code>_TypeOf</code> なら種類を見てから中のパターンを照合します。M式のパターンは頭と引数の数を比べ、引数ごとに再帰します。合う関数がなければ <code>matching failed</code> を出して止まります（[[planck0.sv#1679-1691]]）。</p>
+<p><code>eval</code> も組み込み関数の 1 つです。呼ばれると M式をその場でコンパイルし、新しいフレームで動かします（[[planck0.sv#1657-1661]]）。</p>
+
+<h2>エフェクト</h2>
+<p><code>Handle</code> は、本体を新しいフレームで動かし、そのフレームにハンドラの印を付けます（[[planck0.sv#1806-1813]]）。<code>Perform</code> は、今のフレームから呼び出し元へ鎖をたどり、印の付いたフレームを探します。</p>
+<!--file planck0.sv 1823-1845-->
+<p>見つけたら、継続 <code>k</code>（今のフレームと境目のフレームの組）を作り、ハンドラを <code>(v, k)</code> で照合します。合わなければさらに外の印を探します。ハンドラの値は境目のフレームの呼び出し元に返るので、<code>Handle</code> 式の値になります。</p>
+<p><code>k</code> を呼ぶと、今のフレームから境目までのフレームを写し、写したほうを動かします（<code>resume</code>、[[planck0.sv#1628-1645]]）。元のフレームは一度も動かさないので、同じ <code>k</code> を何度でも呼べます。</p>
