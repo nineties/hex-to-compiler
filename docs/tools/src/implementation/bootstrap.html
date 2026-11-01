@@ -1,0 +1,36 @@
+<!--title 機械語から planck0 まで-->
+<h1>機械語から planck0 まで</h1>
+<p class="lead">16 進で書いた 1 枚の機械語から、sasm で書いた planck0 ができるまでを順にたどります。</p>
+
+<h2>pforth：手書きの機械語</h2>
+<p>出発点は <a href="@REPO@/blob/main/pforth.xxd">pforth.xxd</a> です。201 行の 16 進ダンプで、各行の右に注釈が付いています。<code>xxd -r -c 8</code> がこれをバイト列に戻すと、そのまま 32 ビット x86 の Linux で動く ELF の実行ファイルになります。</p>
+<!--file pforth.xxd 1-11-->
+<p>中身は小さな Forth です。最初に辞書にあるのは 1 文字の名前の語だけです。<code>k</code> は 1 文字読む、<code>t</code> は 1 文字書く、<code>f</code> は文字から語を探す、<code>x</code> は語を実行する、といった具合です。</p>
+<!--file pforth.xxd 20-31-->
+<p>はじめの解釈器は「<code>k</code> で 1 文字読み、<code>f</code> で語を探し、<code>x</code> で実行する」をくり返すだけです。1 文字の語だけでも、次のように Hello World が書けます。</p>
+<!--file plisp.fs 71-79-->
+
+<h2>plisp：Forth を育てて Lisp を作る</h2>
+<p><a href="@REPO@/blob/main/plisp.fs">plisp.fs</a> は pforth に食べさせる入力です。最初の数行は 1 文字の語だけで書かれた暗号のような列で、空白と改行を何もしない語にし、<code>\</code> をコメントの語にします（[[plisp.fs#1-15]]）。15 行目で、やっとコメントが書けるようになります。</p>
+<p>そこから少しずつ語を足して、Forth を使いやすくしていきます。</p>
+<ul>
+<li>2 段目の解釈器。名前で語を探し、コンパイルの状態を持ちます（[[plisp.fs#335-358]]）。</li>
+<li>条件分岐・ループ・再帰・構造体などのふつうの Forth の語（[[plisp.fs#498-1380]]）。</li>
+<li>3 段目の解釈器。辞書にない語は数として読み、数でもなければエラーの文を出して止まります（[[plisp.fs#1386-1447]]）。</li>
+</ul>
+<p>Forth が十分に育ったら、その Forth で Lisp を書きます（[[plisp.fs#1684]] から）。リスト・ノード・パーサとプリンタ・評価器と続き、最後に <code>plisp/init.lisp</code> を読み込んで Lisp 側の準備をします（[[plisp.fs#2435]]）。</p>
+<p>Lisp にしたのは、次の段がアセンブラやコンパイラだからです。木を直接いじれて、内部 DSL を作りやすい言語が向いています。</p>
+
+<h2>asm と sasm：機械語を書く道具</h2>
+<p>plisp の上で 2 つの道具を作ります。どちらも次の段へ渡るための使い捨ての道具で、速さや安全より作りやすさを優先しています。</p>
+<p><a href="@REPO@/blob/main/asm/core.lisp">asm/core.lisp</a> は x86 のアセンブラです。S式で書いた命令を読み、ELF の実行ファイルを直接書き出します。対象は 32 ビットだけで、ヘッダもコードもデータも読み書き実行できる 1 つの <code>PT_LOAD</code> にまとめます。</p>
+<!--file asm/examples/hello.s 1-19-->
+<p><a href="@REPO@/blob/main/sasm/core.lisp">sasm/core.lisp</a> は構造化アセンブリ言語 sasm のコンパイラです。sasm は型のない C のような言語です。変数・関数・<code>if</code>・<code>while</code> が書け、plisp の内部 DSL として作られています。レジスタ割り付けはせず、値を毎回スタックに積んで降ろすコードを出し、asm で機械語にします。</p>
+<!--file sasm/examples/fib.sv 1-14-->
+
+<h2>plisp2：速い Lisp</h2>
+<p>Forth の上の plisp は、大きな仕事には遅すぎます。そこで同じ Lisp を sasm で書き直したのが <a href="@REPO@/blob/main/plisp2.sv">plisp2.sv</a> です。メモリの確保（[[plisp2.sv#6]]）・ノード（[[plisp2.sv#54]]）・パーサとプリンタ（[[plisp2.sv#302]]）・評価器（[[plisp2.sv#586]]）・組み込み関数（[[plisp2.sv#828]]）の順に並んでいます。</p>
+<p>plisp2 は plisp の上の sasm で機械語になります。できた plisp2 が、今度は同じ sasm を動かして <code>planck0.sv</code> を機械語にします。</p>
+
+<h2>planck0 へ</h2>
+<p><a href="@REPO@/blob/main/planck0.sv">planck0.sv</a> も sasm で書かれています。2314 行あり、ここから先が planck です。中身は<a href="planck0.html">次のページ</a>で読みます。</p>

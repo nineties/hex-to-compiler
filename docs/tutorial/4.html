@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>4. パターンで分ける | planck</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="site-header"><div class="inner">
+<a class="logo" href="../index.html">planck<span>.</span></a>
+<nav class="site-nav">
+<a class="here" href="../tutorial/index.html">チュートリアル</a>
+<a href="../reference/index.html">リファレンス</a>
+<a href="../implementation/index.html">処理系の実装</a>
+<a href="https://github.com/nineties/hex-to-compiler">GitHub</a>
+</nav>
+</div></header>
+<div class="layout">
+<nav class="toc" aria-label="チュートリアルの目次"><details open><summary>チュートリアルの目次</summary>
+<h2>チュートリアル</h2>
+<ol>
+<li><a href="index.html">はじめに</a></li>
+<li><a href="1.html">1. はじめの一歩</a></li>
+<li><a href="2.html">2. 変数と関数</a></li>
+<li><a href="3.html">3. 値のかたち</a></li>
+<li><a class="here" href="4.html">4. パターンで分ける</a></li>
+<li><a href="5.html">5. ライブラリを使う</a></li>
+<li><a href="6.html">6. レコードと流れの制御</a></li>
+<li><a href="7.html">7. エフェクト</a></li>
+<li><a href="8.html">8. 構文を広げる</a></li>
+<li><a href="9.html">9. プログラムはデータ</a></li>
+</ol></details></nav>
+<main>
+<h1>4. パターンで分ける</h1>
+<p class="lead">planck の関数は、引数の形で場合分けできます。場合ごとの関数を <code>|</code> でつなぐのが基本の書き方です。</p>
+
+<h2>関数をつなぐ</h2>
+<div class="example">
+<p class="file">t4_fib.pk</p>
+<pre class="pk">fib := (0) -&gt; 0
+     | (1) -&gt; 1
+     | (n) -&gt; fib(n - 1) + fib(n - 2)
+println(fib(20))</pre>
+<p class="label">出力</p>
+<pre class="out">6765</pre>
+</div>
+<p><code>(0) -> 0</code> は「引数が <code>0</code> のときだけ呼べる関数」です。<code>|</code> でつないだ関数を呼ぶと、左から順に引数がパターンに合うかを試し、最初に合ったものが動きます。<code>fib(5)</code> は <code>(0)</code> にも <code>(1)</code> にも合わないので、3 つめの <code>(n)</code> が動きます。</p>
+<p><code>|</code> でつなぐことを関数の融合と呼びます。融合した結果もふつうの関数です。どのパターンにも合わない引数で呼ぶと、プログラムはエラーで止まります。</p>
+
+<h2>パターンの種類</h2>
+<table>
+<tr><th>パターン</th><th>合う値</th></tr>
+<tr><td><code>x</code></td><td>何にでも合い、その値が変数 <code>x</code> に入ります</td></tr>
+<tr><td><code>_</code></td><td>何にでも合います。値は捨てます</td></tr>
+<tr><td><code>0</code>・<code>"abc"</code></td><td>等しい整数・文字列</td></tr>
+<tr><td><code>'none</code></td><td>等しいシンボル</td></tr>
+<tr><td><code>Head{p, ...}</code></td><td>頭と引数の数が同じで、引数がそれぞれ <code>p, ...</code> に合う M式</td></tr>
+<tr><td><code>p :: q</code>・<code>[p, q]</code></td><td>リスト</td></tr>
+<tr><td><code>p @ int</code></td><td><code>p</code> に合い、値の種類が <code>int</code> のもの</td></tr>
+</table>
+
+<h3>リストを分ける</h3>
+<div class="example">
+<p class="file">t4_list.pk</p>
+<pre class="pk">len := (Nil{}) -&gt; 0 | (_ :: xs) -&gt; 1 + len(xs)
+println(len([5, 6, 7]))
+
+sum := ([]) -&gt; 0 | (x :: xs) -&gt; x + sum(xs)
+println(sum([1, 2, 3, 4]))
+
+swap2 := ([a, b]) -&gt; [b, a] | (xs) -&gt; xs
+use(&quot;pretty&quot;)
+put(f&quot;{swap2([1, 2])} {swap2([1, 2, 3])}\n&quot;)</pre>
+<p class="label">出力</p>
+<pre class="out">3
+10
+[2, 1] [1, 2, 3]</pre>
+</div>
+<p><code>Nil{}</code> と <code>[]</code> はどちらも空のリストに合います。<code>x :: xs</code> は先頭の要素 <code>x</code> と残り <code>xs</code> に分けます。<code>[a, b]</code> は要素がちょうど 2 つのリストにだけ合います。</p>
+
+<h3>種類で分ける</h3>
+<div class="example">
+<p class="file">t4_type.pk</p>
+<pre class="pk">describe := (n @ int) -&gt; f&quot;整数 {n}&quot;
+          | (s @ string) -&gt; f&quot;文字列 {s}&quot;
+          | (_) -&gt; &quot;そのほか&quot;
+put(describe(1)); put(&quot;\n&quot;)
+put(describe(&quot;abc&quot;)); put(&quot;\n&quot;)
+put(describe(&#x27;x)); put(&quot;\n&quot;)</pre>
+<p class="label">出力</p>
+<pre class="out">整数 1
+文字列 abc
+そのほか</pre>
+</div>
+<p><code>n @ int</code> は「整数なら <code>n</code> に入れる」というパターンです。<code>@</code> の右には <code>typeof</code> が返す名前を書きます。</p>
+
+<h2>あとから場合を足す</h2>
+<p>融合は値なので、あとから場合を足せます。</p>
+<div class="example">
+<p class="file">t4_extend.pk</p>
+<pre class="pk">greet := (_) -&gt; &quot;hello&quot;
+put(greet(&quot;en&quot;)); put(&quot;\n&quot;)
+
+greet = (&quot;ja&quot;) -&gt; &quot;こんにちは&quot; | greet
+put(greet(&quot;ja&quot;)); put(&quot;\n&quot;)
+put(greet(&quot;fr&quot;)); put(&quot;\n&quot;)</pre>
+<p class="label">出力</p>
+<pre class="out">hello
+こんにちは
+hello</pre>
+</div>
+<p><code>greet = ("ja") -> ... | greet</code> は、新しい場合を前に置いて古い <code>greet</code> とつなぎ、入れ直しています。前に置いたほうが先に試されます。</p>
+
+<h2>match</h2>
+<p>関数を作らずにその場で値を分けたいときは <code>match</code> を使います。</p>
+<div class="example">
+<p class="file">t4_match.pk</p>
+<pre class="pk">classify(n) := match n {
+    0 -&gt; &quot;zero&quot;
+    n if n &lt; 0 -&gt; &quot;negative&quot;
+    n if n % 2 == 0 -&gt; &quot;even&quot;
+    _ -&gt; &quot;odd&quot;
+}
+put(classify(0)); put(&quot; &quot;)
+put(classify(-4)); put(&quot; &quot;)
+put(classify(6)); put(&quot; &quot;)
+put(classify(7)); put(&quot;\n&quot;)</pre>
+<p class="label">出力</p>
+<pre class="out">zero negative even odd</pre>
+</div>
+<p><code>match 値 { パターン -> 式 ... }</code> は、上から順にパターンを試します。場合は改行か <code>;</code> で区切ります。<code>パターン if 条件</code> と書くと、パターンに合ったうえで条件が成り立つときだけ選ばれます。条件が成り立たなければ次の場合に進みます。</p>
+
+<h2>式を微分する</h2>
+<p>パターンと M式を組み合わせると、式を扱うプログラムが短く書けます。次は <code>x</code> での微分です。</p>
+<div class="example">
+<p class="file">t4_deriv.pk</p>
+<pre class="pk">d := (n @ int, x) -&gt; 0
+   | (y @ symbol, x) -&gt; (if (y == x) 1 else 0)
+   | (Add{a, b}, x) -&gt; Add{d(a, x), d(b, x)}
+   | (Mul{a, b}, x) -&gt; Add{Mul{d(a, x), b}, Mul{a, d(b, x)}}
+
+println(d(&#x27;Add{x, 3}, &#x27;x))
+println(d(&#x27;Mul{x, y}, &#x27;x))</pre>
+<p class="label">出力</p>
+<pre class="out">Add{1, 0}
+Add{Mul{1, y}, Mul{x, 0}}</pre>
+</div>
+<p>2 つめの場合の本体はかっこで囲んであります。<code>else</code> のあとは式全体を読むので、かっこがないと次の行の <code>| ...</code> まで <code>else</code> の中に入ってしまいます。融合の途中で <code>if</code> を使うときは、かっこで囲んでください。</p>
+<p><code>'Add{x, 3}</code> の <code>'</code> は、中を計算せずに M式のまま渡す印です（<a href="9.html">9 章</a>）。結果は整理していないので <code>Add{1, 0}</code> のような形のまま出ます。整理する関数も同じようにパターンで書けます。リポジトリの <a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/examples/deriv.pk">planck/examples/deriv.pk</a> に整理まで入れた版があります。</p>
+
+<nav class="pager"><a class="prev" href="3.html"><small>前のページ</small>3. 値のかたち</a><a class="next" href="5.html"><small>次のページ</small>5. ライブラリを使う</a></nav>
+</main>
+</div>
+<footer><div class="inner">planck — <a href="https://github.com/nineties/hex-to-compiler">nineties/hex-to-compiler</a></div></footer>
+<script src="../assets/highlight.js"></script>
+</body>
+</html>

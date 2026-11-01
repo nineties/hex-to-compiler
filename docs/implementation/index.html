@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>処理系の実装 | planck</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="site-header"><div class="inner">
+<a class="logo" href="../index.html">planck<span>.</span></a>
+<nav class="site-nav">
+<a href="../tutorial/index.html">チュートリアル</a>
+<a href="../reference/index.html">リファレンス</a>
+<a class="here" href="../implementation/index.html">処理系の実装</a>
+<a href="https://github.com/nineties/hex-to-compiler">GitHub</a>
+</nav>
+</div></header>
+<div class="layout">
+<nav class="toc" aria-label="処理系の実装の目次"><details open><summary>処理系の実装の目次</summary>
+<h2>処理系の実装</h2>
+<ol>
+<li><a class="here" href="index.html">全体の地図</a></li>
+<li><a href="bootstrap.html">機械語から planck0 まで</a></li>
+<li><a href="planck0.html">planck0 の中身</a></li>
+<li><a href="init.html">init.pk と M式</a></li>
+<li><a href="peg.html">packrat パーサ</a></li>
+<li><a href="syntax.html">構文を planck で書く</a></li>
+</ol></details></nav>
+<main>
+<h1>処理系の実装</h1>
+<p class="lead">planck の処理系は、手で書いた機械語から始めて 1 段ずつ積み上げて作ります。どの段も、前の段が作ったものだけを使います。外のアセンブラやコンパイラは使いません。</p>
+
+<h2>積み上げの全体</h2>
+<ol class="stack">
+<li><b>pforth</b> — 16 進で手書きした機械語の Forth。<a href="https://github.com/nineties/hex-to-compiler/blob/main/pforth.xxd">pforth.xxd</a> を <code>xxd -r</code> で実行ファイルに戻します。</li>
+<li><b>plisp</b> — pforth の上で Forth を育て、その Forth で書いた Lisp。<a href="https://github.com/nineties/hex-to-compiler/blob/main/plisp.fs">plisp.fs</a></li>
+<li><b>asm・sasm</b> — plisp で書いた x86 のアセンブラと、C に似た構造化アセンブリ言語。<a href="https://github.com/nineties/hex-to-compiler/blob/main/asm/core.lisp">asm/core.lisp</a>・<a href="https://github.com/nineties/hex-to-compiler/blob/main/sasm/core.lisp">sasm/core.lisp</a></li>
+<li><b>plisp2</b> — sasm で書き直した速い Lisp。<a href="https://github.com/nineties/hex-to-compiler/blob/main/plisp2.sv">plisp2.sv</a></li>
+<li><b>planck0</b> — sasm で書いた planck の核。M式を読み、バイトコードにして仮想機械で動かします。<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv">planck0.sv</a></li>
+<li><b>planck</b> — planck0 の上に M式で書いた起動の手順・packrat パーサ・構文。<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/init.pk">init.pk</a>・<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk">peg.pk</a>・<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/syntax.pk">syntax.pk</a></li>
+</ol>
+<p><code>make</code> はこの順に作ります。Makefile の該当する行は次のとおりです。</p>
+<pre>pforth:  xxd -r -c 8 pforth.xxd &gt; pforth
+plisp2:  ./pforth &lt; plisp.fs sasm.lisp plisp2.sv tmp-plisp2
+planck0: ./plisp2 sasm.lisp planck0.sv planck0</pre>
+<p>plisp は実行ファイルになりません。pforth が起動するたびに <code>plisp.fs</code> を読んで Lisp を組み立てます。その Lisp が <code>sasm.lisp</code> を動かし、<code>plisp2.sv</code> を機械語にします。できた plisp2 で、今度は <code>planck0.sv</code> を機械語にします。</p>
+
+<h2>各ページ</h2>
+<ul>
+<li><a href="bootstrap.html">機械語から planck0 まで</a> — pforth・plisp・asm・sasm・plisp2 のつくり</li>
+<li><a href="planck0.html">planck0 の中身</a> — 値の表し方・M式のリーダ・コンパイラ・仮想機械・パターン照合・エフェクト</li>
+<li><a href="init.html">init.pk と M式</a> — 核の上に最初に積むもの</li>
+<li><a href="peg.html">packrat パーサ</a> — データとしての文法・メモ化・左再帰</li>
+<li><a href="syntax.html">構文を planck で書く</a> — planck の構文を規則で定義し、<code>parse</code> を差し替える</li>
+</ul>
+
+<h2>読むときの約束</h2>
+<p>ファイルと行へのリンクは GitHub の <code>main</code> を指します。行番号はソースの変更でずれることがあります。ずれていたら近くを探してください。</p>
+
+<nav class="pager"><a class="next" href="bootstrap.html"><small>次のページ</small>機械語から planck0 まで</a></nav>
+</main>
+</div>
+<footer><div class="inner">planck — <a href="https://github.com/nineties/hex-to-compiler">nineties/hex-to-compiler</a></div></footer>
+<script src="../assets/highlight.js"></script>
+</body>
+</html>

@@ -1,0 +1,37 @@
+<!--title 構文を planck で書く-->
+<h1>構文を planck で書く</h1>
+<p class="lead"><a href="@REPO@/blob/main/planck/syntax.pk">planck/syntax.pk</a> は、planck の構文を packrat パーサの規則として定義し、最後に <code>parse</code> を差し替えます。構文は処理系に埋め込まれておらず、planck のプログラムの一部です。</p>
+
+<h2>字句は関数で</h2>
+<p>識別子・整数・文字列のような字句は、構文解析式ではなく関数で書いています。1 文字ずつ見て、読めたら次の位置を返します。</p>
+<!--file planck/syntax.pk 28-42-->
+<p>予約語の表 <code>peg_reserved</code> に入っている単語は識別子になりません（[[planck/syntax.pk#10-26]]）。<code>f"</code> の <code>f</code> も識別子にしません。関数を規則にするのは <code>define_rule</code> に関数をそのまま渡すだけです（[[planck/syntax.pk#123-126]]）。</p>
+
+<h2>式の規則</h2>
+<p>式は結合の弱いほうから順に規則を並べます。<code>expr</code>・<code>union</code>・<code>arrow</code>・<code>ternary</code>・<code>or_expr</code> と続き、<code>primary</code> で終わります（[[planck/syntax.pk#145-290]]）。たとえばたし算とひき算の規則はこうです。</p>
+<!--file planck/syntax.pk 214-220-->
+<p><code>add_expr</code> は自分自身から始まる左再帰なので、左から結合します。動作 <code>peg_binop</code> は「左・演算子・右」の組を <code>Apply{add, Tuple{a, b}}</code> の木にします（[[planck/syntax.pk#130-132]]）。2 項の <code>-</code> の前に <code>Same{}</code> があるので、行の頭の <code>-1</code> は新しい式になります。</p>
+<p>規則の動作が返すのは、評価器がそのまま受け取る M式です。<code>1 + 2</code> を読んだ結果は <code>Apply{add, Tuple{1, 2}}</code> で、これを M式で直接書いても同じ木になります。</p>
+<!--file planck/syntax.pk 268-290-->
+<p><code>primary</code> の最後の選択肢 <code>sugar_primary</code> には、<code>match</code>・<code>return</code>・<code>break</code>・<code>continue</code>・<code>for</code> が入っています（[[planck/syntax.pk#1100-1122]]）。</p>
+
+<h2 id="decl">文法の宣言を読む規則</h2>
+<p><code>::=</code> を読むのも規則です。<code>syntax_decl</code> は <code>name ::= ...</code> を読み、<code>define_rule</code> を呼ぶ木を作ります。</p>
+<!--file planck/syntax.pk 298-302-->
+<p>選択肢の項目と動作のブロックは、<code>g_alt</code> が <code>Act{Seq{...}, Lambda{Tuple{Tuple{ラベル, ...}}, 動作}}</code> に組み替えます（[[planck/syntax.pk#309-319]]）。ラベルが動作の関数の引数になるので、動作の中でラベルを変数として使えます。</p>
+<!--ex i_decl-->
+<p><code>syntax_decl</code> は <code>expr</code> の最初の選択肢です。だから <code>::=</code> はどこにでも書ける式で、読まれた次の式から新しい規則が効きます。</p>
+
+<h2>return と break を読み替える</h2>
+<p><code>return</code>・<code>break</code>・<code>continue</code> はエフェクトとして読みます。<code>return</code> を読むと数を数えておき、関数の木を作るときにその数を見ます。<code>return</code> があれば、本体を <code>Handle</code> で包みます（[[planck/syntax.pk#927-950]]）。</p>
+<!--ex i_return-->
+<p><code>for</code> の本体の中の <code>return x</code> が <code>Perform{Return{x}}</code> になり、関数の本体全体が <code>Handle{..., (Return{v}, k) -> v}</code> で包まれています。<code>for</code> は <code>peg_for</code> の呼び出しになります。</p>
+
+<h2>規則で読む文字列</h2>
+<p><code>name{| text |}</code> を読む <code>embed</code> も関数で書いた規則です（[[planck/syntax.pk#1124-1149]]）。<code>name</code> と <code>{|</code> を見つけたら、規則 <code>name</code> をその位置から呼び、そのあとに <code>|}</code> を求めます。規則の値は <code>Quote{v}</code> にして、定数として木に入れます。</p>
+
+<h2>parse を差し替える</h2>
+<p>最後の 2 行で切り替えます。</p>
+<!--file planck/syntax.pk 1151-1153-->
+<p>元の M式のリーダは <code>parse_mexpr</code> として残し、<code>parse</code> を「規則 <code>toplevel</code> で 1 つ読む関数」にします。planck0 は式ごとに <code>parse</code> を引き直すので（<a href="planck0.html">planck0 の中身</a>）、<code>syntax.pk</code> の次の式からは planck の構文で読まれます。<code>toplevel</code> は <code>expr</code> を 1 つ読み、<code>;</code>・改行・次の式の始まりのどれかを確かめます（[[planck/syntax.pk#149-151]]）。</p>
+<p>M式も構文の一部です。<code>primary</code> に <code>ident{expr, ...}</code> の選択肢があるので、<code>Def{x, 1}</code> と書けばそのまま M式として読まれます。</p>

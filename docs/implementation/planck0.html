@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>planck0 の中身 | planck</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="site-header"><div class="inner">
+<a class="logo" href="../index.html">planck<span>.</span></a>
+<nav class="site-nav">
+<a href="../tutorial/index.html">チュートリアル</a>
+<a href="../reference/index.html">リファレンス</a>
+<a class="here" href="../implementation/index.html">処理系の実装</a>
+<a href="https://github.com/nineties/hex-to-compiler">GitHub</a>
+</nav>
+</div></header>
+<div class="layout">
+<nav class="toc" aria-label="処理系の実装の目次"><details open><summary>処理系の実装の目次</summary>
+<h2>処理系の実装</h2>
+<ol>
+<li><a href="index.html">全体の地図</a></li>
+<li><a href="bootstrap.html">機械語から planck0 まで</a></li>
+<li><a class="here" href="planck0.html">planck0 の中身</a></li>
+<li><a href="init.html">init.pk と M式</a></li>
+<li><a href="peg.html">packrat パーサ</a></li>
+<li><a href="syntax.html">構文を planck で書く</a></li>
+</ol></details></nav>
+<main>
+<h1>planck0 の中身</h1>
+<p class="lead">planck0 は M式だけを読む小さな処理系です。M式を 1 つ読むたびにバイトコードにして、自前の仮想機械で動かします。ファイルは <a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv">planck0.sv</a> の 1 本です。</p>
+
+<h2>全体の流れ</h2>
+<p><code>main</code> は準備をしてから <code>planck/init.pk</code> を読み、続いてコマンドラインのファイルを順に読みます。</p>
+<div class="example">
+<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L2300-L2314">planck0.sv:2300–2314</a></p>
+<pre>(fun main (argc argv)
+    (var i 1)
+    (init_heap)
+    (init_tables)
+    (init_symbols)
+    (init_compiler)
+    (init_vm)
+    (init_prims)
+
+    (interpret_file &quot;planck/init.pk&quot;)
+    (while (&lt; i argc) (do
+        (interpret_file (get argv i))
+        (+= i 1)
+        ))
+    )</pre>
+</div>
+<p>ファイルを読むのは <code>interpret_file</code> です（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L2269-L2298"><code>planck0.sv:2269–2298</code></a>）。大事なのは、1 つの式ごとに大域変数 <code>parse</code> と <code>eval</code> を呼び直している点です。<code>call_global</code> は「<code>Apply{名前, Tuple{引数}}</code> という M式を作ってコンパイルし、動かす」だけの関数です（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L2264-L2267"><code>planck0.sv:2264–2267</code></a>）。だからプログラムが <code>parse</code> を差し替えると、次の式からは新しい <code>parse</code> で読まれます。planck の構文はこの仕組みの上に乗っています。</p>
+<div class="example">
+<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L2254-L2263">planck0.sv:2254–2263</a></p>
+<pre>; The loop looks up the global variables `parse` and `eval` every time, so
+; a program can replace them (Def{parse, ...}, Def{eval, ...}) and the next
+; top-level expression is parsed/evaluated by the new definitions. Apply{eval, ...}
+; in a program also calls the replaced eval.
+;   parse: String -&gt; Tuple{m-expr, rest String}   (initially the builtin parse)
+;     When only white space is left, parse returns Tuple{Eof{}, rest} and the
+;     loop stops. A replacement parse should pass Eof{} through.
+;   eval: m-expr -&gt; any value                     (initially the builtin eval)
+; Inside the VM, the builtin eval (PRIM_EVAL) is called through the global
+; variable like any other function.</pre>
+</div>
+
+<h2>値の表し方</h2>
+<p>値は 32 ビットの 1 語です。最下位ビットが 1 なら小さな整数で、値を 1 つずらして入れます。0 ならヒープ上の物を指します。ヒープの物は先頭に 1 語のヘッダを持ち、そこに種類と長さが入っています。</p>
+<div class="example">
+<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L69-L91">planck0.sv:69–91</a></p>
+<pre>; === data layout (planck0)
+; Small integers: tagged with LSB=1. Value is encoded as (val &lt;&lt; 1) | 1.
+; Heap objects: Identified by LSB=0.
+; These objects are preceded by a one-word header containing object-specific information.
+
+; Layout of heap objects.
+; m: 1 if the object is mutable
+;
+;         |        header        |
+;         |  27bit | 1bit | 4bit |
+; symbol  |      0 |    0 | 0000 | text |
+; string  | length |    0 | 0001 | text |
+; mexpr   |  arity |    0 | 0010 | sym  | arg1 | .... |
+; array   | length |    m | 0011 |
+; lambda  |  arity |    0 | 0101 | code | env  |
+; prim    |  arity |    0 | 0110 | ptr  | name | kind |
+; cont    |      0 |    0 | 0111 | top frame | boundary frame |
+; fusion  |      0 |    0 | 1000 | fun1 | fun2 |
+; code    |      0 |    0 | 1010 | (see Bytecode VM)
+;
+;
+; Both symbols and mexpr undergo interning,
+; enabling O(1) equality testing via pointer comparison.</pre>
+</div>
+<p>シンボルと M式は intern されます。同じ中身の M式はメモリ上でも 1 つなので、比較がポインタの比較ですみます（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L327-L336"><code>planck0.sv:327–336</code></a>）。</p>
+<p>ヒープは起動時に 1GB を確保し、前から順に切り出します。GC はありません（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L36-L67"><code>planck0.sv:36–67</code></a>）。</p>
+
+<h2>M式のリーダ</h2>
+<p>組み込みの <code>parse</code> は M式だけを読みます。シンボル・整数・文字列と、シンボルのあとに <code>{</code> が続く <code>Head{...}</code> の 4 つです（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L766-L856"><code>planck0.sv:766–856</code></a>）。M式の引数は 16 個までです。</p>
+<div class="example">
+<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L812-L844">planck0.sv:812–844</a></p>
+<pre>(fun parse_ (ret raw)
+    (= raw (skip_spaces raw))
+
+    (var c (getb raw 0))
+    (if (is_symbol_leading_char c) (do
+        ; symbol or m-expr
+        (= raw (parse_symbol ret raw))
+        (= raw (skip_spaces raw))
+        (if (== (getb raw) (char &quot;{&quot;))
+            (= raw (parse_mexpr ret (get ret) raw))
+            )
+        )
+    (if (is_digit c)
+        (= raw (parse_int ret raw))
+    (if (&amp;&amp; (== c (char &quot;-&quot;)) (is_digit (getb raw 1))) (do
+        ; negative integer literal
+        (= raw (parse_int ret (+ raw 1)))
+        (if (== (gettag (get ret)) IntT)
+            (set ret (- 2 (get ret))) ; fixnum(-n) = 2 - fixnum(n)
+            )
+        )
+    (if (== c (char &quot;\&quot;&quot;))
+        (= raw (parse_str ret raw))
+    (if (== c 0)
+        (set ret (syntax_error &quot;unexpected end of input&quot;))
+        (do
+            (set ret (syntax_error &quot;unexpected character&quot;))
+            (+= raw 1)
+            )
+        )))))
+    (= raw (skip_spaces raw))
+    (return raw)
+    )</pre>
+</div>
+<p>この <code>parse</code> は、planck の構文が入ったあとも <code>parse_mexpr</code> という名前で残ります。</p>
+<div class="example">
+<p class="file">i_parse.pk</p>
+<pre class="pk">println(parse(&quot;1 + 2 * 3\nx := 4&quot;))
+println(parse_mexpr(&quot;Apply{add, Tuple{1, 2}} rest&quot;))
+println(parse(&quot;   &quot;))</pre>
+<p class="label">出力</p>
+<pre class="out">Tuple{Apply{add, Tuple{1, Apply{mul, Tuple{2, 3}}}}, &quot;x := 4&quot;}
+Tuple{Apply{add, Tuple{1, 2}}, &quot;rest&quot;}
+Tuple{Eof{}, &quot;&quot;}</pre>
+</div>
+
+<h2>コンパイラ</h2>
+<p>M式はバイトコードにコンパイルしてから動かします。<code>compile</code> は整数と文字列を定数に、シンボルを変数の読み出しに、M式を <code>compile_mexpr</code> に回します（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L1427-L1442"><code>planck0.sv:1427–1442</code></a>）。</p>
+<p><code>compile_mexpr</code> は頭を見て分かれます（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L1252-L1425"><code>planck0.sv:1252–1425</code></a>）。<code>Apply</code>・<code>Def</code>・<code>Set</code>・<code>Do</code>・<code>If</code>・<code>While</code>・<code>Lambda</code>・<code>Fusion</code>・<code>Quote</code>・<code>QuasiQuote</code>・<code>Handle</code>・<code>Perform</code> が特殊形式で、それ以外の頭は引数を評価して同じ頭の M式を作るコンストラクタになります。</p>
+<p>変数はコンパイルの時に「何段外の環境の何番目か」に解決します。<code>Def</code> でトップレベルに作った変数と、どこにも束縛されていない名前は大域変数で、実行時に表を引きます。関数がトップレベルの自分自身を呼べるのはこのためです。</p>
+
+<h2>仮想機械</h2>
+<p>仮想機械の命令は 18 個です。設計はファイルの中の長い注釈にまとまっています。</p>
+<div class="example">
+<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L857-L930">planck0.sv:857–930</a></p>
+<pre>; === Bytecode VM
+;
+; planck0 compiles each top-level expression into a code object and runs it
+; on a stack-based virtual machine. Every Lambda becomes its own code object.
+;
+; code object:
+;   | header | arity | patterns | nslots | maxstack | ncode | code words ... |
+;   patterns: Tuple of parameter patterns (0 for top-level code)
+;   nslots:   number of variable slots of the environment
+;   maxstack: maximum depth of the operand stack
+;   Jump targets are word offsets from the first code word.
+;
+; environment (internal):
+;   | parent env | slot0 | slot1 | ... |
+;   Variables are resolved at compile time to (depth, slot) where depth is
+;   the number of parent links to follow. An empty slot holds 0, which is
+;   never a valid value. Variables are shared locations: closures and
+;   continuations refer to the same environment.
+;
+;   Variables defined by top-level Def, and names that are not bound
+;   lexically, are global variables looked up in global_table at run time.
+;
+; frame (internal, allocated in the heap):
+;   | caller | code | pc | env | sp | handler | size | operand stack ... |
+;   caller:  the frame which receives the return value (0 for top-level)
+;   pc:      address of the next instruction (saved when not running)
+;   sp:      byte offset of the stack top from the frame (saved)
+;   handler: effect handler if this frame is the boundary of Handle, or 0
+;   size:    size of the frame in words
+;
+; Since frames are not on the machine stack, the VM never calls itself
+; recursively and the control state of a computation is just the chain
+; of frames from the current frame to the top-level frame.
+;
+; Instructions (operands follow the opcode):
+;   CONST v         push v
+;   LOAD d i sym    push slot i of the d-th parent environment
+;   STORE d i       store the stack top to slot i of the d-th parent env
+;   GLOAD sym       push the global variable sym
+;   GDEF sym        define the global variable sym with the stack top
+;   GSET sym        update the global variable sym with the stack top
+;   POP             discard the stack top
+;   JMP off         jump
+;   JF off          pop, jump if it is false
+;   CALL n          call f with n arguments: [f a1 .. an] -&gt; [result]
+;   TCALL n         same as CALL but reuses the caller (tail call)
+;   RET             return the stack top to the caller
+;   CLOSURE code    push a closure of code and the current environment
+;   TUPLE n         [a1 .. an] -&gt; [Tuple{a1, .., an}]
+;   MEXPR h n       [a1 .. an] -&gt; [h{a1, .., an}]
+;   FUSION          [f g] -&gt; [f|g]
+;   HANDLE          [body handler] -&gt; [result]
+;                   call the closure body in a new frame marked with handler
+;   PERFORM         [v] -&gt; [value given by resume]
+;
+; Function call:
+;   The arguments are matched with the parameter patterns of the callee.
+;   Matched pattern variables are written to the slots of a new environment
+;   in the order of appearance. For f|g, f is tried first and then g.
+;   A frame which is a boundary of Handle is never dropped by TCALL.
+;
+; Algebraic effects (deep handlers):
+;   Handle{body, handler} evaluates body in a boundary frame B with handler.
+;   Perform{v} searches the nearest boundary frame B from the current frame
+;   and calls handler(v, k) whose result is returned to the caller of B,
+;   i.e. it becomes the value of the Handle expression.
+;   k is a continuation object (ContT) holding the current frame and B.
+;   If the arguments do not match the handler, the next outer handler is
+;   tried (effect forwarding).
+;   Calling k with a value x copies the frames from the current frame to B
+;   (B keeps its handler), links the copy of B to the caller of k, pushes x
+;   as the result of Perform and runs the copied frames. Since captured
+;   frames are never executed themselves, k can be resumed multiple times.
+;   When the resumed body finishes, its value is returned to the caller of k.</pre>
+</div>
+<p>要点は、フレームを機械のスタックではなくヒープに置いていることです。仮想機械は自分自身を再帰で呼びません。今の計算の状態は「今のフレームからトップレベルのフレームまでの鎖」だけで表せます。継続はこの鎖へのポインタなので、作るのも呼ぶのも軽くすみます。</p>
+
+<h2>呼び出しとパターン照合</h2>
+<p>関数を呼ぶと、<code>select</code> が引数に合う関数を選びます（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L1598-L1626"><code>planck0.sv:1598–1626</code></a>）。<code>Fusion</code> なら左を試し、だめなら右を試します。<code>Lambda</code> なら引数の数を比べてから、パターンを 1 つずつ照合します。</p>
+<div class="example">
+<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L1553-L1583">planck0.sv:1553–1583</a></p>
+<pre>(fun match_pat (p v env idx)
+    (var t (gettag p))
+    (var i 0)
+    (var n 0)
+    (var h 0)
+    (if (== p _S) (return 1)) ; wildcard
+    (if (== t SymbolT) (do ; variable pattern
+        (set env (+ 1 (get idx)) v)
+        (set idx (+ (get idx) 1))
+        (return 1)
+        ))
+    (if (|| (== t IntT) (== t StringT)) (return (values_equal p v)))
+    (if (== t MexprT) (do
+        (= h (get p 1))
+        (if (== h QuoteS) (return (values_equal (get p 2) v)))
+        (if (== h _TypeOfS) (do
+            (if (!= (typeof v) (get p 3)) (return 0))
+            (return (match_pat (get p 2) v env idx))
+            ))
+        (if (!= (gettag v) MexprT) (return 0))
+        (if (!= (get v 1) h) (return 0))
+        (= n (get_header_arg p))
+        (if (!= (get_header_arg v) n) (return 0))
+        (while (&lt; i n) (do
+            (if (! (match_pat (get p (+ i 2)) (get v (+ i 2)) env idx)) (return 0))
+            (+= i 1)
+            ))
+        (return 1)
+        ))
+    (return 0)
+    )</pre>
+</div>
+<p><code>match_pat</code> は、変数なら新しい環境の次の場所に値を書き、<code>Quote</code> なら等しさを比べ、<code>_TypeOf</code> なら種類を見てから中のパターンを照合します。M式のパターンは頭と引数の数を比べ、引数ごとに再帰します。合う関数がなければ <code>matching failed</code> を出して止まります（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L1679-L1691"><code>planck0.sv:1679–1691</code></a>）。</p>
+<p><code>eval</code> も組み込み関数の 1 つです。呼ばれると M式をその場でコンパイルし、新しいフレームで動かします（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L1657-L1661"><code>planck0.sv:1657–1661</code></a>）。</p>
+
+<h2>エフェクト</h2>
+<p><code>Handle</code> は、本体を新しいフレームで動かし、そのフレームにハンドラの印を付けます（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L1806-L1813"><code>planck0.sv:1806–1813</code></a>）。<code>Perform</code> は、今のフレームから呼び出し元へ鎖をたどり、印の付いたフレームを探します。</p>
+<div class="example">
+<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L1823-L1845">planck0.sv:1823–1845</a></p>
+<pre>(fun op_perform ()
+    (char[] 8 hargs)
+    (var v (vm_pop))
+    (var top vm_frame)
+    (var b vm_frame)
+    (var h 0)
+    (var callee 0)
+    (save_regs)
+    (while b (do
+        (= h (get b F_HANDLER))
+        (if h (do
+            (set hargs 0 v)
+            (set hargs 1 (make_cont top b))
+            (= callee (select h hargs 2))
+            (if callee (do
+                (invoke callee hargs 2 (get b F_CALLER))
+                (return 0)
+                ))
+            ))
+        (= b (get b F_CALLER))
+        ))
+    (runtime_error &quot;unhandled effect: &quot; v)
+    )</pre>
+</div>
+<p>見つけたら、継続 <code>k</code>（今のフレームと境目のフレームの組）を作り、ハンドラを <code>(v, k)</code> で照合します。合わなければさらに外の印を探します。ハンドラの値は境目のフレームの呼び出し元に返るので、<code>Handle</code> 式の値になります。</p>
+<p><code>k</code> を呼ぶと、今のフレームから境目までのフレームを写し、写したほうを動かします（<code>resume</code>、<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L1628-L1645"><code>planck0.sv:1628–1645</code></a>）。元のフレームは一度も動かさないので、同じ <code>k</code> を何度でも呼べます。</p>
+
+<nav class="pager"><a class="prev" href="bootstrap.html"><small>前のページ</small>機械語から planck0 まで</a><a class="next" href="init.html"><small>次のページ</small>init.pk と M式</a></nav>
+</main>
+</div>
+<footer><div class="inner">planck — <a href="https://github.com/nineties/hex-to-compiler">nineties/hex-to-compiler</a></div></footer>
+<script src="../assets/highlight.js"></script>
+</body>
+</html>

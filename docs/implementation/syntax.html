@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>構文を planck で書く | planck</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="site-header"><div class="inner">
+<a class="logo" href="../index.html">planck<span>.</span></a>
+<nav class="site-nav">
+<a href="../tutorial/index.html">チュートリアル</a>
+<a href="../reference/index.html">リファレンス</a>
+<a class="here" href="../implementation/index.html">処理系の実装</a>
+<a href="https://github.com/nineties/hex-to-compiler">GitHub</a>
+</nav>
+</div></header>
+<div class="layout">
+<nav class="toc" aria-label="処理系の実装の目次"><details open><summary>処理系の実装の目次</summary>
+<h2>処理系の実装</h2>
+<ol>
+<li><a href="index.html">全体の地図</a></li>
+<li><a href="bootstrap.html">機械語から planck0 まで</a></li>
+<li><a href="planck0.html">planck0 の中身</a></li>
+<li><a href="init.html">init.pk と M式</a></li>
+<li><a href="peg.html">packrat パーサ</a></li>
+<li><a class="here" href="syntax.html">構文を planck で書く</a></li>
+</ol></details></nav>
+<main>
+<h1>構文を planck で書く</h1>
+<p class="lead"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/syntax.pk">planck/syntax.pk</a> は、planck の構文を packrat パーサの規則として定義し、最後に <code>parse</code> を差し替えます。構文は処理系に埋め込まれておらず、planck のプログラムの一部です。</p>
+
+<h2>字句は関数で</h2>
+<p>識別子・整数・文字列のような字句は、構文解析式ではなく関数で書いています。1 文字ずつ見て、読めたら次の位置を返します。</p>
+<div class="example">
+<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/syntax.pk#L28-L42">planck/syntax.pk:28–42</a></p>
+<pre class="pk">&quot; identifier: [A-Za-z_][A-Za-z0-9_]* except the peg_reserved words and the f of f\&quot;...\&quot; &quot;
+Def{peg_tok_ident, Lambda{Tuple{p}, Do{
+    Set{p, Apply{peg_skip_ws, Tuple{p}}},
+    Def{q, Apply{peg_inc, Tuple{p}}},
+    Def{name, &quot;&quot;},
+    If{Apply{peg_is_alpha, Tuple{Apply{peg_char_at, Tuple{p}}}}, Do{
+        While{Apply{peg_is_alnum, Tuple{Apply{peg_char_at, Tuple{q}}}}, Set{q, Apply{peg_inc, Tuple{q}}}},
+        Set{name, Apply{substr, Tuple{peg_src, p, q}}},
+        If{If{Apply{table_get, Tuple{peg_reserved, name, false}}, true,
+              If{Apply{eq, Tuple{q, Apply{add, Tuple{p, 1}}}},
+                 If{Apply{eq, Tuple{Apply{peg_char_at, Tuple{p}}, 102}}, Apply{eq, Tuple{Apply{peg_char_at, Tuple{q}}, 34}}, false},
+                 false}},
+            Apply{peg_fail, Tuple{p}},
+            Do{Set{peg_pv, Apply{intern, Tuple{name}}}, q}}},
+        Apply{peg_fail, Tuple{p}}}}}}</pre>
+</div>
+<p>予約語の表 <code>peg_reserved</code> に入っている単語は識別子になりません（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/syntax.pk#L10-L26"><code>planck/syntax.pk:10–26</code></a>）。<code>f"</code> の <code>f</code> も識別子にしません。関数を規則にするのは <code>define_rule</code> に関数をそのまま渡すだけです（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/syntax.pk#L123-L126"><code>planck/syntax.pk:123–126</code></a>）。</p>
+
+<h2>式の規則</h2>
+<p>式は結合の弱いほうから順に規則を並べます。<code>expr</code>・<code>union</code>・<code>arrow</code>・<code>ternary</code>・<code>or_expr</code> と続き、<code>primary</code> で終わります（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/syntax.pk#L145-L290"><code>planck/syntax.pk:145–290</code></a>）。たとえばたし算とひき算の規則はこうです。</p>
+<div class="example">
+<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/syntax.pk#L214-L220">planck/syntax.pk:214–220</a></p>
+<pre class="pk">&quot; a binary - must be on the same line as its left operand &quot;
+Apply{define_rule, Tuple{Quote{minus}, Quote{Seq{Same{}, &quot;-&quot;, Not{Tight{&quot;&gt;&quot;}}}}}}
+
+Apply{define_rule, Tuple{Quote{add_expr}, Quote{Choice{
+    Act{Seq{add_expr, &quot;+&quot;, mul_expr}, Apply{peg_binop, Tuple{Quote{add}}}},
+    Act{Seq{add_expr, minus, mul_expr}, Apply{peg_binop, Tuple{Quote{sub}}}},
+    mul_expr}}}}</pre>
+</div>
+<p><code>add_expr</code> は自分自身から始まる左再帰なので、左から結合します。動作 <code>peg_binop</code> は「左・演算子・右」の組を <code>Apply{add, Tuple{a, b}}</code> の木にします（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/syntax.pk#L130-L132"><code>planck/syntax.pk:130–132</code></a>）。2 項の <code>-</code> の前に <code>Same{}</code> があるので、行の頭の <code>-1</code> は新しい式になります。</p>
+<p>規則の動作が返すのは、評価器がそのまま受け取る M式です。<code>1 + 2</code> を読んだ結果は <code>Apply{add, Tuple{1, 2}}</code> で、これを M式で直接書いても同じ木になります。</p>
+<div class="example">
+<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/syntax.pk#L268-L290">planck/syntax.pk:268–290</a></p>
+<pre class="pk">Apply{define_rule, Tuple{Quote{primary}, Quote{Choice{
+    if_expr,
+    Act{Seq{Key{&quot;while&quot;}, &quot;(&quot;, expr, &quot;)&quot;, expr},
+        Lambda{Tuple{Tuple{_, _, c, _, b}}, Apply{peg_while, Tuple{c, b}}}},
+    Act{Seq{Key{&quot;handle&quot;}, expr, Key{&quot;with&quot;}, union},
+        Lambda{Tuple{Tuple{_, b, _, h}}, QuasiQuote{Handle{UnQuote{b}, UnQuote{h}}}}},
+    Act{Seq{Key{&quot;perform&quot;}, unary},
+        Lambda{Tuple{Tuple{_, v}}, QuasiQuote{Perform{UnQuote{v}}}}},
+    block,
+    embed,
+    Act{Seq{ident, Tight{&quot;{&quot;}, Delimited{expr, &quot;,&quot;}, &quot;}&quot;},
+        Lambda{Tuple{Tuple{h, _, args, _}}, Apply{mexpr, Tuple{h, args}}}},
+    Act{Seq{istr_open, Many{Seq{istr_text, istr_hole, expr, &quot;}&quot;}}, istr_text, istr_close},
+        Lambda{Tuple{Tuple{_, parts, last, _}}, Apply{peg_interp, Tuple{parts, last}}}},
+    ident,
+    integer,
+    string,
+    Act{Seq{&quot;(&quot;, &quot;)&quot;}, Lambda{Tuple{_}, Quote{Tuple{}}}},
+    Act{Seq{&quot;(&quot;, Delimited1{expr, &quot;,&quot;}, &quot;)&quot;},
+        Lambda{Tuple{Tuple{_, es, _}}, If{Apply{eq, Tuple{Apply{arity, Tuple{es}}, 1}}, Apply{peg_first, Tuple{es}}, es}}},
+    Act{Seq{&quot;[&quot;, Delimited{expr, &quot;,&quot;}, &quot;]&quot;},
+        Lambda{Tuple{Tuple{_, es, _}}, Apply{peg_to_list, Tuple{es}}}},
+    sugar_primary}}}}</pre>
+</div>
+<p><code>primary</code> の最後の選択肢 <code>sugar_primary</code> には、<code>match</code>・<code>return</code>・<code>break</code>・<code>continue</code>・<code>for</code> が入っています（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/syntax.pk#L1100-L1122"><code>planck/syntax.pk:1100–1122</code></a>）。</p>
+
+<h2 id="decl">文法の宣言を読む規則</h2>
+<p><code>::=</code> を読むのも規則です。<code>syntax_decl</code> は <code>name ::= ...</code> を読み、<code>define_rule</code> を呼ぶ木を作ります。</p>
+<div class="example">
+<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/syntax.pk#L298-L302">planck/syntax.pk:298–302</a></p>
+<pre class="pk">Apply{define_rule, Tuple{Quote{syntax_decl}, Quote{
+    Act{Seq{ident, &quot;::=&quot;, g_choice},
+        Lambda{Tuple{Tuple{n, _, e}},
+            QuasiQuote{Apply{define_rule, Tuple{UnQuote{Apply{mexpr, Tuple{Quote{Quote}, Tuple{n}}}},
+                                                UnQuote{Apply{mexpr, Tuple{Quote{Quote}, Tuple{e}}}}}}}}}}}}</pre>
+</div>
+<p>選択肢の項目と動作のブロックは、<code>g_alt</code> が <code>Act{Seq{...}, Lambda{Tuple{Tuple{ラベル, ...}}, 動作}}</code> に組み替えます（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/syntax.pk#L309-L319"><code>planck/syntax.pk:309–319</code></a>）。ラベルが動作の関数の引数になるので、動作の中でラベルを変数として使えます。</p>
+<div class="example">
+<p class="file">i_decl.pk</p>
+<pre class="pk">use(&quot;pretty&quot;)
+pprint(&#x27;(pair ::= a:integer &quot;,&quot; b:integer { (a, b) }))</pre>
+<p class="label">出力</p>
+<pre class="out">Apply{
+  define_rule,
+  Tuple{
+    Quote{pair},
+    Quote{
+      Act{
+        Seq{integer, &quot;,&quot;, integer},
+        Lambda{Tuple{Tuple{a, _, b}}, Do{Tuple{a, b}}}
+      }
+    }
+  }
+}</pre>
+</div>
+<p><code>syntax_decl</code> は <code>expr</code> の最初の選択肢です。だから <code>::=</code> はどこにでも書ける式で、読まれた次の式から新しい規則が効きます。</p>
+
+<h2>return と break を読み替える</h2>
+<p><code>return</code>・<code>break</code>・<code>continue</code> はエフェクトとして読みます。<code>return</code> を読むと数を数えておき、関数の木を作るときにその数を見ます。<code>return</code> があれば、本体を <code>Handle</code> で包みます（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/syntax.pk#L927-L950"><code>planck/syntax.pk:927–950</code></a>）。</p>
+<div class="example">
+<p class="file">i_return.pk</p>
+<pre class="pk">use(&quot;pretty&quot;)
+pprint(&#x27;(f(xs) := { for (x in xs) if (x &gt; 0) return x; 0 }))</pre>
+<p class="label">出力</p>
+<pre class="out">Def{
+  f,
+  Lambda{
+    Tuple{xs},
+    Handle{
+      Do{
+        Apply{
+          peg_for,
+          Tuple{
+            xs,
+            Lambda{
+              Tuple{x},
+              If{
+                Apply{gt, Tuple{x, 0}},
+                Perform{Return{x}},
+                none
+              }
+            }
+          }
+        },
+        0
+      },
+      Lambda{Tuple{Return{v}, k}, v}
+    }
+  }
+}</pre>
+</div>
+<p><code>for</code> の本体の中の <code>return x</code> が <code>Perform{Return{x}}</code> になり、関数の本体全体が <code>Handle{..., (Return{v}, k) -> v}</code> で包まれています。<code>for</code> は <code>peg_for</code> の呼び出しになります。</p>
+
+<h2>規則で読む文字列</h2>
+<p><code>name{| text |}</code> を読む <code>embed</code> も関数で書いた規則です（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/syntax.pk#L1124-L1149"><code>planck/syntax.pk:1124–1149</code></a>）。<code>name</code> と <code>{|</code> を見つけたら、規則 <code>name</code> をその位置から呼び、そのあとに <code>|}</code> を求めます。規則の値は <code>Quote{v}</code> にして、定数として木に入れます。</p>
+
+<h2>parse を差し替える</h2>
+<p>最後の 2 行で切り替えます。</p>
+<div class="example">
+<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/syntax.pk#L1151-L1153">planck/syntax.pk:1151–1153</a></p>
+<pre class="pk">&quot; === Switch to the new syntax === &quot;
+Def{parse_mexpr, parse}
+Def{parse, Lambda{Tuple{s}, Apply{peg_parse, Tuple{Quote{toplevel}, s}}}}</pre>
+</div>
+<p>元の M式のリーダは <code>parse_mexpr</code> として残し、<code>parse</code> を「規則 <code>toplevel</code> で 1 つ読む関数」にします。planck0 は式ごとに <code>parse</code> を引き直すので（<a href="planck0.html">planck0 の中身</a>）、<code>syntax.pk</code> の次の式からは planck の構文で読まれます。<code>toplevel</code> は <code>expr</code> を 1 つ読み、<code>;</code>・改行・次の式の始まりのどれかを確かめます（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/syntax.pk#L149-L151"><code>planck/syntax.pk:149–151</code></a>）。</p>
+<p>M式も構文の一部です。<code>primary</code> に <code>ident{expr, ...}</code> の選択肢があるので、<code>Def{x, 1}</code> と書けばそのまま M式として読まれます。</p>
+
+<nav class="pager"><a class="prev" href="peg.html"><small>前のページ</small>packrat パーサ</a></nav>
+</main>
+</div>
+<footer><div class="inner">planck — <a href="https://github.com/nineties/hex-to-compiler">nineties/hex-to-compiler</a></div></footer>
+<script src="../assets/highlight.js"></script>
+</body>
+</html>
