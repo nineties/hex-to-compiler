@@ -1,0 +1,634 @@
+# tests for the vasm language of planck/lib/vasm.pk: own in own, arrays and structs (U19),
+# conversions of integers (U20) and the range of literals (U24)
+# Copyright (C) 2026 nineties
+
+passed := 0
+failed := 0
+
+check(actual, expected) := if (actual == expected) {
+    passed = passed + 1
+} else {
+    failed = failed + 1
+    put("Test failed: expected "); print(expected)
+    put(" but got "); println(actual)
+}
+
+use("vasm")
+
+this_file := "planck/test_vasm2.pk"
+this_src := read_file(this_file)
+
+# the module has no error
+ok(m) := check(vasm_errors(this_file, m), [])
+
+# the module has one error of the kind, on the line marked with "# NG"
+ng(m, kind) := {
+    es := vasm_errors(this_file, m)
+    check(map((VasmErr{k, _, _}) -> k, es), [kind])
+    if (length(es) == 1) {
+        line := line_text(this_src, arg(arg(arg(es, 0), 1), 1))
+        check(index_of_str(line, "# NG", 0) >= 0, true)
+    }
+}
+
+# === own in own, in arrays and in structs (U19) ===
+
+# syntax: swap takes a place *p, p[i] or p.f
+body := arg(arg(vasm{| fn g() { x = swap(*p, y); x = swap(a[i], y); x = swap(s.f, y) } |}, 0)[0], 5)
+check(map(s -> map(head, arg(arg(s, 2), 2)), body), [['Load, 'Reg], ['Index, 'Reg], ['Get, 'Reg]])
+check(vasm_show_type(Own{Own{Arr{Own{U8{}}}}}), "own own [own u8]")
+
+# own in own: x = *p moves the contents out, and p is freed or given contents again
+ok(vasm{|
+    fn nested_box() -> i64 {
+        var p: own own i64
+        var q: own i64
+        var v: i64
+        q = box(1)
+        p = box(q)
+        q = *p
+        v = *q
+        *p = q
+        q = *p
+        free(p)
+        free(q)
+        return v
+    }
+|})
+
+# a struct with own: made with the own values, moved as a whole, and taken apart by its fields
+ok(vasm{|
+    struct Buf { data: own [u8], size: i64 }
+    fn make(n: i64) -> Buf {
+        var a: own [u8]
+        var b: Buf
+        a = alloc(n, 0)
+        b = Buf{data: a, size: n}
+        return b
+    }
+    fn drop(b: Buf) -> i64 {
+        var a: own [u8]
+        var n: i64
+        a = b.data
+        n = b.size
+        free(a)
+        return n
+    }
+    fn refill(b: Buf) -> Buf {
+        var a: own [u8]
+        var c: own [u8]
+        a = b.data
+        c = alloc(4, 1)
+        b.data = c
+        free(a)
+        return b
+    }
+    fn use_buf() -> i64 {
+        var b: Buf
+        var c: Buf
+        var n: i64
+        b = make(16)
+        c = b
+        c = refill(c)
+        n = drop(c)
+        return n
+    }
+|})
+
+# swap takes own values out of arrays, structs and borrows, and puts others in
+ok(vasm{|
+    struct Pair { left: own i64, right: own i64 }
+    fn swaps[r](a: &mut r [own i64], m: &mut r own i64, p: &mut r Pair) {
+        var x: own i64
+        var y: own i64
+        var n: i64
+        x = box(1)
+        x = swap(a[0], x)
+        x = swap(*m, x)
+        x = swap(p.left, x)
+        y = swap(p.right, x)
+        n = len(a)
+        free(y)
+    }
+    fn pair_box() {
+        var b: own Pair
+        var s: Pair
+        var l: own i64
+        var r: own i64
+        var n: i64
+        l = box(1)
+        r = box(2)
+        s = Pair{left: l, right: r}
+        b = box(s)
+        l = box(3)
+        l = swap(b.left, l)
+        free(l)
+        region q {
+            var m: &mut q Pair
+            m = &mut q b
+            l = box(4)
+            l = swap(m.right, l)
+            free(l)
+        }
+        s = *b
+        free(b)
+        l = s.left
+        r = s.right
+        free(l)
+        free(r)
+    }
+    fn plain_swap(a: own [i64]) -> i64 {
+        var v: i64
+        v = swap(a[0], 7)
+        free(a)
+        return v
+    }
+|})
+
+# an own value in an array is not copied out
+ng(vasm{|
+    fn copy_elem[r](a: &r [own i64]) -> i64 {
+        var x: own i64
+        x = a[0]    # NG
+        free(x)
+        return 0
+    }
+|}, 'owner)
+# a field that owns is not copied out of a pointer
+ng(vasm{|
+    struct Pair { left: own i64, right: own i64 }
+    fn copy_field[r](p: &mut r Pair) {
+        var x: own i64
+        x = p.left  # NG
+        free(x)
+    }
+|}, 'owner)
+# the contents are not moved out of a borrow
+ng(vasm{|
+    fn out_of_borrow[r](m: &mut r own i64) {
+        var x: own i64
+        x = *m      # NG
+        free(x)
+    }
+|}, 'owner)
+# alloc copies its value
+ng(vasm{|
+    fn alloc_own() {
+        var q: own i64
+        var a: own [own i64]
+        q = box(1)
+        a = alloc(2, q)     # NG
+    }
+|}, 'owner)
+# the outer own is freed together with what is left in it (U32)
+ok(vasm{|
+    fn free_full() {
+        var q: own i64
+        var p: own own i64
+        q = box(1)
+        p = box(q)
+        free(p)
+    }
+    fn free_elems(a: own [own i64]) {
+        free(a)
+    }
+    struct Buf { data: own [u8], size: i64 }
+    fn free_struct(b: own Buf) {
+        free(b)
+    }
+    fn free_field_moved(b: own Buf) -> own [u8] {
+        var d: own [u8]
+        d = alloc(1, 0)
+        d = swap(b.data, d)
+        free(b)
+        return d
+    }
+|})
+ng(vasm{|
+    fn free_full_twice() {
+        var q: own i64
+        var p: own own i64
+        q = box(1)
+        p = box(q)
+        free(p)
+        free(p)     # NG
+    }
+|}, 'freed)
+ng(vasm{|
+    fn free_struct_use(b: own Buf) -> own [u8] {
+        var d: own [u8]
+        d = alloc(1, 0)
+        free(b)
+        d = swap(b.data, d)     # NG
+        return d
+    }
+    struct Buf { data: own [u8], size: i64 }
+|}, 'freed)
+# what is written over is released (U32)
+ok(vasm{|
+    fn over_elem[r](a: &mut r [own i64]) {
+        var x: own i64
+        x = box(1)
+        a[0] = x
+    }
+    struct Pair { left: own i64, right: own i64 }
+    fn over_field[r](p: &mut r Pair) {
+        var x: own i64
+        x = box(1)
+        p.left = x
+    }
+    fn over_box(p: own own i64) {
+        var q: own i64
+        q = box(1)
+        *p = q
+        free(p)
+    }
+    fn over_reg(s: Pair) -> Pair {
+        var x: own i64
+        x = box(1)
+        s.left = x
+        return s
+    }
+    fn over_reg_twice(s: Pair) -> Pair {
+        var x: own i64
+        var y: own i64
+        x = box(1)
+        y = box(2)
+        s.left = x
+        s.left = y
+        return s
+    }
+|})
+# the value that was written over is not used again
+ng(vasm{|
+    fn over_moved(p: own own i64) {
+        var q: own i64
+        var r: own i64
+        q = box(1)
+        *p = q
+        free(q)     # NG
+        free(p)
+    }
+|}, 'moved)
+ng(vasm{|
+    fn over_elem_moved[r](a: &mut r [own i64]) {
+        var x: own i64
+        x = box(1)
+        a[0] = x
+        free(x)     # NG
+    }
+|}, 'moved)
+# the contents are moved out once
+ng(vasm{|
+    fn out_twice(p: own own i64) {
+        var q: own i64
+        var r: own i64
+        q = *p
+        r = *p      # NG
+        free(q)
+        free(r)
+        free(p)
+    }
+|}, 'moved)
+# a box whose contents are moved out is not moved or kept
+ng(vasm{|
+    fn move_empty(p: own own i64) -> own own i64 {
+        var q: own i64
+        q = *p
+        free(q)
+        return p    # NG
+    }
+|}, 'moved)
+# the box that is left empty is released at the return, and so is the rest of a struct (U6)
+ok(vasm{|
+    fn keep_empty(p: own own i64) {
+        var q: own i64
+        q = *p
+        free(q)
+        return
+    }
+|})
+# a struct whose field is moved out is not used as a whole, and its other fields that own are not left
+ng(vasm{|
+    struct Buf { data: own [u8], size: i64 }
+    fn part_moved(b: Buf) -> Buf {
+        var a: own [u8]
+        a = b.data
+        free(a)
+        return b    # NG
+    }
+|}, 'moved)
+ok(vasm{|
+    struct Pair { left: own i64, right: own i64 }
+    fn part_left(s: Pair) {
+        var l: own i64
+        l = s.left
+        free(l)
+        return      # the right is released here
+    }
+|})
+ng(vasm{|
+    struct Pair { left: own i64, right: own i64 }
+    fn field_twice(s: Pair) {
+        var l: own i64
+        var m: own i64
+        l = s.left
+        m = s.left  # NG
+        free(l)
+        free(m)
+    }
+|}, 'moved)
+# U25: a field that owns is moved out of a struct value with x = s.f
+ok(vasm{|
+    struct Pair { left: own i64, right: own i64 }
+    struct Buf { data: own [u8], size: i64 }
+    fn take_all(s: Pair) {
+        var l: own i64
+        var r: own i64
+        l = s.left
+        r = s.right
+        free(l)
+        free(r)         # s owns nothing now and is dropped
+    }
+    fn take_and_put_back(b: Buf) -> Buf {
+        var a: own [u8]
+        var n: i64
+        a = b.data
+        n = b.size      # a field that does not own is read while another is moved out
+        b.data = a      # put back, so b is whole again
+        return b
+    }
+    fn take_in_both(c: bool, s: Pair) {
+        var l: own i64
+        var r: own i64
+        l = s.left
+        r = s.right
+        if (c) { free(l); free(r) } else { free(r); free(l) }
+    }
+|})
+ng(vasm{|
+    struct Pair { left: own i64, right: own i64 }
+    fn whole_after_all(s: Pair) -> Pair {
+        var l: own i64
+        var r: own i64
+        l = s.left
+        r = s.right
+        free(l)
+        free(r)
+        return s        # NG
+    }
+|}, 'moved)
+ng(vasm{|
+    struct Pair { left: own i64, right: own i64 }
+    fn one_side(c: bool, s: Pair) {
+        var l: own i64
+        var r: own i64
+        if (c) {        # NG
+            l = s.left
+            free(l)
+        }
+        l = s.left
+        r = s.right
+        free(l)
+        free(r)
+    }
+|}, 'branch)
+ng(vasm{|
+    struct Buf { data: own [u8], size: i64 }
+    fn read_moved(b: Buf) -> i64 {
+        var a: own [u8]
+        var d: own [u8]
+        a = b.data
+        d = b.data      # NG
+        free(a)
+        free(d)
+        return 0
+    }
+|}, 'moved)
+# a struct with own is not copied, and an own value is not put in two fields
+ng(vasm{|
+    struct Buf { data: own [u8], size: i64 }
+    fn copied(b: Buf) {
+        var c: Buf
+        var d: Buf
+        c = b
+        d = b       # NG
+    }
+|}, 'moved)
+ng(vasm{|
+    struct Pair { left: own i64, right: own i64 }
+    fn two_owners() -> Pair {
+        var l: own i64
+        var s: Pair
+        l = box(1)
+        s = Pair{left: l, right: l}     # NG
+        return s
+    }
+|}, 'moved)
+# the contents are moved out in one branch only
+ng(vasm{|
+    fn one_branch(c: bool, p: own own i64) {
+        var q: own i64
+        if (c) {           # NG
+            q = *p
+            free(q)
+        }
+        free(p)
+    }
+|}, 'branch)
+# swap writes its place, and only swap takes a place
+ng(vasm{|
+    fn swap_shared[r](b: &r own i64) {
+        var x: own i64
+        x = box(1)
+        x = swap(*b, x)     # NG
+        free(x)
+    }
+|}, 'borrowed)
+ng(vasm{|
+    fn place_arg(p: own own i64) {
+        free(*p)    # NG
+        free(p)
+    }
+|}, 'type)
+ng(vasm{|
+    fn not_place(x: own i64, y: own i64) {
+        x = swap(x, y)  # NG
+        free(x)
+    }
+|}, 'type)
+ng(vasm{|
+    fn swap_type(a: own [i64], b: bool) {
+        var v: i64
+        v = swap(a[0], b)   # NG
+        free(a)
+    }
+|}, 'type)
+
+# === x = a as T converts an integer (U20) ===
+conv := arg(arg(vasm{| fn g() { x = a as u16 } |}, 0)[0], 5)[0]
+check(head(arg(conv, 2)), 'Conv)
+check(arg(arg(conv, 2), 2), U16{})
+ok(vasm{|
+    fn widen(a: u8, b: i8, c: i64) -> i64 {
+        var x: i64
+        var y: u16
+        var z: i32
+        var w: u8
+        x = a as i64
+        z = b as i32
+        y = c as u16
+        w = 200 as u8
+        y = w as u16
+        x = x + c
+        return x
+    }
+|})
+ng(vasm{|
+    fn conv_bool(f: bool) -> i64 {
+        var x: i64
+        x = f as i64    # NG
+        return x
+    }
+|}, 'type)
+ng(vasm{|
+    fn to_bool(a: i64) -> bool {
+        var b: bool
+        b = a as bool   # NG
+        return b
+    }
+|}, 'type)
+ng(vasm{|
+    fn conv_lit() -> u8 {
+        var w: u8
+        w = 300 as u8   # NG
+        return w
+    }
+|}, 'type)
+ng(vasm{|
+    fn conv_width(a: u8) -> i64 {
+        var x: i64
+        x = a as i32    # NG
+        return x
+    }
+|}, 'type)
+
+# === a literal is from -32768 to 32767, and a larger value is made with << and | (U24) ===
+check(map(s -> vasm_lit_value(s), ["32767", "-32768", "0x7FFF", "0b101", "0o17", "32768", "-32769", "2147483647"]),
+    [32767, -32768, 32767, 5, 15, Big{"32768"}, Big{"-32769"}, Big{"2147483647"}])
+ok(vasm{|
+    fn magic() -> u32 {
+        var m: u32
+        m = 0x7F45
+        m = m << 16
+        m = m | 0x4C46
+        return m
+    }
+    fn edges() {
+        var a: i16
+        var b: i64
+        var c: u64
+        var d: u16
+        a = -32768
+        a = 32767
+        b = -32768
+        c = 0x7FFF
+        c = c << 48
+        d = 255
+        d = d << 8
+        d = d | 255
+    }
+    # 0xCBF29CE484222325 and 0xFFFFFFFF are made from bytes with << and |
+    fn hash_seed() -> u64 {
+        var h: u64
+        h = 0xCB
+        h = h << 8
+        h = h | 0xF2
+        h = h << 8
+        h = h | 0x9C
+        h = h << 8
+        h = h | 0xE4
+        h = h << 8
+        h = h | 0x84
+        h = h << 8
+        h = h | 0x22
+        h = h << 8
+        h = h | 0x23
+        h = h << 8
+        h = h | 0x25
+        return h
+    }
+    fn mask32() -> u64 {
+        var m: u64
+        m = 0xFF
+        m = m << 8
+        m = m | 0xFF
+        m = m << 8
+        m = m | 0xFF
+        m = m << 8
+        m = m | 0xFF
+        return m
+    }
+|})
+ng(vasm{|
+    fn mask_in_one_literal() -> u64 {
+        var m: u64
+        m = 0xFFFFFFFF   # NG
+        return m
+    }
+|}, 'type)
+ng(vasm{|
+    fn big_i64() -> i64 {
+        var b: i64
+        b = 32768   # NG
+        return b
+    }
+|}, 'type)
+ng(vasm{|
+    fn small_i64() -> i64 {
+        return -32769   # NG
+    }
+|}, 'type)
+ng(vasm{|
+    fn wraps() -> u64 {
+        var c: u64
+        c = 2147483647  # NG
+        return c
+    }
+|}, 'type)
+ng(vasm{|
+    fn elf_magic() -> u32 {
+        var c: u32
+        c = 0x7F454C46  # NG
+        return c
+    }
+|}, 'type)
+ng(vasm{|
+    fn u16_literal() -> u16 {
+        var d: u16
+        d = 40000   # NG
+        return d
+    }
+|}, 'type)
+ng(vasm{|
+    fn negative_u64() -> u64 {
+        var c: u64
+        c = -1      # NG
+        return c
+    }
+|}, 'type)
+ng(vasm{|
+    fn big_arg(n: i32) -> i32 {
+        var r: i32
+        r = big_arg(100000)     # NG
+        return r
+    }
+|}, 'type)
+# the message with the position of the literal
+shown_at := line_col(this_src, index_of_str(this_src, "65536 }", index_of_str(this_src, "fn shown(", 0)))
+check(map((VasmErr{_, loc, msg}) -> f"{show_loc(loc)}: {msg}", vasm_errors(this_file, vasm{|
+    fn shown() { var c: u32; c = 65536 }
+|})), [f"planck/test_vasm2.pk:{arg(shown_at, 0)}:{arg(shown_at, 1)}: 65536 is out of the range of a literal, -32768 to 32767; make it with << and |"])
+
+put("Tests passed "); print(passed); put("/"); println(passed + failed)
+if (failed > 0) exit(1)

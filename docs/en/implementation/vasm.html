@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The vasm checker | hex-to-compiler project</title>
+<link rel="alternate" hreflang="ja" href="../../implementation/vasm.html">
+<link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+<header class="site-header"><div class="inner">
+<a class="logo" href="../index.html"><span class="brand"><b>hex-to-compiler <i>project</i></b><small>A compiler that pulls itself up by its bootstraps.</small></span></a>
+<nav class="site-nav">
+<a href="../index.html">Overview</a>
+<a href="../tutorial/index.html">Tutorial</a>
+<a href="../reference/index.html">Reference</a>
+<a class="here" href="../implementation/index.html">Implementation</a>
+<a href="https://github.com/nineties/hex-to-compiler">GitHub</a>
+<a class="lang-switch" lang="ja" hreflang="ja" href="../../implementation/vasm.html">日本語</a>
+</nav>
+</div></header>
+<div class="layout">
+<nav class="toc" aria-label="Implementation contents"><details open><summary>Implementation contents</summary>
+<h2>Implementation</h2>
+<ol>
+<li><a href="index.html">Overview</a></li>
+<li><a href="bootstrap.html">From machine code to planck0</a></li>
+<li><a href="planck0.html">planck0</a></li>
+<li><a href="init.html">init.pk and M-expressions</a></li>
+<li><a href="peg.html">The packrat parser</a></li>
+<li><a href="syntax.html">Defining the syntax</a></li>
+<li><a class="here" href="vasm.html">The vasm checker</a></li>
+</ol></details></nav>
+<main>
+<h1>The vasm checker</h1>
+<p class="lead"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm.pk">planck/lib/vasm.pk</a> (862 lines) is a library, written in planck, that reads and checks vasm, a low-level language close to machine instructions. <code>use("vasm")</code> loads it. The list of structs and functions written in <code>vasm{| ... |}</code> is checked for ownership and borrow violations, uses after free and reads of uninitialized registers, using type rules alone. The rules of the language are in <a href="../reference/vasm.html">vasm in the reference</a>.</p>
+
+<h2>Entry points</h2>
+<div class="example">
+<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm.pk#L1-L11">planck/lib/vasm.pk:1–11</a></p>
+<pre class="pk"># vasm: a language with types, ownership and named regions, written in .pk files
+# Copyright (C) 2026 nineties
+#
+# vasm{| struct ... fn ... |} reads structs and functions of the language and is Module{[Struct{...}, Fn{...}, ...]}.
+# vasm_check(m) is the list of VasmErr{kind, Pos{d}, msg}, one for each struct or function with an error,
+# and vasm_errors(file, m) gives the positions as Loc{file, line, column} of the file.
+
+use(&quot;list&quot;)
+use(&quot;table&quot;)
+use(&quot;string&quot;)
+use(&quot;error&quot;)</pre>
+</div>
+<p><code>vasm{| ... |}</code> is read as <code>Module{[Struct{...}, Fn{...}, ...]}</code>. <code>vasm_check(m)</code> takes it and returns a list of <code>VasmErr{kind, Pos{d}, msg}</code>. <code>vasm_errors(file, m)</code> turns the positions into <code>Loc{file, line, column}</code> of the file, and <code>vasm_report(file, m)</code> writes them as <code>file:line:column: message</code>. A function without an error does not appear in the result, and a function has at most one error: the first. The examples on this page write the result line by line with the <code>report</code> function in each file.</p>
+
+<h2>Syntax</h2>
+<p>The syntax of vasm is declared with <code>::=</code> as rules of the <a href="peg.html">packrat parser</a> (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm.pk#L38-L39"><code>planck/lib/vasm.pk:38–39</code></a>). The keywords are collected in <code>vasm_kw</code>, and a name is an identifier that is not a keyword. The rule for statements lists one alternative for each head, and each result is an M-expression such as <code>Decl{...}</code>, <code>IfS{...}</code> or <code>Assign{...}</code>.</p>
+<div class="example">
+<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm.pk#L123-L134">planck/lib/vasm.pk:123–134</a></p>
+<pre class="pk">vasm_stmt ::= at:vasm_here &#x27;var x:vasm_name &quot;:&quot; t:vasm_type { Decl{at, x, t} }
+    | at:vasm_here &#x27;if &quot;(&quot; c:vasm_cond &quot;)&quot; a:vasm_block &#x27;else b:vasm_block { IfS{at, c, a, b} }
+    | at:vasm_here &#x27;if &quot;(&quot; c:vasm_cond &quot;)&quot; a:vasm_block { IfS{at, c, a, []} }
+    | at:vasm_here &#x27;while &quot;(&quot; c:vasm_cond &quot;)&quot; a:vasm_block { WhileS{at, c, a} }
+    | at:vasm_here &#x27;region r:vasm_name a:vasm_block { RegionS{at, r, a} }
+    | at:vasm_here &#x27;return vasm_same a:vasm_operand { Ret{at, a} }
+    | at:vasm_here &#x27;return { Ret{at, none} }
+    | at:vasm_here &quot;*&quot; p:vasm_name &quot;=&quot; a:vasm_operand { Store{at, p, a} }
+    | at:vasm_here p:vasm_name &quot;[&quot; i:vasm_operand &quot;]&quot; &quot;=&quot; a:vasm_operand { IStore{at, p, i, a} }
+    | at:vasm_here p:vasm_name &quot;.&quot; f:vasm_name &quot;=&quot; a:vasm_operand { FStore{at, p, f, a} }
+    | at:vasm_here x:vasm_name &quot;=&quot; r:vasm_rhs { Assign{at, x, r} }
+    | at:vasm_here f:vasm_name &quot;(&quot; args:vasm_args? &quot;)&quot; { CallS{at, f, vasm_opt_list(args)} }</pre>
+</div>
+<p>Every result carries its position <code>at</code>. <code>vasm_here</code> is a rule that reads nothing and returns, as <code>Pos{d}</code>, the number of characters from the next token to the end of the text (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm.pk#L29-L34"><code>planck/lib/vasm.pk:29–34</code></a>). An error of the checker holds this <code>Pos</code>, and <code>vasm_errors</code> subtracts it from the length of the text to get the line and the column.</p>
+
+<h2>Types and the state of the checker</h2>
+<p>Types are M-expressions too. The integers are <code>I8{}</code> to <code>U64{}</code>, a box is <code>Own{u}</code>, a borrow is <code>Ref{'shr or 'mut, region, u}</code>, an array is <code>Arr{u}</code> and a struct is <code>Named{s}</code>.</p>
+<div class="example">
+<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm.pk#L186-L198">planck/lib/vasm.pk:186–198</a></p>
+<pre class="pk"># === Checker state ===
+# vasm_info: name -&gt; Info{type, regions open at the declaration}, for the variables in scope
+# a state: name -&gt; Vs{status, loans}, and &quot;.dead&quot; -&gt; true after return
+#   status: &#x27;init, &#x27;uninit, Moved{at}, Freed{at}, Taken{at} (an own value whose contents are moved out by x = *p)
+#   or Parts{fields} (a struct value whose fields that own are moved out by x = s.f, U19); loans: [Loan{region, kind}, ...]
+# vasm_regions: the regions in scope, the innermost first, ending with the regions of the function
+
+vasm_sigs := table()
+vasm_structs := table()
+vasm_info := table()
+vasm_regions := []
+vasm_fn_regions := []
+vasm_ret_type := Unit{}</pre>
+</div>
+<p>For each function, the checker keeps the declarations of the variables in <code>vasm_info</code> (name to type) and the state of the variables in a table of <code>Vs{status, loans}</code>. The <code>status</code> is one of initialized, uninitialized, moved, freed, a box whose contents are moved out, and a struct whose fields are moved out. The <code>loans</code> are the borrows that currently borrow the variable. <code>if</code> and <code>while</code> copy the table, check each branch, and compare the results afterwards.</p>
+<p>Whether a value is moved or copied depends on its type. <code>own</code> and a struct that owns something are <em>linear</em>: a use moves them, and they must be moved or freed exactly once. Integers, <code>bool</code>, structs that own nothing and shared borrows are copied.</p>
+<div class="example">
+<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm.pk#L217-L222">planck/lib/vasm.pk:217–222</a></p>
+<pre class="pk"># An integer literal is Lit{n} until it meets an integer type; Lit{none} is the result of an operation on literals.
+# Integers, bool and structs without own are copied. own and a struct with own are linear: they are moved
+# by a use and must be moved or freed once (U6, U19). &amp;mut is moved by a use, except for an argument of a call
+# (vasm_call). &amp; is copied.
+vasm_linear(t) := head(t) == &#x27;Own or (head(t) == &#x27;Named and vasm_owning(t))
+vasm_moves(t) := vasm_linear(t) or (head(t) == &#x27;Ref and arg(t, 0) == &#x27;mut)</pre>
+</div>
+
+<h2>Ownership</h2>
+<div class="example">
+<p class="file">vasm_box.pk</p>
+<pre class="pk">use(&quot;vasm&quot;)
+
+report(m) := {
+    es := vasm_errors(argv()[0], m)
+    if (es == []) put(&quot;ok\n&quot;)
+    each((VasmErr{_, Loc{_, l, c}, msg}) -&gt; put(f&quot;line {l}: {msg}\n&quot;), es)
+}
+
+m := vasm{|
+    fn bump[r](p: &amp;mut r i64) {
+        var v: i64
+        v = *p
+        v = v + 1
+        *p = v
+    }
+    fn main() -&gt; i64 {
+        var p: own i64
+        var v: i64
+        p = box(41)
+        region r {
+            var m: &amp;mut r i64
+            m = &amp;mut r p
+            bump(m)
+        }
+        v = *p
+        free(p)
+        return v
+    }
+|}
+report(m)</pre>
+<p class="label">Output</p>
+<pre class="out">ok</pre>
+</div>
+<p><code>own i64</code> is the single owner of an integer allocated by <code>box</code>. The <code>[r]</code> of <code>bump</code> is a region parameter fixed at each call. For a call that passes a <code>&amp;mut</code> to a borrow parameter, <code>vasm_reborrows</code> treats the argument as borrowed again for the duration of the call, and does not move it (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm.pk#L511-L517"><code>planck/lib/vasm.pk:511–517</code></a>). This is why <code>m</code> can be used after the call.</p>
+<div class="example">
+<p class="file">vasm_freed.pk</p>
+<pre class="pk">use(&quot;vasm&quot;)
+
+report(m) := {
+    es := vasm_errors(argv()[0], m)
+    if (es == []) put(&quot;ok\n&quot;)
+    each((VasmErr{_, Loc{_, l, c}, msg}) -&gt; put(f&quot;line {l}: {msg}\n&quot;), es)
+}
+
+m := vasm{|
+    fn use_after_free() -&gt; i64 {
+        var p: own i64
+        var v: i64
+        p = box(1)
+        free(p)
+        v = *p
+        return v
+    }
+    fn free_twice() {
+        var p: own i64
+        p = box(1)
+        free(p)
+        free(p)
+    }
+    fn moved_then_used(q: own i64) -&gt; own i64 {
+        var p: own i64
+        p = q
+        free(q)
+        return p
+    }
+|}
+report(m)</pre>
+<p class="label">Output</p>
+<pre class="out">line 15: p is used after it is freed
+line 22: p is freed twice
+line 27: q is used after it is moved</pre>
+</div>
+<p>Before a register is read, <code>vasm_need_init</code> looks up its state. An uninitialized, moved or freed register is an error of kind <code>'uninit</code>, <code>'moved</code> or <code>'freed</code> (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm.pk#L258-L265"><code>planck/lib/vasm.pk:258–265</code></a>). A freed <code>own</code> cannot be read or freed again, because <code>vasm_call</code> marks the argument of <code>free</code> as freed. Assigning <code>q</code> to <code>p</code> marks <code>q</code> as moved, and the ownership moves to <code>p</code>.</p>
+
+<h3>Automatic release</h3>
+<div class="example">
+<p class="file">vasm_drop.pk</p>
+<pre class="pk">use(&quot;vasm&quot;)
+
+report(m) := {
+    es := vasm_errors(argv()[0], m)
+    if (es == []) put(&quot;ok\n&quot;)
+    each((VasmErr{_, Loc{_, l, c}, msg}) -&gt; put(f&quot;line {l}: {msg}\n&quot;), es)
+}
+
+m := vasm{|
+    struct Buf { data: own [u8], size: i64 }
+    fn at_block_end(c: bool) {
+        if (c) {
+            var q: own i64
+            q = box(2)
+        }
+    }
+    fn overwrite() -&gt; i64 {
+        var p: own i64
+        var v: i64
+        p = box(1)
+        p = box(2)
+        box(3)
+        v = *p
+        return v
+    }
+    fn free_with_contents(b: own Buf) {
+        free(b)
+    }
+|}
+report(m)</pre>
+<p class="label">Output</p>
+<pre class="out">ok</pre>
+</div>
+<p>A value that owns something is released automatically where its owner goes away, so none of the functions above is an error. Those places are the end of a block or a function, an overwrite, the result of a call that is discarded as a statement, and what is left inside a value passed to <code>free</code>. The release is an action at run time, and the checker counts nothing. <code>vasm_leak_all</code>, which would examine what is left at the end of a block or a function, is an empty function kept to mark where the release happens (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm.pk#L654-L657"><code>planck/lib/vasm.pk:654–657</code></a>). An overwrite only sets the state back to initialized in <code>vasm_assign</code> (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm.pk#L642-L652"><code>planck/lib/vasm.pk:642–652</code></a>). <code>free</code> is for releasing a value earlier.</p>
+
+<h2>Borrows and regions</h2>
+<div class="example">
+<p class="file">vasm_borrow.pk</p>
+<pre class="pk">use(&quot;vasm&quot;)
+
+report(m) := {
+    es := vasm_errors(argv()[0], m)
+    if (es == []) put(&quot;ok\n&quot;)
+    each((VasmErr{_, Loc{_, l, c}, msg}) -&gt; put(f&quot;line {l}: {msg}\n&quot;), es)
+}
+
+m := vasm{|
+    fn two_shared() -&gt; i64 {
+        var p: own i64
+        var v: i64
+        p = box(1)
+        region r {
+            var a: &amp;r i64
+            var b: &amp;r i64
+            a = &amp;r p
+            b = &amp;r p
+            var w: i64
+            v = *a
+            w = *b
+            v = v + w
+        }
+        free(p)
+        return v
+    }
+    fn mut_and_shared() {
+        var p: own i64
+        p = box(1)
+        region r {
+            var a: &amp;mut r i64
+            var b: &amp;r i64
+            a = &amp;mut r p
+            b = &amp;r p
+        }
+    }
+    fn overwrite_while_borrowed() -&gt; i64 {
+        var p: own i64
+        var v: i64
+        p = box(1)
+        region r {
+            var a: &amp;r i64
+            a = &amp;r p
+            p = box(2)
+            v = *a
+        }
+        return v
+    }
+|}
+report(m)</pre>
+<p class="label">Output</p>
+<pre class="out">line 34: p is borrowed as mut and cannot be borrowed
+line 44: p is borrowed and cannot be assigned</pre>
+</div>
+<p>The <code>Vs</code> of a borrowed variable holds <code>Loan{region, kind}</code>. <code>vasm_no_loans</code> rejects a move, a free or an assignment while the variable is borrowed, and <code>vasm_no_mut_loan</code> rejects a read or a write while it is borrowed with <code>&amp;mut</code> (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm.pk#L294-L295"><code>planck/lib/vasm.pk:294–295</code></a>). Any number of shared borrows can exist at once. A <code>&amp;mut</code> is exclusive: while it lives, the original value can be neither read, written nor freed. At the end of <code>region r { ... }</code>, <code>vasm_end_region</code> removes the loans of <code>r</code> (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm.pk#L691"><code>planck/lib/vasm.pk:691</code></a>).</p>
+<div class="example">
+<p class="file">vasm_escape.pk</p>
+<pre class="pk">use(&quot;vasm&quot;)
+
+report(m) := {
+    es := vasm_errors(argv()[0], m)
+    if (es == []) put(&quot;ok\n&quot;)
+    each((VasmErr{_, Loc{_, l, c}, msg}) -&gt; put(f&quot;line {l}: {msg}\n&quot;), es)
+}
+
+m := vasm{|
+    fn inner_in_outer() {
+        var p: own i64
+        p = box(1)
+        region outer {
+            var keep: &amp;outer i64
+            region inner {
+                var a: &amp;inner i64
+                a = &amp;inner p
+                keep = a
+            }
+        }
+    }
+    fn outer_in_inner() {
+        var p: own i64
+        p = box(1)
+        region outer {
+            var a: &amp;outer i64
+            a = &amp;outer p
+            region inner {
+                var b: &amp;inner i64
+                b = a
+            }
+        }
+    }
+|}
+report(m)</pre>
+<p class="label">Output</p>
+<pre class="out">line 18: a borrow of region inner is put in keep, which lives outside the region</pre>
+</div>
+<p><code>vasm_outlives(q, r)</code> decides which region is inside which. <code>q</code> outlives <code>r</code> if they are the same, or if <code>r</code> is a region opened in the function and <code>q</code> was opened before it. The region parameters of a function have no order among themselves.</p>
+<div class="example">
+<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm.pk#L325-L327">planck/lib/vasm.pk:325–327</a></p>
+<pre class="pk"># q outlives r: q is r, or r is a region opened in the function and q was opened before it (U13).
+# The regions of the function are not ordered.
+vasm_outlives(q, r) := q == r or (not member(r, vasm_fn_regions) and index_of(q, vasm_regions) &gt; index_of(r, vasm_regions))</pre>
+</div>
+<div class="example">
+<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm.pk#L334-L345">planck/lib/vasm.pk:334–345</a></p>
+<pre class="pk"># a value of type t can be put where e is expected: an integer literal in the range of e,
+# or a borrow of a region that outlives the region of e (U13)
+vasm_fits(at, e, t) := if (head(t) == &#x27;Lit and vasm_int(e)) {
+    vasm_lit_range(at, arg(t, 0), e)
+    true
+} else if (head(e) == &#x27;Own and head(t) == &#x27;Own) vasm_fits(at, arg(e, 0), arg(t, 0))
+else if (head(e) == &#x27;Arr and head(t) == &#x27;Arr) vasm_fits(at, arg(e, 0), arg(t, 0))
+else if (head(e) == &#x27;Ref and head(t) == &#x27;Ref) arg(e, 0) == arg(t, 0) and vasm_outlives(arg(t, 1), arg(e, 1)) and vasm_fits(at, arg(e, 2), arg(t, 2))
+else e == t
+
+# a borrow that does not fit only because its region is opened inside the function and does not outlive the expected one
+vasm_escapes(e, t) := head(e) == &#x27;Ref and head(t) == &#x27;Ref and arg(e, 0) == arg(t, 0) and arg(e, 2) == arg(t, 2) and not member(arg(t, 1), vasm_fn_regions)</pre>
+</div>
+<p><code>vasm_fits</code> decides whether the type of a borrow matches in an assignment or an argument. A borrow of an outer region can be used where a borrow of an inner region is expected, because the outer one lives longer, and the reverse is rejected. When the reverse puts the borrow in a register that lives outside the region opened in the function, <code>vasm_escapes</code> makes the error of kind <code>'escape</code>.</p>
+
+<h2>Branches and loops</h2>
+<div class="example">
+<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm.pk#L659-L684">planck/lib/vasm.pk:659–684</a></p>
+<pre class="pk"># the state after if: both branches must agree on own values
+vasm_merge(at, a, b) := if (vasm_dead(a)) b else if (vasm_dead(b)) a else {
+    m := table()
+    each(x -&gt; {
+        t := arg(table_get(vasm_info, x, none), 0)
+        sa := vasm_status(a, x)
+        sb := vasm_status(b, x)
+        if (vasm_owns(t, sa) != vasm_owns(t, sb)) vasm_fail(at, &#x27;branch, f&quot;{symname(x)} is owned after one branch and not after the other&quot;)
+        if (vasm_linear(t) and vasm_key(t, sa) != vasm_key(t, sb)) vasm_fail(at, &#x27;branch, f&quot;{symname(x)} has different parts moved out after the two branches&quot;)
+        s := if (sb == &#x27;init) sa else sb
+        la := vasm_loans(a, x)
+        table_set(m, x, Vs{s, append(la, filter(l -&gt; not member(l, la), vasm_loans(b, x)))})
+    }, vasm_vars(a))
+    m
+}
+
+vasm_replace(st, m) := {
+    each(x -&gt; table_set(st, x, table_get(m, x, none)), vasm_vars(st))
+    table_set(st, &quot;.dead&quot;, vasm_dead(m))
+}
+
+# a loop must give back the own and &amp;mut values it moves
+vasm_loop_same(at, a, b) := each(x -&gt; {
+    t := arg(table_get(vasm_info, x, none), 0)
+    if (vasm_moves(t) and vasm_key(t, vasm_status(a, x)) != vasm_key(t, vasm_status(b, x))) vasm_fail(at, &#x27;loop, f&quot;{symname(x)} is moved or freed in the loop and not given a value again&quot;)
+}, vasm_vars(a))</pre>
+</div>
+<p><code>if</code> checks both branches on copies of the state, and <code>vasm_merge</code> compares them. A value moved or freed in only one branch has no definite owner afterwards, which is an error of kind <code>'branch</code>. A branch that ends in <code>return</code> is marked with <code>.dead</code> and left out of the comparison. <code>while</code> checks the body twice, and <code>vasm_loop_same</code> looks at whether a value moved in the loop is given back before the next iteration (<code>'loop</code>).</p>
+
+<h2>Widths of integers</h2>
+<div class="example">
+<p class="file">vasm_ints.pk</p>
+<pre class="pk">use(&quot;vasm&quot;)
+
+report(m) := {
+    es := vasm_errors(argv()[0], m)
+    if (es == []) put(&quot;ok\n&quot;)
+    each((VasmErr{_, Loc{_, l, c}, msg}) -&gt; put(f&quot;line {l}: {msg}\n&quot;), es)
+}
+
+m := vasm{|
+    fn mixed(flags: u8, size: u32) -&gt; u32 {
+        var w: u32
+        w = size + flags
+        return w
+    }
+    fn widened(flags: u8, size: u32) -&gt; u32 {
+        var f: u32
+        var w: u32
+        f = flags as u32
+        w = size + f
+        return w
+    }
+    fn magic() -&gt; u32 {
+        var m: u32
+        m = 0x7F45
+        m = m &lt;&lt; 16
+        m = m | 0x4C46
+        return m
+    }
+    fn too_big() -&gt; u32 {
+        var m: u32
+        m = 0x7F454C46
+        return m
+    }
+|}
+report(m)</pre>
+<p class="label">Output</p>
+<pre class="out">line 12: the operands are u32 and u8
+line 31: 0x7F454C46 is out of the range of a literal, -32768 to 32767; make it with &lt;&lt; and |</pre>
+</div>
+<p>The integer types are listed in the table <code>vasm_ints</code> (type, name, bits, signedness) (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm.pk#L159-L166"><code>planck/lib/vasm.pk:159–166</code></a>). Both operands of an operator have the same type, and <code>as</code> changes the width or the signedness. A literal starts as <code>Lit{n}</code>, which has no type, and its range is checked where it meets an integer type. The range is -32768 to 32767, narrowed to start at 0 for an unsigned type and to the range of the type for 8 bits (<code>vasm_lit_lo</code> and <code>vasm_lit_hi</code>, <a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm.pk#L167-L170"><code>planck/lib/vasm.pk:167–170</code></a>). A larger value is built with shifts and <code>|</code>.</p>
+
+<h2>Arrays and structs</h2>
+<div class="example">
+<p class="file">vasm_array.pk</p>
+<pre class="pk">use(&quot;vasm&quot;)
+
+report(m) := {
+    es := vasm_errors(argv()[0], m)
+    if (es == []) put(&quot;ok\n&quot;)
+    each((VasmErr{_, Loc{_, l, c}, msg}) -&gt; put(f&quot;line {l}: {msg}\n&quot;), es)
+}
+
+m := vasm{|
+    struct Section { offset: u64, size: u32 }
+    fn total[r](ss: &amp;r [Section]) -&gt; u64 {
+        var i: i64
+        var n: i64
+        var t: u64
+        var s: Section
+        var o: u64
+        i = 0
+        t = 0
+        n = len(ss)
+        while (i &lt; n) {
+            s = ss[i]
+            o = s.offset
+            t = t + o
+            i = i + 1
+        }
+        return t
+    }
+    fn build() -&gt; u64 {
+        var a: own [Section]
+        var s: Section
+        var t: u64
+        s = Section{offset: 64, size: 16}
+        a = alloc(3, s)
+        s = Section{offset: 128, size: 0}
+        a[1] = s
+        region r {
+            var view: &amp;r [Section]
+            view = &amp;r a
+            t = total(view)
+        }
+        free(a)
+        return t
+    }
+|}
+report(m)</pre>
+<p class="label">Output</p>
+<pre class="out">ok</pre>
+</div>
+<p>The built-in functions are listed in the table <code>vasm_builtins</code> as types <code>Sig{regions, arguments, result}</code> with the type variable <code>T</code> (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm.pk#L224-L232"><code>planck/lib/vasm.pk:224–232</code></a>). <code>alloc(n, v)</code> makes an <code>own [T]</code> of <code>n</code> copies of <code>v</code>, and <code>len</code> returns the length. An index is an <code>i64</code>. Checking its range is left to run time, and the checker looks only at types and ownership. A struct is built by giving every field once. It is copied like an integer unless it owns something, and <code>vasm_owning</code> decides that by following the fields (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm.pk#L200-L212"><code>planck/lib/vasm.pk:200–212</code></a>).</p>
+
+<h3>Exchanging values that own</h3>
+<div class="example">
+<p class="file">vasm_swap.pk</p>
+<pre class="pk">use(&quot;vasm&quot;)
+
+report(m) := {
+    es := vasm_errors(argv()[0], m)
+    if (es == []) put(&quot;ok\n&quot;)
+    each((VasmErr{_, Loc{_, l, c}, msg}) -&gt; put(f&quot;line {l}: {msg}\n&quot;), es)
+}
+
+m := vasm{|
+    struct Image { header: own [u8], body: own [u8], entry: u64 }
+    fn replace_body(img: Image, n: i64) -&gt; Image {
+        var b: own [u8]
+        b = alloc(n, 0)
+        img.body = b
+        return img
+    }
+    fn take_header[r](parts: &amp;mut r [own [u8]]) -&gt; own [u8] {
+        var a: own [u8]
+        a = alloc(1, 9)
+        a = swap(parts[0], a)
+        return a
+    }
+    fn read_header[r](parts: &amp;r [own [u8]]) -&gt; own [u8] {
+        var a: own [u8]
+        a = parts[0]
+        return a
+    }
+|}
+report(m)</pre>
+<p class="label">Output</p>
+<pre class="out">line 25: the elements of parts own values and are not copied; use swap(parts[i], v)</pre>
+</div>
+<p>A value that owns something cannot be copied out of an array element or the target of a pointer, because it would have two owners. <code>swap(p[i], v)</code> puts <code>v</code> in and returns the previous value. The parameter type <code>Place{T}</code> accepts only a place of the form <code>*p</code>, <code>p[i]</code> or <code>p.f</code>. Writing a field of a struct register, as in <code>img.body = b</code>, releases the previous value and puts the new one in.</p>
+
+<h2>Reporting errors</h2>
+<div class="example">
+<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm.pk#L830-L848">planck/lib/vasm.pk:830–848</a></p>
+<pre class="pk"># the errors of the module m: [VasmErr{kind, Pos{d}, msg}, ...], the first error of each struct and function
+vasm_check(m) := {
+    items := arg(m, 0)
+    vasm_sigs = table()
+    vasm_structs = table()
+    each(d -&gt; match d {
+        Fn{_, f, rs, ps, ret, _} -&gt; table_set(vasm_sigs, f, Sig{rs, map(p -&gt; arg(p, 2), ps), ret})
+      | Struct{_, s, _} -&gt; if (table_get(vasm_structs, s, none) == none) table_set(vasm_structs, s, d)
+    }, items)
+    errs := []
+    each(d -&gt; {
+        r := handle {
+            if (head(d) == &#x27;Struct) vasm_check_struct(d) else vasm_check_fn(d)
+            none
+        } with (VasmFail{at, kind, msg}, k) -&gt; VasmErr{kind, at, msg}
+        if (r != none) errs = r :: errs
+    }, items)
+    reverse(errs)
+}</pre>
+</div>
+<p>When the checker meets an error, <code>vasm_fail</code> performs the algebraic effect <code>VasmFail{at, kind, msg}</code> (<a href="../tutorial/5.html">Algebraic effects</a>). For each struct and function, <code>vasm_check</code> receives it with <code>handle</code>, makes a <code>VasmErr</code> and abandons the check, so a function has at most one error: the first. The kinds are in the table of the <a href="../reference/vasm.html">reference</a>.</p>
+
+<nav class="pager"><a class="prev" href="syntax.html"><small>Previous</small>Defining the syntax</a></nav>
+</main>
+</div>
+<footer><div class="inner"><a href="https://github.com/nineties/hex-to-compiler">github.com/nineties/hex-to-compiler</a></div></footer>
+<script src="../../assets/highlight.js"></script>
+</body>
+</html>

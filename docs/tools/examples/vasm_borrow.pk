@@ -1,0 +1,50 @@
+use("vasm")
+
+report(m) := {
+    es := vasm_errors(argv()[0], m)
+    if (es == []) put("ok\n")
+    each((VasmErr{_, Loc{_, l, c}, msg}) -> put(f"line {l}: {msg}\n"), es)
+}
+
+m := vasm{|
+    fn two_shared() -> i64 {
+        var p: own i64
+        var v: i64
+        p = box(1)
+        region r {
+            var a: &r i64
+            var b: &r i64
+            a = &r p
+            b = &r p
+            var w: i64
+            v = *a
+            w = *b
+            v = v + w
+        }
+        free(p)
+        return v
+    }
+    fn mut_and_shared() {
+        var p: own i64
+        p = box(1)
+        region r {
+            var a: &mut r i64
+            var b: &r i64
+            a = &mut r p
+            b = &r p
+        }
+    }
+    fn overwrite_while_borrowed() -> i64 {
+        var p: own i64
+        var v: i64
+        p = box(1)
+        region r {
+            var a: &r i64
+            a = &r p
+            p = box(2)
+            v = *a
+        }
+        return v
+    }
+|}
+report(m)

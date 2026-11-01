@@ -38,6 +38,7 @@ SECTIONS = {
             ("grammar", "文法の宣言"),
             ("builtins", "組み込み関数"),
             ("library", "ライブラリ"),
+            ("vasm", "vasm"),
         ]),
         ("implementation", "処理系の実装", [
             ("index", "構成"),
@@ -46,6 +47,7 @@ SECTIONS = {
             ("init", "init.pk と M式"),
             ("peg", "packrat パーサ"),
             ("syntax", "構文の定義"),
+            ("vasm", "vasm の検査器"),
         ]),
     ],
     "en": [
@@ -69,6 +71,7 @@ SECTIONS = {
             ("grammar", "Grammar declarations"),
             ("builtins", "Builtin functions"),
             ("library", "Libraries"),
+            ("vasm", "vasm"),
         ]),
         ("implementation", "Implementation", [
             ("index", "Overview"),
@@ -77,6 +80,7 @@ SECTIONS = {
             ("init", "init.pk and M-expressions"),
             ("peg", "The packrat parser"),
             ("syntax", "Defining the syntax"),
+            ("vasm", "The vasm checker"),
         ]),
     ],
 }

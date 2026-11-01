@@ -1,0 +1,931 @@
+# tests for the vasm language of planck/lib/vasm.pk
+# Copyright (C) 2026 nineties
+
+passed := 0
+failed := 0
+
+check(actual, expected) := if (actual == expected) {
+    passed = passed + 1
+} else {
+    failed = failed + 1
+    put("Test failed: expected "); print(expected)
+    put(" but got "); println(actual)
+}
+
+use("vasm")
+
+this_file := "planck/test_vasm.pk"
+this_src := read_file(this_file)
+
+# the module has no error
+ok(m) := check(vasm_errors(this_file, m), [])
+
+# the module has one error of the kind, on the line marked with "# NG"
+ng(m, kind) := {
+    es := vasm_errors(this_file, m)
+    check(map((VasmErr{k, _, _}) -> k, es), [kind])
+    if (length(es) == 1) {
+        line := line_text(this_src, arg(arg(arg(es, 0), 1), 1))
+        check(index_of_str(line, "# NG", 0) >= 0, true)
+    }
+}
+
+# === syntax ===
+m := vasm{|
+    fn f(a: i64, b: &r i64) -> i64 { return a }
+|}
+fn_f := arg(m, 0)[0]
+check(length(arg(m, 0)), 1)
+check(head(fn_f), 'Fn)
+check(arg(fn_f, 1), 'f)
+check(map((Param{_, x, t}) -> Tuple{x, t}, arg(fn_f, 3)), [Tuple{'a, I64{}}, Tuple{'b, Ref{'shr, 'r, I64{}}}])
+check(arg(fn_f, 4), I64{})
+body := arg(arg(vasm{| fn g() { x = a + 1; *p = 2; y = *p; return } |}, 0)[0], 5)
+check(map(head, body), ['Assign, 'Store, 'Assign, 'Ret])
+check(arg(arg(body, 0)[2], 0), 'add)
+check(head(arg(body[2], 2)), 'Load)
+# a new line separates statements: *p = 1 is not a multiplication
+body2 := arg(arg(vasm{| fn g() {
+    x = a
+    *p = 1
+} |}, 0)[0], 5)
+check(map(head, body2), ['Assign, 'Store])
+check(map(t -> vasm_show_type(t), [I64{}, Own{Bool{}}, Ref{'mut, 'r, I64{}}, Ref{'shr, 'q, I64{}}]),
+    ["i64", "own bool", "&mut r i64", "&q i64"])
+
+# === modules that pass ===
+
+# integers, if and while
+ok(vasm{|
+    fn sum(n: i64) -> i64 {
+        var s: i64
+        var i: i64
+        s = 0
+        i = 0
+        while (i < n) {
+            s = s + i
+            i = i + 1
+        }
+        return s
+    }
+    fn max(a: i64, b: i64) -> i64 {
+        var m: i64
+        if (a < b) { m = b } else { m = a }
+        return m
+    }
+    fn twice(n: i64) -> i64 {
+        var r: i64
+        var s: i64
+        r = sum(n)
+        s = max(n, 0)
+        r = r + s
+        return r
+    }
+|})
+
+# a value owned by a register is moved to another and freed once
+ok(vasm{|
+    fn own_move() -> i64 {
+        var p: own i64
+        var q: own i64
+        var v: i64
+        p = box(1)
+        *p = 2
+        q = p
+        v = *q
+        free(q)
+        return v
+    }
+|})
+
+# an own value is given to a function, which frees it, or is given back
+ok(vasm{|
+    fn consume(p: own i64) { free(p) }
+    fn inc(p: own i64) -> own i64 {
+        var v: i64
+        v = *p
+        v = v + 1
+        *p = v
+        return p
+    }
+    fn caller() {
+        var p: own i64
+        p = box(41)
+        p = inc(p)
+        consume(p)
+    }
+|})
+
+# borrows in a region; the owner is used again after the region
+ok(vasm{|
+    fn get[r](p: &r i64) -> i64 {
+        var v: i64
+        v = *p
+        return v
+    }
+    fn set[r](p: &mut r i64, v: i64) { *p = v }
+    fn borrow() -> i64 {
+        var p: own i64
+        var v: i64
+        p = box(1)
+        region r {
+            var m: &mut r i64
+            m = &mut r p
+            set(m, 5)
+        }
+        region r {
+            var a: &r i64
+            var b: &r i64
+            a = &r p
+            b = &r p
+            var w: i64
+            v = get(a)
+            w = get(b)
+            v = v + w
+        }
+        free(p)
+        return v
+    }
+|})
+
+# a function returns a borrow of a region given by its parameters
+ok(vasm{|
+    fn pick[r](a: &r i64, b: &r i64, first: bool) -> &r i64 {
+        if (first) { return a }
+        return b
+    }
+    fn use_pick() -> i64 {
+        var x: own i64
+        var y: own i64
+        var v: i64
+        x = box(1)
+        y = box(2)
+        region r {
+            var a: &r i64
+            var b: &r i64
+            var c: &r i64
+            a = &r x
+            b = &r y
+            c = pick(a, b, true)
+            v = *c
+        }
+        free(x)
+        free(y)
+        return v
+    }
+|})
+
+# a register is initialized in both branches; an own value is freed in both branches
+ok(vasm{|
+    fn branches(c: bool, p: own i64) -> i64 {
+        var v: i64
+        if (c) {
+            v = *p
+            free(p)
+        } else {
+            v = 0
+            free(p)
+        }
+        return v
+    }
+    fn loop_keeps(n: i64) {
+        var p: own i64
+        var i: i64
+        p = box(0)
+        i = 0
+        while (i < n) {
+            free(p)
+            p = box(i)
+            i = i + 1
+        }
+        free(p)
+    }
+|})
+
+# === modules that fail ===
+
+# moved twice
+ng(vasm{|
+    fn twice_moved() {
+        var p: own i64
+        var q: own i64
+        var r: own i64
+        p = box(1)
+        q = p
+        r = p       # NG
+        free(q)
+        free(r)
+    }
+|}, 'moved)
+
+# given to a function and used again
+ng(vasm{|
+    fn consume(p: own i64) { free(p) }
+    fn moved_by_call() {
+        var p: own i64
+        p = box(1)
+        consume(p)
+        consume(p)  # NG
+    }
+|}, 'moved)
+
+# used after it is freed
+ng(vasm{|
+    fn after_free() -> i64 {
+        var p: own i64
+        var v: i64
+        p = box(1)
+        free(p)
+        v = *p      # NG
+        return v
+    }
+|}, 'freed)
+
+# freed twice
+ng(vasm{|
+    fn double_free() {
+        var p: own i64
+        p = box(1)
+        free(p)
+        free(p)     # NG
+    }
+|}, 'freed)
+
+# read before it is initialized
+ng(vasm{|
+    fn uninit() -> i64 {
+        var v: i64
+        var w: i64
+        w = v + 1   # NG
+        return w
+    }
+|}, 'uninit)
+
+# initialized in one branch only
+ng(vasm{|
+    fn one_branch(c: bool) -> i64 {
+        var v: i64
+        if (c) { v = 1 }
+        return v    # NG
+    }
+|}, 'uninit)
+
+# initialized only in the loop, which may not run
+ng(vasm{|
+    fn in_loop(n: i64) -> i64 {
+        var v: i64
+        while (n > 0) {
+            v = n
+            n = n - 1
+        }
+        return v    # NG
+    }
+|}, 'uninit)
+
+# a borrow is put in a register outside its region
+ng(vasm{|
+    fn escape_by_register() -> i64 {
+        var p: own i64
+        var v: i64
+        p = box(1)
+        region q {
+            var outer: &q i64
+            region r {
+                outer = &r p    # NG
+            }
+            v = *outer
+        }
+        free(p)
+        return v
+    }
+|}, 'escape)
+
+# a borrow of a region of the function is returned
+ng(vasm{|
+    fn escape_by_return[q](a: &q i64) -> &q i64 {
+        var p: own i64
+        var b: &q i64
+        p = box(1)
+        region r {
+            var c: &r i64
+            c = &r p
+            return c        # NG
+        }
+        return a
+    }
+|}, 'escape)
+
+# a register of a type of a region is declared outside the region
+ng(vasm{|
+    fn region_not_open() {
+        var b: &r i64   # NG
+    }
+|}, 'region)
+
+# borrowed into a region that outlives the owner
+ng(vasm{|
+    fn short_owner() {
+        region r {
+            var p: own i64
+            var b: &r i64
+            p = box(1)
+            b = &r p    # NG
+            free(p)
+        }
+    }
+|}, 'region)
+
+# freed while it is borrowed
+ng(vasm{|
+    fn free_borrowed() {
+        var p: own i64
+        p = box(1)
+        region r {
+            var b: &r i64
+            b = &r p
+            free(p)     # NG
+        }
+    }
+|}, 'borrowed)
+
+# borrowed as mut twice
+ng(vasm{|
+    fn two_mut() {
+        var p: own i64
+        p = box(1)
+        region r {
+            var a: &mut r i64
+            var b: &mut r i64
+            a = &mut r p
+            b = &mut r p    # NG
+        }
+        free(p)
+    }
+|}, 'borrowed)
+
+# read through the owner while it is borrowed as mut
+ng(vasm{|
+    fn read_mut_borrowed() -> i64 {
+        var p: own i64
+        var v: i64
+        p = box(1)
+        region r {
+            var a: &mut r i64
+            a = &mut r p
+            v = *p      # NG
+        }
+        free(p)
+        return v
+    }
+|}, 'borrowed)
+
+# written through a shared borrow
+ng(vasm{|
+    fn write_shared() {
+        var p: own i64
+        p = box(1)
+        region r {
+            var a: &r i64
+            a = &r p
+            *a = 2      # NG
+        }
+        free(p)
+    }
+|}, 'borrowed)
+
+# an own value is not freed
+# an own value that is left at the return is released there (U6)
+ok(vasm{|
+    fn dropped_at_return() -> i64 {
+        var p: own i64
+        p = box(1)
+        return 0
+    }
+    fn dropped_at_end() {
+        var p: own i64
+        p = box(1)
+    }
+    fn dropped_at_block_end(c: bool) {
+        if (c) {
+            var q: own i64
+            q = box(2)
+        }
+    }
+|})
+
+# an own value that is overwritten is released (U32)
+ok(vasm{|
+    fn overwrite() {
+        var p: own i64
+        p = box(1)
+        p = box(2)
+        free(p)
+    }
+    fn overwrite_twice() {
+        var p: own i64
+        p = box(1)
+        p = box(2)
+        p = box(3)
+    }
+    fn overwrite_in_loop(n: i64) {
+        var p: own i64
+        var i: i64
+        p = box(0)
+        i = 0
+        while (i < n) {
+            p = box(i)
+            i = i + 1
+        }
+    }
+|})
+# the new value is freed twice, and the old borrow is not used after the overwrite
+ng(vasm{|
+    fn overwrite_free_twice() {
+        var p: own i64
+        p = box(1)
+        p = box(2)
+        free(p)
+        free(p)     # NG
+    }
+|}, 'freed)
+ng(vasm{|
+    fn overwrite_borrowed() {
+        var p: own i64
+        var v: i64
+        p = box(1)
+        region r {
+            var b: &r i64
+            b = &r p
+            p = box(2)      # NG
+            v = *b
+        }
+    }
+|}, 'borrowed)
+
+# freed in one branch only
+ng(vasm{|
+    fn one_free(c: bool, p: own i64) {
+        if (c) { free(p) }  # NG
+    }
+|}, 'branch)
+
+# freed in a loop
+ng(vasm{|
+    fn free_in_loop(n: i64) {
+        var p: own i64
+        p = box(1)
+        while (n > 0) {     # NG
+            free(p)
+            n = n - 1
+        }
+    }
+|}, 'loop)
+
+# types
+ng(vasm{|
+    fn not_bool(n: i64) {
+        if (n) { return }   # NG
+    }
+|}, 'type)
+ng(vasm{|
+    fn wrong_arg(p: own i64) {
+        var q: own i64
+        q = box(true)   # NG
+        free(q)
+        free(p)
+    }
+|}, 'type)
+ng(vasm{|
+    fn no_return(n: i64) -> i64 {   # NG
+        if (n > 0) { return n }
+    }
+|}, 'type)
+ng(vasm{|
+    fn undefined_function() {
+        nothing(1)  # NG
+    }
+|}, 'undefined)
+
+# one error for each function
+check(map((VasmErr{k, _, _}) -> k, vasm_errors(this_file, vasm{|
+    fn a1() { var v: i64; v = v }
+    fn a2() { var v: i64; v = 1 }
+    fn a3() { var p: own i64; p = box(1); free(p); free(p) }
+|})), ['uninit, 'freed])
+
+# the message with the position, at the second free
+shown_at := line_col(this_src, index_of_str(this_src, "free(p) }", index_of_str(this_src, "fn shown(", 0)))
+check(map((VasmErr{_, loc, msg}) -> f"{show_loc(loc)}: {msg}", vasm_errors(this_file, vasm{|
+    fn shown() { var p: own i64; p = box(1); free(p); free(p) }
+|})), [f"planck/test_vasm.pk:{arg(shown_at, 0)}:{arg(shown_at, 1)}: p is freed twice"])
+
+# === integer types, arrays, structs and built-in functions (U4, U8, U9, U16) ===
+
+check(map(t -> vasm_show_type(t), [I8{}, U64{}, Own{Arr{U8{}}}, Ref{'shr, 'r, Arr{Named{'Point}}}]),
+    ["i8", "u64", "own [u8]", "&r [Point]"])
+m2 := vasm{|
+    struct Point { x: i64, y: i64 }
+    fn g(a: own [u8], p: Point) { b = box(1); free(b); v = a[0]; a[i] = 2; w = p.x; p.y = 3; q = Point{x: 1, y: 2} }
+|}
+check(map(head, arg(m2, 0)), ['Struct, 'Fn])
+check(map((Field{_, x, t}) -> Tuple{x, t}, arg(arg(m2, 0)[0], 2)), [Tuple{'x, I64{}}, Tuple{'y, I64{}}])
+check(map((Param{_, x, t}) -> t, arg(arg(m2, 0)[1], 3)), [Own{Arr{U8{}}}, Named{'Point}])
+body3 := arg(arg(m2, 0)[1], 5)
+check(map(head, body3), ['Assign, 'CallS, 'Assign, 'IStore, 'Assign, 'FStore, 'Assign])
+check(map(s -> if (head(s) == 'Assign) head(arg(s, 2)) else arg(s, 1), body3), ['Call, 'free, 'Index, 'a, 'Get, 'p, 'Make])
+# box and free are not words of the syntax but built-in functions
+check(arg(arg(body3[0], 2), 1), 'box)
+
+# integers of each width; a literal takes the type of the other operand or of the register
+ok(vasm{|
+    fn widths(a: u8, b: i32) -> u8 {
+        var c: u8
+        var d: i32
+        var e: u64
+        var f: bool
+        c = a + 1
+        c = c & 255
+        d = b * -2
+        e = 32767
+        f = c < a
+        if (d >= 0) { c = c << 1 }
+        return c
+    }
+    fn call_widths() -> u8 {
+        var r: u8
+        r = widths(200, -5)
+        return r
+    }
+|})
+ng(vasm{|
+    fn mixed(a: i8, b: i64) -> i64 {
+        var c: i64
+        c = a + b   # NG
+        return c
+    }
+|}, 'type)
+ng(vasm{|
+    fn too_big() {
+        var c: u8
+        c = 256     # NG
+    }
+|}, 'type)
+ng(vasm{|
+    fn negative_unsigned(n: u32) -> u32 {
+        var m: u32
+        m = n + -1  # NG
+        return m
+    }
+|}, 'type)
+ng(vasm{|
+    fn wrong_width(a: i32) -> i64 {
+        return a    # NG
+    }
+|}, 'type)
+
+# arrays: alloc(n, v) has n elements v; a[i] reads and writes; len gives the length
+ok(vasm{|
+    fn sum[r](a: &r [i64]) -> i64 {
+        var s: i64
+        var i: i64
+        var n: i64
+        var x: i64
+        s = 0
+        i = 0
+        n = len(a)
+        while (i < n) {
+            x = a[i]
+            s = s + x
+            i = i + 1
+        }
+        return s
+    }
+    fn fill[r](a: &mut r [i64], v: i64) {
+        var i: i64
+        var n: i64
+        i = 0
+        n = len(a)
+        while (i < n) {
+            a[i] = v
+            i = i + 1
+        }
+    }
+    fn arrays() -> i64 {
+        var a: own [i64]
+        var s: i64
+        a = alloc(4, 0)
+        a[0] = 5
+        region r {
+            var m: &mut r [i64]
+            m = &mut r a
+            fill(m, 2)
+        }
+        region r {
+            var b: &r [i64]
+            b = &r a
+            s = sum(b)
+        }
+        free(a)
+        return s
+    }
+|})
+ng(vasm{|
+    fn bad_index(a: own [i64], c: bool) -> i64 {
+        var x: i64
+        x = a[c]    # NG
+        free(a)
+        return x
+    }
+|}, 'type)
+ng(vasm{|
+    fn whole_array(a: own [i64]) -> i64 {
+        var x: i64
+        x = *a      # NG
+        free(a)
+        return x
+    }
+|}, 'type)
+ng(vasm{|
+    fn write_shared_array[r](a: &r [i64]) {
+        a[0] = 1    # NG
+    }
+|}, 'borrowed)
+ok(vasm{|
+    fn array_dropped(n: i64) {
+        var a: own [u8]
+        a = alloc(n, 0)
+        return
+    }
+|})
+ng(vasm{|
+    fn bare_array() {
+        var a: [i64]    # NG
+    }
+|}, 'type)
+ng(vasm{|
+    fn elem_range(a: own [u8]) {
+        a[0] = 300  # NG
+        free(a)
+    }
+|}, 'type)
+
+# structs: a value of a struct is made with all its fields and copied; fields are read and written
+# in a register or through a pointer
+ok(vasm{|
+    struct Point { x: i64, y: i64 }
+    struct Header {
+        magic: u32
+        size: u16
+        origin: Point
+    }
+    fn norm1(p: Point) -> i64 {
+        var x: i64
+        var y: i64
+        x = p.x
+        y = p.y
+        x = x + y
+        return x
+    }
+    fn move_x[r](p: &mut r Point, x: i64) { p.x = x }
+    fn structs() -> i64 {
+        var p: Point
+        var b: own Point
+        var h: own [Header]
+        var e: Header
+        var v: i64
+        p = Point{x: 1, y: 2}
+        p.x = 3
+        b = box(p)
+        b.y = 4
+        region r {
+            var m: &mut r Point
+            m = &mut r b
+            move_x(m, 5)
+        }
+        p = *b
+        free(b)
+        e = Header{magic: 1179, size: 64, origin: p}
+        h = alloc(2, e)
+        e = h[1]
+        p = e.origin
+        free(h)
+        v = norm1(p)
+        return v
+    }
+|})
+ng(vasm{|
+    struct Point { x: i64, y: i64 }
+    fn missing() -> Point {
+        var p: Point
+        p = Point{x: 1}     # NG
+        return p
+    }
+|}, 'type)
+ng(vasm{|
+    struct Point { x: i64, y: i64 }
+    fn no_field(p: Point) -> i64 {
+        var v: i64
+        v = p.z     # NG
+        return v
+    }
+|}, 'type)
+ng(vasm{|
+    fn no_struct(p: own Pair) { free(p) }   # NG
+|}, 'undefined)
+ng(vasm{|
+    struct Node { value: i64, next: Node }  # NG
+|}, 'type)
+ng(vasm{|
+    struct Point { x: i64, y: i64 }
+    fn shared_field[r](p: &r Point) {
+        p.x = 1     # NG
+    }
+|}, 'borrowed)
+# the contents of a struct, an array and own do not borrow (U7, U19)
+ng(vasm{|
+    struct Cell {
+        p: &r i64       # NG
+    }
+|}, 'type)
+ng(vasm{|
+    fn box_borrow() {
+        var p: own i64
+        p = box(1)
+        region r {
+            var b: &r i64
+            var c: own i64
+            b = &r p
+            c = box(b)      # NG
+        }
+        free(p)
+    }
+|}, 'type)
+
+# built-in functions: they are not defined again, and their types are checked like other functions
+ng(vasm{|
+    fn box(a: i64) -> i64 { return a }  # NG
+|}, 'type)
+ng(vasm{|
+    fn free_int(n: i64) {
+        free(n)     # NG
+    }
+|}, 'type)
+# a result that is not kept is released (U32)
+ok(vasm{|
+    fn dropped() {
+        box(1)
+    }
+    fn dropped_twice() {
+        box(1)
+        box(2)
+    }
+    fn make(n: i64) -> own i64 {
+        var p: own i64
+        p = box(n)
+        return p
+    }
+    fn dropped_user() {
+        make(3)
+    }
+|})
+# the borrow of an own value that is dropped is not used (a call is not an own value)
+ng(vasm{|
+    fn dropped_free() {
+        var p: own i64
+        p = box(1)
+        box(2)
+        free(p)
+        free(p)     # NG
+    }
+|}, 'freed)
+
+# === &mut given to a function is borrowed again for the call (U11) ===
+ok(vasm{|
+    fn set[r](p: &mut r i64, v: i64) { *p = v }
+    fn get[r](p: &r i64) -> i64 {
+        var v: i64
+        v = *p
+        return v
+    }
+    fn reborrow() -> i64 {
+        var p: own i64
+        var v: i64
+        p = box(0)
+        region r {
+            var m: &mut r i64
+            m = &mut r p
+            set(m, 1)
+            set(m, 2)
+            v = get(m)
+            *m = v
+        }
+        v = *p
+        free(p)
+        return v
+    }
+|})
+ng(vasm{|
+    fn set2[r](a: &mut r i64, b: &mut r i64) { *a = 1; *b = 2 }
+    fn alias() {
+        var p: own i64
+        p = box(0)
+        region r {
+            var m: &mut r i64
+            m = &mut r p
+            set2(m, m)  # NG
+        }
+        free(p)
+    }
+|}, 'borrowed)
+# the result has the region of the parameter, so m is moved
+ng(vasm{|
+    fn id[r](p: &mut r i64) -> &mut r i64 { return p }
+    fn kept() {
+        var p: own i64
+        p = box(0)
+        region r {
+            var m: &mut r i64
+            var n: &mut r i64
+            m = &mut r p
+            n = id(m)
+            *m = 1      # NG
+        }
+        free(p)
+    }
+|}, 'moved)
+
+# === a borrow of an outer region is given where an inner region is expected (U13) ===
+ok(vasm{|
+    fn pick[r](a: &r i64, b: &r i64, first: bool) -> &r i64 {
+        if (first) { return a }
+        return b
+    }
+    fn nested() -> i64 {
+        var x: own i64
+        var y: own i64
+        var v: i64
+        x = box(1)
+        y = box(2)
+        region q {
+            var a: &q i64
+            a = &q x
+            region r {
+                var b: &r i64
+                var c: &r i64
+                var d: &r i64
+                b = &r y
+                c = pick(a, b, true)
+                d = a
+                v = *c
+            }
+        }
+        free(x)
+        free(y)
+        return v
+    }
+    fn from_param[q](a: &q i64) -> i64 {
+        var v: i64
+        region r {
+            var b: &r i64
+            b = a
+            v = *b
+        }
+        return v
+    }
+|})
+ng(vasm{|
+    fn pick[r](a: &r i64, b: &r i64) -> &r i64 { return a }
+    fn inner_result() -> i64 {
+        var x: own i64
+        var y: own i64
+        var v: i64
+        x = box(1)
+        y = box(2)
+        region q {
+            var a: &q i64
+            var c: &q i64
+            a = &q x
+            region r {
+                var b: &r i64
+                b = &r y
+                c = pick(a, b)      # NG
+            }
+            v = *c
+        }
+        free(x)
+        free(y)
+        return v
+    }
+|}, 'escape)
+# the regions of a function are not ordered
+ng(vasm{|
+    fn pick[r](a: &r i64, b: &r i64) -> &r i64 { return a }
+    fn two_params[q, s](a: &q i64, b: &s i64) -> &q i64 {
+        var c: &q i64
+        c = pick(a, b)  # NG
+        return c
+    }
+|}, 'type)
+
+put("Tests passed "); print(passed); put("/"); println(passed + failed)
+if (failed > 0) exit(1)
