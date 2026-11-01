@@ -584,9 +584,9 @@ arg_texts(t) := {
     if (ok) reverse(acc) else none
 }
 
-# the statements of a block. A block with fun in it has the names defined first (Def{f, none})
-# and the functions assigned where they were written (Set{f, Lambda{...}}): peg_block in syntax.pk.
-# The leading defs that are assigned later, in the same order, are written back as fun.
+# the statements of a block. The function definitions f(p, ...) := e of a block define their names
+# first (Def{f, none}) and assign the functions where they were written (Set{f, Lambda{...}}): peg_block in syntax.pk.
+# The leading defs that are assigned later, in the same order, are written back as f(p, ...) := e.
 is_fun_def(x) := is_mx(x) and head(x) == 'Def and arity(x) == 2 and typeof(arg(x, 0)) == 'symbol and arg(x, 1) == none
 is_fun_set(x, f) := is_mx(x) and head(x) == 'Set and arity(x) == 2 and arg(x, 0) == f and is_mx(arg(x, 1)) and head(arg(x, 1)) == 'Lambda
     and arity(arg(x, 1)) == 2 and is_mx(arg(arg(x, 1), 0)) and head(arg(arg(x, 1), 0)) == 'Tuple
@@ -626,8 +626,17 @@ fun_text(x) := {
     ps := list_pieces('pattern, ",", arg(lam, 0))
     b := unparse_pp('expr, un_strip('UnwrapReturn, arg(lam, 1)))
     if (ps == none or b == none) none
-    else _strcat("fun ", _strcat(symname(arg(x, 0)), _strcat("(", _strcat(un_render(ps), _strcat(") ", b)))))
+    else _strcat(symname(arg(x, 0)), _strcat("(", _strcat(un_render(ps), _strcat(") := ", b))))
 }
+
+# a statement of a block. Def{x, Lambda{...}} is written x := e, since f(p, ...) := e in a block
+# is defined at the top of the block
+is_fn(v) := is_mx(v) and (head(v) == 'Lambda or head(v) == 'Fusion)
+stmt_text(x) :=
+    if (is_mx(x) and head(x) == 'Def and arity(x) == 2 and typeof(arg(x, 0)) == 'symbol and is_fn(arg(x, 1))) {
+        v := unparse_pp('expr, arg(x, 1))
+        if (v == none) none else _strcat(symname(arg(x, 0)), _strcat(" := ", v))
+    } else unparse_pp('expr, x)
 
 # the text of each statement, or none
 block_texts(items) := {
@@ -641,7 +650,7 @@ block_texts(items) := {
         s := if (pending != [] and is_fun_set(x, first_of(pending))) {
                 pending = rest_of(pending)
                 fun_text(x)
-            } else unparse_pp('expr, x)
+            } else stmt_text(x)
         if (s == none) ok = false else acc = s :: acc
     }, rest)
     if (ok) reverse(acc) else none

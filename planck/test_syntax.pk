@@ -451,7 +451,7 @@ check(tree("while (a) b"), 'While{a, b})
 check(tree("for (x in xs) break"), `Handle{Apply{peg_for, Tuple{xs, Lambda{Tuple{x}, Perform{Break{}}}}}, !bh})
 # a loop or a function handles only its own return and break
 check(tree("while (a) { while (b) break }"), `While{a, Do{Handle{While{b, Perform{Break{}}}, !bh}}})
-check(tree("f() := { g() := return 1; 2 }"), `Def{f, Lambda{Tuple{}, Do{Def{g, Lambda{Tuple{}, Handle{Perform{Return{1}}, !rh}}}, 2}}})
+check(tree("f() := { g() := return 1; 2 }"), `Def{f, Lambda{Tuple{}, Do{Def{g, none}, Set{g, Lambda{Tuple{}, Handle{Perform{Return{1}}, !rh}}}, 2}}})
 check(tree("f() := for (x in xs) return x"), `Def{f, Lambda{Tuple{}, Handle{Apply{peg_for, Tuple{xs, Lambda{Tuple{x}, Perform{Return{x}}}}}, !rh}}})
 check(tree("f() := match x { 1 -> return 2 | _ -> 3 }"), `Def{f, Lambda{Tuple{}, Handle{Apply{Fusion{Lambda{Tuple{1}, Perform{Return{2}}}, Lambda{Tuple{_}, 3}}, Tuple{x}}, !rh}}})
 check(tree("f() := '(return 1)"), 'Def{f, Lambda{Tuple{}, Quote{Perform{Return{1}}}}})
@@ -627,25 +627,24 @@ x := 7
 for (x in [1, 2]) total = total + x
 check(x, 7)
 
-# === fun ===
-check(tree("{ fun f(x) x }"), 'Do{Def{f, none}, Set{f, Lambda{Tuple{x}, x}}})
-check(tree("{ a := 1; fun f() { a }; f() }"), 'Do{Def{f, none}, Def{a, 1}, Set{f, Lambda{Tuple{}, Do{a}}}, Apply{f, Tuple{}}})
-check(tree("{ fun f(x, y) x + y\n fun g() f(1, 2)\n g() }"), 'Do{Def{f, none}, Def{g, none}, Set{f, Lambda{Tuple{x, y}, Apply{_add, Tuple{x, y}}}}, Set{g, Lambda{Tuple{}, Apply{f, Tuple{1, 2}}}}, Apply{g, Tuple{}}})
-check(tree("{ fun f(x :: xs) x }"), 'Do{Def{f, none}, Set{f, Lambda{Tuple{Cons{x, xs}}, x}}})
-check(tree("{ fun f() { return 1 } }"), `Do{Def{f, none}, Set{f, Lambda{Tuple{}, Handle{Do{Perform{Return{1}}}, !rh}}}})
+# === function definitions in a block ===
+check(tree("{ f(x) := x }"), 'Do{Def{f, none}, Set{f, Lambda{Tuple{x}, x}}})
+check(tree("{ a := 1; f() := { a }; f() }"), 'Do{Def{f, none}, Def{a, 1}, Set{f, Lambda{Tuple{}, Do{a}}}, Apply{f, Tuple{}}})
+check(tree("{ f(x, y) := x + y\n g() := f(1, 2)\n g() }"), 'Do{Def{f, none}, Def{g, none}, Set{f, Lambda{Tuple{x, y}, Apply{_add, Tuple{x, y}}}}, Set{g, Lambda{Tuple{}, Apply{f, Tuple{1, 2}}}}, Apply{g, Tuple{}}})
+check(tree("{ f(x :: xs) := x }"), 'Do{Def{f, none}, Set{f, Lambda{Tuple{Cons{x, xs}}, x}}})
+check(tree("{ f() := { return 1 } }"), `Do{Def{f, none}, Set{f, Lambda{Tuple{}, Handle{Do{Perform{Return{1}}}, !rh}}}})
+check(tree("{ f(x) := 1; f(x) := 2 }"), 'Do{Def{f, none}, Set{f, Lambda{Tuple{x}, 1}}, Set{f, Lambda{Tuple{x}, 2}}})
+check(tree("{ g := x -> x; y := 1 }"), 'Do{Def{g, Lambda{Tuple{x}, x}}, Def{y, 1}})
 check(tree("{ a; b }"), 'Do{a, b})
-check(head(tree("fun f(x) x")), 'SyntaxError)
-check(head(tree("{ fun f x }")), 'SyntaxError)
-check(head(tree("{ fun (x) x }")), 'SyntaxError)
 
 check({
-    fun even(n) n == 0 ? true : odd(n - 1)
-    fun odd(n) n == 0 ? false : even(n - 1)
+    even(n) := n == 0 ? true : odd(n - 1)
+    odd(n) := n == 0 ? false : even(n - 1)
     Tuple{even(10), odd(10), even(7)}
 }, Tuple{true, false, false})
 counter() := {
     c := 0
-    fun inc() {
+    inc() := {
         c = c + 1
         c
     }
@@ -653,16 +652,16 @@ counter() := {
     inc()
 }
 check(counter(), 2)
-# a fun sees the variables declared before it, and funs call each other
+# a function of a block sees the variables defined before it, and the functions of the block call each other
 fact_sum(n) := {
     base := 1
-    fun fact(m) m <= 1 ? base : m * fact(m - 1)
-    fun sum_to(m) m == 0 ? 0 : fact(m) + sum_to(m - 1)
+    fact(m) := m <= 1 ? base : m * fact(m - 1)
+    sum_to(m) := m == 0 ? 0 : fact(m) + sum_to(m - 1)
     sum_to(n)
 }
 check(fact_sum(4), 33)
 find_in(xs, y) := {
-    fun go(l) {
+    go(l) := {
         for (x in l) {
             if (x == y) return true
         }
@@ -675,8 +674,8 @@ check(find_in([1, 2, 3], 5), false)
 # a recursive descent parser: sum := num ("+" num)* with parentheses
 parse_sum(toks) := {
     pos := 0
-    fun peek() pos < length(toks) ? nth(toks, pos) : "eof"
-    fun atom() {
+    peek() := pos < length(toks) ? nth(toks, pos) : "eof"
+    atom() := {
         t := peek()
         pos = pos + 1
         if (t == "(") {
@@ -685,7 +684,7 @@ parse_sum(toks) := {
             v
         } else t
     }
-    fun sum() {
+    sum() := {
         v := atom()
         while (peek() == "+") {
             pos = pos + 1
@@ -696,6 +695,52 @@ parse_sum(toks) := {
     sum()
 }
 check(parse_sum([1, "+", "(", 2, "+", 3, ")", "+", 4]), 10)
+
+# === binding ===
+# a function sees the variables where it is defined, not those of its caller
+bind_x := "global"
+bind_g() := bind_x
+bind_h() := { bind_x := "local"; bind_g() }
+check(bind_h(), "global")
+bind_mk() := { y := 1; () -> y }
+bind_k := bind_mk()
+bind_use() := { y := 2; bind_k() }
+check(bind_use(), 1)
+bind_add(n) := m -> n + m
+bind_call(f) := { n := 100; f(1) }
+check(bind_call(bind_add(10)), 11)
+# the top-level functions see each other, and so do the functions of a block
+bind_ev(n) := if (n == 0) true else bind_od(n - 1)
+bind_od(n) := if (n == 0) false else bind_ev(n - 1)
+check(bind_ev(10), true)
+bind_blk(n) := {
+    ev(n) := if (n == 0) true else od(n - 1)
+    od(n) := if (n == 0) false else ev(n - 1)
+    ev(n)
+}
+check(bind_blk(10), true)
+check(bind_blk(7), false)
+# a function of a block defined after another one is still that of the block
+bind_b(n) := "global b"
+bind_ab() := {
+    a(n) := bind_b(n)
+    bind_b(n) := "local b"
+    a(1)
+}
+check(bind_ab(), "local b")
+check(bind_b(1), "global b")
+# a variable that is not a function is defined where it is written
+bind_v := "outer"
+bind_seq() := { a := bind_v; bind_v := "inner"; Tuple{a, bind_v} }
+check(bind_seq(), Tuple{"outer", "inner"})
+# the variables are shared locations: a function sees later assignments
+bind_late(n) := {
+    x := n
+    g() := x
+    x = x + 1
+    g()
+}
+check(bind_late(2), 3)
 
 # === Packrat parser: grammar declarations ===
 num ::= integer

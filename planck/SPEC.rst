@@ -82,7 +82,7 @@ M-expressions are expressions of this syntax too.
      - ``Apply{f, Tuple{e}}``
    * - ``f"a{e}b"``
      - ``Apply{_strcat, Tuple{Apply{_strcat, Tuple{"a", Apply{_to_text, Tuple{e}}}}, "b"}}``
-   * - ``fun f(p, ...) e`` in a block
+   * - ``f(p, ...) := e`` in a block
      - ``Def{f, none}`` at the top of the block, and ``Set{f, Lambda{Tuple{p, ...}, e}}`` in its place
    * - ``handle e with h``
      - ``Handle{e, h}``
@@ -116,11 +116,18 @@ A ``.`` follows its left operand with no space. A value whose head is not declar
 so ``a`` followed by ``[1, 2]`` on the next line or after a space is two expressions.
 ``a`` is a postfix expression such as ``x``, ``f(x)``, ``t.f`` or ``b[j]``: ``a[i][j] = e`` is ``Apply{_index_set, Tuple{a[i], j, e}}``.
 
-``fun f(p, ...) e`` declares a function in a block, as ``f(p, ...) := e`` does, but all the ``fun`` of a block are
-declared at its top, so each function can call the functions declared after it. A function is assigned where its ``fun`` is,
-so it sees the variables declared before it in the block, and it can be called after that place.
-A ``fun`` is written only as an expression of a block. It is a variable of the function or the program that contains the block,
-like ``x := e``.
+Variables have lexical scope. A variable in the body of a function is a parameter of that function or of a function around it,
+or a variable defined before it in those functions, and otherwise a global variable.
+The variables of the caller are not visible. A function keeps the variables of the place where it was made,
+and they are shared locations: an assignment to them after the function was made is seen by the function.
+A global variable is looked up when it is used, so the top-level definitions see each other, also those written after them.
+
+A function definition ``f(p, ...) := e`` is written in the same way at the top level and in a block.
+In a block, ``f`` is defined at the top of the block, so the function definitions of a block see each other
+as the top-level ones do. The function is assigned where its definition is,
+so it sees the variables defined before it in the block, and it can be called after that place.
+A variable definition ``x := e`` (also ``x := (p) -> e``) is defined where it is written, and the expressions before it see the ``x`` outside.
+A variable of a block is a variable of the function or the program that contains the block.
 
 ``for (p in e) a`` evaluates ``a`` for each element of the list or the vector ``e``, with the elements matched by the pattern ``p``,
 and has the value ``none``. The variables of ``a`` outside the loop are shared, so ``a`` can assign them.
@@ -187,7 +194,7 @@ and are the M-expressions of the table above, which are matched as in Patterns b
 Lexical rules:
 
 * identifiers are ``[A-Za-z_][A-Za-z0-9_]*`` except the reserved words
-  ``if else while and or handle with perform match record for in return break continue fun``.
+  ``if else while and or handle with perform match record for in return break continue``.
 * integers are decimal (``10``, ``-3``), ``0x1f``, ``0o17`` or ``0b101``.
 * strings are ``"..."`` in one line with the escapes ``\a \b \t \n \v \f \r \" \' \\``.
   ``f"...{e}..."`` embeds the value of the expression ``e``, which may contain strings and f-strings;

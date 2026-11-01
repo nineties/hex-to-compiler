@@ -23,7 +23,6 @@ Apply{table_set, Tuple{peg_reserved, "in", true}}
 Apply{table_set, Tuple{peg_reserved, "return", true}}
 Apply{table_set, Tuple{peg_reserved, "break", true}}
 Apply{table_set, Tuple{peg_reserved, "continue", true}}
-Apply{table_set, Tuple{peg_reserved, "fun", true}}
 
 " identifier: [A-Za-z_][A-Za-z0-9_]* except the peg_reserved words and the f of f\"...\" "
 Def{peg_tok_ident, Lambda{Tuple{p}, Do{
@@ -278,10 +277,13 @@ Apply{_define_rule, Tuple{Quote{assign_op}, Quote{Seq{"=", Not{Tight{"="}}}}}}
 Apply{_define_rule, Tuple{Quote{index}, Quote{
     Act{expr, Lambda{Tuple{e}, Apply{_peg_rewrite, Tuple{e}}}}}}}
 
+" a function definition f(p, ...) := e of a block is marked _Fun so that peg_block "
+" defines all of them at the top of the block "
 Apply{_define_rule, Tuple{Quote{block}, Quote{
-    Act{Seq{"{", Many{Seq{Choice{expr,
-            Act{Seq{Key{"fun"}, ident, "(", patterns, ")", expr},
-                Lambda{Tuple{Tuple{_, f, _, ps, _, b}}, QuasiQuote{_Fun{UnQuote{f}, UnQuote{Apply{peg_lambda, Tuple{ps, b}}}}}}}}, Option{";"}}}, "}"},
+    Act{Seq{"{", Many{Seq{Choice{
+            Act{Seq{And{Seq{postfix, ":="}}, ident, Tight{"("}, Delimited{pattern, ","}, ")", ":=", expr},
+                Lambda{Tuple{Tuple{_, f, _, ps, _, _, b}}, QuasiQuote{_Fun{UnQuote{f}, UnQuote{Apply{peg_lambda, Tuple{ps, b}}}}}}},
+            expr}, Option{";"}}}, "}"},
         Lambda{Tuple{Tuple{_, es, _}}, Apply{peg_block, Tuple{es}}}}}}}
 
 " a branch of if: an expression without | outside of brackets, "
@@ -1192,6 +1194,28 @@ Def{
     peg_continue,
     Lambda{Tuple{}, Do{Set{peg_ncnt, Apply{_add, Tuple{peg_ncnt, 1}}}, QuasiQuote{Perform{Continue{}}}}}}
 
+" whether the tuple defs has Def{f, none} "
+Def{
+    peg_has_def,
+    Lambda{
+        Tuple{defs, f},
+        Do{
+            Def{i, 0},
+            Def{found, false},
+            While{
+                If{Apply{_not, Tuple{found}}, Apply{_lt, Tuple{i, Apply{arity, Tuple{defs}}}}, false},
+                Do{
+                    If{Apply{_eq, Tuple{Apply{arg, Tuple{Apply{arg, Tuple{defs, i}}, 0}}, f}}, Set{found, true}, none},
+                    Set{i, Apply{_add, Tuple{i, 1}}}
+                }
+            },
+            found
+        }
+    }}
+
+" the expressions of a block. Each function definition f(p, ...) := e (_Fun) defines f "
+" at the top of the block (Def{f, none}, once for each name) and assigns it in its place "
+" (Set{f, ...}), so the functions of a block see each other. "
 Def{
     peg_block,
     Lambda{
@@ -1208,11 +1232,15 @@ Def{
                     If{
                         Apply{peg_is_head, Tuple{x, Quote{_Fun}}},
                         Do{
-                            Set{
-                                defs,
-                                Apply{
-                                    push,
-                                    Tuple{defs, QuasiQuote{Def{UnQuote{Apply{arg, Tuple{x, 0}}}, none}}}
+                            If{
+                                Apply{peg_has_def, Tuple{defs, Apply{arg, Tuple{x, 0}}}},
+                                none,
+                                Set{
+                                    defs,
+                                    Apply{
+                                        push,
+                                        Tuple{defs, QuasiQuote{Def{UnQuote{Apply{arg, Tuple{x, 0}}}, none}}}
+                                    }
                                 }
                             },
                             Set{
@@ -1247,8 +1275,6 @@ Def{
             Apply{mexpr, Tuple{Quote{Do}, defs}}
         }
     }}
-
-Apply{_define_rule, Tuple{Quote{patterns}, Quote{Delimited{pattern, ","}}}}
 
 Apply{_define_rule, Tuple{Quote{same}, Quote{Same{}}}}
 
