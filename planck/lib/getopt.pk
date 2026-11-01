@@ -1,0 +1,76 @@
+# getopt: command-line options in the rules of GNU getopt_long
+# Copyright (C) 2026 nineties
+
+use("base")
+use("list")
+use("string")
+use("table")
+
+# An option is Opt{short, long, takes}: short is a one-character string or "", long is a string or "",
+# takes is true when the option has a value.
+# getopt(opts, args, from) reads the strings of the array args from the index from (1 for argv()) and is
+#   Parsed{table, rest}  table maps the name of each given option to its value (true for an option without value);
+#                        the name is long when it is not "", otherwise short. rest is the array of the other strings.
+#   Unknown{name}        name (-x or --xyz) is not in opts
+#   Missing{name}        the option name needs a value and args ends
+#   NoValue{name}        the option --name=value does not take a value
+# A string that begins with - is read as options: -a, -abc (the same as -a -b -c), -o value, -ovalue,
+# --opt, --opt value and --opt=value. A lone - is not an option. After -- every string is in rest.
+# Options and other strings may be mixed; rest keeps the order of the other strings.
+getopt(opts, args, from) := {
+    n := array_len(args)
+    given := table()
+    rest := []
+    err := none
+    only_rest := false
+    i := from
+    by_short(c) := find(o -> arg(o, 0) == c, opts)
+    by_long(s) := find(o -> arg(o, 1) == s, opts)
+    name_of(o) := if (arg(o, 1) != "") arg(o, 1) else arg(o, 0)
+    # next_value(shown) is the next string of args for the option shown, or none after setting Missing
+    next_value(shown) := if (i < n) {
+        v := array_get(args, i)
+        i = i + 1
+        v
+    } else {
+        err = Missing{shown}
+        none
+    }
+    take(o, shown, attached) := if (arg(o, 2)) {
+        v := if (attached != none) attached else next_value(shown)
+        if (err == none) table_set(given, name_of(o), v)
+    } else table_set(given, name_of(o), true)
+    while (i < n and err == none) {
+        a := array_get(args, i)
+        i = i + 1
+        if (only_rest or a == "-" or not starts_with(a, "-")) rest = a :: rest
+        else if (a == "--") only_rest = true
+        else if (starts_with(a, "--")) {
+            eq := index_of_str(a, "=", 2)
+            name := if (eq >= 0) substr(a, 2, eq) else substr(a, 2, strlen(a))
+            o := if (name == "") none else by_long(name)
+            shown := _strcat("--", name)
+            if (o == none) err = Unknown{shown}
+            else if (eq >= 0 and not arg(o, 2)) err = NoValue{shown}
+            else take(o, shown, if (eq >= 0) substr(a, eq + 1, strlen(a)) else none)
+        } else {
+            j := 1
+            while (j < strlen(a) and err == none) {
+                c := substr(a, j, j + 1)
+                j = j + 1
+                shown := _strcat("-", c)
+                o := by_short(c)
+                if (c == "" or o == none) err = Unknown{shown}
+                else if (arg(o, 2) and j < strlen(a)) {
+                    v := substr(a, j, strlen(a))
+                    j = strlen(a)
+                    take(o, shown, v)
+                } else take(o, shown, none)
+            }
+        }
+    }
+    if (err != none) err
+    else {
+        Parsed{given, list_to_array(reverse(rest))}
+    }
+}

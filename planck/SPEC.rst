@@ -529,7 +529,7 @@ Each file uses the files it needs. Lists are ``Cons{x, xs}`` and ``Nil{}``, and 
      - ``panic(msg)`` prints ``msg`` and stops with status 1, ``assert(c, msg)``
    * - ``list``
      - ``length`` ``reverse`` ``append`` ``concat`` ``map`` ``filter`` ``concat_map`` ``each`` ``foldl`` ``foldr`` ``sum``
-       ``nth`` ``last`` ``take`` ``drop`` ``find`` ``any`` ``all`` ``member`` ``index_of`` ``zip`` ``range`` ``sort``
+       ``nth`` ``last`` ``take`` ``drop`` ``find`` ``any`` ``all`` ``member`` ``index_of`` ``zip`` ``range`` ``list_to_array`` ``sort``
    * - ``vector``
      - ``vec_new`` ``vec_push`` ``vec_pop`` ``vec_get`` ``vec_set`` ``vec_len`` ``vec_to_list`` ``vec_from_list``
    * - ``string``
@@ -540,6 +540,8 @@ Each file uses the files it needs. Lists are ``Cons{x, xs}`` and ``Nil{}``, and 
      - ``u64`` ``u64_limbs`` ``u64_hex`` ``u64_to_hex`` ``u64_to_int`` ``u64_add`` ``u64_sub`` ``u64_neg`` ``u64_and`` ``u64_or`` ``u64_xor`` ``u64_not``
        ``u64_shl`` ``u64_shr`` ``u64_sar`` ``u64_eq`` ``u64_ucmp`` ``u64_scmp`` ``u64_ult`` ``u64_slt``
        ``u64_write_le`` ``u64_write_be`` ``u64_read_le`` ``u64_bytes_le``
+   * - ``getopt``
+     - ``getopt``
    * - ``table``
      - ``table_len`` ``table_has`` ``table_keys`` ``table_values`` ``table_items``
        ``set_new`` ``set_add`` ``set_has`` ``set_len`` ``set_to_list`` ``set_from_list``
@@ -585,6 +587,13 @@ and ``u64_to_hex(a)`` is ``0x`` and 16 digits. ``u64_to_int(a)`` stops the progr
 ``u64_ucmp`` and ``u64_scmp`` are ``-1``, ``0`` or ``1`` as unsigned and as signed, and ``u64_ult`` and ``u64_slt`` are the tests.
 ``u64_write_le(buf, off, a)`` stores the 8 bytes of ``a`` into the ``u8`` array ``buf`` lowest first (``u64_write_be``: highest first),
 ``u64_read_le(buf, off)`` reads them, and ``u64_bytes_le(a)`` is a ``u8`` array of them.
+
+Command-line options (``use("getopt")``) are read in the rules of GNU ``getopt_long``. An option is ``Opt{short, long, takes}``.
+``getopt(opts, args, from)`` reads the array ``args`` from the index ``from`` and is ``Parsed{table, rest}`` or an error value.
+``table`` maps the name of each given option (``long``, or ``short`` when ``long`` is ``""``) to its value, ``true`` for an option without a value,
+and ``rest`` is the array of the other strings. ``-a``, ``-abc``, ``-o value``, ``-ovalue``, ``--opt``, ``--opt value`` and ``--opt=value`` are read,
+and every string after ``--`` is in ``rest``. ``Unknown{name}`` is an option not in ``opts``, ``Missing{name}`` an option whose value is missing,
+and ``NoValue{name}`` is ``--opt=value`` for an option without a value.
 
 ``gensym("t")`` is the symbol ``t1``, then ``t2``, ``t3`` ... ``gensym_reset()`` restarts the count.
 
