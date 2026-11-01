@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>6. Algebraic effects | hex-to-compiler</title>
+<link rel="alternate" hreflang="ja" href="../../tutorial/6.html">
+<link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+<header class="site-header"><div class="inner">
+<a class="logo" href="../index.html">hex-to-compiler</a>
+<nav class="site-nav">
+<a href="../index.html">Overview</a>
+<a class="here" href="../tutorial/index.html">Tutorial</a>
+<a href="../reference/index.html">Reference</a>
+<a href="../implementation/index.html">Implementation</a>
+<a href="https://github.com/nineties/hex-to-compiler">GitHub</a>
+<a class="lang-switch" lang="ja" hreflang="ja" href="../../tutorial/6.html">日本語</a>
+</nav>
+</div></header>
+<div class="layout">
+<nav class="toc" aria-label="Tutorial contents"><details open><summary>Tutorial contents</summary>
+<h2>Tutorial</h2>
+<ol>
+<li><a href="index.html">Prerequisites and running</a></li>
+<li><a href="1.html">1. Expressions, bindings, functions</a></li>
+<li><a href="2.html">2. Values and M-expressions</a></li>
+<li><a href="3.html">3. Patterns and fusion</a></li>
+<li><a href="4.html">4. Libraries</a></li>
+<li><a href="5.html">5. Records, local functions, escapes</a></li>
+<li><a class="here" href="6.html">6. Algebraic effects</a></li>
+<li><a href="7.html">7. Extending the grammar</a></li>
+<li><a href="8.html">8. Quotation and the evaluator</a></li>
+<li><a href="9.html">9. Indexing and rewriting</a></li>
+</ol></details></nav>
+<main>
+<h1>6. Algebraic effects</h1>
+<p class="lead"><code>handle e with h</code> and <code>perform v</code> are algebraic effects with deep handlers. A continuation can be called many times, so exceptions, generators and nondeterminism are written with the same mechanism.</p>
+
+<h2>Exceptions</h2>
+<div class="example">
+<p class="file">t6_exception.pk</p>
+<pre class="pk">safe_div(a, b) := if (b == 0) perform Raise{&quot;division by zero&quot;} else a / b
+
+try(f) := handle Ok{f()} with (Raise{msg}, k) -&gt; Error{msg}
+
+println(try(() -&gt; safe_div(10, 2)))
+println(try(() -&gt; safe_div(10, 0)))
+println(try(() -&gt; { put(&quot;before\n&quot;); safe_div(1, 0); put(&quot;after\n&quot;) }))</pre>
+<p class="label">Output</p>
+<pre class="out">Ok{5}
+Error{&quot;division by zero&quot;}
+before
+Error{&quot;division by zero&quot;}</pre>
+</div>
+<p><code>perform v</code> calls the nearest handler that has a pattern matching <code>v</code>, as <code>h(v, k)</code>. <code>k</code> is the continuation of the <code>perform</code>. The value of the handler is the value of the <code>handle</code> expression. When the handler does not call <code>k</code>, the rest of the computation is discarded (<code>after</code> is not printed in the third example). When no handler matches, the effect goes to the outer handler.</p>
+
+<h2>Resumption</h2>
+<div class="example">
+<p class="file">t6_resume.pk</p>
+<pre class="pk">ask() := perform Ask{}
+
+with_answer(v, f) := handle f() with (Ask{}, k) -&gt; k(v)
+
+println(with_answer(21, () -&gt; ask() * 2))
+println(with_answer(5, () -&gt; ask() + ask()))</pre>
+<p class="label">Output</p>
+<pre class="out">42
+10</pre>
+</div>
+<p><code>k(x)</code> resumes the computation as if the <code>perform</code> returned <code>x</code>. Handlers are deep: a <code>perform</code> in the resumed computation is received by the same handler.</p>
+
+<h2>Generators</h2>
+<div class="example">
+<p class="file">t6_generator.pk</p>
+<pre class="pk">walk := (Leaf{}) -&gt; none
+      | (Node{l, v, r}) -&gt; { walk(l); perform Yield{v}; walk(r) }
+
+tree := Node{Node{Leaf{}, 1, Leaf{}}, 2, Node{Leaf{}, 3, Leaf{}}}
+
+handle walk(tree) with (Yield{v}, k) -&gt; { put(f&quot;yield {v}\n&quot;); k(none) }
+
+to_list(t) := handle { walk(t); [] } with (Yield{v}, k) -&gt; v :: k(none)
+use(&quot;pretty&quot;)
+put(f&quot;{to_list(tree)}\n&quot;)</pre>
+<p class="label">Output</p>
+<pre class="out">yield 1
+yield 2
+yield 3
+[1, 2, 3]</pre>
+</div>
+<p>For the same <code>walk</code>, the handler decides how the values are used. The second one collects the results into a list with <code>v :: k(none)</code>.</p>
+
+<h2>Multiple resumption</h2>
+<div class="example">
+<p class="file">t6_choose.pk</p>
+<pre class="pk">use(&quot;list&quot;)
+use(&quot;pretty&quot;)
+choose(xs) := perform Choose{xs}
+
+all_results(f) := handle [f()] with (Choose{xs}, k) -&gt; concat_map(x -&gt; k(x), xs)
+
+put(f&quot;{all_results(() -&gt; (choose([1, 2]), choose([&quot;a&quot;, &quot;b&quot;])))}\n&quot;)</pre>
+<p class="label">Output</p>
+<pre class="out">[Tuple{1, &quot;a&quot;}, Tuple{1, &quot;b&quot;}, Tuple{2, &quot;a&quot;}, Tuple{2, &quot;b&quot;}]</pre>
+</div>
+<p><code>k</code> is an ordinary function and can be called any number of times, even after <code>handle</code> has returned a value. Here <code>k</code> is called for each candidate and the results are concatenated. <a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/examples/queens.pk">planck/examples/queens.pk</a> solves N-queens in the same way.</p>
+<p>planck0 keeps the frames of the virtual machine on the heap and represents a continuation as a pointer to a chain of frames. Each call of <code>k</code> copies the frames up to the boundary and runs the copy (<a href="../implementation/planck0.html#effects">Effects in planck0</a>).</p>
+
+<nav class="pager"><a class="prev" href="5.html"><small>Previous</small>5. Records, local functions, escapes</a><a class="next" href="7.html"><small>Next</small>7. Extending the grammar</a></nav>
+</main>
+</div>
+<footer><div class="inner"><a href="https://github.com/nineties/hex-to-compiler">github.com/nineties/hex-to-compiler</a></div></footer>
+<script src="../../assets/highlight.js"></script>
+</body>
+</html>

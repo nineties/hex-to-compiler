@@ -1,53 +1,31 @@
 <!--title hex-to-compiler-->
 <h1>hex-to-compiler</h1>
-<p class="lead">16進で手書きした機械語から出発して、言語処理系をブートストラップするプロジェクトです。各段は前の段が作った成果物だけを使い、外部のアセンブラ・コンパイラ・ランタイム・コード生成器を使いません。</p>
+<p class="lead">16進で手書きした機械語から出発して、言語処理系をブートストラップするプロジェクトです。各ステージは前のステージが作った成果物だけを使い、外部のアセンブラ・コンパイラ・ランタイム・コード生成器を使いません。</p>
 
-<p>対象は x86 の32ビット Linux です。ビルドに必要なのは <code>make</code> と <code>xxd</code> だけです。今は第3段で、planck という言語の処理系 planck0 を作っています。</p>
+<p>ビルドに必要なのは <code>make</code> と <code>xxd</code> だけです。今はステージ3で、planck という言語の処理系 planck0 を作っています。</p>
 
-<h2>段の構成</h2>
-<p>3つの段で処理系と道具を順に作ります。矢印の横は Makefile が実行するコマンドです。</p>
-<div class="chain">
-<section class="stage">
-<p class="stage-name">第1段　機械語 → Forth → Lisp</p>
-<div class="node src"><b>pforth.xxd</b><span>16進ダンプ201行。右側の注釈は <code>xxd -r</code> が読み飛ばす</span></div>
-<div class="edge"><code>xxd -r -c 8 pforth.xxd &gt; pforth</code></div>
-<div class="node"><b>pforth</b><span>1文字の語だけを持つ Forth インタプリタ。32ビット ELF</span></div>
-<div class="edge"><code>./pforth &lt; plisp.fs</code></div>
-<div class="node"><b>plisp</b><span>Forth を自己拡張し、その Forth で書いた Lisp インタプリタ。ファイルにはならず、起動のたびに組み立てる</span></div>
-</section>
-<section class="stage">
-<p class="stage-name">第2段　機械語を出す道具</p>
-<div class="node"><b>asm・sasm</b><span>plisp で書いた x86 アセンブラと、C 風の構造化アセンブリ言語のコンパイラ</span></div>
-<div class="edge"><code>./pforth &lt; plisp.fs sasm.lisp plisp2.sv tmp-plisp2</code></div>
-<div class="node"><b>plisp2</b><span>plisp を sasm で書き直した Lisp インタプリタ</span></div>
-</section>
-<section class="stage">
-<p class="stage-name">第3段　本格的な言語処理系</p>
-<div class="edge"><code>./plisp2 sasm.lisp planck0.sv planck0</code></div>
-<div class="node"><b>planck0</b><span>sasm で書いた planck の処理系。M式をバイトコードにして仮想機械で実行する</span></div>
-<div class="edge">起動時に <code>planck/init.pk</code> → <code>peg.pk</code> → <code>syntax.pk</code> を読む</div>
-<div class="node"><b>planck</b><span>planck0 の上に packrat パーサと構文を M式で載せた言語</span></div>
-</section>
-</div>
+<h2>ブートストラップのステージ</h2>
+<p>3つのステージで処理系と道具を順に作ります。矢印の横は Makefile が実行するコマンドです。色は各成果物を書いている言語です。</p>
+<!--diagram-->
 
 <table class="stack-sm">
 <tr><th>成果物</th><th>ソース</th><th>言語</th><th>役割</th></tr>
 <tr><td>pforth</td><td><a href="@REPO@/blob/main/pforth.xxd"><code>pforth.xxd</code></a></td><td>機械語</td><td>1文字の語だけを持つ Forth インタプリタ。ここから自己拡張で育てる</td></tr>
 <tr><td>plisp</td><td><a href="@REPO@/blob/main/plisp.fs"><code>plisp.fs</code></a>・<code>plisp/init.lisp</code></td><td>Forth・Lisp</td><td>pforth を使える Forth まで拡張し、その上に構文木を直接扱える Lisp を作る</td></tr>
-<tr><td>asm</td><td><code>asm.lisp</code>・<a href="@REPO@/blob/main/asm/core.lisp"><code>asm/core.lisp</code></a></td><td>plisp</td><td>x86 32ビットのアセンブラ。ELF を直接書き出し、ヘッダ・コード・データを1つの <code>PT_LOAD</code>（RWX）に置く</td></tr>
+<tr><td>asm</td><td><code>asm.lisp</code>・<a href="@REPO@/blob/main/asm/core.lisp"><code>asm/core.lisp</code></a></td><td>plisp</td><td>アセンブラ。現在の実装は x86 Linux の ELF を直接書き出し、ヘッダ・コード・データを1つの <code>PT_LOAD</code>（RWX）に置く</td></tr>
 <tr><td>sasm</td><td><code>sasm.lisp</code>・<a href="@REPO@/blob/main/sasm/core.lisp"><code>sasm/core.lisp</code></a>・<code>sasm/lib/std.sv</code></td><td>plisp</td><td>型のない C 風の言語。plisp の内部 DSL で、レジスタ割り付けをせずスタックマシン型のコードを出す</td></tr>
-<tr><td>plisp2</td><td><a href="@REPO@/blob/main/plisp2.sv"><code>plisp2.sv</code></a></td><td>sasm</td><td>plisp の速度では足りない次の段のための Lisp。sasm を動かして planck0 を作る</td></tr>
+<tr><td>plisp2</td><td><a href="@REPO@/blob/main/plisp2.sv"><code>plisp2.sv</code></a></td><td>sasm</td><td>plisp の速度では足りない次のステージのための Lisp。sasm を動かして planck0 を作る</td></tr>
 <tr><td>planck0</td><td><a href="@REPO@/blob/main/planck0.sv"><code>planck0.sv</code></a></td><td>sasm</td><td>planck の最小限の部分集合で、ブートストラップのための暫定の実装。M式のリーダ・バイトコードコンパイラ・仮想機械・代数的エフェクト</td></tr>
 <tr><td>planck</td><td><code>planck/init.pk</code>・<code>peg.pk</code>・<code>syntax.pk</code>・<code>lib/</code></td><td>M式・planck</td><td>構文を文法の規則として持ち、プログラムから拡張できる言語</td></tr>
 </table>
-<p>asm と sasm は次の段へ渡るための道具で、性能と安全性より実装の単純さを優先しています。各段のつくりは<a href="implementation/bootstrap.html">機械語から planck0 まで</a>にあります。</p>
+<p>asm と sasm は次のステージへ渡るための道具で、性能と安全性より実装の単純さを優先しています。各ステージのつくりは<a href="implementation/bootstrap.html">機械語から planck0 まで</a>にあります。</p>
 
-<h2>ビルドと試験</h2>
+<h2>ビルドとテスト</h2>
 <pre>$ git clone @REPO@.git
 $ cd hex-to-compiler
 $ make                  # pforth・plisp2・planck0
-$ make test             # plisp の試験 plisp/test.lisp
-$ make test-planck0     # planck の試験と例
+$ make test             # plisp のテスト plisp/test.lisp
+$ make test-planck0     # planck のテストと例
 $ ./planck0 prog.pk</pre>
 <p>planck0 は起動時に相対パスで <code>planck/init.pk</code> を読むので、リポジトリの最上位で実行します。</p>
 <table>
@@ -57,33 +35,32 @@ $ ./planck0 prog.pk</pre>
 <tr><td><code>make test</code></td><td><code>./pforth &lt; plisp.fs plisp/test.lisp</code></td></tr>
 <tr><td><code>make test-planck0</code></td><td class="wrap"><code>planck/test.pk</code>・<code>test_syntax.pk</code>・<code>test_lib.pk</code>・<code>test_unparse.pk</code> を実行し、<code>planck/examples/*.pk</code> の出力を <code>*.out</code> と比べる</td></tr>
 </table>
-<p>CI（<a href="@REPO@/blob/main/.github/workflows/runtests.yaml"><code>runtests.yaml</code></a>）は main への push ごとに、pforth のビルド、plisp の試験、plisp2 のビルド、<code>./plisp2 plisp/test.lisp</code>、planck0 のビルド、<code>make test-planck0</code> を順に実行します。</p>
+<p>CI（<a href="@REPO@/blob/main/.github/workflows/runtests.yaml"><code>runtests.yaml</code></a>）は main への push ごとに、pforth のビルド、plisp のテスト、plisp2 のビルド、<code>./plisp2 plisp/test.lisp</code>、planck0 のビルド、<code>make test-planck0</code> を順に実行します。</p>
 
 <h2>リポジトリの構成</h2>
 <table>
 <tr><th>パス</th><th>中身</th></tr>
-<tr><td><code>pforth.xxd</code></td><td>第1段の機械語</td></tr>
-<tr><td><code>plisp.fs</code>・<code>plisp/</code></td><td>plisp の本体、Lisp 側の初期化 <code>init.lisp</code>、試験と例</td></tr>
+<tr><td><code>pforth.xxd</code></td><td>ステージ1の機械語</td></tr>
+<tr><td><code>plisp.fs</code>・<code>plisp/</code></td><td>plisp の本体、Lisp 側の初期化 <code>init.lisp</code>、テストと例</td></tr>
 <tr><td><code>asm.lisp</code>・<code>asm/</code></td><td>アセンブラの入口と本体、例</td></tr>
 <tr><td><code>sasm.lisp</code>・<code>sasm/</code></td><td>sasm のコンパイラの入口と本体、標準ライブラリ <code>lib/std.sv</code>、例</td></tr>
 <tr><td><code>plisp2.sv</code></td><td>plisp2</td></tr>
 <tr><td><code>planck0.sv</code></td><td>planck0</td></tr>
-<tr><td><code>planck/</code></td><td>言語仕様 <code>SPEC.rst</code>、起動の手順 <code>init.pk</code>、packrat パーサ <code>peg.pk</code>、構文 <code>syntax.pk</code>、ライブラリ <code>lib/</code>、試験 <code>test*.pk</code>、例 <code>examples/</code></td></tr>
+<tr><td><code>planck/</code></td><td>言語仕様 <code>SPEC.rst</code>、起動の手順 <code>init.pk</code>、packrat パーサ <code>peg.pk</code>、構文 <code>syntax.pk</code>、ライブラリ <code>lib/</code>、テスト <code>test*.pk</code>、例 <code>examples/</code></td></tr>
 <tr><td><code>docs/</code></td><td>この文書。作り直しの道具は <code>docs/tools/</code></td></tr>
 </table>
 
 <h2>進んでいる所</h2>
 <ul>
-<li>第3段の最初の処理系 planck0 は planck の部分集合で、ブートストラップのための暫定の実装です（[[planck0.sv#4-5]]）。</li>
+<li>ステージ3の最初の処理系 planck0 は planck の部分集合で、ブートストラップのための暫定の実装です（[[planck0.sv#4-5]]）。</li>
 <li>planck の言語仕様は <a href="@REPO@/blob/main/planck/SPEC.rst">planck/SPEC.rst</a> です。<code>planck/lib</code> には処理系を書くためのライブラリ（リスト・ベクタ・文字列・表・gensym・位置つきエラー・整形・文法から作る unparse）があります。</li>
 <li><a href="@REPO@/tree/main/planck/examples"><code>planck/examples</code></a> には13本の例があります。字句解析・構文解析・3番地コード生成・仮想機械を持つ電卓 <code>calc.pk</code>、記号微分、非決定性のエフェクトによる N クイーン、構文木の書き換えなどです。</li>
 <li>planck0 のヒープは起動時に確保する1GB の固定領域で、GC はありません（[[planck0.sv#39-67]]）。</li>
-<li>動く環境は x86 の Linux だけです。</li>
 </ul>
 
 <h2>planck の文書</h2>
 <div class="cards">
-<a class="card" href="tutorial/index.html"><h3>速習</h3><p>例を中心に、planck の構文・パターン・エフェクト・文法の拡張・メタプログラミング・添字と書き換えを9章で通す</p></a>
+<a class="card" href="tutorial/index.html"><h3>チュートリアル</h3><p>例を中心に、planck の構文・パターン・エフェクト・文法の拡張・メタプログラミング・添字と書き換えを9章で通す</p></a>
 <a class="card" href="reference/index.html"><h3>リファレンス</h3><p>構文と M式の対応、値とパターン、文法の宣言、組み込み関数、ライブラリ</p></a>
 <a class="card" href="implementation/index.html"><h3>処理系の実装</h3><p>pforth から planck0 までの積み上げ、planck0 の VM とエフェクト、packrat パーサ、構文の定義</p></a>
 </div>

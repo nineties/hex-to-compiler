@@ -1,7 +1,7 @@
 docs/ の作り直し
 ================
 
-docs/ の HTML は、頁の元 (``src/``)、例 (``examples/*.pk``)、例の出力 (``examples/*.out``) から ``build.py`` が組む。
+docs/ の HTML（英語版は docs/en/）は、頁の元 (日本語は ``src/ja/``、英語は ``src/en/``)、例 (``examples/*.pk``)、例の出力 (``examples/*.out``) から ``build.py`` が組む。
 
 例の出力は planck0 を実際に動かして取る。planck0 のビルドは x86_64 の GCP ノードで行う。
 

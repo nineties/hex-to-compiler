@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Syntax | hex-to-compiler</title>
+<link rel="alternate" hreflang="ja" href="../../reference/syntax.html">
+<link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+<header class="site-header"><div class="inner">
+<a class="logo" href="../index.html">hex-to-compiler</a>
+<nav class="site-nav">
+<a href="../index.html">Overview</a>
+<a href="../tutorial/index.html">Tutorial</a>
+<a class="here" href="../reference/index.html">Reference</a>
+<a href="../implementation/index.html">Implementation</a>
+<a href="https://github.com/nineties/hex-to-compiler">GitHub</a>
+<a class="lang-switch" lang="ja" hreflang="ja" href="../../reference/syntax.html">日本語</a>
+</nav>
+</div></header>
+<div class="layout">
+<nav class="toc" aria-label="Reference contents"><details open><summary>Reference contents</summary>
+<h2>Reference</h2>
+<ol>
+<li><a href="index.html">Contents</a></li>
+<li><a class="here" href="syntax.html">Syntax</a></li>
+<li><a href="values.html">Values, patterns, M-expressions</a></li>
+<li><a href="grammar.html">Grammar declarations</a></li>
+<li><a href="builtins.html">Builtin functions</a></li>
+<li><a href="library.html">Libraries</a></li>
+</ol></details></nav>
+<main>
+<h1>Syntax</h1>
+<p class="lead">An expression is translated to an M-expression before it is evaluated. An M-expression is also an expression of this syntax.</p>
+
+<h2>Expressions and M-expressions</h2>
+<p>A row binds more weakly than the rows below it.</p>
+<table>
+<tr><th>Expression</th><th>M-expression</th></tr>
+<tr><td><code>x := e</code></td><td><code>Def{x, e}</code></td></tr>
+<tr><td><code>f(p, ...) := e</code></td><td><code>Def{f, Lambda{Tuple{p, ...}, e}}</code></td></tr>
+<tr><td><code>record T(f, ...)</code></td><td><code>Apply{_record_declare, Tuple{Quote{T}, Quote{Tuple{f, ...}}}}</code></td></tr>
+<tr><td><code>x = e</code></td><td><code>Set{x, e}</code></td></tr>
+<tr><td><code>a[i] = e</code></td><td><code>Apply{_index_set, Tuple{a, i, e}}</code></td></tr>
+<tr><td><code>f | g</code></td><td><code>Fusion{f, g}</code></td></tr>
+<tr><td><code>(p, ...) -> e</code>, <code>p -> e</code></td><td><code>Lambda{Tuple{p, ...}, e}</code></td></tr>
+<tr><td><code>c ? a : b</code></td><td><code>If{c, a, b}</code></td></tr>
+<tr><td><code>a or b</code>, <code>a and b</code></td><td><code>If{a, true, b}</code>, <code>If{a, b, false}</code></td></tr>
+<tr><td><code>not a</code></td><td><code>Apply{_not, Tuple{a}}</code></td></tr>
+<tr><td><code>a == b</code> <code>a != b</code> <code>a &lt; b</code> <code>a &lt;= b</code> <code>a &gt; b</code> <code>a &gt;= b</code></td><td><code>Apply{_eq, Tuple{a, b}}</code> and <code>_ne</code> <code>_lt</code> <code>_le</code> <code>_gt</code> <code>_ge</code></td></tr>
+<tr><td><code>a :: b</code></td><td><code>Cons{a, b}</code></td></tr>
+<tr><td><code>a + b</code> <code>a - b</code> <code>a * b</code> <code>a / b</code> <code>a % b</code></td><td><code>Apply{_add, Tuple{a, b}}</code> and <code>_sub</code> <code>_mul</code> <code>_div</code> <code>_mod</code></td></tr>
+<tr><td><code>-a</code></td><td><code>Apply{_sub, Tuple{0, a}}</code></td></tr>
+<tr><td><code>'e</code>, <code>`e</code>, <code>!e</code></td><td><code>Quote{e}</code>, <code>QuasiQuote{e}</code>, <code>UnQuote{e}</code></td></tr>
+<tr><td><code>f(a, ...)</code></td><td><code>Apply{f, Tuple{a, ...}}</code></td></tr>
+<tr><td><code>t.f</code></td><td><code>Apply{_record_get, Tuple{t, Quote{f}}}</code></td></tr>
+<tr><td><code>a[i]</code></td><td><code>Apply{_index_get, Tuple{a, i}}</code></td></tr>
+<tr><td><code>t[p -&gt; a | q if c -&gt; b]</code></td><td class="wrap"><code>Apply{_index_get, Tuple{t, f}}</code>, where <code>f</code> is the function of the arms (see <a href="#index">Indexing and rewriting</a>)</td></tr>
+<tr><td><code>p @ type</code></td><td><code>_TypeOf{p, type}</code></td></tr>
+<tr><td><code>{ e; ... }</code></td><td><code>Do{e, ...}</code></td></tr>
+<tr><td><code>if (c) a else b</code>, <code>if (c) a</code></td><td><code>If{c, a, b}</code>, <code>If{c, a, none}</code></td></tr>
+<tr><td><code>while (c) e</code></td><td><code>While{c, e}</code></td></tr>
+<tr><td><code>for (p in e) a</code></td><td><code>Apply{peg_for, Tuple{e, Lambda{Tuple{p}, a}}}</code></td></tr>
+<tr><td><code>return e</code>, <code>return</code>, <code>break</code>, <code>continue</code></td><td><code>Perform{Return{e}}</code>, <code>Perform{Return{none}}</code>, <code>Perform{Break{}}</code>, <code>Perform{Continue{}}</code></td></tr>
+<tr><td><code>match e { p -> a; ... }</code></td><td><code>Apply{Fusion{Lambda{Tuple{p}, a}, ...}, Tuple{e}}</code></td></tr>
+<tr><td><code>match e { p if c -> a; ... }</code></td><td>the arm applies when <code>p</code> matches and <code>c</code> is true</td></tr>
+<tr><td><code>f"a{e}b"</code></td><td class="wrap"><code>Apply{_strcat, Tuple{Apply{_strcat, Tuple{"a", Apply{_to_text, Tuple{e}}}}, "b"}}</code></td></tr>
+<tr><td><code>fun f(p, ...) e</code> in a block</td><td class="wrap"><code>Def{f, none}</code> at the top of the block, and <code>Set{f, Lambda{Tuple{p, ...}, e}}</code> in its place</td></tr>
+<tr><td><code>handle e with h</code></td><td><code>Handle{e, h}</code></td></tr>
+<tr><td><code>perform e</code></td><td><code>Perform{e}</code></td></tr>
+<tr><td><code>()</code>, <code>(a, b, ...)</code></td><td><code>Tuple{}</code>, <code>Tuple{a, b, ...}</code></td></tr>
+<tr><td><code>[a, b, ...]</code>, <code>[]</code></td><td><code>Cons{a, Cons{b, ... Nil{}}}</code>, <code>Nil{}</code></td></tr>
+<tr><td><code>name{| text |}</code></td><td class="wrap"><code>Quote{v}</code>, where <code>v</code> is the value of the rule <code>name</code> read from <code>text</code> (see <a href="grammar.html#text">Text of a rule</a>)</td></tr>
+</table>
+<p>The functions that the sugar calls have names starting with <code>_</code> (see <a href="#names">Names the sugar calls</a>). Examples:</p>
+<div class="example">
+<p class="file">r_tree.pk</p>
+<pre class="pk">println(&#x27;(x := 1))
+println(&#x27;(f(x) := x + 1))
+println(&#x27;(x = 2))
+println(&#x27;(f | g))
+println(&#x27;(x -&gt; x))
+println(&#x27;(c ? a : b))
+println(&#x27;(a and b or c))
+println(&#x27;(not a))
+println(&#x27;(a :: b))
+println(&#x27;(-a))
+println(&#x27;(t.f))
+println(&#x27;(a[i]))
+println(&#x27;(a[i] = v))
+println(&#x27;(p @ int))
+println(&#x27;[1, 2])
+println(&#x27;(if (c) a))
+println(&#x27;(while (c) e))
+println(&#x27;(for (x in xs) f(x)))
+println(&#x27;(match e { 0 -&gt; a; _ -&gt; b }))
+println(&#x27;(handle e with h))
+println(&#x27;(perform E{}))
+println(&#x27;(record T(a, b)))</pre>
+<p class="label">Output</p>
+<pre class="out">Def{x, 1}
+Def{f, Lambda{Tuple{x}, Apply{_add, Tuple{x, 1}}}}
+Set{x, 2}
+Fusion{f, g}
+Lambda{Tuple{x}, x}
+If{c, a, b}
+If{If{a, b, false}, true, c}
+Apply{_not, Tuple{a}}
+Cons{a, b}
+Apply{_sub, Tuple{0, a}}
+Apply{_record_get, Tuple{t, Quote{f}}}
+Apply{_index_get, Tuple{a, i}}
+Apply{_index_set, Tuple{a, i, v}}
+_TypeOf{p, int}
+Cons{1, Cons{2, Nil{}}}
+If{c, a, none}
+While{c, e}
+Apply{peg_for, Tuple{xs, Lambda{Tuple{x}, Apply{f, Tuple{x}}}}}
+Apply{Fusion{Lambda{Tuple{0}, a}, Lambda{Tuple{_}, b}}, Tuple{e}}
+Handle{e, h}
+Perform{E{}}
+Apply{_record_declare, Tuple{Quote{T}, Quote{Tuple{a, b}}}}</pre>
+</div>
+
+<h2>Associativity</h2>
+<ul>
+<li><code>|</code>, <code>-></code> and <code>::</code> group to the right. <code>+ - * / %</code> group to the left. Comparisons do not group: <code>a &lt; b &lt; c</code> is not an expression.</li>
+<li><code>::</code> binds tighter than comparisons and looser than <code>+ -</code>, so <code>a + 1 :: b == c</code> is <code>Cons{a + 1, b} == c</code>.</li>
+<li><code>()</code> groups an expression.</li>
+</ul>
+
+<h2>if and while</h2>
+<p>The condition of <code>if</code> and <code>while</code> is in parentheses. The body <code>a</code>, <code>b</code>, <code>e</code> is any expression. A block <code>{ ... }</code> is the usual body of several expressions.</p>
+<p><code>else</code> belongs to the nearest <code>if</code> that has no <code>else</code>, so <code>if (a) if (b) x else y</code> is <code>if (a) { if (b) x else y }</code>. <code>else if (c) ...</code> is <code>else</code> followed by an <code>if</code> expression. An <code>if</code> is an expression: <code>y = if (c) 1 else 2</code>.</p>
+
+<h2>record</h2>
+<p><code>record T(f, g, ...)</code> declares the names of the fields of the values <code>T{a, b, ...}</code>, which are built as before. <code>t.f</code> is the argument of <code>t</code> at the position of the field <code>f</code> in the declaration for the head of <code>t</code>.</p>
+<p>Values with different heads can have fields of the same name. Declaring <code>T</code> again replaces the names. A <code>.</code> follows its left operand with no space. A value whose head is not declared or has no field <code>f</code> stops the program with a message.</p>
+
+<h2>fun</h2>
+<p><code>fun f(p, ...) e</code> declares a function in a block, as <code>f(p, ...) := e</code> does, but all the <code>fun</code> of a block are declared at its top, so each function can call the functions declared after it.</p>
+<p>A function is assigned where its <code>fun</code> is, so it sees the variables declared before it in the block, and it can be called after that place. A <code>fun</code> is written only as an expression of a block. It is a variable of the function or the program that contains the block, like <code>x := e</code>.</p>
+
+<h2 id="names">Names the sugar calls</h2>
+<p>The functions a piece of sugar expands to have a name starting with <code>_</code>, and there is no function of the same name without <code>_</code>. A variable named <code>add</code> or <code>index_get</code> in a program therefore does not change the meaning of <code>a + b</code> or <code>a[i]</code>.</p>
+<table>
+<tr><th>Sugar</th><th>Function</th></tr>
+<tr><td>operators</td><td><code>_add</code> <code>_sub</code> <code>_mul</code> <code>_div</code> <code>_mod</code> <code>_lt</code> <code>_le</code> <code>_gt</code> <code>_ge</code> <code>_eq</code> <code>_ne</code> <code>_not</code></td></tr>
+<tr><td>string with embedded values</td><td><code>_strcat</code> <code>_to_text</code></td></tr>
+<tr><td><code>t.f</code></td><td><code>_record_get</code></td></tr>
+<tr><td><code>record</code></td><td><code>_record_declare</code></td></tr>
+<tr><td><code>::=</code></td><td><code>_define_rule</code></td></tr>
+<tr><td><code>a[i]</code>, <code>a[i] = e</code></td><td><code>_index_get</code> <code>_index_set</code></td></tr>
+</table>
+<p>A function that takes the operator as an argument is written with the sugar, e.g. <code>sort((a, b) -&gt; a &lt; b, xs)</code>, and a tree made by the sugar has these names: <code>a + b</code> is <code>Apply{_add, Tuple{a, b}}</code>.</p>
+
+<h2 id="index">Indexing and rewriting</h2>
+<p><code>a[i]</code> is <code>_index_get(a, i)</code> and <code>a[i] = e</code> is <code>_index_set(a, i, e)</code>, whose value is the value of <code>e</code>. The <code>[</code> follows <code>a</code> with no space, so <code>a</code> followed by <code>[1, 2]</code> on the next line or after a space is two expressions. <code>a</code> is a postfix expression such as <code>x</code>, <code>f(x)</code>, <code>t.f</code> or <code>b[j]</code>: <code>a[i][j] = e</code> is <code>Apply{_index_set, Tuple{a[i], j, e}}</code>.</p>
+<p><code>_index_get</code> and <code>_index_set</code> are functions joined by <code>|</code>, one for each kind of <code>a</code>, tried in this order:</p>
+<table>
+<tr><th><code>a</code></th><th><code>i</code></th><th><code>a[i]</code></th><th><code>a[i] = e</code></th></tr>
+<tr><td>array</td><td>integer</td><td><code>array_get(a, i)</code></td><td><code>array_set(a, i, e)</code></td></tr>
+<tr><td>string</td><td>integer</td><td><code>ord(s, i)</code>, the byte</td><td>stops</td></tr>
+<tr><td>table</td><td>any value</td><td><code>table_get(a, i, none)</code>: <code>none</code> for a missing key</td><td><code>table_set(a, i, e)</code></td></tr>
+<tr><td>vector (added in front by <code>use("vector")</code>)</td><td>integer</td><td><code>vec_get(a, i)</code></td><td><code>vec_set(a, i, e)</code></td></tr>
+<tr><td>any value</td><td>function</td><td><code>subst(a, i)</code></td><td></td></tr>
+<tr><td>list</td><td>integer</td><td>the element at <code>i</code>, counted from 0</td><td>stops</td></tr>
+<tr><td>M-expression</td><td>symbol</td><td><code>_record_get(a, i)</code>, the field</td><td>stops</td></tr>
+<tr><td>M-expression</td><td>integer</td><td><code>arg(a, i)</code></td><td>stops</td></tr>
+</table>
+<p>A string, a list, a tuple and an M-expression are immutable: <code>a[i] = e</code> on them stops the program with a message such as <code>cannot assign to an element of a string, which is immutable: ...</code>. An array, a table, a vector and a kind of a program (added in front) can be written. An index outside a string, a list or the arguments of an M-expression stops the program with a message, and so does <code>a[i]</code> or <code>a[i] = e</code> that no kind accepts.</p>
+<p>A program adds a kind of its own in front of the others by assigning <code>_index_get</code> and <code>_index_set</code>:</p>
+<div class="example">
+<p class="file">r_index_kind.pk</p>
+<pre class="pk">_index_get = (Matrix{w, _, d}, (i, j)) -&gt; d[i * w + j] | _index_get
+_index_set = (Matrix{w, _, d}, (i, j), e) -&gt; { d[i * w + j] = e } | _index_set
+m := Matrix{2, 2, array(4)}
+m[(1, 0)] = 5
+m[(0, 1)] = 7
+println(m[(1, 0)] + m[(0, 1)])
+println(m[(1, 1)])</pre>
+<p class="label">Output</p>
+<pre class="out">12
+none</pre>
+</div>
+<p><code>subst(t, f)</code> rewrites the tree <code>t</code> with the function <code>f</code>. Each part of <code>t</code> is tried from the root down: when a pattern of <code>f</code> matches the part, the part is replaced by the value of <code>f</code> and the parts inside it are not tried; otherwise the arguments of the part are tried and its head is kept. A part that is not an M-expression has no parts.</p>
+<p><code>t[p -&gt; a | q -&gt; b]</code> is the expression <code>p -&gt; a | q -&gt; b</code> in brackets, so its arms are tried in order. An arm may have a guard as in <code>match</code>: in <code>t[p if c -&gt; a | q -&gt; b]</code> the arm applies when <code>p</code> matches and <code>c</code> is true, otherwise the next arm is tried, and a part that no arm applies to is gone into. The body of an arm is an expression up to <code>-&gt;</code>, so <code>|</code> in a body needs parentheses. <code>'t[f]</code> quotes <code>t[f]</code>: a quoted tree to rewrite is written <code>('e)[f]</code>.</p>
+<div class="example">
+<p class="file">r_rewrite.pk</p>
+<pre class="pk">use(&quot;unparse&quot;)
+t := &#x27;(x * 1 + 0 * y)
+println(unparse(t[Apply{&#x27;_mul, Tuple{a, 1}} -&gt; a | Apply{&#x27;_mul, Tuple{0, _}} -&gt; 0]))
+# with a guard: 1 * 2 is skipped and its parts are tried
+u := &#x27;(1 * 2 + 3 * 4)
+println(unparse(u[Apply{&#x27;_mul, Tuple{a @ int, b @ int}} if a &gt; 1 -&gt; a * b]))</pre>
+<p class="label">Output</p>
+<pre class="out">&quot;x + 0&quot;
+&quot;1 * 2 + 12&quot;</pre>
+</div>
+
+<h2>for</h2>
+<p><code>for (p in e) a</code> evaluates <code>a</code> for each element of the list or the vector <code>e</code>, with the elements matched by the pattern <code>p</code>, and has the value <code>none</code>. The variables of <code>a</code> outside the loop are shared, so <code>a</code> can assign them.</p>
+
+<h2>return, break and continue</h2>
+<p><code>return e</code> ends the call of the function that contains it, with the value <code>e</code> (<code>none</code> without <code>e</code>; <code>e</code> must start on the same line). <code>break</code> ends the innermost <code>while</code> or <code>for</code> that contains it.</p>
+<p>They are effects: the function is translated to <code>Handle{body, (Return{v}, k) -> v}</code> when its body has a <code>return</code>, and the loop to <code>Handle{loop, (Break{}, k) -> none}</code> when its body has a <code>break</code>. <code>continue</code> goes on to the next round of the innermost <code>while</code> or <code>for</code> that contains it: the body of the loop is translated to <code>Handle{body, (Continue{}, k) -> none}</code> when it has a <code>continue</code>. A <code>continue</code> outside of a loop stops the program with <code>unhandled effect: Continue{}</code>.</p>
+<p>A <code>return</code> in a <code>for</code> body or in an arm of <code>match</code> belongs to the function around them, and one in a function written inside belongs to that function.</p>
+
+<h2>match</h2>
+<p><code>match</code> evaluates <code>e</code> once and selects the first arm whose pattern <code>p</code> matches it. The arms are separated by <code>;</code> or newlines. The body <code>a</code> is any expression.</p>
+<p>The guard <code>if c</code> is evaluated after <code>p</code> matched, with the variables of <code>p</code>; when it is false the arms after it are tried. <code>e</code> and <code>c</code> are expressions up to <code>?:</code>, so a lambda needs parentheses. When no arm applies the call fails as a call of a function with no matching pattern does.</p>
+<p><code>match</code> binds <code>%v</code> and <code>%r0</code>, <code>%r1</code> ... in the arms with guards, which no identifier can name.</p>
+
+<h2>Parameter patterns</h2>
+<p>Parameters <code>p</code> are patterns: unary expressions such as <code>x</code>, <code>1</code>, <code>'none</code>, <code>Cons{x, xs}</code> or <code>x @ int</code>, and <code>p :: q</code> for <code>Cons{p, q}</code>, e.g. <code>(x :: xs) -> ...</code> and <code>f(x :: y :: rest) := ...</code>. The meaning of patterns is in <a href="values.html#patterns">Values, patterns, M-expressions</a>.</p>
+
+<h2>Lexical rules</h2>
+<ul>
+<li>Identifiers are <code>[A-Za-z_][A-Za-z0-9_]*</code> except the reserved words<br><code>if else while and or handle with perform match record for in return break continue fun</code>.</li>
+<li>Integers are decimal (<code>10</code>, <code>-3</code>), <code>0x1f</code>, <code>0o17</code> or <code>0b101</code>.</li>
+<li>Strings are <code>"..."</code> in one line with the escapes <code>\a \b \t \n \v \f \r \" \' \\</code>. <code>f"...{e}..."</code> embeds the value of the expression <code>e</code>, which may contain strings and f-strings; <code>{{</code> and <code>}}</code> are the braces themselves. A string without the prefix <code>f</code> embeds nothing.</li>
+<li><code>#</code> starts a comment up to the end of the line.</li>
+<li>There is no space between <code>f</code> and <code>(</code> in <code>f(a)</code>, between <code>a</code> and <code>[</code> in <code>a[i]</code>, and between <code>Head</code> and <code>{</code> in <code>Head{a}</code>.</li>
+</ul>
+<div class="example">
+<p class="file">r_strings.pk</p>
+<pre class="pk">put(&quot;tab:[\t] quote:[\&quot;] backslash:[\\]\n&quot;)
+x := 7
+put(f&quot;{{x}} = {x}\n&quot;)
+put(f&quot;{x * 6} {&quot;inner&quot;} {f&quot;n{x}&quot;}\n&quot;)</pre>
+<p class="label">Output</p>
+<pre class="out">tab:[	] quote:[&quot;] backslash:[\]
+{x} = 7
+42 inner n7</pre>
+</div>
+
+<h2>Separators</h2>
+<p>Expressions in a block are separated by <code>;</code> or newlines. A top-level expression ends with <code>;</code>, a newline or the start of another expression.</p>
+<p>A binary <code>-</code> must be on the same line as its left operand, so a line starting with <code>-1</code> is a new expression. Other binary operators may start a line.</p>
+
+<nav class="pager"><a class="prev" href="index.html"><small>Previous</small>Contents</a><a class="next" href="values.html"><small>Next</small>Values, patterns, M-expressions</a></nav>
+</main>
+</div>
+<footer><div class="inner"><a href="https://github.com/nineties/hex-to-compiler">github.com/nineties/hex-to-compiler</a></div></footer>
+<script src="../../assets/highlight.js"></script>
+</body>
+</html>

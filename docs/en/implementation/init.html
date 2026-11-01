@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>init.pk and M-expressions | hex-to-compiler</title>
+<link rel="alternate" hreflang="ja" href="../../implementation/init.html">
+<link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+<header class="site-header"><div class="inner">
+<a class="logo" href="../index.html">hex-to-compiler</a>
+<nav class="site-nav">
+<a href="../index.html">Overview</a>
+<a href="../tutorial/index.html">Tutorial</a>
+<a href="../reference/index.html">Reference</a>
+<a class="here" href="../implementation/index.html">Implementation</a>
+<a href="https://github.com/nineties/hex-to-compiler">GitHub</a>
+<a class="lang-switch" lang="ja" hreflang="ja" href="../../implementation/init.html">日本語</a>
+</nav>
+</div></header>
+<div class="layout">
+<nav class="toc" aria-label="Implementation contents"><details open><summary>Implementation contents</summary>
+<h2>Implementation</h2>
+<ol>
+<li><a href="index.html">Overview</a></li>
+<li><a href="bootstrap.html">From machine code to planck0</a></li>
+<li><a href="planck0.html">planck0</a></li>
+<li><a class="here" href="init.html">init.pk and M-expressions</a></li>
+<li><a href="peg.html">The packrat parser</a></li>
+<li><a href="syntax.html">Defining the syntax</a></li>
+</ol></details></nav>
+<main>
+<h1>init.pk and M-expressions</h1>
+<p class="lead">planck0 reads <a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/init.pk">planck/init.pk</a> first. The reader at this point reads only M-expressions, so all 111 lines are M-expressions. The file defines the functions and tables used afterward.</p>
+
+<h2>Writing in M-expressions only</h2>
+<p>There are no operators and no syntax for <code>if</code>, so everything is written with special forms and function calls. The definition of <code>_not</code>, which <code>not</code> calls, is as follows.</p>
+<div class="example">
+<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/init.pk#L12-L15">planck/init.pk:12–15</a></p>
+<pre class="pk">&quot; === Basic Functions === &quot;
+Def{_not, Fusion{
+    Lambda{Tuple{Quote{false}}, true},
+    Lambda{Tuple{_}, false}}}</pre>
+</div>
+<p>A <code>Fusion</code> joins two <code>Lambda</code>s. The first is chosen when the argument is <code>false</code>, and the second otherwise. <code>Quote{false}</code> is a pattern that matches the symbol <code>false</code>. A top-level string <code>" ... "</code> does nothing when evaluated, so it serves as a comment.</p>
+<p>The first lines bind <code>true</code>, <code>false</code> and <code>none</code> to the symbols of the same names (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/init.pk#L8-L10"><code>planck/init.pk:8–10</code></a>).</p>
+
+<h2>Tables</h2>
+<p>The builtins of planck0 stop at arrays and <code>hash</code>. init.pk implements the hash table with arrays (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/init.pk#L18-L77"><code>planck/init.pk:18–77</code></a>).</p>
+<div class="example">
+<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/init.pk#L18-L26">planck/init.pk:18–26</a></p>
+<pre class="pk">&quot; A table is Table{a}, where a is an array | buckets | number of entries |. Each bucket is a chain of entries &quot;
+&quot; | key | value | next entry or none | hash of the key |. Keys are compared by eq. &quot;
+&quot; The number of buckets doubles when there are more entries than buckets. &quot;
+Def{table, Lambda{Tuple{}, Do{
+    Def{t, Apply{array, Tuple{2}}},
+    Apply{array_set, Tuple{t, 0, Apply{array, Tuple{16}}}},
+    Apply{array_set, Tuple{t, 1, 0}},
+    Table{t}}}}
+</pre>
+</div>
+<p>A table is <code>Table{a}</code>, where <code>a</code> is an array that holds an array of buckets and the number of entries. The number of buckets doubles when the number of entries exceeds it. Keys are compared as by <code>==</code>. Tables are used for the memo table of the parser, the table of rules, the record of the libraries that <code>use</code> has loaded, and so on.</p>
+
+<h2>Loading files</h2>
+<p>Like <code>interpret_file</code> of planck0, <code>load</code> evaluates a file one expression at a time with the current <code>parse</code> and <code>eval</code>.</p>
+<div class="example">
+<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/init.pk#L81-L99">planck/init.pk:81–99</a></p>
+<pre class="pk">Def{load, Lambda{Tuple{path}, Do{
+    Def{s, Apply{read_file, Tuple{path}}},
+    Def{r, none},
+    Def{e, none},
+    Def{go, true},
+    While{go, Do{
+        Set{r, Apply{parse, Tuple{s}}},
+        Set{e, Apply{arg, Tuple{r, 0}}},
+        If{Apply{_eq, Tuple{e, Eof{}}}, Set{go, false},
+        If{If{Apply{_eq, Tuple{Apply{typeof, Tuple{e}}, Quote{mexpr}}}, Apply{_eq, Tuple{Apply{head, Tuple{e}}, Quote{SyntaxError}}}, false},
+            Do{
+                Apply{put, Tuple{path}},
+                Apply{put, Tuple{&quot;: syntax error: &quot;}},
+                Apply{println, Tuple{e}},
+                Apply{exit, Tuple{1}}},
+            Do{
+                Apply{eval, Tuple{e}},
+                Set{s, Apply{arg, Tuple{r, 1}}}}}}}},
+    none}}}</pre>
+</div>
+<p><code>use</code> is a <code>load</code> that records what it has loaded (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/init.pk#L103-L106"><code>planck/init.pk:103–106</code></a>).</p>
+
+<h2>Switching to the syntax</h2>
+<p>The last lines load the packrat parser and the syntax.</p>
+<div class="example">
+<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/init.pk#L108-L111">planck/init.pk:108–111</a></p>
+<pre class="pk">&quot; === Syntax === &quot;
+&quot; planck/syntax.pk replaces parse. The files after it are read by the new syntax. &quot;
+Apply{load, Tuple{&quot;planck/peg.pk&quot;}}
+Apply{load, Tuple{&quot;planck/syntax.pk&quot;}}</pre>
+</div>
+<p><code>planck/peg.pk</code> is a parser written in M-expressions (<a href="peg.html">The packrat parser</a>). <code>planck/syntax.pk</code> defines the syntax of planck with that parser and replaces <code>parse</code> (<a href="syntax.html">Defining the syntax</a>). The files read afterward, both <code>planck/lib</code> and the programs of users, are read in the syntax of planck.</p>
+
+<nav class="pager"><a class="prev" href="planck0.html"><small>Previous</small>planck0</a><a class="next" href="peg.html"><small>Next</small>The packrat parser</a></nav>
+</main>
+</div>
+<footer><div class="inner"><a href="https://github.com/nineties/hex-to-compiler">github.com/nineties/hex-to-compiler</a></div></footer>
+<script src="../../assets/highlight.js"></script>
+</body>
+</html>

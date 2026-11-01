@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>8. Quotation and the evaluator | hex-to-compiler</title>
+<link rel="alternate" hreflang="ja" href="../../tutorial/8.html">
+<link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+<header class="site-header"><div class="inner">
+<a class="logo" href="../index.html">hex-to-compiler</a>
+<nav class="site-nav">
+<a href="../index.html">Overview</a>
+<a class="here" href="../tutorial/index.html">Tutorial</a>
+<a href="../reference/index.html">Reference</a>
+<a href="../implementation/index.html">Implementation</a>
+<a href="https://github.com/nineties/hex-to-compiler">GitHub</a>
+<a class="lang-switch" lang="ja" hreflang="ja" href="../../tutorial/8.html">日本語</a>
+</nav>
+</div></header>
+<div class="layout">
+<nav class="toc" aria-label="Tutorial contents"><details open><summary>Tutorial contents</summary>
+<h2>Tutorial</h2>
+<ol>
+<li><a href="index.html">Prerequisites and running</a></li>
+<li><a href="1.html">1. Expressions, bindings, functions</a></li>
+<li><a href="2.html">2. Values and M-expressions</a></li>
+<li><a href="3.html">3. Patterns and fusion</a></li>
+<li><a href="4.html">4. Libraries</a></li>
+<li><a href="5.html">5. Records, local functions, escapes</a></li>
+<li><a href="6.html">6. Algebraic effects</a></li>
+<li><a href="7.html">7. Extending the grammar</a></li>
+<li><a class="here" href="8.html">8. Quotation and the evaluator</a></li>
+<li><a href="9.html">9. Indexing and rewriting</a></li>
+</ol></details></nav>
+<main>
+<h1>8. Quotation and the evaluator</h1>
+<p class="lead">The source is read into M-expressions and then evaluated. A syntax tree is an ordinary value, so it can be built, inspected, evaluated and turned back into a string.</p>
+
+<h2>Quotation</h2>
+<div class="example">
+<p class="file">t8_quote.pk</p>
+<pre class="pk">e := &#x27;(1 + 2 * x)
+println(e)
+x := 10
+println(eval(e))
+
+n := 5
+println(`(n + !n))</pre>
+<p class="label">Output</p>
+<pre class="out">Apply{_add, Tuple{1, Apply{_mul, Tuple{2, x}}}}
+21
+Apply{_add, Tuple{n, 5}}</pre>
+</div>
+<p><code>'e</code> is <code>Quote{e}</code>. Its value is the syntax tree of <code>e</code>. An operator becomes an <code>Apply</code> of a builtin function. <code>`e</code> is a quasiquote: only the <code>!e</code> (<code>UnQuote</code>) parts are evaluated and filled in. <code>eval</code> compiles a tree as a top-level expression on the spot and runs it.</p>
+
+<h2>Writing M-expressions</h2>
+<div class="example">
+<p class="file">t8_mexpr.pk</p>
+<pre class="pk">Def{y, 3}
+Apply{println, Tuple{Apply{_mul, Tuple{y, y}}}}
+println(&#x27;Def{y, 3} == &#x27;(y := 3))</pre>
+<p class="label">Output</p>
+<pre class="out">9
+true</pre>
+</div>
+<p>An M-expression can be written directly as an expression. The syntax is a translation to M-expressions. The correspondence is listed in <a href="../reference/syntax.html">Syntax</a>.</p>
+
+<h2>Replacing parse and eval</h2>
+<div class="example">
+<p class="file">t8_eval.pk</p>
+<pre class="pk">old_eval := eval
+eval = e -&gt; {
+    v := old_eval(e)
+    put(&quot;=&gt; &quot;)
+    println(v)
+    v
+}
+1 + 2
+&#x27;(a + b)
+Point{1, 2}</pre>
+<p class="label">Output</p>
+<pre class="out">=&gt; 3
+=&gt; Apply{_add, Tuple{a, b}}
+=&gt; Point{1, 2}</pre>
+</div>
+<p>For each expression, the top level looks up the global variables <code>parse</code> (<code>string -&gt; Tuple{M-expression, rest}</code>) and <code>eval</code> (<code>M-expression -&gt; value</code>) again. A replacement takes effect from the next expression. <code>planck/syntax.pk</code> also replaces <code>parse</code> at its end to install the planck syntax.</p>
+
+<h2>unparse</h2>
+<div class="example">
+<p class="file">t8_unparse.pk</p>
+<pre class="pk">use(&quot;unparse&quot;)
+t := &#x27;(if (n &lt; 0) -n else n * (n + 1))
+println(t)
+put(unparse(t)); put(&quot;\n&quot;)</pre>
+<p class="label">Output</p>
+<pre class="out">If{Apply{_lt, Tuple{n, 0}}, Apply{_sub, Tuple{0, n}}, Apply{_mul, Tuple{n, Apply{_add, Tuple{n, 1}}}}}
+if (n &lt; 0) -n else n * (n + 1)</pre>
+</div>
+<p><code>unparse</code> follows the grammar rules backwards to turn a tree into a string. A tree that a rule added by <code>::=</code> can read is turned back by that rule.</p>
+
+<p>Longer examples are in <a href="https://github.com/nineties/hex-to-compiler/tree/main/planck/examples">planck/examples</a>. The same mechanism seen from the implementation is in <a href="../implementation/index.html">Implementation</a>.</p>
+
+<nav class="pager"><a class="prev" href="7.html"><small>Previous</small>7. Extending the grammar</a><a class="next" href="9.html"><small>Next</small>9. Indexing and rewriting</a></nav>
+</main>
+</div>
+<footer><div class="inner"><a href="https://github.com/nineties/hex-to-compiler">github.com/nineties/hex-to-compiler</a></div></footer>
+<script src="../../assets/highlight.js"></script>
+</body>
+</html>

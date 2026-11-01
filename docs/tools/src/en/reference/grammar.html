@@ -1,0 +1,39 @@
+<!--title Grammar declarations-->
+<h1>Grammar declarations</h1>
+<p class="lead"><code>::=</code> defines or replaces a rule of the grammar. The syntax of planck is made of the same rules, so a declaration extends the syntax of the following expressions.</p>
+
+<h2>::=</h2>
+<p><code>name ::= alternative | ...</code> defines or replaces the rule <code>name</code> of the grammar. The rules of the <a href="syntax.html">syntax</a> (<code>expr</code>, <code>primary</code>, <code>block</code>, <code>add_expr</code> ..., <code>ident</code>, <code>integer</code>, <code>string</code>) are rules of the same grammar. <code>...</code> as an alternative stands for the previous definition of the rule.</p>
+<!--ex r_unless-->
+<p>An alternative is a sequence of items followed by an optional action <code>{ ... }</code>. The items and the action are on the same line as <code>::=</code> or <code>|</code>.</p>
+
+<h2>Items</h2>
+<table>
+<tr><th>Item</th><th>Matches</th></tr>
+<tr><td><code>"text"</code></td><td>the text, after blanks and comments</td></tr>
+<tr><td><code>'word</code></td><td>the word, not followed by <code>[A-Za-z0-9_]</code></td></tr>
+<tr><td><code>name</code></td><td>the rule</td></tr>
+<tr><td><code>(a | b ...)</code></td><td>a choice</td></tr>
+<tr><td><code>e*</code>, <code>e+</code>, <code>e?</code></td><td>zero or more, one or more, optional</td></tr>
+<tr><td><code>&amp;e</code>, <code>!e</code></td><td>lookahead: <code>e</code> matches / does not match, without consuming</td></tr>
+<tr><td><code>label:e</code></td><td><code>e</code>, and its value is the variable <code>label</code> in the action</td></tr>
+</table>
+
+<h2>Values and order</h2>
+<p>Alternatives are tried in order (PEG). The value of an alternative is the value of its action, the value of the item when there is one item, or <code>Tuple{v, ...}</code> of the items. <code>e*</code> and <code>e+</code> give <code>Tuple{v, ...}</code>, <code>e?</code> gives <code>Tuple{}</code> or <code>Tuple{v}</code>.</p>
+<p>Results of rules are memoized for each position (packrat parsing). A rule may be directly left recursive (<code>sum ::= a:sum "+" b:term { ... } | term</code>), which groups to the left.</p>
+<!--ex t7_calc-->
+
+<h2>peg_parse</h2>
+<p><code>peg_parse(rule, s)</code> parses a prefix of <code>s</code> by the rule and returns <code>Tuple{value, rest}</code>, <code>Tuple{Eof{}, ""}</code> when only blanks are left, or <code>Tuple{SyntaxError{...}, ""}</code>.</p>
+
+<h2 id="text">Text of a rule</h2>
+<p><code>name{| text |}</code> is an expression whose text is read by the rule <code>name</code> when the expression is parsed. There is no space between <code>name</code> and <code>{|</code>.</p>
+<p>The text is read only by the rule (its strings, words and rules, with their blanks and comments), not by the tokens of the expressions around it. The rule decides where the text ends, and <code>|}</code> must follow, after blanks. So <code>|}</code> and <code>}</code> that the rule reads, for example in its strings or brackets, are a part of the text. A failure of the rule or a missing <code>|}</code> is a syntax error of the expression, at the farthest position the rule reached in the text.</p>
+<p>The value of the expression is the value of the rule, as a constant.</p>
+<!--ex r_calc-->
+<p>The rule must be defined by an expression that is evaluated before the expression with the text is parsed.</p>
+
+<h2>Reading the grammar</h2>
+<p><code>peg_sources</code> is a table from a rule name to the parsing expression given to <code>_define_rule</code>, with the actions not evaluated (<code>...</code> replaced by the previous definition). <code>peg_version</code> increases at every <code>_define_rule</code>.</p>
+<!--ex i_sources-->
