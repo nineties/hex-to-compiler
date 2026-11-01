@@ -1,0 +1,473 @@
+# tests for the low-level language of planck/lib/lowlevel.pk
+# Copyright (C) 2026 nineties
+
+passed := 0
+failed := 0
+
+check(actual, expected) := if (actual == expected) {
+    passed = passed + 1
+} else {
+    failed = failed + 1
+    put("Test failed: expected "); print(expected)
+    put(" but got "); println(actual)
+}
+
+use("lowlevel")
+
+this_file := "planck/test_lowlevel.pk"
+this_src := read_file(this_file)
+
+# the module has no error
+ok(m) := check(ll_errors(this_file, m), [])
+
+# the module has one error of the kind, on the line marked with "# NG"
+ng(m, kind) := {
+    es := ll_errors(this_file, m)
+    check(map((LLErr{k, _, _}) -> k, es), [kind])
+    if (length(es) == 1) {
+        line := line_text(this_src, arg(arg(arg(es, 0), 1), 1))
+        check(index_of_str(line, "# NG", 0) >= 0, true)
+    }
+}
+
+# === syntax ===
+m := lowlevel{|
+    fn f(a: i64, b: &r i64) -> i64 { return a }
+|}
+fn_f := arg(m, 0)[0]
+check(length(arg(m, 0)), 1)
+check(head(fn_f), 'Fn)
+check(arg(fn_f, 1), 'f)
+check(map((Param{_, x, t}) -> Tuple{x, t}, arg(fn_f, 3)), [Tuple{'a, I64{}}, Tuple{'b, Ref{'shr, 'r, I64{}}}])
+check(arg(fn_f, 4), I64{})
+body := arg(arg(lowlevel{| fn g() { x = a + 1; *p = 2; y = *p; return } |}, 0)[0], 5)
+check(map(head, body), ['Assign, 'Store, 'Assign, 'Ret])
+check(arg(arg(body, 0)[2], 0), 'add)
+check(head(arg(body[2], 2)), 'Load)
+# a new line separates statements: *p = 1 is not a multiplication
+body2 := arg(arg(lowlevel{| fn g() {
+    x = a
+    *p = 1
+} |}, 0)[0], 5)
+check(map(head, body2), ['Assign, 'Store])
+check(map(t -> ll_show_type(t), [I64{}, Own{Bool{}}, Ref{'mut, 'r, I64{}}, Ref{'shr, 'q, I64{}}]),
+    ["i64", "own bool", "&mut r i64", "&q i64"])
+
+# === modules that pass ===
+
+# integers, if and while
+ok(lowlevel{|
+    fn sum(n: i64) -> i64 {
+        var s: i64
+        var i: i64
+        s = 0
+        i = 0
+        while (i < n) {
+            s = s + i
+            i = i + 1
+        }
+        return s
+    }
+    fn max(a: i64, b: i64) -> i64 {
+        var m: i64
+        if (a < b) { m = b } else { m = a }
+        return m
+    }
+    fn twice(n: i64) -> i64 {
+        var r: i64
+        var s: i64
+        r = sum(n)
+        s = max(n, 0)
+        r = r + s
+        return r
+    }
+|})
+
+# a value owned by a register is moved to another and freed once
+ok(lowlevel{|
+    fn own_move() -> i64 {
+        var p: own i64
+        var q: own i64
+        var v: i64
+        p = box(1)
+        *p = 2
+        q = p
+        v = *q
+        free(q)
+        return v
+    }
+|})
+
+# an own value is given to a function, which frees it, or is given back
+ok(lowlevel{|
+    fn consume(p: own i64) { free(p) }
+    fn inc(p: own i64) -> own i64 {
+        var v: i64
+        v = *p
+        v = v + 1
+        *p = v
+        return p
+    }
+    fn caller() {
+        var p: own i64
+        p = box(41)
+        p = inc(p)
+        consume(p)
+    }
+|})
+
+# borrows in a region; the owner is used again after the region
+ok(lowlevel{|
+    fn get[r](p: &r i64) -> i64 {
+        var v: i64
+        v = *p
+        return v
+    }
+    fn set[r](p: &mut r i64, v: i64) { *p = v }
+    fn borrow() -> i64 {
+        var p: own i64
+        var v: i64
+        p = box(1)
+        region r {
+            var m: &mut r i64
+            m = &mut r p
+            set(m, 5)
+        }
+        region r {
+            var a: &r i64
+            var b: &r i64
+            a = &r p
+            b = &r p
+            var w: i64
+            v = get(a)
+            w = get(b)
+            v = v + w
+        }
+        free(p)
+        return v
+    }
+|})
+
+# a function returns a borrow of a region given by its parameters
+ok(lowlevel{|
+    fn pick[r](a: &r i64, b: &r i64, first: bool) -> &r i64 {
+        if (first) { return a }
+        return b
+    }
+    fn use_pick() -> i64 {
+        var x: own i64
+        var y: own i64
+        var v: i64
+        x = box(1)
+        y = box(2)
+        region r {
+            var a: &r i64
+            var b: &r i64
+            var c: &r i64
+            a = &r x
+            b = &r y
+            c = pick(a, b, true)
+            v = *c
+        }
+        free(x)
+        free(y)
+        return v
+    }
+|})
+
+# a register is initialized in both branches; an own value is freed in both branches
+ok(lowlevel{|
+    fn branches(c: bool, p: own i64) -> i64 {
+        var v: i64
+        if (c) {
+            v = *p
+            free(p)
+        } else {
+            v = 0
+            free(p)
+        }
+        return v
+    }
+    fn loop_keeps(n: i64) {
+        var p: own i64
+        var i: i64
+        p = box(0)
+        i = 0
+        while (i < n) {
+            free(p)
+            p = box(i)
+            i = i + 1
+        }
+        free(p)
+    }
+|})
+
+# === modules that fail ===
+
+# moved twice
+ng(lowlevel{|
+    fn twice_moved() {
+        var p: own i64
+        var q: own i64
+        var r: own i64
+        p = box(1)
+        q = p
+        r = p       # NG
+        free(q)
+        free(r)
+    }
+|}, 'moved)
+
+# given to a function and used again
+ng(lowlevel{|
+    fn consume(p: own i64) { free(p) }
+    fn moved_by_call() {
+        var p: own i64
+        p = box(1)
+        consume(p)
+        consume(p)  # NG
+    }
+|}, 'moved)
+
+# used after it is freed
+ng(lowlevel{|
+    fn after_free() -> i64 {
+        var p: own i64
+        var v: i64
+        p = box(1)
+        free(p)
+        v = *p      # NG
+        return v
+    }
+|}, 'freed)
+
+# freed twice
+ng(lowlevel{|
+    fn double_free() {
+        var p: own i64
+        p = box(1)
+        free(p)
+        free(p)     # NG
+    }
+|}, 'freed)
+
+# read before it is initialized
+ng(lowlevel{|
+    fn uninit() -> i64 {
+        var v: i64
+        var w: i64
+        w = v + 1   # NG
+        return w
+    }
+|}, 'uninit)
+
+# initialized in one branch only
+ng(lowlevel{|
+    fn one_branch(c: bool) -> i64 {
+        var v: i64
+        if (c) { v = 1 }
+        return v    # NG
+    }
+|}, 'uninit)
+
+# initialized only in the loop, which may not run
+ng(lowlevel{|
+    fn in_loop(n: i64) -> i64 {
+        var v: i64
+        while (n > 0) {
+            v = n
+            n = n - 1
+        }
+        return v    # NG
+    }
+|}, 'uninit)
+
+# a borrow is put in a register outside its region
+ng(lowlevel{|
+    fn escape_by_register() -> i64 {
+        var p: own i64
+        var v: i64
+        p = box(1)
+        region q {
+            var outer: &q i64
+            region r {
+                outer = &r p    # NG
+            }
+            v = *outer
+        }
+        free(p)
+        return v
+    }
+|}, 'escape)
+
+# a borrow of a region of the function is returned
+ng(lowlevel{|
+    fn escape_by_return[q](a: &q i64) -> &q i64 {
+        var p: own i64
+        var b: &q i64
+        p = box(1)
+        region r {
+            var c: &r i64
+            c = &r p
+            return c        # NG
+        }
+        return a
+    }
+|}, 'escape)
+
+# a register of a type of a region is declared outside the region
+ng(lowlevel{|
+    fn region_not_open() {
+        var b: &r i64   # NG
+    }
+|}, 'region)
+
+# borrowed into a region that outlives the owner
+ng(lowlevel{|
+    fn short_owner() {
+        region r {
+            var p: own i64
+            var b: &r i64
+            p = box(1)
+            b = &r p    # NG
+            free(p)
+        }
+    }
+|}, 'region)
+
+# freed while it is borrowed
+ng(lowlevel{|
+    fn free_borrowed() {
+        var p: own i64
+        p = box(1)
+        region r {
+            var b: &r i64
+            b = &r p
+            free(p)     # NG
+        }
+    }
+|}, 'borrowed)
+
+# borrowed as mut twice
+ng(lowlevel{|
+    fn two_mut() {
+        var p: own i64
+        p = box(1)
+        region r {
+            var a: &mut r i64
+            var b: &mut r i64
+            a = &mut r p
+            b = &mut r p    # NG
+        }
+        free(p)
+    }
+|}, 'borrowed)
+
+# read through the owner while it is borrowed as mut
+ng(lowlevel{|
+    fn read_mut_borrowed() -> i64 {
+        var p: own i64
+        var v: i64
+        p = box(1)
+        region r {
+            var a: &mut r i64
+            a = &mut r p
+            v = *p      # NG
+        }
+        free(p)
+        return v
+    }
+|}, 'borrowed)
+
+# written through a shared borrow
+ng(lowlevel{|
+    fn write_shared() {
+        var p: own i64
+        p = box(1)
+        region r {
+            var a: &r i64
+            a = &r p
+            *a = 2      # NG
+        }
+        free(p)
+    }
+|}, 'borrowed)
+
+# an own value is not freed
+ng(lowlevel{|
+    fn leak() -> i64 {
+        var p: own i64
+        p = box(1)
+        return 0    # NG
+    }
+|}, 'leak)
+
+# an own value is overwritten
+ng(lowlevel{|
+    fn overwrite() {
+        var p: own i64
+        p = box(1)
+        p = box(2)  # NG
+        free(p)
+    }
+|}, 'leak)
+
+# freed in one branch only
+ng(lowlevel{|
+    fn one_free(c: bool, p: own i64) {
+        if (c) { free(p) }  # NG
+    }
+|}, 'branch)
+
+# freed in a loop
+ng(lowlevel{|
+    fn free_in_loop(n: i64) {
+        var p: own i64
+        p = box(1)
+        while (n > 0) {     # NG
+            free(p)
+            n = n - 1
+        }
+    }
+|}, 'loop)
+
+# types
+ng(lowlevel{|
+    fn not_bool(n: i64) {
+        if (n) { return }   # NG
+    }
+|}, 'type)
+ng(lowlevel{|
+    fn wrong_arg(p: own i64) {
+        var q: own i64
+        q = box(true)   # NG
+        free(q)
+        free(p)
+    }
+|}, 'type)
+ng(lowlevel{|
+    fn no_return(n: i64) -> i64 {   # NG
+        if (n > 0) { return n }
+    }
+|}, 'type)
+ng(lowlevel{|
+    fn undefined_function() {
+        nothing(1)  # NG
+    }
+|}, 'undefined)
+
+# one error for each function
+check(map((LLErr{k, _, _}) -> k, ll_errors(this_file, lowlevel{|
+    fn a1() { var v: i64; v = v }
+    fn a2() { var v: i64; v = 1 }
+    fn a3() { var p: own i64; p = box(1) }
+|})), ['uninit, 'leak])
+
+# the message with the position, at the second free
+shown_at := line_col(this_src, index_of_str(this_src, "free(p) }", index_of_str(this_src, "fn shown(", 0)))
+check(map((LLErr{_, loc, msg}) -> f"{show_loc(loc)}: {msg}", ll_errors(this_file, lowlevel{|
+    fn shown() { var p: own i64; p = box(1); free(p); free(p) }
+|})), [f"planck/test_lowlevel.pk:{arg(shown_at, 0)}:{arg(shown_at, 1)}: p is freed twice"])
+
+put("Tests passed "); print(passed); put("/"); println(passed + failed)
+if (failed > 0) exit(1)
