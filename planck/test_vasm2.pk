@@ -293,6 +293,73 @@ ng(vasm{|
         free(m)
     }
 |}, 'moved)
+# U25: a field that owns is moved out of a struct value with x = s.f
+ok(vasm{|
+    struct Pair { left: own i64, right: own i64 }
+    struct Buf { data: own [u8], size: i64 }
+    fn take_all(s: Pair) {
+        var l: own i64
+        var r: own i64
+        l = s.left
+        r = s.right
+        free(l)
+        free(r)         # s owns nothing now and is dropped
+    }
+    fn take_and_put_back(b: Buf) -> Buf {
+        var a: own [u8]
+        var n: i64
+        a = b.data
+        n = b.size      # a field that does not own is read while another is moved out
+        b.data = a      # put back, so b is whole again
+        return b
+    }
+    fn take_in_both(c: bool, s: Pair) {
+        var l: own i64
+        var r: own i64
+        l = s.left
+        r = s.right
+        if (c) { free(l); free(r) } else { free(r); free(l) }
+    }
+|})
+ng(vasm{|
+    struct Pair { left: own i64, right: own i64 }
+    fn whole_after_all(s: Pair) -> Pair {
+        var l: own i64
+        var r: own i64
+        l = s.left
+        r = s.right
+        free(l)
+        free(r)
+        return s        # NG
+    }
+|}, 'moved)
+ng(vasm{|
+    struct Pair { left: own i64, right: own i64 }
+    fn one_side(c: bool, s: Pair) {
+        var l: own i64
+        var r: own i64
+        if (c) {        # NG
+            l = s.left
+            free(l)
+        }
+        l = s.left
+        r = s.right
+        free(l)
+        free(r)
+    }
+|}, 'branch)
+ng(vasm{|
+    struct Buf { data: own [u8], size: i64 }
+    fn read_moved(b: Buf) -> i64 {
+        var a: own [u8]
+        var d: own [u8]
+        a = b.data
+        d = b.data      # NG
+        free(a)
+        free(d)
+        return 0
+    }
+|}, 'moved)
 # a struct with own is not copied, and an own value is not put in two fields
 ng(vasm{|
     struct Buf { data: own [u8], size: i64 }
