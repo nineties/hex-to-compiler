@@ -141,24 +141,133 @@ Apply{_record_declare, Tuple{Quote{T}, Quote{Tuple{a, b}}}}</pre>
 
 <h2 id="scope">Scope of variables</h2>
 <p>Variables have lexical scope, and the variable a name refers to is decided before the expression runs. A variable in the body of a function is a parameter of that function or of a function around it, or a variable defined before it in those functions, and otherwise a variable defined before it at the top level (a global variable). The variables of the caller are not visible. If a name refers to no variable, the program stops with a message before the expression runs. A function keeps the variables of the place where it was made, and they are shared locations: an assignment to them after the function was made is seen by the function.</p>
-<p>The top-level definitions are resolved in the order they are written. A definition written later is not visible to the expressions before it. The body of a function definition <code>f(p, ...) := e</code> sees <code>f</code> itself. Defining the same name again with <code>x := e</code> or <code>fun f</code> makes a new variable. The functions made before keep referring to the old variable, and only the expressions after the definition see the new one. With <code>f(x) := 1</code>, <code>g() := f(0)</code> and <code>f := (x) -&gt; 2</code> in this order, <code>g()</code> is <code>1</code>. To overwrite an existing variable, write <code>x = e</code>. It is an assignment to the same variable, so the functions made before also see the new value. With <code>f = (x) -&gt; 2</code> instead of <code>f := (x) -&gt; 2</code>, <code>g()</code> is <code>2</code>.</p>
-<p>A function definition <code>f(p, ...) := e</code> is <code>f(p, ...) = e</code> when <code>f</code> is already a variable of the place where it is written, and otherwise <code>fun f</code> followed by <code>f(p, ...) = e</code>, which defines a new <code>f</code> where it is written. The variables of the place are the global variables defined by the same file at the top level, and in a function the parameters of the function and the variables defined before it in the function. A global variable defined by another file, such as a library loaded by <code>use</code> or <code>planck/init.pk</code>, or a builtin function, is not of the place, so <code>f(p, ...) := e</code> at the top level of a program defines a new <code>f</code> that hides it. To add a case to an <code>f</code> defined by another file, write <code>f(p, ...) = e</code>. A variable of a function around it, or a global variable seen from a function, is not of the place either, so <code>f(p, ...) := e</code> there defines a new <code>f</code> and does not change the <code>f</code> outside. In a branch of <code>if</code> or the body of <code>while</code> at the top level, the variables of the place are those defined before it in the branch or the body. Several definitions of <code>f</code> in one place make one function whose functions are tried in the order they are written.</p>
-<div class="example"><pre><code>fib(0) := 0
+<div class="example">
+<p class="file">t1_scope.pk</p>
+<pre class="pk">n := 5
+read_n() := n
+caller() := {
+    n := 100
+    read_n()
+}
+println(caller())
+
+x := 1
+get() := x
+x := x + 1
+println(Tuple{x, get()})
+x = 10
+println(Tuple{x, get()})</pre>
+<p class="label">Output</p>
+<pre class="out">5
+Tuple{2, 1}
+Tuple{10, 1}</pre>
+</div>
+<div class="example">
+<p class="file">e_undefined.pk</p>
+<pre class="pk">println(&quot;start&quot;)
+println(later)
+later := 2</pre>
+<p class="label">Output</p>
+<pre class="out">&quot;start&quot;
+undefined variable: later</pre>
+</div>
+
+<h3>Definition and assignment</h3>
+<p>The top-level definitions are resolved in the order they are written. A definition written later is not visible to the expressions before it. The body of a function definition <code>f(p, ...) := e</code> sees <code>f</code> itself.</p>
+<p>Defining the same name again with <code>x := e</code> or <code>fun f</code> makes a new variable. The functions made before keep referring to the old variable, and only the expressions after the definition see the new one. To overwrite an existing variable, write <code>x = e</code>. It is an assignment to the same variable, so the functions made before also see the new value. In the first half of the example below, <code>f := (x) -&gt; 2</code> makes a new <code>f</code> and <code>g()</code> is <code>1</code>. In the second half, <code>h = (x) -&gt; 2</code> assigns, and <code>k()</code> is <code>2</code>.</p>
+<div class="example">
+<p class="file">r_scope_redefine.pk</p>
+<pre class="pk">f(x) := 1
+g() := f(0)
+f := (x) -&gt; 2
+println(g())
+
+h(x) := 1
+k() := h(0)
+h = (x) -&gt; 2
+println(k())</pre>
+<p class="label">Output</p>
+<pre class="out">1
+2</pre>
+</div>
+<p>A variable definition <code>x := e</code> (also <code>x := (p) -&gt; e</code>) is defined where it is written, and the expressions before it see the <code>x</code> outside. The right-hand side <code>e</code> sees the previous <code>x</code> too. The new <code>x</code> is made after the right-hand side is evaluated, so <code>x</code> in the right-hand side is undefined if there is no previous <code>x</code>. A variable of a block is a variable of the function or the program that contains the block.</p>
+
+<h3>A function definition that adds a case</h3>
+<p>A function definition <code>f(p, ...) := e</code> is <code>f(p, ...) = e</code> when <code>f</code> is already a variable of the place where it is written, and otherwise <code>fun f</code> followed by <code>f(p, ...) = e</code>, which defines a new <code>f</code> where it is written. Several definitions of <code>f</code> in one place make one function whose functions are tried in the order they are written.</p>
+<p>The variables of the place are the global variables defined by the same file at the top level, and in a function the parameters of the function and the variables defined before it in the function. In a branch of <code>if</code> or the body of <code>while</code> at the top level, they are the variables defined before it in the branch or the body. A variable of a function around it, or a global variable seen from a function, is not of the place. So <code>f(p, ...) := e</code> there defines a new <code>f</code> and does not change the <code>f</code> outside.</p>
+<div class="example">
+<p class="file">r_scope_same.pk</p>
+<pre class="pk">fib(0) := 0
 fib(1) := 1
-fib(n) := fib(n - 1) + fib(n - 2)</code></pre></div>
-<p>Functions that call each other first declare the name with <code>fun f</code>. <code>fun f</code> defines a variable <code>f</code> whose value is <code>none</code> where it is written, and <code>f(p, ...) = e</code> later fills it. <code>f(p, ...) = e</code> is the assignment <code>f = f | (p, ...) -&gt; e</code>: it adds the function after the functions of <code>f</code>, so the functions are tried in the order they are written. <code>none | g</code> is <code>g</code>, so the first <code>f(p, ...) = e</code> after <code>fun f</code> assigns the function <code>(p, ...) -&gt; e</code> itself. The functions may have different numbers of parameters. The functions written after the declaration see <code>f</code>. Calling <code>f</code> before it is filled calls <code>none</code> and stops the program.</p>
-<div class="example"><pre><code>fun odd
+fib(n) := fib(n - 1) + fib(n - 2)
+println(fib(20))
+
+x := 1
+x := x + 1
+println(x)</pre>
+<p class="label">Output</p>
+<pre class="out">6765
+2</pre>
+</div>
+<div class="example">
+<p class="file">t8_place.pk</p>
+<pre class="pk">fib(0) := 0
+fib(1) := 1
+fib(n) := fib(n - 1) + fib(n - 2)
+println(fib(10))
+
+name(x) := &quot;outer&quot;
+inner() := {
+    name(0) := &quot;inner&quot;
+    name(0)
+}
+println(Tuple{inner(), name(0), name(1)})</pre>
+<p class="label">Output</p>
+<pre class="out">55
+Tuple{&quot;inner&quot;, &quot;outer&quot;, &quot;outer&quot;}</pre>
+</div>
+<p>A global variable defined by another file, such as a library loaded by <code>use</code> or <code>planck/init.pk</code>, or a builtin function, is not of the place either. <code>f(p, ...) := e</code> at the top level of a program defines a new <code>f</code> that hides it. To add a case to an <code>f</code> defined by another file, write <code>f(p, ...) = e</code>.</p>
+<div class="example">
+<p class="file">t8_library.pk</p>
+<pre class="pk">use(&quot;list&quot;)
+last(Tuple{a, b}) = b
+println(Tuple{last([1, 2, 3]), last(Tuple{4, 5})})
+sum(xs) := &quot;mine&quot;
+println(sum([1, 2]))</pre>
+<p class="label">Output</p>
+<pre class="out">Tuple{3, 5}
+&quot;mine&quot;</pre>
+</div>
+
+<h3>Functions that call each other</h3>
+<p>Functions that call each other first declare the name with <code>fun f</code>. <code>fun f</code> defines a variable <code>f</code> whose value is <code>none</code> where it is written, and <code>f(p, ...) = e</code> later fills it. <code>f(p, ...) = e</code> is the assignment <code>f = f | (p, ...) -&gt; e</code>: it adds the function after the functions of <code>f</code>, so the functions are tried in the order they are written. <code>none | g</code> is <code>g</code>, so the first <code>f(p, ...) = e</code> after <code>fun f</code> assigns the function <code>(p, ...) -&gt; e</code> itself. The functions may have different numbers of parameters. The functions written after the declaration see <code>f</code>.</p>
+<div class="example">
+<p class="file">r_scope_fun.pk</p>
+<pre class="pk">fun odd
 even(n) := if (n == 0) true else odd(n - 1)
 odd(n) = if (n == 0) false else even(n - 1)
+println(Tuple{even(10), odd(7)})
 
 fun fact
 fact(0) = 1
-fact(n) = n * fact(n - 1)   # fact(0) is 1</code></pre></div>
+fact(n) = n * fact(n - 1)
+println(fact(5))</pre>
+<p class="label">Output</p>
+<pre class="out">Tuple{true, true}
+120</pre>
+</div>
+<p>Calling <code>f</code> before it is filled calls <code>none</code> and stops the program.</p>
+<div class="example">
+<p class="file">e_call_before_fill.pk</p>
+<pre class="pk">fun f
+println(&quot;run&quot;)
+f()
+f() = 1</pre>
+<p class="label">Output</p>
+<pre class="out">&quot;run&quot;
+not a function: none</pre>
+</div>
 <p>When the value of <code>f</code> is a function with a guard, as after <code>f = (n) if n &gt; 0 -&gt; 1</code>, a function added by <code>f(p, ...) = e</code> is not called when the guard is false, as <code>h | g</code> below.</p>
-<p>A variable definition <code>x := e</code> (also <code>x := (p) -&gt; e</code>) is defined where it is written, and the expressions before it see the <code>x</code> outside. The right-hand side <code>e</code> sees the previous <code>x</code> too. The new <code>x</code> is made after the right-hand side is evaluated, so <code>x</code> in the right-hand side is undefined if there is no previous <code>x</code>. A function that calls itself is written as <code>f(p, ...) := e</code>. This is the same at the top level and in a block.</p>
-<div class="example"><pre><code>x := 1
-x := x + 1   # x is 2</code></pre></div>
-<p>A variable of a block is a variable of the function or the program that contains the block.</p>
 
 <h2 id="names">Names the sugar calls</h2>
 <p>The functions a piece of sugar expands to have a name starting with <code>_</code>, and there is no function of the same name without <code>_</code>. A variable named <code>add</code> or <code>index_get</code> in a program therefore does not change the meaning of <code>a + b</code> or <code>a[i]</code>.</p>
