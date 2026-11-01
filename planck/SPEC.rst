@@ -138,6 +138,7 @@ The variables of the place are the global variables defined by the same file at 
 and in a function the parameters of the function and the variables defined before it in the function.
 A global variable defined by another file, such as a library loaded by ``use`` or ``planck/init.pk``, or a builtin function, is not of the place,
 so ``f(p, ...) := e`` at the top level of a program defines a new ``f`` that hides it.
+To add a case to an ``f`` defined by another file, write ``f(p, ...) = e``.
 A variable of a function around it, or a global variable seen from a function, is not of the place either,
 so ``f(p, ...) := e`` there defines a new ``f`` and does not change the ``f`` outside.
 In a branch of ``if`` or the body of ``while`` at the top level, the variables of the place are those defined before it in the branch or the body.
