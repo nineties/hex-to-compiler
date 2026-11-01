@@ -1,0 +1,57 @@
+# tests for planck/lib/unparse.pk: files and grammars written with ::=
+# Copyright (C) 2026 nineties
+
+use("unparse")
+
+passed := 0
+failed := 0
+trips := 0
+
+check(actual, expected) := if (actual == expected) {
+    passed = passed + 1
+} else {
+    failed = failed + 1
+    put("Test failed: expected "); print(expected)
+    put(" but got "); println(actual)
+}
+
+tree(s) := arg(peg_parse('toplevel, s), 0)
+rest(s) := arg(peg_parse('toplevel, s), 1)
+
+# round trip: the text of a tree parses to the tree, and printing again gives the same text
+trip(t) := {
+    out := unparse(t)
+    t2 := tree(out)
+    trips = trips + 1
+    check(t2, t)
+    check(unparse(t2), out)
+}
+rt(s) := trip(tree(s))
+
+# === Round trips of files ===
+file_trips(path) := {
+    src := read_file(path)
+    t := tree(src)
+    while (t != Eof{} and head(t) != 'SyntaxError) {
+        trip(t)
+        src = rest(src)
+        t = tree(src)
+    }
+}
+file_trips("planck/lib/base.pk")
+file_trips("planck/lib/symbol.pk")
+file_trips("planck/lib/error.pk")
+
+# === A grammar written with ::= is run backwards too ===
+arith ::= a:arith "+" b:term { `Apply{_add, Tuple{!a, !b}} } | a:arith "-" b:term { `Apply{_sub, Tuple{!a, !b}} } | term
+term ::= a:term "*" b:factor { `Apply{_mul, Tuple{!a, !b}} } | factor
+factor ::= n:integer { n } | x:ident { x } | "(" e:arith ")" { e }
+check(unparse_as('arith, arith{| 1+2*3 |}), "1 + 2 * 3")
+check(unparse_as('arith, arith{| (1+2)*3 |}), "(1 + 2) * 3")
+check(unparse_as('arith, arith{| 1-(2-x) |}), "1 - (2 - x)")
+check(unparse_as('arith, 'Apply{_mul, Tuple{Apply{_add, Tuple{a, b}}, Apply{_sub, Tuple{c, d}}}}), "(a + b) * (c - d)")
+check(unparse_try('arith, 'Apply{_div, Tuple{1, 2}}), none)
+
+put("Tests passed "); print(passed); put("/"); println(passed + failed)
+put("Round trips "); println(trips)
+if (failed > 0) exit(1)
