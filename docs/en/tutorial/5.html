@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>5. Records, local functions, escapes | hex-to-compiler</title>
+<title>5. Algebraic effects | hex-to-compiler</title>
 <link rel="alternate" hreflang="ja" href="../../tutorial/5.html">
 <link rel="stylesheet" href="../../assets/style.css">
 </head>
@@ -28,73 +28,85 @@
 <li><a href="2.html">2. Values and M-expressions</a></li>
 <li><a href="3.html">3. Patterns and fusion</a></li>
 <li><a href="4.html">4. Libraries</a></li>
-<li><a class="here" href="5.html">5. Records, local functions, escapes</a></li>
-<li><a href="6.html">6. Algebraic effects</a></li>
+<li><a class="here" href="5.html">5. Algebraic effects</a></li>
+<li><a href="6.html">6. Quotation and the evaluator</a></li>
 <li><a href="7.html">7. Extending the grammar</a></li>
-<li><a href="8.html">8. Quotation and the evaluator</a></li>
+<li><a href="8.html">8. Records, local functions, escapes</a></li>
 <li><a href="9.html">9. Indexing and rewriting</a></li>
 </ol></details></nav>
 <main>
-<h1>5. Records, local functions, escapes</h1>
-<p class="lead"><code>record</code> declares names for the arguments of an M-expression. <code>return</code>, <code>break</code> and <code>continue</code> are implemented as effects.</p>
+<h1>5. Algebraic effects</h1>
+<p class="lead"><code>handle e with h</code> and <code>perform v</code> are algebraic effects with deep handlers. A continuation can be called many times, so exceptions, generators and nondeterminism are written with the same mechanism.</p>
 
-<h2>record</h2>
+<h2>Exceptions</h2>
 <div class="example">
-<p class="file">t5_record.pk</p>
-<pre class="pk">record Point(x, y)
-p := Point{3, 4}
-println(p.x * p.x + p.y * p.y)
+<p class="file">t5_exception.pk</p>
+<pre class="pk">safe_div(a, b) := if (b == 0) perform Raise{&quot;division by zero&quot;} else a / b
 
-move(p, dx) := Point{p.x + dx, p.y}
-println(move(p, 10))</pre>
+try(f) := handle Ok{f()} with (Raise{msg}, k) -&gt; Error{msg}
+
+println(try(() -&gt; safe_div(10, 2)))
+println(try(() -&gt; safe_div(10, 0)))
+println(try(() -&gt; { put(&quot;before\n&quot;); safe_div(1, 0); put(&quot;after\n&quot;) }))</pre>
 <p class="label">Output</p>
-<pre class="out">25
-Point{13, 4}</pre>
+<pre class="out">Ok{5}
+Error{&quot;division by zero&quot;}
+before
+Error{&quot;division by zero&quot;}</pre>
 </div>
-<p><code>record Point(x, y)</code> only names the 0th and 1st arguments of the head <code>Point</code>. The value is still <code>Point{3, 4}</code>. Patterns can destructure it too. There is no space before <code>.</code>.</p>
+<p><code>perform v</code> calls the nearest handler that has a pattern matching <code>v</code>, as <code>h(v, k)</code>. <code>k</code> is the continuation of the <code>perform</code>. The value of the handler is the value of the <code>handle</code> expression. When the handler does not call <code>k</code>, the rest of the computation is discarded (<code>after</code> is not printed in the third example). When no handler matches, the effect goes to the outer handler.</p>
 
-<h2>fun</h2>
+<h2>Resumption</h2>
 <div class="example">
-<p class="file">t5_fun.pk</p>
-<pre class="pk">parity(n) := {
-    fun is_even(n) if (n == 0) true else is_odd(n - 1)
-    fun is_odd(n) if (n == 0) false else is_even(n - 1)
-    if (is_even(n)) &quot;even&quot; else &quot;odd&quot;
-}
-put(parity(10)); put(&quot;\n&quot;)
-put(parity(7)); put(&quot;\n&quot;)</pre>
-<p class="label">Output</p>
-<pre class="out">even
-odd</pre>
-</div>
-<p>A <code>fun</code> in a block declares its name at the top of the block, so mutual recursion can be written. An <code>f(x) := ...</code> in a block is not visible to the expressions before it.</p>
+<p class="file">t5_resume.pk</p>
+<pre class="pk">ask() := perform Ask{}
 
-<h2>return, break, continue</h2>
+with_answer(v, f) := handle f() with (Ask{}, k) -&gt; k(v)
+
+println(with_answer(21, () -&gt; ask() * 2))
+println(with_answer(5, () -&gt; ask() + ask()))</pre>
+<p class="label">Output</p>
+<pre class="out">42
+10</pre>
+</div>
+<p><code>k(x)</code> resumes the computation as if the <code>perform</code> returned <code>x</code>. Handlers are deep: a <code>perform</code> in the resumed computation is received by the same handler.</p>
+
+<h2>Generators</h2>
 <div class="example">
-<p class="file">t5_return.pk</p>
-<pre class="pk">find_first(p, xs) := {
-    for (x in xs) if (p(x)) return x
-    none
-}
-println(find_first(x -&gt; x &gt; 3, [1, 5, 2, 7]))
-println(find_first(x -&gt; x &gt; 9, [1, 5, 2, 7]))
+<p class="file">t5_generator.pk</p>
+<pre class="pk">walk := (Leaf{}) -&gt; none
+      | (Node{l, v, r}) -&gt; { walk(l); perform Yield{v}; walk(r) }
 
-n := 0
-odd_sum := 0
-while (true) {
-    n = n + 1
-    if (n &gt; 10) break
-    if (n % 2 == 0) continue
-    odd_sum = odd_sum + n
-}
-println(odd_sum)</pre>
+tree := Node{Node{Leaf{}, 1, Leaf{}}, 2, Node{Leaf{}, 3, Leaf{}}}
+
+handle walk(tree) with (Yield{v}, k) -&gt; { put(f&quot;yield {v}\n&quot;); k(none) }
+
+to_list(t) := handle { walk(t); [] } with (Yield{v}, k) -&gt; v :: k(none)
+use(&quot;pretty&quot;)
+put(f&quot;{to_list(tree)}\n&quot;)</pre>
 <p class="label">Output</p>
-<pre class="out">5
-none
-25</pre>
+<pre class="out">yield 1
+yield 2
+yield 3
+[1, 2, 3]</pre>
 </div>
-<p><code>return e</code> leaves the enclosing function. The body of <code>for</code> is a function, but the <code>return</code> in it leaves the outer <code>find_first</code>. <code>break</code> and <code>continue</code> apply to the innermost <code>while</code> or <code>for</code>.</p>
-<nav class="pager"><a class="prev" href="4.html"><small>Previous</small>4. Libraries</a><a class="next" href="6.html"><small>Next</small>6. Algebraic effects</a></nav>
+<p>For the same <code>walk</code>, the handler decides how the values are used. The second one collects the results into a list with <code>v :: k(none)</code>.</p>
+
+<h2>Multiple resumption</h2>
+<div class="example">
+<p class="file">t5_choose.pk</p>
+<pre class="pk">use(&quot;list&quot;)
+use(&quot;pretty&quot;)
+choose(xs) := perform Choose{xs}
+
+all_results(f) := handle [f()] with (Choose{xs}, k) -&gt; concat_map(x -&gt; k(x), xs)
+
+put(f&quot;{all_results(() -&gt; (choose([1, 2]), choose([&quot;a&quot;, &quot;b&quot;])))}\n&quot;)</pre>
+<p class="label">Output</p>
+<pre class="out">[Tuple{1, &quot;a&quot;}, Tuple{1, &quot;b&quot;}, Tuple{2, &quot;a&quot;}, Tuple{2, &quot;b&quot;}]</pre>
+</div>
+<p><code>k</code> is an ordinary function and can be called any number of times, even after <code>handle</code> has returned a value. Here <code>k</code> is called for each candidate and the results are concatenated. <a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/examples/queens.pk">planck/examples/queens.pk</a> solves N-queens in the same way.</p>
+<nav class="pager"><a class="prev" href="4.html"><small>Previous</small>4. Libraries</a><a class="next" href="6.html"><small>Next</small>6. Quotation and the evaluator</a></nav>
 </main>
 </div>
 <footer><div class="inner"><a href="https://github.com/nineties/hex-to-compiler">github.com/nineties/hex-to-compiler</a></div></footer>
