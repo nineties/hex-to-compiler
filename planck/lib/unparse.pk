@@ -79,11 +79,14 @@ un_match_args(p, t, i, env) := {
     ok
 }
 
-# un_match(template, tree, env) binds the holes in the table env
+# un_match(template, tree, env) binds the holes in the table env. A label that appears twice must match equal subtrees.
 un_match(p, t, env) =
     if (is_hole(p)) {
-        table_set(env, arg(p, 0), t)
-        true
+        old := table_get(env, arg(p, 0), bad)
+        if (is_bad(old)) {
+            table_set(env, arg(p, 0), t)
+            true
+        } else old == t
     } else if (is_unwrap(p)) un_match_unwrap(p, t, env)
     else if (is_mx(p) and head(p) == 'Generic) {
         if (is_mx(t)) {
@@ -222,7 +225,8 @@ const_kind(e, i, n, text, prev) :=
 # ConstItem{text, kind} or ValItem{label, element}, or Bad{} when an element cannot be run backwards
 make_items(elems, labels, holes) := {
     n := length(elems)
-    go := (Nil{}, _, _, _) -> []
+    fun go
+    go = (Nil{}, _, _, _) -> []
         | (e :: es, l :: ls, i, prev) -> {
             it := if (l == '_) {
                     c := const_text(e, 0)
@@ -486,7 +490,8 @@ item_pieces := (ConstItem{text, kind}, env) -> {
                }
              | (ValItem{label, elem}, env) -> val_pieces(elem, table_get(env, label, none))
 
-items_pieces := (Nil{}, env) -> []
+fun items_pieces
+items_pieces = (Nil{}, env) -> []
               | (it :: rest, env) -> {
                     ps := item_pieces(it, env)
                     qs := if (ps == none) none else items_pieces(rest, env)
@@ -534,7 +539,8 @@ try_fit(a, wrapped, t) := {
 try_alt(a, wrapped, t) :=
     if (is_tok(alt_tmpl(a)) or is_custom(alt_tmpl(a)) or fits(alt_tmpl(a), t)) try_fit(a, wrapped, t) else none
 
-try_cands := (Nil{}, t) -> none
+fun try_cands
+try_cands = (Nil{}, t) -> none
            | (c :: cs, t) -> {
                 s := try_alt(arg(c, 1), arg(c, 2), t)
                 if (s == none) try_cands(cs, t) else s

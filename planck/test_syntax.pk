@@ -63,7 +63,7 @@ check(tree("(0) -> 1 | (n) -> n"), 'Fusion{Lambda{Tuple{0}, 1}, Lambda{Tuple{n},
 check(tree("(F{a}, 'none) -> a"), 'Lambda{Tuple{F{a}, Quote{none}}, a})
 check(tree("(x @ int) -> x"), 'Lambda{Tuple{_TypeOf{x, int}}, x})
 check(tree("x := 1"), 'Def{x, 1})
-check(tree("f(x) := x"), 'Def{f, Lambda{Tuple{x}, x}})
+check(tree("f(x) := x"), 'Do{Def{f, none}, Set{f, Lambda{Tuple{x}, x}}})
 check(tree("x = y"), 'Set{x, y})
 
 # === Quotation ===
@@ -113,7 +113,7 @@ check(tree("(x :: xs) -> x"), 'Lambda{Tuple{Cons{x, xs}}, x})
 check(tree("x :: xs -> x"), 'Lambda{Tuple{Cons{x, xs}}, x})
 check(tree("(x :: y :: r, n) -> x"), 'Lambda{Tuple{Cons{x, Cons{y, r}}, n}, x})
 check(tree("(x :: Nil{}) -> x | (x :: xs) -> xs"), 'Fusion{Lambda{Tuple{Cons{x, Nil{}}}, x}, Lambda{Tuple{Cons{x, xs}}, xs}})
-check(tree("f(x :: xs) := x"), 'Def{f, Lambda{Tuple{Cons{x, xs}}, x}})
+check(tree("f(x :: xs) := x"), 'Do{Def{f, none}, Set{f, Lambda{Tuple{Cons{x, xs}}, x}}})
 check(tree("xs ::= ident"), 'Apply{_define_rule, Tuple{Quote{xs}, Quote{ident}}})
 
 # === Lines and comments ===
@@ -132,7 +132,8 @@ check(head(tree(")")), 'SyntaxError)
 check(head(tree("\"abc")), 'SyntaxError)
 
 # === Evaluation of the new syntax ===
-fib := (0) -> 0 | (1) -> 1 | (n) -> fib(n - 1) + fib(n - 2)
+fun fib
+fib = (0) -> 0 | (1) -> 1 | (n) -> fib(n - 1) + fib(n - 2)
 check(fib(15), 610)
 check({ a := 2; b := 3; a * b }, 6)
 check(if (1 < 2) { "y" } else { "n" }, "y")
@@ -141,10 +142,12 @@ n := 0
 i := 0
 while (i < 5) { i = i + 1; n = n + i }
 check(n, 15)
-last := (x :: Nil{}) -> x | (x :: xs) -> last(xs)
+fun last
+last = (x :: Nil{}) -> x | (x :: xs) -> last(xs)
 check(last(1 :: 2 :: 3 :: []), 3)
 check(1 :: 2 :: [], [1, 2])
-sum := (Nil{}) -> 0 | (x :: xs) -> x + sum(xs)
+fun sum
+sum = (Nil{}) -> 0 | (x :: xs) -> x + sum(xs)
 check(sum(1 :: 2 :: 3 :: []), 6)
 count := 0
 if (count == 0) count = 10 else count = 20
@@ -173,7 +176,8 @@ check(1 == 1 and 2 == 3, false)
 check(false or 3 > 2, true)
 add3(a, b, c) := a + b + c
 check(add3(1, 2, 3), 6)
-len := (Nil{}) -> 0 | (Cons{_, xs}) -> 1 + len(xs)
+fun len
+len = (Nil{}) -> 0 | (Cons{_, xs}) -> 1 + len(xs)
 check(len([1, 2, 3]), 3)
 x := 5
 check(`F{!x, x}, 'F{5, x})
@@ -204,7 +208,8 @@ check(shape(70), "big")
 # a guard that is false goes on to the arms after it, with the same value
 check(match 5 { n if n > 10 -> "a" | n if n > 3 -> "b" | _ -> "c" }, "b")
 check(match 5 { 5 if false -> "a" | 5 -> "b" }, "b")
-tree_eval := (e) -> match e {
+fun tree_eval
+tree_eval = (e) -> match e {
     Num{n} -> n
   | Neg{e} -> 0 - tree_eval(e)
   | Add{a, b} -> tree_eval(a) + tree_eval(b)
@@ -443,18 +448,18 @@ check(tree("{ return\n 1 }"), 'Do{Perform{Return{none}}, 1})
 check(tree("{ return }"), 'Do{Perform{Return{none}}})
 check(tree("if (a) return 1 else 2"), 'If{a, Perform{Return{1}}, 2})
 check(tree("break"), 'Perform{Break{}})
-check(tree("f(x) := { return x }"), `Def{f, Lambda{Tuple{x}, Handle{Do{Perform{Return{x}}}, !rh}}})
-check(tree("f(x) := x"), 'Def{f, Lambda{Tuple{x}, x}})
+check(tree("f(x) := { return x }"), `Do{Def{f, none}, Set{f, Lambda{Tuple{x}, Handle{Do{Perform{Return{x}}}, !rh}}}})
+check(tree("f(x) := x"), 'Do{Def{f, none}, Set{f, Lambda{Tuple{x}, x}}})
 check(tree("x -> return x"), `Lambda{Tuple{x}, Handle{Perform{Return{x}}, !rh}})
 check(tree("while (a) { break }"), `Handle{While{a, Do{Perform{Break{}}}}, !bh})
 check(tree("while (a) b"), 'While{a, b})
 check(tree("for (x in xs) break"), `Handle{Apply{peg_for, Tuple{xs, Lambda{Tuple{x}, Perform{Break{}}}}}, !bh})
 # a loop or a function handles only its own return and break
 check(tree("while (a) { while (b) break }"), `While{a, Do{Handle{While{b, Perform{Break{}}}, !bh}}})
-check(tree("f() := { g() := return 1; 2 }"), `Def{f, Lambda{Tuple{}, Do{Def{g, Lambda{Tuple{}, Handle{Perform{Return{1}}, !rh}}}, 2}}})
-check(tree("f() := for (x in xs) return x"), `Def{f, Lambda{Tuple{}, Handle{Apply{peg_for, Tuple{xs, Lambda{Tuple{x}, Perform{Return{x}}}}}, !rh}}})
-check(tree("f() := match x { 1 -> return 2 | _ -> 3 }"), `Def{f, Lambda{Tuple{}, Handle{Apply{Fusion{Lambda{Tuple{1}, Perform{Return{2}}}, Lambda{Tuple{_}, 3}}, Tuple{x}}, !rh}}})
-check(tree("f() := '(return 1)"), 'Def{f, Lambda{Tuple{}, Quote{Perform{Return{1}}}}})
+check(tree("f() := { g() := return 1; 2 }"), `Do{Def{f, none}, Set{f, Lambda{Tuple{}, Do{Do{Def{g, none}, Set{g, Lambda{Tuple{}, Handle{Perform{Return{1}}, !rh}}}}, 2}}}})
+check(tree("f() := for (x in xs) return x"), `Do{Def{f, none}, Set{f, Lambda{Tuple{}, Handle{Apply{peg_for, Tuple{xs, Lambda{Tuple{x}, Perform{Return{x}}}}}, !rh}}}})
+check(tree("f() := match x { 1 -> return 2 | _ -> 3 }"), `Do{Def{f, none}, Set{f, Lambda{Tuple{}, Handle{Apply{Fusion{Lambda{Tuple{1}, Perform{Return{2}}}, Lambda{Tuple{_}, 3}}, Tuple{x}}, !rh}}}})
+check(tree("f() := '(return 1)"), 'Do{Def{f, none}, Set{f, Lambda{Tuple{}, Quote{Perform{Return{1}}}}}})
 ch := 'Lambda{Tuple{Continue{}, k}, none}
 check(tree("continue"), 'Perform{Continue{}})
 check(tree("while (a) { continue }"), `While{a, Handle{Do{Perform{Continue{}}}, !ch}})
@@ -627,18 +632,33 @@ x := 7
 for (x in [1, 2]) total = total + x
 check(x, 7)
 
+# === the right-hand side of := sees the previous variable ===
+check(tree("x := x + 1"), 'Def{x, Apply{_add, Tuple{x, 1}}})
+check(tree("x := (n) -> x(n)"), 'Def{x, Lambda{Tuple{n}, Apply{x, Tuple{n}}}})
+prev_a := 1
+prev_a := prev_a + 1
+check(prev_a, 2)
+prev_f(n) := n + 1
+prev_f := (n) -> prev_f(n) * 10
+check(prev_f(1), 20)
+prev_c(n) := if (n == 0) 0 else 1 + prev_c(n - 1)
+check(prev_c(3), 3)
+check({ pb := 1; pb := pb + 1; pb }, 2)
+check({ pg(n) := n + 1; pg := (n) -> pg(n) * 10; pg(1) }, 20)
+check({ pc(n) := if (n == 0) 0 else 1 + pc(n - 1); pc(3) }, 3)
+
 # === function definitions in a block ===
-check(tree("{ f(x) := x }"), 'Do{Def{f, Lambda{Tuple{x}, x}}})
-check(tree("{ a := 1; f() := { a }; f() }"), 'Do{Def{a, 1}, Def{f, Lambda{Tuple{}, Do{a}}}, Apply{f, Tuple{}}})
-check(tree("{ f(x :: xs) := x }"), 'Do{Def{f, Lambda{Tuple{Cons{x, xs}}, x}}})
-check(tree("{ f() := { return 1 } }"), `Do{Def{f, Lambda{Tuple{}, Handle{Do{Perform{Return{1}}}, !rh}}}})
-check(tree("{ f(x) := 1; f(x) := 2 }"), 'Do{Def{f, Lambda{Tuple{x}, 1}}, Def{f, Lambda{Tuple{x}, 2}}})
+check(tree("{ f(x) := x }"), 'Do{Do{Def{f, none}, Set{f, Lambda{Tuple{x}, x}}}})
+check(tree("{ a := 1; f() := { a }; f() }"), 'Do{Def{a, 1}, Do{Def{f, none}, Set{f, Lambda{Tuple{}, Do{a}}}}, Apply{f, Tuple{}}})
+check(tree("{ f(x :: xs) := x }"), 'Do{Do{Def{f, none}, Set{f, Lambda{Tuple{Cons{x, xs}}, x}}}})
+check(tree("{ f() := { return 1 } }"), `Do{Do{Def{f, none}, Set{f, Lambda{Tuple{}, Handle{Do{Perform{Return{1}}}, !rh}}}}})
+check(tree("{ f(x) := 1; f(x) := 2 }"), 'Do{Do{Def{f, none}, Set{f, Lambda{Tuple{x}, 1}}}, Do{Def{f, none}, Set{f, Lambda{Tuple{x}, 2}}}})
 check(tree("{ g := x -> x; y := 1 }"), 'Do{Def{g, Lambda{Tuple{x}, x}}, Def{y, 1}})
 check(tree("{ a; b }"), 'Do{a, b})
 
 # === fun and f(p, ...) = e ===
-check(tree("fun f"), 'Fun{f})
-check(tree("{ fun f; f(x) = x }"), 'Do{Fun{f}, Set{f, Lambda{Tuple{x}, x}}})
+check(tree("fun f"), 'Def{f, none})
+check(tree("{ fun f; f(x) = x }"), 'Do{Def{f, none}, Set{f, Lambda{Tuple{x}, x}}})
 check(tree("f(x, y) = x + y"), 'Set{f, Lambda{Tuple{x, y}, Apply{_add, Tuple{x, y}}}})
 check(tree("f(x :: xs) = x"), 'Set{f, Lambda{Tuple{Cons{x, xs}}, x}})
 check(tree("f() = { return 1 }"), `Set{f, Lambda{Tuple{}, Handle{Do{Perform{Return{1}}}, !rh}}})
@@ -875,7 +895,7 @@ check(tree("'(x + 1) -> 0"), 'Lambda{Tuple{Quote{Apply{_add, Tuple{x, 1}}}}, 0})
 check(tree("F{a + 1, g(b)} -> a"), 'Lambda{Tuple{F{Apply{Quote{_add}, Tuple{a, 1}}, Apply{Quote{g}, Tuple{b}}}}, a})
 check(tree("(a + b, c) -> a"), 'Lambda{Tuple{Apply{Quote{_add}, Tuple{a, b}}, c}, a})
 check(tree("((a, b)) -> a"), 'Lambda{Tuple{Tuple{a, b}}, a})
-check(tree("f(a + b) := a"), 'Def{f, Lambda{Tuple{Apply{Quote{_add}, Tuple{a, b}}}, a}})
+check(tree("f(a + b) := a"), 'Do{Def{f, none}, Set{f, Lambda{Tuple{Apply{Quote{_add}, Tuple{a, b}}}, a}}})
 check(tree("match e { a + 0 -> a | _ -> e }"), 'Apply{Fusion{Lambda{Tuple{Apply{Quote{_add}, Tuple{a, 0}}}, a}, Lambda{Tuple{_}, e}}, Tuple{e}})
 # M-expressions are patterns as before: a variable in the place of the function binds it
 check(tree("Apply{f, Tuple{x}} -> f"), 'Lambda{Tuple{Apply{f, Tuple{x}}}, f})

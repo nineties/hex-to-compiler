@@ -29,7 +29,7 @@ M-expressions are expressions of this syntax too.
    * - ``x := e``
      - ``Def{x, e}``
    * - ``f(p, ...) := e``
-     - ``Def{f, Lambda{Tuple{p, ...}, e}}``
+     - ``Do{Def{f, none}, Set{f, Lambda{Tuple{p, ...}, e}}}``
    * - ``record T(f, ...)``
      - ``Apply{_record_declare, Tuple{Quote{T}, Quote{Tuple{f, ...}}}}``
    * - ``x = e``
@@ -83,7 +83,7 @@ M-expressions are expressions of this syntax too.
    * - ``f"a{e}b"``
      - ``Apply{_strcat, Tuple{Apply{_strcat, Tuple{"a", Apply{_to_text, Tuple{e}}}}, "b"}}``
    * - ``fun f``
-     - ``Fun{f}``
+     - ``Def{f, none}``
    * - ``f(p, ...) = e``
      - ``Set{f, Lambda{Tuple{p, ...}, e}}``
    * - ``handle e with h``
@@ -132,18 +132,25 @@ With ``f(x) := 1``, ``g() := f(0)`` and ``f(x) := 2`` in this order, ``g()`` is 
 To overwrite an existing variable, write ``x = e``. It is an assignment to the same variable,
 so the functions made before also see the new value. With ``f = (x) -> 2`` instead of ``f(x) := 2``, ``g()`` is ``2``.
 
-A function definition ``f(p, ...) := e`` is written in the same way at the top level and in a block,
-and in both it is defined where it is written. Functions that call each other first declare the name with ``fun f``.
-``fun f`` defines a variable ``f`` without a value where it is written, and ``f(p, ...) = e`` later fills it by assigning a function.
+A function definition ``f(p, ...) := e`` is the same as ``fun f`` followed by ``f(p, ...) = e``,
+and at the top level and in a block it is defined where it is written. Functions that call each other first declare the name with ``fun f``.
+``fun f`` defines a variable ``f`` whose value is ``none`` where it is written, and ``f(p, ...) = e`` later fills it by assigning a function.
 ``f(p, ...) = e`` is the same assignment as ``f = (p, ...) -> e``. The functions written after the declaration see ``f``.
-Calling ``f`` before it is filled stops the program with a message::
+Calling ``f`` before it is filled calls ``none`` and stops the program::
 
    fun odd
    even(n) := if (n == 0) true else odd(n - 1)
    odd(n) = if (n == 0) false else even(n - 1)
 
 A variable definition ``x := e`` (also ``x := (p) -> e``) is defined where it is written,
-and the expressions before it see the ``x`` outside. A variable of a block is a variable of the function or the program that contains the block.
+and the expressions before it see the ``x`` outside. The right-hand side ``e`` sees the previous ``x`` too.
+The new ``x`` is made after the right-hand side is evaluated, so ``x`` in the right-hand side is undefined if there is no previous ``x``.
+A function that calls itself is written as ``f(p, ...) := e``. This is the same at the top level and in a block::
+
+   x := 1
+   x := x + 1   # x is 2
+
+A variable of a block is a variable of the function or the program that contains the block.
 
 ``for (p in e) a`` evaluates ``a`` for each element of the list or the vector ``e``, with the elements matched by the pattern ``p``,
 and has the value ``none``. The variables of ``a`` outside the loop are shared, so ``a`` can assign them.
@@ -415,9 +422,7 @@ Special forms
    * - Form
      - Meaning
    * - ``Def{x, e}`` / ``Set{x, e}``
-     - Define / assign a variable
-   * - ``Fun{f}``
-     - Declare only the name of a function
+     - Define a variable (``e`` sees the previous ``x``) / assign a variable
    * - ``Apply{f, Tuple{a, ...}}``
      - Call ``f``
    * - ``Do{e, ...}``

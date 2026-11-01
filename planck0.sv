@@ -429,7 +429,6 @@
 (long plainS)
 (long DefS)
 (long SetS)
-(long FunS)
 (long ApplyS)
 (long DoS)
 (long IfS)
@@ -493,7 +492,6 @@
     (= plainS   (sym "plain"))
     (= DefS         (sym "Def"))
     (= SetS         (sym "Set"))
-    (= FunS         (sym "Fun"))
     (= ApplyS       (sym "Apply"))
     (= DoS          (sym "Do"))
     (= IfS          (sym "If"))
@@ -1335,34 +1333,21 @@
     (if (== head DefS) (do
         (if (|| (!= arity 2) (!= (gettag (get e 2)) SymbolT)) (malformed e))
         (= x (get e 2))
+        ; The right-hand side refers to the previous variable of the same
+        ; name. The new variable is made after it is compiled.
+        (compile (get e 3) 0)
         (if (is_global_scope)
             (do
-                ; The new variable is visible from its definition
-                ; so that recursive functions can be defined.
                 (= cell (define_global x))
-                (compile (get e 3) 0)
                 (emit OP_GDEF)
                 (emit cell)
                 )
             (do
-                ; The variable is visible from its definition
-                ; so that recursive functions can be defined.
                 (= slot (cenv_add x))
-                (compile (get e 3) 0)
                 (emit OP_STORE)
                 (emit 0)
                 (emit slot)
                 ))
-        (return 0)
-        ))
-    (if (== head FunS) (do
-        (if (|| (!= arity 1) (!= (gettag (get e 2)) SymbolT)) (malformed e))
-        (= x (get e 2))
-        ; The variable has no value until it is assigned.
-        (if (is_global_scope)
-            (define_global x)
-            (cenv_add x))
-        (emit_const noneS)
         (return 0)
         ))
     (if (== head SetS) (do
