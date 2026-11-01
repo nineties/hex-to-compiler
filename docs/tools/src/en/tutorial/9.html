@@ -1,17 +1,18 @@
-<!--title 9. Indexing and rewriting-->
-<h1>9. Indexing and rewriting</h1>
-<p class="lead"><code>a[i]</code> and <code>a[i] = v</code> call <code>_index_get</code> and <code>_index_set</code>. These are functions joined by <code>|</code>, one for each kind of value, so a program can add its own kind. <code>t[p -&gt; e | ...]</code> rewrites a syntax tree.</p>
+<!--title 9. Scope of variables-->
+<h1>9. Scope of variables</h1>
+<p class="lead">Which variable a name refers to is decided from the place where the program is written, before the expression runs. A function definition <code>f(p, ...) := e</code> adds a case or defines a new <code>f</code> depending on whether <code>f</code> is in the same place.</p>
 
-<h2>Reading and writing</h2>
-<!--ex t9_index-->
-<p>Indexing works on arrays, strings, tables, lists and M-expressions. For a string, <code>s[i]</code> is the <code>i</code>-th character, a string of length 1. A list is counted from 0. For an M-expression, an integer is a position and a symbol is a field declared by <code>record</code>. A missing key of a table gives <code>none</code>.</p>
-<p>Arrays, plain arrays, tables and vectors can be written. Strings, lists, tuples and M-expressions are immutable: <code>s[0] = 1</code> stops the program with <code>cannot assign to an element of a string, which is immutable: ...</code>. An index out of range also stops the program.</p>
+<h2>Resolving names</h2>
+<!--ex t1_scope-->
+<p>Scope is lexical: which variable a name refers to is decided before the expression runs, from the place where the program is written. The body of a function sees the parameters and variables of that function and of the functions around it, and the variables defined before it at the top level. The variables of the caller are not visible. <code>read_n()</code> reads the top-level <code>n</code>, not the <code>n</code> inside <code>caller</code>.</p>
+<p>Defining the same name again with <code>:=</code> makes a new variable, and the functions made before keep referring to the old one. <code>get</code> refers to the first <code>x</code>, so it does not see the new <code>x</code> that <code>x = 10</code> assigns.</p>
+<!--ex e_undefined-->
+<p>If a name refers to no variable, the program stops with a message before the expression runs. <code>later</code> is defined on the third line and is not visible to the second line. The first line runs earlier, so <code>"start"</code> is written.</p>
 
-<h2>Adding a kind</h2>
-<!--ex t9_kind-->
-<p>Put your own kind at the front of the fusion and pass the rest to the original <code>_index_get</code>. Here an M-expression with the head <code>Counts</code> is a table that counts a missing key as 0. <code>use("vector")</code> adds vectors in the same way.</p>
+<h2>Adding to a function and hiding it</h2>
+<!--ex t8_place-->
+<p><code>f(p, ...) := e</code> adds a case when <code>f</code> is already defined in the same place, and otherwise defines a new <code>f</code>. The place is the same file at the top level, and in a function the parameters of the function and the variables defined before it in the function. The outer <code>name</code> is not a variable of the place inside <code>inner</code>, so <code>name(0) := "inner"</code> in <code>inner</code> defines a new <code>name</code> and does not change the outer one.</p>
+<!--ex t8_library-->
+<p>A function defined by another file and a builtin function are not variables of the same place at the top level of a program either. <code>sum(xs) := ...</code> defines a new <code>sum</code> that hides the <code>sum</code> of <code>use("list")</code>. To add a case to a library function, write it with <code>=</code> as in <code>last(Tuple{a, b}) = b</code>. The added case is tried after the original cases.</p>
 
-<h2>Rewriting trees</h2>
-<!--ex t9_rewrite-->
-<p><code>t[p -&gt; a | q -&gt; b]</code> is <code>subst(t, p -&gt; a | q -&gt; b)</code>. Each part of the tree <code>t</code> is tried from the root down. When the pattern of an arm matches, the part is replaced and its inside is not tried. When no arm matches, the arguments are tried in order. An arm can have a guard <code>p if c -&gt; a</code> as in <code>match</code>.</p>
-<p>A replacement leaves its inside untouched, so repeat until nothing changes. The head of an operator tree is a name with <code>_</code>, such as <code>'_add</code>. A quoted tree is written <code>('e)[f]</code>; <code>'t[f]</code> quotes <code>t[f]</code>.</p>
+<p>The whole rules are in <a href="../reference/syntax.html#scope">Scope of variables</a> in the reference.</p>

@@ -28,7 +28,8 @@ SECTIONS = {
             ("6", "6. クオートと評価器"),
             ("7", "7. 文法の拡張"),
             ("8", "8. レコード・局所関数・脱出"),
-            ("9", "9. 添字と置き換え"),
+            ("9", "9. 変数の範囲"),
+            ("10", "10. 添字と置き換え"),
         ]),
         ("reference", "リファレンス", [
             ("index", "目次"),
@@ -58,7 +59,8 @@ SECTIONS = {
             ("6", "6. Quotation and the evaluator"),
             ("7", "7. Extending the grammar"),
             ("8", "8. Records, local functions, escapes"),
-            ("9", "9. Indexing and rewriting"),
+            ("9", "9. Scope of variables"),
+            ("10", "10. Indexing and rewriting"),
         ]),
         ("reference", "Reference", [
             ("index", "Contents"),
