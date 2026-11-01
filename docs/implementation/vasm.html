@@ -79,7 +79,7 @@ use(&quot;error&quot;)</pre>
 # vasm_info: name -&gt; Info{type, regions open at the declaration}, for the variables in scope
 # a state: name -&gt; Vs{status, loans}, and &quot;.dead&quot; -&gt; true after return
 #   status: &#x27;init, &#x27;uninit, Moved{at}, Freed{at}, Taken{at} (an own value whose contents are moved out by x = *p)
-#   or Parts{fields} (a struct value whose fields that own are moved out by x = s.f, U19); loans: [Loan{region, kind}, ...]
+#   or Parts{fields} (a struct value whose fields that own are moved out by x = s.f); loans: [Loan{region, kind}, ...]
 # vasm_regions: the regions in scope, the innermost first, ending with the regions of the function
 
 vasm_sigs := table()
@@ -95,7 +95,7 @@ vasm_ret_type := Unit{}</pre>
 <p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm.pk#L217-L222">planck/lib/vasm.pk:217–222</a></p>
 <pre class="pk"># An integer literal is Lit{n} until it meets an integer type; Lit{none} is the result of an operation on literals.
 # Integers, bool and structs without own are copied. own and a struct with own are linear: they are moved
-# by a use and must be moved or freed once (U6, U19). &amp;mut is moved by a use, except for an argument of a call
+# by a use and must be moved or freed once. &amp;mut is moved by a use, except for an argument of a call
 # (vasm_call). &amp; is copied.
 vasm_linear(t) := head(t) == &#x27;Own or (head(t) == &#x27;Named and vasm_owning(t))
 vasm_moves(t) := vasm_linear(t) or (head(t) == &#x27;Ref and arg(t, 0) == &#x27;mut)</pre>
@@ -317,14 +317,14 @@ report(m)</pre>
 <p>領域の内外は <code>vasm_outlives(q, r)</code> が決めます。<code>q</code> が <code>r</code> と同じか、<code>r</code> が関数の中で開いた領域で <code>q</code> がそれより前に開いたものなら、<code>q</code> は <code>r</code> より長く生きます。関数の領域の引数どうしには順序がありません。</p>
 <div class="example">
 <p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm.pk#L325-L327">planck/lib/vasm.pk:325–327</a></p>
-<pre class="pk"># q outlives r: q is r, or r is a region opened in the function and q was opened before it (U13).
+<pre class="pk"># q outlives r: q is r, or r is a region opened in the function and q was opened before it.
 # The regions of the function are not ordered.
 vasm_outlives(q, r) := q == r or (not member(r, vasm_fn_regions) and index_of(q, vasm_regions) &gt; index_of(r, vasm_regions))</pre>
 </div>
 <div class="example">
 <p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm.pk#L334-L345">planck/lib/vasm.pk:334–345</a></p>
 <pre class="pk"># a value of type t can be put where e is expected: an integer literal in the range of e,
-# or a borrow of a region that outlives the region of e (U13)
+# or a borrow of a region that outlives the region of e
 vasm_fits(at, e, t) := if (head(t) == &#x27;Lit and vasm_int(e)) {
     vasm_lit_range(at, arg(t, 0), e)
     true

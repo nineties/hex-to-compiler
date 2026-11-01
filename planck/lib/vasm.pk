@@ -38,7 +38,7 @@ _define_rule('vasm_newline, 'Not{Same{}})
 vasm_kw ::= ('fn | 'struct | 'var | 'region | 'own | 'mut | 'i8 | 'i16 | 'i32 | 'i64 | 'u8 | 'u16 | 'u32 | 'u64 | 'bool | 'true | 'false | 'if | 'else | 'while | 'return | 'as)
 vasm_name ::= !vasm_kw x:ident { x }
 
-# the value of the text s of an integer literal, or Big{s} if it is out of -32768 to 32767 (U24).
+# the value of the text s of an integer literal, or Big{s} if it is out of -32768 to 32767.
 # The value is not computed past the range, so that it does not wrap around as an integer of planck.
 vasm_lit_value(s) := {
     n := strlen(s)
@@ -93,7 +93,7 @@ vasm_binop ::= "+" { 'add } | "-" { 'sub } | "*" { 'mul } | "/" { 'div } | "%" {
     | "<<" { 'shl } | ">>" { 'shr } | "&" { 'bit_and } | "|" { 'bit_or } | "^" { 'bit_xor }
     | "==" { 'eq } | "!=" { 'ne } | "<=" { 'le } | ">=" { 'ge } | "<" { 'lt } | ">" { 'gt }
 
-# an argument is a value, or a place *p, p[i] or p.f, which only swap takes (U19)
+# an argument is a value, or a place *p, p[i] or p.f, which only swap takes
 vasm_arg ::= at:vasm_here "*" p:vasm_name { Load{at, p} }
     | at:vasm_here a:vasm_name "[" i:vasm_operand "]" { Index{at, a, i} }
     | at:vasm_here a:vasm_name "." f:vasm_name { Get{at, a, f} }
@@ -165,7 +165,7 @@ vasm_ints := [
 vasm_int_entry(t) := find(e -> arg(e, 0) == t, vasm_ints)
 vasm_int(t) := vasm_int_entry(t) != none
 
-# A literal is from -32768 to 32767 (U24). A type of 16 bits or more holds all of them but the negative ones
+# A literal is from -32768 to 32767. A type of 16 bits or more holds all of them but the negative ones
 # for an unsigned type, so these are the bounds of a literal of the type e of vasm_ints.
 vasm_lit_lo(e) := if (not arg(e, 3)) 0 else if (arg(e, 2) == 8) -128 else -32768
 vasm_lit_hi(e) := if (arg(e, 2) != 8) 32767 else if (arg(e, 3)) 127 else 255
@@ -187,7 +187,7 @@ vasm_show_type(t) := match t {
 # vasm_info: name -> Info{type, regions open at the declaration}, for the variables in scope
 # a state: name -> Vs{status, loans}, and ".dead" -> true after return
 #   status: 'init, 'uninit, Moved{at}, Freed{at}, Taken{at} (an own value whose contents are moved out by x = *p)
-#   or Parts{fields} (a struct value whose fields that own are moved out by x = s.f, U19); loans: [Loan{region, kind}, ...]
+#   or Parts{fields} (a struct value whose fields that own are moved out by x = s.f); loans: [Loan{region, kind}, ...]
 # vasm_regions: the regions in scope, the innermost first, ending with the regions of the function
 
 vasm_sigs := table()
@@ -197,7 +197,7 @@ vasm_regions := []
 vasm_fn_regions := []
 vasm_ret_type := Unit{}
 
-# t owns a value: t is own, or a struct with a field that owns, or an array of them (U19)
+# t owns a value: t is own, or a struct with a field that owns, or an array of them
 fun vasm_owning_in
 vasm_owning(t) := vasm_owning_in(t, [])
 vasm_owning_in(t, seen) := match t {
@@ -216,14 +216,14 @@ vasm_own_fields(s) := map((Field{_, x, _}) -> x, filter((Field{_, _, u}) -> vasm
 
 # An integer literal is Lit{n} until it meets an integer type; Lit{none} is the result of an operation on literals.
 # Integers, bool and structs without own are copied. own and a struct with own are linear: they are moved
-# by a use and must be moved or freed once (U6, U19). &mut is moved by a use, except for an argument of a call
+# by a use and must be moved or freed once. &mut is moved by a use, except for an argument of a call
 # (vasm_call). & is copied.
 vasm_linear(t) := head(t) == 'Own or (head(t) == 'Named and vasm_owning(t))
 vasm_moves(t) := vasm_linear(t) or (head(t) == 'Ref and arg(t, 0) == 'mut)
 
-# the built-in functions, given as types with the type variable T (U16).
-# free also marks its argument as freed (vasm_call). The contents of own are checked by vasm_type_ok (U7).
-# swap(x, v) puts v in the place x (*p, p[i] or p.f) and gives the value that was there (U19).
+# the built-in functions, given as types with the type variable T.
+# free also marks its argument as freed (vasm_call). The contents of own are checked by vasm_type_ok.
+# swap(x, v) puts v in the place x (*p, p[i] or p.f) and gives the value that was there.
 vasm_builtins := table()
 table_set(vasm_builtins, 'box, Sig{[], [TVar{'T}], Own{TVar{'T}}})
 table_set(vasm_builtins, 'free, Sig{[], [Own{TVar{'T}}], Unit{}})
@@ -294,7 +294,7 @@ vasm_key(t, s) := if (not vasm_linear(t)) s == 'init else if (not vasm_owns(t, s
 vasm_no_loans(at, st, x, what) := if (vasm_loans(st, x) != []) vasm_fail(at, 'borrowed, f"{symname(x)} is borrowed and cannot be {what}")
 vasm_no_mut_loan(at, st, x, what) := if (any(l -> arg(l, 1) == 'mut, vasm_loans(st, x))) vasm_fail(at, 'borrowed, f"{symname(x)} is borrowed as mut and cannot be {what}")
 
-# the contents of own and of a borrow: an integer, bool, a struct or own, or an array of them (U7, U8, U19)
+# the contents of own and of a borrow: an integer, bool, a struct or own, or an array of them
 fun vasm_type_ok
 vasm_contents_ok(at, t, u) := {
     e := if (head(u) == 'Arr) arg(u, 0) else u
@@ -322,7 +322,7 @@ vasm_declare(at, st, x, t, init) := {
 
 # === Regions, integers and the types of values ===
 
-# q outlives r: q is r, or r is a region opened in the function and q was opened before it (U13).
+# q outlives r: q is r, or r is a region opened in the function and q was opened before it.
 # The regions of the function are not ordered.
 vasm_outlives(q, r) := q == r or (not member(r, vasm_fn_regions) and index_of(q, vasm_regions) > index_of(r, vasm_regions))
 
@@ -332,7 +332,7 @@ vasm_lit_range(at, n, t) := if (n != none) {
 }
 
 # a value of type t can be put where e is expected: an integer literal in the range of e,
-# or a borrow of a region that outlives the region of e (U13)
+# or a borrow of a region that outlives the region of e
 vasm_fits(at, e, t) := if (head(t) == 'Lit and vasm_int(e)) {
     vasm_lit_range(at, arg(t, 0), e)
     true
@@ -406,7 +406,7 @@ vasm_cell(at, st, p, write) := {
     u
 }
 
-# the element type of the array p at the index operand i (U8). The range of i is checked when the program runs.
+# the element type of the array p at the index operand i. The range of i is checked when the program runs.
 vasm_elem(at, st, p, i, write) := {
     u := vasm_ptr(at, st, p, write)
     if (head(u) != 'Arr) vasm_fail(at, 'type, f"{symname(p)} points to {vasm_show_type(u)}, not an array")
@@ -415,7 +415,7 @@ vasm_elem(at, st, p, i, write) := {
     arg(u, 0)
 }
 
-# the type of the field f of the struct s (U9)
+# the type of the field f of the struct s
 vasm_field_type(at, s, f) := {
     fd := find((Field{_, x, _}) -> x == f, arg(table_get(vasm_structs, s, none), 2))
     if (fd == none) vasm_fail(at, 'type, f"struct {symname(s)} has no field {symname(f)}")
@@ -433,7 +433,7 @@ vasm_struct_of(at, st, p, write) := {
     arg(u, 0)
 }
 
-# x = *p (U7, U19). Contents that own are moved out of an own p, which is then Taken until *p is written or p is freed.
+# x = *p. Contents that own are moved out of an own p, which is then Taken until *p is written or p is freed.
 # They are not moved out of a borrow.
 vasm_load(at, st, p) := {
     u := vasm_cell(at, st, p, false)
@@ -445,7 +445,7 @@ vasm_load(at, st, p) := {
     u
 }
 
-# x = p.f. A field that owns is moved out of a struct value p (U19), and not copied out of a pointer p.
+# x = p.f. A field that owns is moved out of a struct value p, and not copied out of a pointer p.
 vasm_get(at, st, p, f) := {
     t := vasm_type_of(at, p)
     if (head(t) == 'Named) {
@@ -463,7 +463,7 @@ vasm_get(at, st, p, f) := {
     }
 }
 
-# the type of the place a (*p, p[i] or p.f) of swap, which is read and written (U19)
+# the type of the place a (*p, p[i] or p.f) of swap, which is read and written
 vasm_place(st, a) := match a {
     Load{at, p} -> vasm_cell(at, st, p, true)
   | Index{at, p, i} -> vasm_elem(at, st, p, i, true)
@@ -480,7 +480,7 @@ vasm_is_place(a) := member(head(a), ['Load, 'Index, 'Get])
 
 # a parameter type pt of a function matches an argument type t.
 # rs are the regions of the function; rsub gets the regions given to each, tsub the type of T.
-# &mut is given to & (U18).
+# &mut is given to &.
 vasm_match(at, pt, t, rs, rsub, tsub) := if (head(pt) == 'Place) vasm_match(at, arg(pt, 0), t, rs, rsub, tsub)
 else if (head(pt) == 'TVar) {
     b := table_get(tsub, arg(pt, 0), none)
@@ -500,7 +500,7 @@ else if (head(pt) == 'TVar) {
 else if (head(pt) == 'Arr and head(t) == 'Arr) vasm_match(at, arg(pt, 0), arg(t, 0), rs, rsub, tsub)
 else vasm_fits(at, pt, t)
 
-# the region given to r: the innermost of the regions qs of the arguments, which all outlive it (U13)
+# the region given to r: the innermost of the regions qs of the arguments, which all outlive it
 vasm_pick_region(at, f, r, qs) := {
     inner := filter(q -> all(q2 -> vasm_outlives(q2, q), qs), qs)
     names := join(", ", map(q -> symname(q), reverse(qs)))
@@ -508,7 +508,7 @@ vasm_pick_region(at, f, r, qs) := {
     arg(inner, 0)
 }
 
-# An &mut register given to a borrow parameter is borrowed again for the call and is not moved (U11),
+# An &mut register given to a borrow parameter is borrowed again for the call and is not moved,
 # unless the result has the region of the parameter. It is given once in the call.
 vasm_mut_reg(a) := if (head(a) == 'Reg) {
     t := vasm_type_of(arg(a, 0), arg(a, 1))
@@ -551,7 +551,7 @@ vasm_call(at, st, f, args) := {
         if (not vasm_match(arg(a, 0), p, t, rs, rsub, tsub)) vasm_fail(arg(a, 0), 'type, f"the argument is {vasm_show_type(t)} but {symname(f)} takes {vasm_show_type(p)}")
     }, zip(ps, args))
     if (freeing) {
-        # what is left in the value is freed with it (U32, koichi msg 20360)
+        # what is left in the value is freed with it
         vasm_set_status(st, arg(args[0], 1), Freed{at})
     }
     if (user == none and f == 'alloc and vasm_owning(table_get(tsub, 'T, I64{}))) vasm_fail(at, 'owner, "alloc copies its value to every element, so the value does not own")
@@ -647,11 +647,11 @@ vasm_assign(at, st, x, t) := {
         vasm_fail(at, 'type, f"{symname(x)} is {vasm_show_type(dt)} but the value is {vasm_show_type(t)}")
     }
     vasm_no_loans(at, st, x, "assigned")
-    # what x owned before is released here (U32, koichi msg 20360)
+    # what x owned before is released here
     vasm_set_status(st, x, 'init)
 }
 
-# What an own value still owns at the end of its block or of the function is released there (U6, koichi msg 20354):
+# What an own value still owns at the end of its block or of the function is released there:
 # the contents of a box, the fields of a struct and the elements of an array that are not moved out.
 # So nothing is checked; the function is kept to mark the places where the release happens.
 vasm_leak_all(at, st) := none
@@ -733,7 +733,7 @@ vasm_block(ss, st) := {
             if (not vasm_fits(at, u, t)) vasm_fail(at, 'type, f"field {symname(f)} of {symname(s)} is {vasm_show_type(u)} but the value is {vasm_show_type(t)}")
         }
       | CallS{at, f, args} -> {
-            # a result that owns a value and is not kept is released here (U32, koichi msg 20360)
+            # a result that owns a value and is not kept is released here
             vasm_call(at, st, f, args)
         }
       | IfS{at, c, a, b} -> {
@@ -810,7 +810,7 @@ vasm_reaches(target, s, seen) := any((Field{_, _, t}) -> if (head(t) == 'Named) 
     n == target or (sd != none and not member(n, seen) and vasm_reaches(target, n, n :: seen))
 } else false, arg(table_get(vasm_structs, s, none), 2))
 
-# a field is an integer, bool, a struct or own (U9, U19), and does not borrow
+# a field is an integer, bool, a struct or own, and does not borrow
 vasm_check_struct(d) := match d {
     Struct{at, s, fs} -> {
         if (arg(table_get(vasm_structs, s, none), 0) != at) vasm_fail(at, 'type, f"struct {symname(s)} is already defined")
