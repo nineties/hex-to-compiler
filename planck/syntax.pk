@@ -159,7 +159,7 @@ Apply{define_rule, Tuple{Quote{expr}, Quote{Choice{
     Act{Seq{ident, "=", Not{Tight{"="}}, expr},
         Lambda{Tuple{Tuple{x, _, _, e}}, QuasiQuote{Set{UnQuote{x}, UnQuote{e}}}}},
     Act{Seq{postfix, Tight{"["}, expr, "]", "=", Not{Tight{"="}}, expr},
-        Lambda{Tuple{Tuple{a, _, i, _, _, _, v}}, QuasiQuote{Apply{set, Tuple{UnQuote{a}, UnQuote{i}, UnQuote{v}}}}}},
+        Lambda{Tuple{Tuple{a, _, i, _, _, _, v}}, QuasiQuote{Apply{index_set, Tuple{UnQuote{a}, UnQuote{i}, UnQuote{v}}}}}},
     union,
     Act{Seq{Key{"record"}, ident, "(", idents, ")"},
         Lambda{Tuple{Tuple{_, n, _, fs, _}}, Apply{peg_record, Tuple{n, fs}}}}}}}}
@@ -252,7 +252,7 @@ Apply{define_rule, Tuple{Quote{postfix}, Quote{Choice{
     Act{Seq{postfix, Tight{"."}, ident},
         Lambda{Tuple{Tuple{t, _, f}}, QuasiQuote{Apply{record_get, Tuple{UnQuote{t}, Quote{UnQuote{f}}}}}}},
     Act{Seq{postfix, Tight{"["}, index, "]", Not{assign_op}},
-        Lambda{Tuple{Tuple{a, _, i, _, _}}, QuasiQuote{Apply{get, Tuple{UnQuote{a}, UnQuote{i}}}}}},
+        Lambda{Tuple{Tuple{a, _, i, _, _}}, QuasiQuote{Apply{index, Tuple{UnQuote{a}, UnQuote{i}}}}}},
     primary}}}}
 
 " the = of an assignment, not == "
@@ -1274,10 +1274,10 @@ Def{
         }
     }}
 
-" a[i] is get(a, i), a function for each kind of a joined by Fusion. A program adds its own kind in front: "
-" get = (Matrix{w, _, d}, (i, j)) -> d[i * w + j] | get "
+" a[i] is index(a, i), a function for each kind of a joined by Fusion. A program adds its own kind in front: "
+" index = (Matrix{w, _, d}, (i, j)) -> d[i * w + j] | index "
 Def{
-    get,
+    index,
     Fusion{
         Lambda{Tuple{_TypeOf{a, array}, _TypeOf{i, int}}, Apply{array_get, Tuple{a, i}}},
         Fusion{
@@ -1318,7 +1318,7 @@ Def{
                                     Lambda{
                                         Tuple{a, i},
                                         Do{
-                                            Apply{put, Tuple{"no get for "}},
+                                            Apply{put, Tuple{"no index for "}},
                                             Apply{print, Tuple{a}},
                                             Apply{put, Tuple{" and "}},
                                             Apply{println, Tuple{i}},
@@ -1334,21 +1334,71 @@ Def{
         }
     }}
 
-" a[i] = v is set(a, i, v) "
+" a[i] = v is index_set(a, i, v) "
 Def{
-    set,
+    index_set_immutable,
+    Lambda{
+        Tuple{kind, a, i},
+        Do{
+            Apply{put, Tuple{"cannot assign to an element of "}},
+            Apply{put, Tuple{kind}},
+            Apply{put, Tuple{", which is immutable: "}},
+            Apply{print, Tuple{a}},
+            Apply{put, Tuple{" at "}},
+            Apply{println, Tuple{i}},
+            Apply{exit, Tuple{1}}
+        }
+    }}
+
+Def{
+    index_set,
     Fusion{
         Lambda{Tuple{_TypeOf{a, array}, _TypeOf{i, int}, v}, Apply{array_set, Tuple{a, i, v}}},
         Fusion{
             Lambda{Tuple{Table{t}, k, v}, Apply{table_set, Tuple{Table{t}, k, v}}},
-            Lambda{
-                Tuple{a, i, v},
-                Do{
-                    Apply{put, Tuple{"no set for "}},
-                    Apply{print, Tuple{a}},
-                    Apply{put, Tuple{" and "}},
-                    Apply{println, Tuple{i}},
-                    Apply{exit, Tuple{1}}
+            Fusion{
+                Lambda{
+                    Tuple{_TypeOf{s, string}, i, v},
+                    Apply{index_set_immutable, Tuple{"a string", s, i}}
+                },
+                Fusion{
+                    Lambda{
+                        Tuple{Cons{x, xs}, i, v},
+                        Apply{index_set_immutable, Tuple{"a list", Cons{x, xs}, i}}
+                    },
+                    Fusion{
+                        Lambda{
+                            Tuple{Nil{}, i, v},
+                            Apply{index_set_immutable, Tuple{"a list", Nil{}, i}}
+                        },
+                        Fusion{
+                            Lambda{
+                                Tuple{_TypeOf{t, mexpr}, i, v},
+                                Apply{
+                                    index_set_immutable,
+                                    Tuple{
+                                        If{
+                                            Apply{eq, Tuple{Apply{head, Tuple{t}}, Quote{Tuple}}},
+                                            "a tuple",
+                                            "an M-expression"
+                                        },
+                                        t,
+                                        i
+                                    }
+                                }
+                            },
+                            Lambda{
+                                Tuple{a, i, v},
+                                Do{
+                                    Apply{put, Tuple{"no index_set for "}},
+                                    Apply{print, Tuple{a}},
+                                    Apply{put, Tuple{" and "}},
+                                    Apply{println, Tuple{i}},
+                                    Apply{exit, Tuple{1}}
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

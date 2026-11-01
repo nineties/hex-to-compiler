@@ -35,7 +35,7 @@ M-expressions are expressions of this syntax too.
    * - ``x = e``
      - ``Set{x, e}``
    * - ``a[i] = e``
-     - ``Apply{set, Tuple{a, i, e}}``
+     - ``Apply{index_set, Tuple{a, i, e}}``
    * - ``f | g``
      - ``Fusion{f, g}``
    * - ``(p, ...) -> e``, ``p -> e``
@@ -61,9 +61,9 @@ M-expressions are expressions of this syntax too.
    * - ``t.f``
      - ``Apply{record_get, Tuple{t, Quote{f}}}``
    * - ``a[i]``
-     - ``Apply{get, Tuple{a, i}}``
+     - ``Apply{index, Tuple{a, i}}``
    * - ``t[p -> a | q if c -> b]``
-     - ``Apply{get, Tuple{t, f}}``, where ``f`` is the function of the arms (see Indexing and rewriting)
+     - ``Apply{index, Tuple{t, f}}``, where ``f`` is the function of the arms (see Indexing and rewriting)
    * - ``p @ type``
      - ``_TypeOf{p, type}``
    * - ``{ e; ... }``
@@ -113,7 +113,7 @@ A ``.`` follows its left operand with no space. A value whose head is not declar
 
 ``a[i]`` and ``a[i] = e`` are described in Indexing and rewriting. The ``[`` follows ``a`` with no space,
 so ``a`` followed by ``[1, 2]`` on the next line or after a space is two expressions.
-``a`` is a postfix expression such as ``x``, ``f(x)``, ``t.f`` or ``b[j]``: ``a[i][j] = e`` is ``Apply{set, Tuple{a[i], j, e}}``.
+``a`` is a postfix expression such as ``x``, ``f(x)``, ``t.f`` or ``b[j]``: ``a[i][j] = e`` is ``Apply{index_set, Tuple{a[i], j, e}}``.
 
 ``fun f(p, ...) e`` declares a function in a block, as ``f(p, ...) := e`` does, but all the ``fun`` of a block are
 declared at its top, so each function can call the functions declared after it. A function is assigned where its ``fun`` is,
@@ -163,8 +163,8 @@ so a line starting with ``-1`` is a new expression. Other binary operators may s
 Indexing and rewriting
 ----------------------
 
-``a[i]`` is ``get(a, i)`` and ``a[i] = e`` is ``set(a, i, e)``, whose value is the value of ``e``.
-``get`` and ``set`` are functions joined by ``|``, one for each kind of ``a``, tried in this order:
+``a[i]`` is ``index(a, i)`` and ``a[i] = e`` is ``index_set(a, i, e)``, whose value is the value of ``e``.
+``index`` and ``index_set`` are functions joined by ``|``, one for each kind of ``a``, tried in this order:
 
 .. list-table::
    :header-rows: 1
@@ -180,7 +180,7 @@ Indexing and rewriting
    * - string
      - integer
      - ``ord(s, i)``, the byte
-     -
+     - stops, see below
    * - table
      - any value
      - ``table_get(a, i, none)``: ``none`` for a missing key
@@ -196,24 +196,27 @@ Indexing and rewriting
    * - list
      - integer
      - the element at ``i``, counted from 0
-     -
+     - stops, see below
    * - M-expression
      - symbol
      - ``record_get(a, i)``, the field
-     -
+     - stops, see below
    * - M-expression
      - integer
      - ``arg(a, i)``
-     -
+     - stops, see below
 
+A string, a list, a tuple and an M-expression are immutable:
+``a[i] = e`` on them stops the program with the message ``cannot assign to an element of a string, which is immutable: ...``.
+An array, a table, a vector and a kind of a program (added in front) can be written.
 An index outside a string, a list or the arguments of an M-expression stops the program with a message,
 and so does ``a[i]`` or ``a[i] = e`` that no kind accepts.
-A program adds a kind of its own in front of the others by assigning ``get`` and ``set``:
+A program adds a kind of its own in front of the others by assigning ``index`` and ``index_set``:
 
 .. code-block::
 
-   get = (Matrix{w, _, d}, (i, j)) -> d[i * w + j] | get
-   set = (Matrix{w, _, d}, (i, j), e) -> { d[i * w + j] = e } | set
+   index = (Matrix{w, _, d}, (i, j)) -> d[i * w + j] | index
+   index_set = (Matrix{w, _, d}, (i, j), e) -> { d[i * w + j] = e } | index_set
    m := Matrix{2, 2, array(4)}
    m[(1, 0)] = 5
 
@@ -416,7 +419,7 @@ Builtin functions
    * - ``planck/peg.pk``
      - ``peg_parse`` ``define_rule``
    * - ``planck/syntax.pk``
-     - ``parse_mexpr`` ``to_text`` ``record_declare`` ``record_get`` ``peg_for`` ``get`` ``set`` ``subst``
+     - ``parse_mexpr`` ``to_text`` ``record_declare`` ``record_get`` ``peg_for`` ``index`` ``index_set`` ``subst``
 
 * ``parse_mexpr(s)``: the parser of M-expressions, with the same arguments and result as ``parse``.
 * ``to_text(x)``: ``x`` for a string, the decimal text for an integer, and ``show(x)`` (``planck/lib/pretty.pk``) otherwise,
