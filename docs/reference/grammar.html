@@ -3,14 +3,15 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>文法の宣言 | planck</title>
+<title>文法の宣言 | hex-to-compiler</title>
 <link rel="stylesheet" href="../assets/style.css">
 </head>
 <body>
 <header class="site-header"><div class="inner">
-<a class="logo" href="../index.html">planck<span>.</span></a>
+<a class="logo" href="../index.html">hex-to-compiler</a>
 <nav class="site-nav">
-<a href="../tutorial/index.html">チュートリアル</a>
+<a href="../index.html">概要</a>
+<a href="../tutorial/index.html">速習</a>
 <a class="here" href="../reference/index.html">リファレンス</a>
 <a href="../implementation/index.html">処理系の実装</a>
 <a href="https://github.com/nineties/hex-to-compiler">GitHub</a>
@@ -29,7 +30,7 @@
 </ol></details></nav>
 <main>
 <h1>文法の宣言</h1>
-<p class="lead"><code>::=</code> で文法の規則を定義・置き換えします。構文の規則も同じ文法の規則なので、宣言でその後の式の構文を広げられます。</p>
+<p class="lead"><code>::=</code> は文法の規則を定義または置き換えます。planck の構文自体が同じ規則でできているので、宣言で後続の式の構文を拡張できます。</p>
 
 <h2>::=</h2>
 <p><code>name ::= alternative | ...</code> は文法の規則 <code>name</code> を定義するか置き換えます。<a href="syntax.html">構文</a>の規則（<code>expr</code>・<code>primary</code>・<code>block</code>・<code>add_expr</code> ...・<code>ident</code>・<code>integer</code>・<code>string</code>）も同じ文法の規則です。選択肢に <code>...</code> と書くと、その規則のそれまでの定義を表します。</p>
@@ -43,7 +44,7 @@ unless (1 &lt; 2) { put(&quot;then\n&quot;) } else { put(&quot;else\n&quot;) }</
 <pre class="out">then
 else</pre>
 </div>
-<p>選択肢は項目を並べたもので、最後に動作 <code>{ ... }</code> を付けてもかまいません。項目と動作は <code>::=</code> や <code>|</code> と同じ行に書きます。</p>
+<p>選択肢は項目の列で、末尾に動作 <code>{ ... }</code> を付けられます。項目と動作は <code>::=</code> や <code>|</code> と同じ行に書きます。</p>
 
 <h2>項目</h2>
 <table>
@@ -52,16 +53,16 @@ else</pre>
 <tr><td><code>'word</code></td><td>その単語。後ろに <code>[A-Za-z0-9_]</code> が続かないもの</td></tr>
 <tr><td><code>name</code></td><td>その規則</td></tr>
 <tr><td><code>(a | b ...)</code></td><td>選択</td></tr>
-<tr><td><code>e*</code>・<code>e+</code>・<code>e?</code></td><td>0 回以上・1 回以上・あってもなくても</td></tr>
-<tr><td><code>&amp;e</code>・<code>!e</code></td><td>先読み。<code>e</code> が合う / 合わない。読み進めない</td></tr>
+<tr><td><code>e*</code>・<code>e+</code>・<code>e?</code></td><td>0回以上・1回以上・省略可能</td></tr>
+<tr><td><code>&amp;e</code>・<code>!e</code></td><td>肯定・否定の先読み。入力を消費しない</td></tr>
 <tr><td><code>label:e</code></td><td><code>e</code>。その値が動作の中で変数 <code>label</code> になる</td></tr>
 </table>
 
 <h2>値と試す順番</h2>
-<p>選択肢は順に試されます（PEG）。選択肢の値は、動作があれば動作の値、項目が 1 つならその項目の値、それ以外は項目の値の <code>Tuple{v, ...}</code> です。<code>e*</code> と <code>e+</code> の値は <code>Tuple{v, ...}</code>、<code>e?</code> の値は <code>Tuple{}</code> か <code>Tuple{v}</code> です。</p>
+<p>選択肢は順に試されます（PEG）。選択肢の値は、動作があれば動作の値、項目が1つならその項目の値、それ以外は項目の値の <code>Tuple{v, ...}</code> です。<code>e*</code> と <code>e+</code> の値は <code>Tuple{v, ...}</code>、<code>e?</code> の値は <code>Tuple{}</code> か <code>Tuple{v}</code> です。</p>
 <p>規則の結果は位置ごとに覚えておきます（packrat 構文解析）。規則は直接の左再帰を書けます（<code>sum ::= a:sum "+" b:term { ... } | term</code>）。左再帰は左から結合します。</p>
 <div class="example">
-<p class="file">t8_calc.pk</p>
+<p class="file">t7_calc.pk</p>
 <pre class="pk">calc ::= a:calc &quot;+&quot; b:term { a + b } | a:calc &quot;-&quot; b:term { a - b } | term
 term ::= a:term &quot;*&quot; b:atom { a * b } | atom
 atom ::= integer | &quot;(&quot; e:calc &quot;)&quot; { e }
@@ -85,7 +86,7 @@ Tuple{SyntaxError{&quot;unexpected input&quot;, &quot;)&quot;}, &quot;&quot;}</p
 
 <h2 id="text">規則で読む文字列</h2>
 <p><code>name{| text |}</code> は、式を読むときに規則 <code>name</code> で <code>text</code> を読む式です。<code>name</code> と <code>{|</code> の間に空白は入れません。</p>
-<p><code>text</code> を読むのはその規則だけです（規則の文字列・単語・規則と、それらの空白とコメント）。まわりの式の字句では読みません。どこで終わるかは規則が決め、そのあと空白をはさんで <code>|}</code> が続きます。だから規則が読む <code>|}</code> や <code>}</code>、たとえば規則の文字列やかっこの中のものは <code>text</code> の一部です。規則が失敗したときや <code>|}</code> がないときは、その式の構文エラーです。位置は規則が <code>text</code> の中で一番先まで進んだ所です。</p>
+<p><code>text</code> を読むのはその規則だけです（規則の文字列・単語・規則と、それらの空白とコメント）。まわりの式の字句では読みません。どこで終わるかは規則が決め、そのあと空白をはさんで <code>|}</code> が続きます。したがって規則が読む <code>|}</code> や <code>}</code>（規則の文字列や括弧の中のもの）は <code>text</code> の一部です。規則が失敗したときや <code>|}</code> がないときは、その式の構文エラーです。位置は規則が <code>text</code> の中で一番先まで進んだ所です。</p>
 <p>式の値は規則の値で、定数として入ります。</p>
 <div class="example">
 <p class="file">r_calc.pk</p>
@@ -120,7 +121,7 @@ pprint(table_get(peg_sources, &#x27;add_expr, none))</pre>
 <nav class="pager"><a class="prev" href="values.html"><small>前のページ</small>値・パターン・M式</a><a class="next" href="builtins.html"><small>次のページ</small>組み込み関数</a></nav>
 </main>
 </div>
-<footer><div class="inner">planck — <a href="https://github.com/nineties/hex-to-compiler">nineties/hex-to-compiler</a></div></footer>
+<footer><div class="inner"><a href="https://github.com/nineties/hex-to-compiler">github.com/nineties/hex-to-compiler</a></div></footer>
 <script src="../assets/highlight.js"></script>
 </body>
 </html>

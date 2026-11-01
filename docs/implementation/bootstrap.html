@@ -3,14 +3,15 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>機械語から planck0 まで | planck</title>
+<title>機械語から planck0 まで | hex-to-compiler</title>
 <link rel="stylesheet" href="../assets/style.css">
 </head>
 <body>
 <header class="site-header"><div class="inner">
-<a class="logo" href="../index.html">planck<span>.</span></a>
+<a class="logo" href="../index.html">hex-to-compiler</a>
 <nav class="site-nav">
-<a href="../tutorial/index.html">チュートリアル</a>
+<a href="../index.html">概要</a>
+<a href="../tutorial/index.html">速習</a>
 <a href="../reference/index.html">リファレンス</a>
 <a class="here" href="../implementation/index.html">処理系の実装</a>
 <a href="https://github.com/nineties/hex-to-compiler">GitHub</a>
@@ -20,19 +21,19 @@
 <nav class="toc" aria-label="処理系の実装の目次"><details open><summary>処理系の実装の目次</summary>
 <h2>処理系の実装</h2>
 <ol>
-<li><a href="index.html">全体の地図</a></li>
+<li><a href="index.html">構成</a></li>
 <li><a class="here" href="bootstrap.html">機械語から planck0 まで</a></li>
-<li><a href="planck0.html">planck0 の中身</a></li>
+<li><a href="planck0.html">planck0</a></li>
 <li><a href="init.html">init.pk と M式</a></li>
 <li><a href="peg.html">packrat パーサ</a></li>
-<li><a href="syntax.html">構文を planck で書く</a></li>
+<li><a href="syntax.html">構文の定義</a></li>
 </ol></details></nav>
 <main>
 <h1>機械語から planck0 まで</h1>
-<p class="lead">16 進で書いた 1 枚の機械語から、sasm で書いた planck0 ができるまでを順にたどります。</p>
+<p class="lead">16進ダンプ1枚の Forth から、sasm で書いた planck0 ができるまでです。</p>
 
-<h2>pforth：手書きの機械語</h2>
-<p>出発点は <a href="https://github.com/nineties/hex-to-compiler/blob/main/pforth.xxd">pforth.xxd</a> です。201 行の 16 進ダンプで、各行の右に注釈が付いています。<code>xxd -r -c 8</code> がこれをバイト列に戻すと、そのまま 32 ビット x86 の Linux で動く ELF の実行ファイルになります。</p>
+<h2>pforth</h2>
+<p><a href="https://github.com/nineties/hex-to-compiler/blob/main/pforth.xxd">pforth.xxd</a> は201行の16進ダンプで、右側の注釈は <code>xxd -r -c 8</code> が無視します。戻したバイト列がそのまま32ビット x86 Linux の ELF 実行ファイルです。</p>
 <div class="example">
 <p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/pforth.xxd#L1-L11">pforth.xxd:1–11</a></p>
 <pre>00000000: 7f45 4c46 0101 0100   # planckforth -
@@ -47,7 +48,7 @@
 00000048: 0000 0040 0700 0000   p_memsz(1GB),p_flags=PF_X|PF_W|PF_R
 00000050: 0010 0000 0084 0408   p_align, &lt;here&gt;</pre>
 </div>
-<p>中身は小さな Forth です。最初に辞書にあるのは 1 文字の名前の語だけです。<code>k</code> は 1 文字読む、<code>t</code> は 1 文字書く、<code>f</code> は文字から語を探す、<code>x</code> は語を実行する、といった具合です。</p>
+<p>辞書の初期状態は1文字の名前の組み込み語だけです。<code>k</code> は1文字読む、<code>t</code> は1文字書く、<code>f</code> は文字から語を引く、<code>x</code> は語を実行する、などです。</p>
 <div class="example">
 <p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/pforth.xxd#L20-L31">pforth.xxd:20–31</a></p>
 <pre>00000090: 6882 0408 0000 0000
@@ -63,7 +64,7 @@
 000000cc: 9d82 0408 0000 0000
 000000d0: c480 0408 016a 0000   j: branch</pre>
 </div>
-<p>はじめの解釈器は「<code>k</code> で 1 文字読み、<code>f</code> で語を探し、<code>x</code> で実行する」をくり返すだけです。1 文字の語だけでも、次のように Hello World が書けます。</p>
+<p>最初の解釈器は <code>k</code>・<code>f</code>・<code>x</code> を繰り返すだけです。この段階の Hello World は次のとおりです。</p>
 <div class="example">
 <p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/plisp.fs#L71-L79">plisp.fs:71–79</a></p>
 <pre>\ The 1st phase interpreter repeats execution of k, f and x.
@@ -77,20 +78,18 @@
 </pre>
 </div>
 
-<h2>plisp：Forth を育てて Lisp を作る</h2>
-<p><a href="https://github.com/nineties/hex-to-compiler/blob/main/plisp.fs">plisp.fs</a> は pforth に食べさせる入力です。最初の数行は 1 文字の語だけで書かれた暗号のような列で、空白と改行を何もしない語にし、<code>\</code> をコメントの語にします（<a href="https://github.com/nineties/hex-to-compiler/blob/main/plisp.fs#L1-L15"><code>plisp.fs:1–15</code></a>）。15 行目で、やっとコメントが書けるようになります。</p>
-<p>そこから少しずつ語を足して、Forth を使いやすくしていきます。</p>
+<h2>plisp</h2>
+<p><a href="https://github.com/nineties/hex-to-compiler/blob/main/plisp.fs">plisp.fs</a> は pforth への入力です。先頭は1文字の語だけで書いた列で、空白と改行を何もしない語として、<code>\</code> を行コメントの語として登録します（<a href="https://github.com/nineties/hex-to-compiler/blob/main/plisp.fs#L1-L15"><code>plisp.fs:1–15</code></a>）。以降は自己拡張で Forth を組み立てます。</p>
 <ul>
-<li>2 段目の解釈器。名前で語を探し、コンパイルの状態を持ちます（<a href="https://github.com/nineties/hex-to-compiler/blob/main/plisp.fs#L335-L358"><code>plisp.fs:335–358</code></a>）。</li>
-<li>条件分岐・ループ・再帰・構造体などのふつうの Forth の語（<a href="https://github.com/nineties/hex-to-compiler/blob/main/plisp.fs#L498-L1380"><code>plisp.fs:498–1380</code></a>）。</li>
-<li>3 段目の解釈器。辞書にない語は数として読み、数でもなければエラーの文を出して止まります（<a href="https://github.com/nineties/hex-to-compiler/blob/main/plisp.fs#L1386-L1447"><code>plisp.fs:1386–1447</code></a>）。</li>
+<li>第2段の解釈器。名前で語を引き、コンパイル状態を持つ（<a href="https://github.com/nineties/hex-to-compiler/blob/main/plisp.fs#L335-L358"><code>plisp.fs:335–358</code></a>）。</li>
+<li>条件分岐・ループ・再帰・構造体などの通常の Forth の語（<a href="https://github.com/nineties/hex-to-compiler/blob/main/plisp.fs#L498-L1380"><code>plisp.fs:498–1380</code></a>）。</li>
+<li>第3段の解釈器。辞書にない語を数として読み、数でもなければエラーを出して止まる（<a href="https://github.com/nineties/hex-to-compiler/blob/main/plisp.fs#L1386-L1447"><code>plisp.fs:1386–1447</code></a>）。</li>
 </ul>
-<p>Forth が十分に育ったら、その Forth で Lisp を書きます（<a href="https://github.com/nineties/hex-to-compiler/blob/main/plisp.fs#L1684"><code>plisp.fs:1684</code></a> から）。リスト・ノード・パーサとプリンタ・評価器と続き、最後に <code>plisp/init.lisp</code> を読み込んで Lisp 側の準備をします（<a href="https://github.com/nineties/hex-to-compiler/blob/main/plisp.fs#L2435"><code>plisp.fs:2435</code></a>）。</p>
-<p>Lisp にしたのは、次の段がアセンブラやコンパイラだからです。木を直接いじれて、内部 DSL を作りやすい言語が向いています。</p>
+<p>その Forth で Lisp インタプリタを書きます（<a href="https://github.com/nineties/hex-to-compiler/blob/main/plisp.fs#L1684"><code>plisp.fs:1684</code></a> 以降）。リスト、ノード、リーダとプリンタ、評価器の順で、最後に <code>plisp/init.lisp</code> を読みます（<a href="https://github.com/nineties/hex-to-compiler/blob/main/plisp.fs#L2435"><code>plisp.fs:2435</code></a>）。次の段がアセンブラとコンパイラなので、構文木を直接扱えて内部 DSL を作りやすい Lisp を選んでいます。</p>
 
-<h2>asm と sasm：機械語を書く道具</h2>
-<p>plisp の上で 2 つの道具を作ります。どちらも次の段へ渡るための使い捨ての道具で、速さや安全より作りやすさを優先しています。</p>
-<p><a href="https://github.com/nineties/hex-to-compiler/blob/main/asm/core.lisp">asm/core.lisp</a> は x86 のアセンブラです。S式で書いた命令を読み、ELF の実行ファイルを直接書き出します。対象は 32 ビットだけで、ヘッダもコードもデータも読み書き実行できる 1 つの <code>PT_LOAD</code> にまとめます。</p>
+<h2>asm と sasm</h2>
+<p>どちらも plisp の上で動く、次の段へ渡るための道具です。性能と安全性より実装の単純さを優先しています。</p>
+<p><a href="https://github.com/nineties/hex-to-compiler/blob/main/asm/core.lisp">asm/core.lisp</a> は x86 32ビットのアセンブラです。S式の命令列から ELF を直接書き出し、ヘッダ・コード・データを読み書き実行可能な1つの <code>PT_LOAD</code> に置きます。</p>
 <div class="example">
 <p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/asm/examples/hello.s#L1-L19">asm/examples/hello.s:1–19</a></p>
 <pre>; hello.s in x86
@@ -113,7 +112,7 @@
     (xor %ebx %ebx) ; status = 0
     (int 0x80)</pre>
 </div>
-<p><a href="https://github.com/nineties/hex-to-compiler/blob/main/sasm/core.lisp">sasm/core.lisp</a> は構造化アセンブリ言語 sasm のコンパイラです。sasm は型のない C のような言語です。変数・関数・<code>if</code>・<code>while</code> が書け、plisp の内部 DSL として作られています。レジスタ割り付けはせず、値を毎回スタックに積んで降ろすコードを出し、asm で機械語にします。</p>
+<p><a href="https://github.com/nineties/hex-to-compiler/blob/main/sasm/core.lisp">sasm/core.lisp</a> は構造化アセンブリ言語 sasm のコンパイラです。sasm は型のない C 風の言語で、変数・関数・<code>if</code>・<code>while</code> を持ち、plisp の内部 DSL として実装されています。レジスタ割り付けはせず、スタックへの push と pop を繰り返すコードを出して asm で機械語にします。</p>
 <div class="example">
 <p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/sasm/examples/fib.sv#L1-L14">sasm/examples/fib.sv:1–14</a></p>
 <pre>; fib.sv
@@ -132,17 +131,17 @@
     )</pre>
 </div>
 
-<h2>plisp2：速い Lisp</h2>
-<p>Forth の上の plisp は、大きな仕事には遅すぎます。そこで同じ Lisp を sasm で書き直したのが <a href="https://github.com/nineties/hex-to-compiler/blob/main/plisp2.sv">plisp2.sv</a> です。メモリの確保（<a href="https://github.com/nineties/hex-to-compiler/blob/main/plisp2.sv#L6"><code>plisp2.sv:6</code></a>）・ノード（<a href="https://github.com/nineties/hex-to-compiler/blob/main/plisp2.sv#L54"><code>plisp2.sv:54</code></a>）・パーサとプリンタ（<a href="https://github.com/nineties/hex-to-compiler/blob/main/plisp2.sv#L302"><code>plisp2.sv:302</code></a>）・評価器（<a href="https://github.com/nineties/hex-to-compiler/blob/main/plisp2.sv#L586"><code>plisp2.sv:586</code></a>）・組み込み関数（<a href="https://github.com/nineties/hex-to-compiler/blob/main/plisp2.sv#L828"><code>plisp2.sv:828</code></a>）の順に並んでいます。</p>
-<p>plisp2 は plisp の上の sasm で機械語になります。できた plisp2 が、今度は同じ sasm を動かして <code>planck0.sv</code> を機械語にします。</p>
+<h2>plisp2</h2>
+<p>Forth の上の plisp は以降の段には遅すぎるため、同じ Lisp を sasm で書き直したのが <a href="https://github.com/nineties/hex-to-compiler/blob/main/plisp2.sv">plisp2.sv</a> です。メモリ確保（<a href="https://github.com/nineties/hex-to-compiler/blob/main/plisp2.sv#L6"><code>plisp2.sv:6</code></a>）、ノード（<a href="https://github.com/nineties/hex-to-compiler/blob/main/plisp2.sv#L54"><code>plisp2.sv:54</code></a>）、リーダとプリンタ（<a href="https://github.com/nineties/hex-to-compiler/blob/main/plisp2.sv#L302"><code>plisp2.sv:302</code></a>）、評価器（<a href="https://github.com/nineties/hex-to-compiler/blob/main/plisp2.sv#L586"><code>plisp2.sv:586</code></a>）、組み込み関数（<a href="https://github.com/nineties/hex-to-compiler/blob/main/plisp2.sv#L828"><code>plisp2.sv:828</code></a>）の順に並んでいます。</p>
+<p>plisp2 は plisp の上の sasm でコンパイルし、できた plisp2 の上で同じ sasm が <code>planck0.sv</code> をコンパイルします。</p>
 
-<h2>planck0 へ</h2>
-<p><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv">planck0.sv</a> も sasm で書かれています。2314 行あり、ここから先が planck です。中身は<a href="planck0.html">次のページ</a>で読みます。</p>
+<h2>planck0</h2>
+<p><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv">planck0.sv</a>（2314行）も sasm で書かれています。中身は<a href="planck0.html">planck0</a>の頁にあります。</p>
 
-<nav class="pager"><a class="prev" href="index.html"><small>前のページ</small>全体の地図</a><a class="next" href="planck0.html"><small>次のページ</small>planck0 の中身</a></nav>
+<nav class="pager"><a class="prev" href="index.html"><small>前のページ</small>構成</a><a class="next" href="planck0.html"><small>次のページ</small>planck0</a></nav>
 </main>
 </div>
-<footer><div class="inner">planck — <a href="https://github.com/nineties/hex-to-compiler">nineties/hex-to-compiler</a></div></footer>
+<footer><div class="inner"><a href="https://github.com/nineties/hex-to-compiler">github.com/nineties/hex-to-compiler</a></div></footer>
 <script src="../assets/highlight.js"></script>
 </body>
 </html>

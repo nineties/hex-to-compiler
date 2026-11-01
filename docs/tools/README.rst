@@ -5,7 +5,7 @@ docs/ の HTML は、頁の元 (``src/``)、例 (``examples/*.pk``)、例の出�
 
 例の出力は planck0 を実際に動かして取る。planck0 のビルドは x86_64 の GCP ノードで行う。
 
-1. GCP ノードの ``~/tmp/planck-docs/hex`` にこのリポジトリを置き、``make`` で planck0 を作る。
+1. GCP ノードの ``~/tmp/planck-docs/hex`` にこのリポジトリを置き、``make`` で planck0 を作る。別の場所に置いたときは ``GCP_DIR=tmp/<名前>`` で ``~`` からの位置を渡す。
 2. 例を動かして ``examples/*.out`` を更新する。
 
    ::

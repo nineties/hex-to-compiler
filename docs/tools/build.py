@@ -15,17 +15,16 @@ SRC, EX, OUT = T / "src", T / "examples", W / "docs"
 REPO = "https://github.com/nineties/hex-to-compiler"
 
 SECTIONS = [
-    ("tutorial", "チュートリアル", [
-        ("index", "はじめに"),
-        ("1", "1. はじめの一歩"),
-        ("2", "2. 変数と関数"),
-        ("3", "3. 値のかたち"),
-        ("4", "4. パターンで分ける"),
-        ("5", "5. ライブラリを使う"),
-        ("6", "6. レコードと流れの制御"),
-        ("7", "7. エフェクト"),
-        ("8", "8. 構文を広げる"),
-        ("9", "9. プログラムはデータ"),
+    ("tutorial", "速習", [
+        ("index", "前提と実行"),
+        ("1", "1. 式・束縛・関数"),
+        ("2", "2. 値と M式"),
+        ("3", "3. パターンと融合"),
+        ("4", "4. ライブラリ"),
+        ("5", "5. レコード・局所関数・脱出"),
+        ("6", "6. 代数的エフェクト"),
+        ("7", "7. 文法の拡張"),
+        ("8", "8. クオートと評価器"),
     ]),
     ("reference", "リファレンス", [
         ("index", "目次"),
@@ -36,12 +35,12 @@ SECTIONS = [
         ("library", "ライブラリ"),
     ]),
     ("implementation", "処理系の実装", [
-        ("index", "全体の地図"),
+        ("index", "構成"),
         ("bootstrap", "機械語から planck0 まで"),
-        ("planck0", "planck0 の中身"),
+        ("planck0", "planck0"),
         ("init", "init.pk と M式"),
         ("peg", "packrat パーサ"),
-        ("syntax", "構文を planck で書く"),
+        ("syntax", "構文の定義"),
     ]),
 ]
 
@@ -105,7 +104,7 @@ def href(frm_sec, to_sec, to_page):
 
 
 def nav(cur_sec):
-    items = []
+    items = [f'<a{' class="here"' if cur_sec is None else ""} href="{href(cur_sec, None, None)}">概要</a>']
     for sec, label, pages in SECTIONS:
         cls = ' class="here"' if sec == cur_sec else ""
         items.append(f'<a{cls} href="{href(cur_sec, sec, "index")}">{label}</a>')
@@ -132,7 +131,7 @@ def page(cur_sec, cur_page, title, body, toc_pages, sec_label):
         b = f'<a class="next" href="{nxt[0]}.html"><small>次のページ</small>{nxt[1]}</a>' if nxt else ""
         pager = f'<nav class="pager">{a}{b}</nav>'
     up = "../" if cur_sec else ""
-    full_title = f"{title} | planck" if title != "planck" else "planck"
+    full_title = f"{title} | hex-to-compiler" if title != "hex-to-compiler" else title
     return f'''<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -143,7 +142,7 @@ def page(cur_sec, cur_page, title, body, toc_pages, sec_label):
 </head>
 <body>
 <header class="site-header"><div class="inner">
-<a class="logo" href="{up}index.html">planck<span>.</span></a>
+<a class="logo" href="{up}index.html">hex-to-compiler</a>
 <nav class="site-nav">
 {nav(cur_sec)}
 <a href="{REPO}">GitHub</a>
@@ -156,7 +155,7 @@ def page(cur_sec, cur_page, title, body, toc_pages, sec_label):
 {pager}
 </main>
 </div>
-<footer><div class="inner">planck — <a href="{REPO}">nineties/hex-to-compiler</a></div></footer>
+<footer><div class="inner"><a href="{REPO}">github.com/nineties/hex-to-compiler</a></div></footer>
 <script src="{up}assets/highlight.js"></script>
 </body>
 </html>

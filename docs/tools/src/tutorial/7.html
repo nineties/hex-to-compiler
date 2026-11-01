@@ -1,26 +1,27 @@
-<!--title 7. エフェクト-->
-<h1>7. エフェクト</h1>
-<p class="lead"><code>perform</code> で「頼みごと」を投げ、<code>handle</code> で受け取ります。例外・生成器・やり直しの探索が、この 1 つの仕組みで書けます。</p>
+<!--title 7. 文法の拡張-->
+<h1>7. 文法の拡張</h1>
+<p class="lead">planck の構文は PEG の規則の集まりで、<code>::=</code> は規則を定義または置き換える式です。宣言の次のトップレベルの式から新しい規則で読みます。</p>
 
-<h2>例外を作る</h2>
-<!--ex t7_exception-->
-<p><code>perform Raise{...}</code> は、計算を止めて外に頼みごとを投げます。投げる値は何でもよく、ここでは <code>Raise{メッセージ}</code> という M式にしました。</p>
-<p><code>handle 式 with ハンドラ</code> は式を計算します。その途中で <code>perform</code> されると、ハンドラが <code>(投げられた値, k)</code> を引数にして呼ばれます。ハンドラの値が <code>handle</code> 全体の値になります。</p>
-<p>3 つめの例では <code>before</code> は出ますが <code>after</code> は出ません。<code>perform</code> した所から先は捨てられたからです。</p>
+<h2>構文の追加</h2>
+<!--ex t7_unless-->
+<ul>
+<li><code>primary ::= ... | ...</code> の末尾の <code>...</code> はその規則の直前の定義です。既存の規則の前に選択肢を足すことになります。</li>
+<li><code>'unless</code> は単語、<code>"("</code> は文字列、<code>c:expr</code> は規則 <code>expr</code> の値をラベル <code>c</code> に束縛する項目です。</li>
+<li><code>{ ... }</code> は動作で、その値が規則の値になります。ここでは準クオートで構文木 <code>If{c, none, a}</code> を作っています。</li>
+</ul>
+<p>項目と動作は <code>::=</code> や <code>|</code> と同じ行に書きます。</p>
 
-<h2>続きを再開する</h2>
-<p>ハンドラの 2 つめの引数 <code>k</code> は「<code>perform</code> した所から先の計算」です。<code>k(値)</code> と呼ぶと、<code>perform</code> がその値を返したことにして計算が再開します。</p>
-<!--ex t7_resume-->
-<p><code>ask()</code> の所で止まり、ハンドラが <code>k(21)</code> で再開します。だから <code>ask() * 2</code> は 42 になります。ハンドラは再開した先でも有効です。2 つめの例では <code>ask()</code> が 2 回とも 5 を受け取っています。</p>
-<p>ハンドラのパターンに合わない値が投げられたときは、さらに外側の <code>handle</code> に回ります。</p>
+<h2>二項演算子</h2>
+<!--ex t7_pipe-->
+<p><code>union</code> は融合 <code>|</code> の規則です。直接の左再帰が書けるので、<code>x:union "|&gt;" ...</code> は左結合になります。</p>
 
-<h2>生成器</h2>
-<p>木をたどりながら値を 1 つずつ外に渡す生成器も、<code>perform</code> で書けます。</p>
-<!--ex t7_generator-->
-<p><code>walk</code> は値を見つけるたびに <code>perform Yield{v}</code> します。受け取る側が使い方を決めます。1 つめは見つけた値を表示し、2 つめは <code>v :: k(none)</code> で残りの結果の前に足してリストにしています。</p>
+<h2>ブロックを取る構文</h2>
+<!--ex t7_repeat-->
+<p>準クオートの中は通常の構文で書けます。<code>`repeat_fn(!n, () -&gt; !body)</code> は呼び出しの木に、読んだブロックを埋め込みます。</p>
 
-<h2>何度も再開する</h2>
-<p><code>k</code> はふつうの関数なので、何度でも呼べます。候補を 1 つずつ試す探索が書けます。</p>
-<!--ex t7_choose-->
-<p><code>choose</code> は候補のリストを投げます。ハンドラは候補ごとに <code>k</code> を呼び、出てきた結果を全部つなげます。2 つの <code>choose</code> の組み合わせ 4 通りが全部出ています。</p>
-<p>この仕組みで N クイーン問題を解いた例が <a href="@REPO@/blob/main/planck/examples/queens.pk">planck/examples/queens.pk</a> にあります。</p>
+<h2>別の文法</h2>
+<!--ex t7_calc-->
+<p>動作は木でなく任意の値を返せます。規則は位置ごとにメモ化され（packrat）、左再帰は左結合です。</p>
+<p><code>calc{| ... |}</code> は <code>{|</code> と <code>|}</code> の間を規則 <code>calc</code> で読む式で、読むのは構文解析の時点です。値は定数として木に入ります。実行時の文字列は <code>peg_parse(rule, s)</code> で読み、結果は <code>Tuple{値, 残り}</code> です。先頭から読めなければ値は <code>SyntaxError{...}</code> です。</p>
+
+<p>項目の一覧は<a href="../reference/grammar.html">文法の宣言</a>、planck 自身の構文の規則は<a href="../implementation/syntax.html">構文の定義</a>にあります。</p>

@@ -3,141 +3,143 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>3. 値のかたち | planck</title>
+<title>3. パターンと融合 | hex-to-compiler</title>
 <link rel="stylesheet" href="../assets/style.css">
 </head>
 <body>
 <header class="site-header"><div class="inner">
-<a class="logo" href="../index.html">planck<span>.</span></a>
+<a class="logo" href="../index.html">hex-to-compiler</a>
 <nav class="site-nav">
-<a class="here" href="../tutorial/index.html">チュートリアル</a>
+<a href="../index.html">概要</a>
+<a class="here" href="../tutorial/index.html">速習</a>
 <a href="../reference/index.html">リファレンス</a>
 <a href="../implementation/index.html">処理系の実装</a>
 <a href="https://github.com/nineties/hex-to-compiler">GitHub</a>
 </nav>
 </div></header>
 <div class="layout">
-<nav class="toc" aria-label="チュートリアルの目次"><details open><summary>チュートリアルの目次</summary>
-<h2>チュートリアル</h2>
+<nav class="toc" aria-label="速習の目次"><details open><summary>速習の目次</summary>
+<h2>速習</h2>
 <ol>
-<li><a href="index.html">はじめに</a></li>
-<li><a href="1.html">1. はじめの一歩</a></li>
-<li><a href="2.html">2. 変数と関数</a></li>
-<li><a class="here" href="3.html">3. 値のかたち</a></li>
-<li><a href="4.html">4. パターンで分ける</a></li>
-<li><a href="5.html">5. ライブラリを使う</a></li>
-<li><a href="6.html">6. レコードと流れの制御</a></li>
-<li><a href="7.html">7. エフェクト</a></li>
-<li><a href="8.html">8. 構文を広げる</a></li>
-<li><a href="9.html">9. プログラムはデータ</a></li>
+<li><a href="index.html">前提と実行</a></li>
+<li><a href="1.html">1. 式・束縛・関数</a></li>
+<li><a href="2.html">2. 値と M式</a></li>
+<li><a class="here" href="3.html">3. パターンと融合</a></li>
+<li><a href="4.html">4. ライブラリ</a></li>
+<li><a href="5.html">5. レコード・局所関数・脱出</a></li>
+<li><a href="6.html">6. 代数的エフェクト</a></li>
+<li><a href="7.html">7. 文法の拡張</a></li>
+<li><a href="8.html">8. クオートと評価器</a></li>
 </ol></details></nav>
 <main>
-<h1>3. 値のかたち</h1>
-<p class="lead">planck が扱う値の種類を見ていきます。中心になるのは M式という木の形の値です。</p>
+<h1>3. パターンと融合</h1>
+<p class="lead">無名関数の引数はパターンです。<code>f | g</code>（融合）は <code>f</code> のパターンが合わなければ <code>g</code> を試す関数で、場合分けはこれで書きます。</p>
 
-<h2>値の種類</h2>
-<p><code>typeof</code> は値の種類をシンボルで返します。</p>
 <div class="example">
-<p class="file">t3_types.pk</p>
-<pre class="pk">println(typeof(42))
-println(typeof(&quot;abc&quot;))
-println(typeof(&#x27;apple))
-println(typeof(true))
-println(typeof(Point{1, 2}))
-println(typeof(x -&gt; x))</pre>
+<p class="file">t3_fib.pk</p>
+<pre class="pk">fib := (0) -&gt; 0
+     | (1) -&gt; 1
+     | (n) -&gt; fib(n - 1) + fib(n - 2)
+println(fib(20))</pre>
 <p class="label">出力</p>
-<pre class="out">int
-string
-symbol
-symbol
-mexpr
-function</pre>
+<pre class="out">6765</pre>
 </div>
+<p>融合は左から試し、最初に合った無名関数を呼びます。どれも合わなければ <code>matching failed</code> で止まります。<code>|</code> は右結合です。</p>
+
+<h2>パターン</h2>
 <table>
-<tr><th>種類</th><th>例</th></tr>
-<tr><td><code>int</code></td><td>整数。<code>42</code>・<code>-1</code>・<code>0x1f</code></td></tr>
-<tr><td><code>string</code></td><td>文字列。<code>"abc"</code></td></tr>
-<tr><td><code>symbol</code></td><td>シンボル。<code>'apple</code>・<code>true</code>・<code>false</code>・<code>none</code></td></tr>
-<tr><td><code>mexpr</code></td><td>M式。<code>Point{1, 2}</code></td></tr>
-<tr><td><code>function</code></td><td>関数</td></tr>
-<tr><td><code>array</code></td><td>書き換えられる配列。<code>array(n)</code> で作ります</td></tr>
+<tr><th>パターン</th><th>合う値</th></tr>
+<tr><td><code>x</code>・<code>_</code></td><td>任意。<code>x</code> は束縛し、<code>_</code> は束縛しない</td></tr>
+<tr><td><code>0</code>・<code>"abc"</code></td><td>等しい整数・文字列</td></tr>
+<tr><td><code>'none</code></td><td>等しいシンボル（<code>Quote{none}</code>）</td></tr>
+<tr><td><code>Head{p, ...}</code></td><td>頭と引数の数が一致し、各引数が <code>p, ...</code> に合う M式</td></tr>
+<tr><td><code>p :: q</code>・<code>[p, q]</code>・<code>[]</code></td><td><code>Cons</code>・<code>Nil</code> のパターン</td></tr>
+<tr><td><code>p @ int</code></td><td><code>p</code> に合い、<code>typeof</code> が <code>int</code> の値</td></tr>
 </table>
-
-<h2>シンボル</h2>
-<p>シンボルは名前そのものを表す値です。<code>'apple</code> のように <code>'</code> を付けて書きます。<code>'</code> がないと、<code>apple</code> という変数の値を取り出そうとします。</p>
-<p><code>true</code>・<code>false</code>・<code>none</code> もシンボルです。<code>if</code> は <code>false</code> だけを「成り立たない」とみなします。<code>0</code> や <code>none</code> は成り立つ側です。</p>
-
-<h2>文字列</h2>
 <div class="example">
-<p class="file">t3_strings.pk</p>
-<pre class="pk">s := &quot;planck&quot;
-println(strlen(s))
-println(substr(s, 0, 3))
-println(strcat(s, &quot;!&quot;))
-println(ord(s, 0))
-n := 3
-put(f&quot;{s} は {strlen(s)} 文字。n = {n}\n&quot;)</pre>
-<p class="label">出力</p>
-<pre class="out">6
-&quot;pla&quot;
-&quot;planck!&quot;
-112
-planck は 6 文字。n = 3</pre>
-</div>
-<p><code>strlen</code> は長さ、<code>substr(s, i, j)</code> は <code>i</code> 番目から <code>j - 1</code> 番目まで、<code>strcat</code> は連結です。<code>ord(s, i)</code> は <code>i</code> 番目の文字の番号を返します。位置は 0 から数えます。長さはバイトで数えるので、日本語は 1 文字が 3 バイトです。</p>
-<p>先頭に <code>f</code> を付けた <code>f"..."</code> の中では、<code>{式}</code> の所に式の値が入ります。</p>
+<p class="file">t3_list.pk</p>
+<pre class="pk">len := (Nil{}) -&gt; 0 | (_ :: xs) -&gt; 1 + len(xs)
+println(len([5, 6, 7]))
 
-<h2>M式</h2>
-<p><code>名前{値, ...}</code> は M式です。頭（ヘッド）の名前と、いくつかの引数でできた木です。</p>
-<div class="example">
-<p class="file">t3_mexpr.pk</p>
-<pre class="pk">p := Point{3, 4}
-println(p)
-println(head(p))
-println(arity(p))
-println(arg(p, 1))
-println(Point{1, 2} == Point{1, 2})
-println(push(p, 5))</pre>
-<p class="label">出力</p>
-<pre class="out">Point{3, 4}
-Point
-2
-4
-true
-Point{3, 4, 5}</pre>
-</div>
-<p><code>head</code> は頭、<code>arity</code> は引数の数、<code>arg(m, i)</code> は <code>i</code> 番目の引数です。<code>push</code> は引数を 1 つ足した新しい M式を返します。<code>==</code> は中身まで比べます。</p>
-<p>M式は前もって宣言する必要がありません。<code>Point{3, 4}</code> と書けば、その場で <code>Point</code> という頭の M式ができます。データを表すのにも、あとで見るようにプログラムそのものを表すのにも使います。</p>
-<p>頭の名前と <code>{</code> の間に空白は入れません。</p>
+sum := ([]) -&gt; 0 | (x :: xs) -&gt; x + sum(xs)
+println(sum([1, 2, 3, 4]))
 
-<h2>リストと組</h2>
-<p>リストは <code>[1, 2, 3]</code> と書きます。中身は <code>Cons{先頭, 残り}</code> をつないだ M式で、最後が空のリスト <code>Nil{}</code> です。<code>x :: xs</code> は <code>Cons{x, xs}</code> と同じで、リストの先頭に要素を足します。</p>
-<div class="example">
-<p class="file">t3_lists.pk</p>
-<pre class="pk">xs := [1, 2, 3]
-println(xs)
-ys := 0 :: xs
-println(ys)
-
+swap2 := ([a, b]) -&gt; [b, a] | (xs) -&gt; xs
 use(&quot;pretty&quot;)
-put(f&quot;{ys}\n&quot;)
-
-println(())
-println((1, &quot;a&quot;))</pre>
+put(f&quot;{swap2([1, 2])} {swap2([1, 2, 3])}\n&quot;)</pre>
 <p class="label">出力</p>
-<pre class="out">Cons{1, Cons{2, Cons{3, Nil{}}}}
-Cons{0, Cons{1, Cons{2, Cons{3, Nil{}}}}}
-[0, 1, 2, 3]
-Tuple{}
-Tuple{1, &quot;a&quot;}</pre>
+<pre class="out">3
+10
+[2, 1] [1, 2, 3]</pre>
 </div>
-<p><code>println</code> はリストを <code>Cons</code> の形で書きます。<code>use("pretty")</code> で整形のライブラリを読むと、<code>f"..."</code> の中では <code>[0, 1, 2, 3]</code> の形で書かれます。ライブラリは<a href="5.html">5 章</a>でくわしく扱います。</p>
-<p><code>(1, "a")</code> は組で、<code>Tuple{1, "a"}</code> という M式です。<code>()</code> は空の組です。</p>
+<div class="example">
+<p class="file">t3_type.pk</p>
+<pre class="pk">describe := (n @ int) -&gt; f&quot;整数 {n}&quot;
+          | (s @ string) -&gt; f&quot;文字列 {s}&quot;
+          | (_) -&gt; &quot;そのほか&quot;
+put(describe(1)); put(&quot;\n&quot;)
+put(describe(&quot;abc&quot;)); put(&quot;\n&quot;)
+put(describe(&#x27;x)); put(&quot;\n&quot;)</pre>
+<p class="label">出力</p>
+<pre class="out">整数 1
+文字列 abc
+そのほか</pre>
+</div>
 
-<nav class="pager"><a class="prev" href="2.html"><small>前のページ</small>2. 変数と関数</a><a class="next" href="4.html"><small>次のページ</small>4. パターンで分ける</a></nav>
+<h2>場合の追加</h2>
+<div class="example">
+<p class="file">t3_extend.pk</p>
+<pre class="pk">greet := (_) -&gt; &quot;hello&quot;
+put(greet(&quot;en&quot;)); put(&quot;\n&quot;)
+
+greet = (&quot;ja&quot;) -&gt; &quot;こんにちは&quot; | greet
+put(greet(&quot;ja&quot;)); put(&quot;\n&quot;)
+put(greet(&quot;fr&quot;)); put(&quot;\n&quot;)</pre>
+<p class="label">出力</p>
+<pre class="out">hello
+こんにちは
+hello</pre>
+</div>
+<p>融合は値なので、既存の関数の前に場合を足して代入し直せます。</p>
+
+<h2>match</h2>
+<div class="example">
+<p class="file">t3_match.pk</p>
+<pre class="pk">classify(n) := match n {
+    0 -&gt; &quot;zero&quot;
+    n if n &lt; 0 -&gt; &quot;negative&quot;
+    n if n % 2 == 0 -&gt; &quot;even&quot;
+    _ -&gt; &quot;odd&quot;
+}
+put(classify(0)); put(&quot; &quot;)
+put(classify(-4)); put(&quot; &quot;)
+put(classify(6)); put(&quot; &quot;)
+put(classify(7)); put(&quot;\n&quot;)</pre>
+<p class="label">出力</p>
+<pre class="out">zero negative even odd</pre>
+</div>
+<p><code>match e { p -> a ... }</code> は <code>e</code> を1回評価し、場合を上から試します。<code>p if c</code> はガードで、<code>c</code> が偽なら次の場合に進みます。</p>
+
+<h2>記号微分</h2>
+<div class="example">
+<p class="file">t3_deriv.pk</p>
+<pre class="pk">d := (n @ int, x) -&gt; 0
+   | (y @ symbol, x) -&gt; (if (y == x) 1 else 0)
+   | (Add{a, b}, x) -&gt; Add{d(a, x), d(b, x)}
+   | (Mul{a, b}, x) -&gt; Add{Mul{d(a, x), b}, Mul{a, d(b, x)}}
+
+println(d(&#x27;Add{x, 3}, &#x27;x))
+println(d(&#x27;Mul{x, y}, &#x27;x))</pre>
+<p class="label">出力</p>
+<pre class="out">Add{1, 0}
+Add{Mul{1, y}, Mul{x, 0}}</pre>
+</div>
+<p><code>'Add{x, 3}</code> はクオートで、評価せずに M式のまま渡します（<a href="8.html">8章</a>）。融合の途中に置く <code>if ... else ...</code> は括弧で囲みます。<code>else</code> の右は式全体を読むので、括弧がないと次の <code>| ...</code> まで取り込みます。簡約まで入れた版は <a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/examples/deriv.pk">planck/examples/deriv.pk</a> です。</p>
+
+<nav class="pager"><a class="prev" href="2.html"><small>前のページ</small>2. 値と M式</a><a class="next" href="4.html"><small>次のページ</small>4. ライブラリ</a></nav>
 </main>
 </div>
-<footer><div class="inner">planck — <a href="https://github.com/nineties/hex-to-compiler">nineties/hex-to-compiler</a></div></footer>
+<footer><div class="inner"><a href="https://github.com/nineties/hex-to-compiler">github.com/nineties/hex-to-compiler</a></div></footer>
 <script src="../assets/highlight.js"></script>
 </body>
 </html>

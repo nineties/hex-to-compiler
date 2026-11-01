@@ -3,14 +3,15 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>init.pk と M式 | planck</title>
+<title>init.pk と M式 | hex-to-compiler</title>
 <link rel="stylesheet" href="../assets/style.css">
 </head>
 <body>
 <header class="site-header"><div class="inner">
-<a class="logo" href="../index.html">planck<span>.</span></a>
+<a class="logo" href="../index.html">hex-to-compiler</a>
 <nav class="site-nav">
-<a href="../tutorial/index.html">チュートリアル</a>
+<a href="../index.html">概要</a>
+<a href="../tutorial/index.html">速習</a>
 <a href="../reference/index.html">リファレンス</a>
 <a class="here" href="../implementation/index.html">処理系の実装</a>
 <a href="https://github.com/nineties/hex-to-compiler">GitHub</a>
@@ -20,19 +21,19 @@
 <nav class="toc" aria-label="処理系の実装の目次"><details open><summary>処理系の実装の目次</summary>
 <h2>処理系の実装</h2>
 <ol>
-<li><a href="index.html">全体の地図</a></li>
+<li><a href="index.html">構成</a></li>
 <li><a href="bootstrap.html">機械語から planck0 まで</a></li>
-<li><a href="planck0.html">planck0 の中身</a></li>
+<li><a href="planck0.html">planck0</a></li>
 <li><a class="here" href="init.html">init.pk と M式</a></li>
 <li><a href="peg.html">packrat パーサ</a></li>
-<li><a href="syntax.html">構文を planck で書く</a></li>
+<li><a href="syntax.html">構文の定義</a></li>
 </ol></details></nav>
 <main>
 <h1>init.pk と M式</h1>
-<p class="lead">planck0 が最初に読むのが <a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/init.pk">planck/init.pk</a> です。まだ M式しか読めないので、全部 M式で書かれています。111 行で、この先で使う関数と表を用意します。</p>
+<p class="lead">planck0 が最初に読むのが <a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/init.pk">planck/init.pk</a> です。この時点のリーダは M式しか読まないので、111行すべて M式で書かれています。以降で使う関数と表を定義します。</p>
 
-<h2>M式で書くということ</h2>
-<p>M式は「頭{引数, ...}」だけでできた書き方です。<code>x + 1</code> のような演算子も <code>if</code> もないので、全部を特殊形式と関数の呼び出しで書きます。たとえば <code>not</code> はこうです。</p>
+<h2>M式だけで書く</h2>
+<p>演算子も <code>if</code> の構文もないので、すべて特殊形式と関数呼び出しで書きます。<code>not</code> の定義は次のとおりです。</p>
 <div class="example">
 <p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/init.pk#L12-L15">planck/init.pk:12–15</a></p>
 <pre class="pk">&quot; === Basic Functions === &quot;
@@ -40,11 +41,11 @@ Def{not, Fusion{
     Lambda{Tuple{Quote{false}}, true},
     Lambda{Tuple{_}, false}}}</pre>
 </div>
-<p><code>Fusion</code> で 2 つの <code>Lambda</code> をつないでいます。引数が <code>false</code> なら 1 つめ、それ以外は 2 つめが選ばれます。パターンの <code>Quote{false}</code> は値 <code>false</code> そのものに合うパターンです。トップレベルに置いた文字列 <code>" ... "</code> は何もしないので、コメントとして使っています。</p>
-<p>最初の 3 行は <code>true</code>・<code>false</code>・<code>none</code> を、同じ名前のシンボルとして定義します（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/init.pk#L8-L10"><code>planck/init.pk:8–10</code></a>）。</p>
+<p><code>Fusion</code> で2つの <code>Lambda</code> をつなぎ、引数が <code>false</code> なら1つ目、それ以外は2つ目を選びます。<code>Quote{false}</code> はシンボル <code>false</code> に合うパターンです。トップレベルの文字列 <code>" ... "</code> は評価しても何もしないので、コメントとして使っています。</p>
+<p>冒頭で <code>true</code>・<code>false</code>・<code>none</code> を同名のシンボルに束縛します（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/init.pk#L8-L10"><code>planck/init.pk:8–10</code></a>）。</p>
 
 <h2>表</h2>
-<p>次は表（ハッシュ表）です。planck0 の組み込みにあるのは配列とハッシュ値までです。表そのものは init.pk が配列で組み立てます（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/init.pk#L18-L77"><code>planck/init.pk:18–77</code></a>）。</p>
+<p>planck0 の組み込みは配列と <code>hash</code> までで、ハッシュ表は init.pk が配列で実装します（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/init.pk#L18-L77"><code>planck/init.pk:18–77</code></a>）。</p>
 <div class="example">
 <p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/init.pk#L18-L26">planck/init.pk:18–26</a></p>
 <pre class="pk">&quot; A table is an array | buckets | number of entries |. Each bucket is a chain of entries &quot;
@@ -57,10 +58,10 @@ Def{table, Lambda{Tuple{}, Do{
     t}}}
 </pre>
 </div>
-<p>表は「バケツの配列」と「項目の数」の 2 つを持つ配列です。項目が増えてバケツの数を超えると、バケツを倍にします。キーは <code>eq</code> で比べます。パーサのメモや規則の表、ライブラリの読み込み済みの印など、この先のあちこちで使います。</p>
+<p>表はバケットの配列と項目数を持つ配列で、項目数がバケット数を超えるとバケットを倍にします。キーは <code>eq</code> で比べます。パーサのメモ表、規則の表、<code>use</code> の読み込み済みの記録などに使います。</p>
 
 <h2>ファイルを読む</h2>
-<p><code>load</code> はファイルを読んで 1 つずつ評価します。やっていることは planck0 の <code>interpret_file</code> と同じで、そのときの <code>parse</code> と <code>eval</code> を使います。</p>
+<p><code>load</code> は planck0 の <code>interpret_file</code> と同じく、その時点の <code>parse</code> と <code>eval</code> でファイルを1式ずつ評価します。</p>
 <div class="example">
 <p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/init.pk#L81-L99">planck/init.pk:81–99</a></p>
 <pre class="pk">Def{load, Lambda{Tuple{path}, Do{
@@ -83,10 +84,10 @@ Def{table, Lambda{Tuple{}, Do{
                 Set{s, Apply{arg, Tuple{r, 1}}}}}}}},
     none}}}</pre>
 </div>
-<p><code>use</code> は <code>load</code> に読み込み済みの印を付けたものです（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/init.pk#L103-L106"><code>planck/init.pk:103–106</code></a>）。</p>
+<p><code>use</code> は読み込み済みを記録する <code>load</code> です（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/init.pk#L103-L106"><code>planck/init.pk:103–106</code></a>）。</p>
 
 <h2>構文に切り替える</h2>
-<p>最後の 2 行で packrat パーサと構文を読み込みます。</p>
+<p>末尾で packrat パーサと構文を読み込みます。</p>
 <div class="example">
 <p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/init.pk#L108-L111">planck/init.pk:108–111</a></p>
 <pre class="pk">&quot; === Syntax === &quot;
@@ -94,12 +95,12 @@ Def{table, Lambda{Tuple{}, Do{
 Apply{load, Tuple{&quot;planck/peg.pk&quot;}}
 Apply{load, Tuple{&quot;planck/syntax.pk&quot;}}</pre>
 </div>
-<p><code>planck/peg.pk</code> は M式で書いたパーサです（<a href="peg.html">次のページ</a>）。<code>planck/syntax.pk</code> はそのパーサで planck の構文を定義し、最後に <code>parse</code> を差し替えます（<a href="syntax.html">その次のページ</a>）。<code>syntax.pk</code> を読み終えると、そのあとに読むファイルはすべて planck の構文で読まれます。<code>planck/lib</code> のライブラリも、利用者のプログラムもそうです。</p>
+<p><code>planck/peg.pk</code> は M式で書いたパーサ（<a href="peg.html">packrat パーサ</a>）、<code>planck/syntax.pk</code> はそのパーサで planck の構文を定義して <code>parse</code> を差し替えるファイルです（<a href="syntax.html">構文の定義</a>）。以降に読むファイルは、<code>planck/lib</code> も利用者のプログラムも planck の構文で読まれます。</p>
 
-<nav class="pager"><a class="prev" href="planck0.html"><small>前のページ</small>planck0 の中身</a><a class="next" href="peg.html"><small>次のページ</small>packrat パーサ</a></nav>
+<nav class="pager"><a class="prev" href="planck0.html"><small>前のページ</small>planck0</a><a class="next" href="peg.html"><small>次のページ</small>packrat パーサ</a></nav>
 </main>
 </div>
-<footer><div class="inner">planck — <a href="https://github.com/nineties/hex-to-compiler">nineties/hex-to-compiler</a></div></footer>
+<footer><div class="inner"><a href="https://github.com/nineties/hex-to-compiler">github.com/nineties/hex-to-compiler</a></div></footer>
 <script src="../assets/highlight.js"></script>
 </body>
 </html>
