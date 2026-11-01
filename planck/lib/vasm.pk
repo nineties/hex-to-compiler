@@ -658,9 +658,10 @@ vasm_assign(at, st, x, t) := {
     vasm_set_status(st, x, 'init)
 }
 
-vasm_leak_all(at, st) := each(x -> {
-    if (vasm_owns(arg(table_get(vasm_info, x, none), 0), vasm_status(st, x))) vasm_fail(at, 'leak, f"{symname(x)} still owns a value at the end of the function")
-}, vasm_vars(st))
+# What an own value still owns at the end of its block or of the function is released there (U6, koichi msg 20354):
+# the contents of a box, the fields of a struct and the elements of an array that are not moved out.
+# So nothing is checked; the function is kept to mark the places where the release happens.
+vasm_leak_all(at, st) := none
 
 # the state after if: both branches must agree on own values
 vasm_merge(at, a, b) := if (vasm_dead(a)) b else if (vasm_dead(b)) a else {
@@ -788,8 +789,6 @@ vasm_block(ss, st) := {
         }
     }
     each((Tuple{x, at}) -> {
-        owned := not vasm_dead(st) and vasm_owns(arg(table_get(vasm_info, x, none), 0), vasm_status(st, x))
-        if (owned) vasm_fail(at, 'leak, f"{symname(x)} still owns a value at the end of its block")
         table_set(vasm_info, x, none)
         table_set(st, x, none)
     }, declared)

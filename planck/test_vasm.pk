@@ -394,13 +394,24 @@ ng(vasm{|
 |}, 'borrowed)
 
 # an own value is not freed
-ng(vasm{|
-    fn leak() -> i64 {
+# an own value that is left at the return is released there (U6)
+ok(vasm{|
+    fn dropped_at_return() -> i64 {
         var p: own i64
         p = box(1)
-        return 0    # NG
+        return 0
     }
-|}, 'leak)
+    fn dropped_at_end() {
+        var p: own i64
+        p = box(1)
+    }
+    fn dropped_at_block_end(c: bool) {
+        if (c) {
+            var q: own i64
+            q = box(2)
+        }
+    }
+|})
 
 # an own value is overwritten
 ng(vasm{|
@@ -460,7 +471,7 @@ ng(vasm{|
 check(map((VasmErr{k, _, _}) -> k, vasm_errors(this_file, vasm{|
     fn a1() { var v: i64; v = v }
     fn a2() { var v: i64; v = 1 }
-    fn a3() { var p: own i64; p = box(1) }
+    fn a3() { var p: own i64; p = box(1); p = box(2) }
 |})), ['uninit, 'leak])
 
 # the message with the position, at the second free
@@ -600,13 +611,13 @@ ng(vasm{|
         a[0] = 1    # NG
     }
 |}, 'borrowed)
-ng(vasm{|
-    fn array_leak(n: i64) {
+ok(vasm{|
+    fn array_dropped(n: i64) {
         var a: own [u8]
         a = alloc(n, 0)
-        return      # NG
+        return
     }
-|}, 'leak)
+|})
 ng(vasm{|
     fn bare_array() {
         var a: [i64]    # NG
