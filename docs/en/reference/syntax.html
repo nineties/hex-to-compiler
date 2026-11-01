@@ -44,6 +44,7 @@
 <tr><td><code>x = e</code></td><td><code>Set{x, e}</code></td></tr>
 <tr><td><code>a[i] = e</code></td><td><code>Apply{_index_set, Tuple{a, i, e}}</code></td></tr>
 <tr><td><code>f | g</code></td><td><code>Fusion{f, g}</code></td></tr>
+<tr><td><code>(p, ...) if c -&gt; e | g</code>, <code>p if c -&gt; e | g</code></td><td class="wrap">a function that calls <code>g</code> with its arguments when they do not match the parameters or <code>c</code> is false</td></tr>
 <tr><td><code>(p, ...) -> e</code>, <code>p -> e</code></td><td><code>Lambda{Tuple{p, ...}, e}</code></td></tr>
 <tr><td><code>c ? a : b</code></td><td><code>If{c, a, b}</code></td></tr>
 <tr><td><code>a or b</code>, <code>a and b</code></td><td><code>If{a, true, b}</code>, <code>If{a, b, false}</code></td></tr>
@@ -63,8 +64,7 @@
 <tr><td><code>while (c) e</code></td><td><code>While{c, e}</code></td></tr>
 <tr><td><code>for (p in e) a</code></td><td><code>Apply{peg_for, Tuple{e, Lambda{Tuple{p}, a}}}</code></td></tr>
 <tr><td><code>return e</code>, <code>return</code>, <code>break</code>, <code>continue</code></td><td><code>Perform{Return{e}}</code>, <code>Perform{Return{none}}</code>, <code>Perform{Break{}}</code>, <code>Perform{Continue{}}</code></td></tr>
-<tr><td><code>match e { p -> a; ... }</code></td><td><code>Apply{Fusion{Lambda{Tuple{p}, a}, ...}, Tuple{e}}</code></td></tr>
-<tr><td><code>match e { p if c -> a; ... }</code></td><td>the arm applies when <code>p</code> matches and <code>c</code> is true</td></tr>
+<tr><td><code>match e { f }</code></td><td><code>Apply{f, Tuple{e}}</code></td></tr>
 <tr><td><code>f"a{e}b"</code></td><td class="wrap"><code>Apply{_strcat, Tuple{Apply{_strcat, Tuple{"a", Apply{_to_text, Tuple{e}}}}, "b"}}</code></td></tr>
 <tr><td><code>fun f(p, ...) e</code> in a block</td><td class="wrap"><code>Def{f, none}</code> at the top of the block, and <code>Set{f, Lambda{Tuple{p, ...}, e}}</code> in its place</td></tr>
 <tr><td><code>handle e with h</code></td><td><code>Handle{e, h}</code></td></tr>
@@ -94,7 +94,7 @@ println(&#x27;[1, 2])
 println(&#x27;(if (c) a))
 println(&#x27;(while (c) e))
 println(&#x27;(for (x in xs) f(x)))
-println(&#x27;(match e { 0 -&gt; a; _ -&gt; b }))
+println(&#x27;(match e { 0 -&gt; a | _ -&gt; b }))
 println(&#x27;(handle e with h))
 println(&#x27;(perform E{}))
 println(&#x27;(record T(a, b)))</pre>
@@ -131,7 +131,7 @@ Apply{_record_declare, Tuple{Quote{T}, Quote{Tuple{a, b}}}}</pre>
 </ul>
 
 <h2>if and while</h2>
-<p>The condition of <code>if</code> and <code>while</code> is in parentheses. The body <code>a</code>, <code>b</code>, <code>e</code> is any expression. A block <code>{ ... }</code> is the usual body of several expressions.</p>
+<p>The condition of <code>if</code> and <code>while</code> is in parentheses. The body <code>e</code> of <code>while</code> is any expression, and the branches <code>a</code> and <code>b</code> of <code>if</code> are expressions without <code>|</code> outside of brackets, so <code>if (c) a else b | g</code> is <code>(if (c) a else b) | g</code>. A block <code>{ ... }</code> is the usual body of several expressions.</p>
 <p><code>else</code> belongs to the nearest <code>if</code> that has no <code>else</code>, so <code>if (a) if (b) x else y</code> is <code>if (a) { if (b) x else y }</code>. <code>else if (c) ...</code> is <code>else</code> followed by an <code>if</code> expression. An <code>if</code> is an expression: <code>y = if (c) 1 else 2</code>.</p>
 
 <h2>record</h2>
@@ -203,17 +203,26 @@ println(unparse(u[Apply{&#x27;_mul, Tuple{a @ int, b @ int}} if a &gt; 1 -&gt; a
 <p><code>for (p in e) a</code> evaluates <code>a</code> for each element of the list or the vector <code>e</code>, with the elements matched by the pattern <code>p</code>, and has the value <code>none</code>. The variables of <code>a</code> outside the loop are shared, so <code>a</code> can assign them.</p>
 
 <h2>return, break and continue</h2>
-<p><code>return e</code> ends the call of the function that contains it, with the value <code>e</code> (<code>none</code> without <code>e</code>; <code>e</code> must start on the same line). <code>break</code> ends the innermost <code>while</code> or <code>for</code> that contains it.</p>
+<p><code>return e</code> ends the call of the function that contains it, with the value <code>e</code> (<code>none</code> without <code>e</code>; <code>e</code> must start on the same line and is an expression up to <code>-&gt;</code>, without <code>|</code>, <code>:=</code> and <code>=</code> outside of brackets). <code>break</code> ends the innermost <code>while</code> or <code>for</code> that contains it.</p>
 <p>They are effects: the function is translated to <code>Handle{body, (Return{v}, k) -> v}</code> when its body has a <code>return</code>, and the loop to <code>Handle{loop, (Break{}, k) -> none}</code> when its body has a <code>break</code>. <code>continue</code> goes on to the next round of the innermost <code>while</code> or <code>for</code> that contains it: the body of the loop is translated to <code>Handle{body, (Continue{}, k) -> none}</code> when it has a <code>continue</code>. A <code>continue</code> outside of a loop stops the program with <code>unhandled effect: Continue{}</code>.</p>
 <p>A <code>return</code> in a <code>for</code> body or in an arm of <code>match</code> belongs to the function around them, and one in a function written inside belongs to that function.</p>
 
 <h2>match</h2>
-<p><code>match</code> evaluates <code>e</code> once and selects the first arm whose pattern <code>p</code> matches it. The arms are separated by <code>;</code> or newlines. The body <code>a</code> is any expression.</p>
-<p>The guard <code>if c</code> is evaluated after <code>p</code> matched, with the variables of <code>p</code>; when it is false the arms after it are tried. <code>e</code> and <code>c</code> are expressions up to <code>?:</code>, so a lambda needs parentheses. When no arm applies the call fails as a call of a function with no matching pattern does.</p>
-<p><code>match</code> binds <code>%v</code> and <code>%r0</code>, <code>%r1</code> ... in the arms with guards, which no identifier can name.</p>
+<p><code>match e { f }</code> evaluates <code>e</code> once and calls the function <code>f</code> with it. <code>f</code> is an expression up to <code>|</code>, usually functions of one parameter joined by <code>|</code>, the arms, so the first arm whose pattern matches <code>e</code> is selected. An arm takes one parameter: <code>(a, b) -&gt; x</code> takes two, and <code>((a, b)) -&gt; x</code> takes a tuple. A <code>|</code> may start a line, and the arms after the first one are usually written so:</p>
+<pre>match e {
+    p -&gt; a
+  | q -&gt; b
+}</pre>
+<p>The guard <code>if c</code> of <code>(p, ...) if c -&gt; e | g</code> is evaluated after the parameters matched, with their variables. When it is false, or the arguments do not match the parameters, <code>g</code> is called with the same arguments, so <code>g</code> is the arms after it. Without <code>| g</code> the call fails as a call of a function with no matching pattern does. <code>g</code> is what is joined after the function by <code>|</code> in the text, also when the function is in parentheses: <code>(p if c -&gt; a) | g</code>. A function with a guard that is given by a variable, as <code>h | g</code> after <code>h := p if c -&gt; a</code>, does not call <code>g</code>. The guard and <code>e</code> of <code>match</code> are expressions up to <code>?:</code>, so a lambda needs parentheses. The function binds variables whose names start with <code>%</code>, which no identifier can name.</p>
 
 <h2>Parameter patterns</h2>
-<p>Parameters <code>p</code> are patterns: unary expressions such as <code>x</code>, <code>1</code>, <code>'none</code>, <code>Cons{x, xs}</code> or <code>x @ int</code>, and <code>p :: q</code> for <code>Cons{p, q}</code>, e.g. <code>(x :: xs) -> ...</code> and <code>f(x :: y :: rest) := ...</code>. The meaning of patterns is in <a href="values.html#patterns">Values, patterns, M-expressions</a>.</p>
+<p>Parameters <code>p</code> and the patterns of <code>for</code> are written as expressions up to <code>or</code>, and are the M-expressions of the table above, matched as the patterns of <a href="values.html#patterns">Values, patterns, M-expressions</a>, with these rules:</p>
+<ul>
+<li>The name of an operator or of a called function is a symbol: <code>a + b</code> is <code>Apply{Quote{_add}, Tuple{a, b}}</code>, <code>-a</code> is <code>Apply{Quote{_sub}, Tuple{0, a}}</code> and <code>f(p, ...)</code> is <code>Apply{Quote{f}, Tuple{p, ...}}</code>, so they match the trees of <code>x + 1</code>, <code>-x</code> and <code>f(1)</code>. <code>a and b</code> and <code>a or b</code> are <code>If{a, b, Quote{false}}</code> and <code>If{a, Quote{true}, b}</code>.</li>
+<li>The other identifiers are variables. The arguments of <code>Head{p, ...}</code> are patterns, so <code>Apply{f, Tuple{x}}</code> matches a call of any function with one argument and binds <code>f</code>.</li>
+<li><code>'e</code> is <code>Quote{e}</code> for the expression <code>e</code>.</li>
+<li>The forms are the operators <code>or and not == != &lt;= &gt;= &lt; &gt; :: + - * / %</code>, the unary <code>-</code> and <code>'</code>, <code>f(p, ...)</code>, <code>p @ type</code>, <code>Head{p, ...}</code>, identifiers, integers, strings, <code>()</code>, <code>(p)</code>, <code>(p, q, ...)</code> and <code>[p, ...]</code>, with the same binding as in expressions: <code>a @ int + b @ int</code> is <code>(a @ int) + (b @ int)</code>.</li>
+</ul>
 
 <h2>Lexical rules</h2>
 <ul>
