@@ -99,20 +99,22 @@ Apply{check, Tuple{Quote{Apply{Apply{Apply{
     Tuple{3}}, Tuple{4}}, Tuple{5}}}, 7}}
 
 " === Recursion === "
-Def{fact, Fusion{
+Def{fact, none}
+Set{fact, Fusion{
     Lambda{Tuple{0}, 1},
     Lambda{Tuple{n}, Apply{_mul, Tuple{n, Apply{fact, Tuple{Apply{_sub, Tuple{n, 1}}}}}}}}}
 Apply{check, Tuple{Quote{Apply{fact, Tuple{10}}}, 3628800}}
 
 " mutual recursion of global functions "
+Def{is_odd, none}
 Def{is_even, Fusion{Lambda{Tuple{0}, true}, Lambda{Tuple{n}, Apply{is_odd, Tuple{Apply{_sub, Tuple{n, 1}}}}}}}
-Def{is_odd, Fusion{Lambda{Tuple{0}, false}, Lambda{Tuple{n}, Apply{is_even, Tuple{Apply{_sub, Tuple{n, 1}}}}}}}
+Set{is_odd, Fusion{Lambda{Tuple{0}, false}, Lambda{Tuple{n}, Apply{is_even, Tuple{Apply{_sub, Tuple{n, 1}}}}}}}
 Apply{check, Tuple{Quote{Apply{is_even, Tuple{10}}}, true}}
 Apply{check, Tuple{Quote{Apply{is_odd, Tuple{7}}}, true}}
 
 " local recursive function "
 Def{sum_to, Lambda{Tuple{n}, Do{
-    Def{loop, Lambda{Tuple{i, acc},
+    Def{loop, none}, Set{loop, Lambda{Tuple{i, acc},
         If{Apply{_gt, Tuple{i, n}},
             acc,
             Apply{loop, Tuple{Apply{_add, Tuple{i, 1}}, Apply{_add, Tuple{acc, i}}}}}}},
@@ -122,7 +124,8 @@ Apply{check, Tuple{Quote{Apply{sum_to, Tuple{100}}}, 5050}}
 Apply{check, Tuple{Quote{Apply{sum_to, Tuple{40000}}}, 800020000}}
 
 " deep recursion (non-tail calls) "
-Def{count_down, Fusion{
+Def{count_down, none}
+Set{count_down, Fusion{
     Lambda{Tuple{0}, 0},
     Lambda{Tuple{n}, Apply{_add, Tuple{1, Apply{count_down, Tuple{Apply{_sub, Tuple{n, 1}}}}}}}}}
 Apply{check, Tuple{Quote{Apply{count_down, Tuple{100000}}}, 100000}}
@@ -258,7 +261,8 @@ Apply{check, Tuple{Quote{Apply{saved_k, Tuple{9}}}, 10}}
 " parse: string -> Tuple{m-expr, rest}, eval: m-expr -> value. "
 
 Def{old_parse, parse}
-Def{expand, Fusion{
+Def{expand, none}
+Set{expand, Fusion{
     Lambda{Tuple{Unless{c, a, b}}, QuasiQuote{If{UnQuote{Apply{expand, Tuple{c}}}, UnQuote{Apply{expand, Tuple{b}}}, UnQuote{Apply{expand, Tuple{a}}}}}},
     Fusion{
         Lambda{Tuple{Def{n, x}}, QuasiQuote{Def{UnQuote{n}, UnQuote{Apply{expand, Tuple{x}}}}}},
@@ -280,6 +284,64 @@ Def{evals_1, evals}
 Def{evals_2, evals}
 Def{eval, old_eval}
 Apply{check, Tuple{Quote{Tuple{evals_0, evals_1, evals_2}}, Tuple{1, 2, 3}}}
+
+" === Names are resolved in the order they are written === "
+
+" defining a name again makes a new variable: the function made before keeps the old one "
+Def{nm_f, Lambda{Tuple{x}, 1}}
+Def{nm_g, Lambda{Tuple{}, Apply{nm_f, Tuple{0}}}}
+Def{nm_f, Lambda{Tuple{x}, 2}}
+Apply{check, Tuple{Quote{Tuple{Apply{nm_g, Tuple{}}, Apply{nm_f, Tuple{0}}}}, Tuple{1, 2}}}
+
+" Set assigns the variable that the function made before refers to "
+Def{nm_h, Lambda{Tuple{}, Apply{nm_f, Tuple{0}}}}
+Set{nm_f, Lambda{Tuple{x}, 3}}
+Apply{check, Tuple{Quote{Tuple{Apply{nm_g, Tuple{}}, Apply{nm_h, Tuple{}}, Apply{nm_f, Tuple{0}}}}, Tuple{1, 3, 3}}}
+
+" Def{f, none} declares a name without a value to be filled by Set "
+Def{nm_up, none}
+Set{nm_up, Lambda{Tuple{n}, If{Apply{_eq, Tuple{n, 0}}, 0, Apply{_add, Tuple{1, Apply{nm_up, Tuple{Apply{_sub, Tuple{n, 1}}}}}}}}}
+Apply{check, Tuple{Quote{Apply{nm_up, Tuple{5}}}, 5}}
+Def{nm_od, none}
+Def{nm_ev, Lambda{Tuple{n}, If{Apply{_eq, Tuple{n, 0}}, true, Apply{nm_od, Tuple{Apply{_sub, Tuple{n, 1}}}}}}}
+Set{nm_od, Lambda{Tuple{n}, If{Apply{_eq, Tuple{n, 0}}, false, Apply{nm_ev, Tuple{Apply{_sub, Tuple{n, 1}}}}}}}
+Apply{check, Tuple{Quote{Tuple{Apply{nm_ev, Tuple{10}}, Apply{nm_od, Tuple{10}}}}, Tuple{true, false}}}
+
+" Fusion{none, g} is g, and Fusion{f, g} tries f first "
+Def{fz_g, Lambda{Tuple{x}, 1}}
+Apply{check, Tuple{Quote{Apply{_eq, Tuple{Fusion{none, fz_g}, fz_g}}}, true}}
+Def{fz_f, none}
+Set{fz_f, Fusion{fz_f, Lambda{Tuple{0}, 0}}}
+Set{fz_f, Fusion{fz_f, Lambda{Tuple{n}, Apply{_add, Tuple{n, Apply{fz_f, Tuple{Apply{_sub, Tuple{n, 1}}}}}}}}}
+Set{fz_f, Fusion{fz_f, Lambda{Tuple{n}, 99}}}
+Apply{check, Tuple{Quote{Tuple{Apply{fz_f, Tuple{0}}, Apply{fz_f, Tuple{3}}}}, Tuple{0, 6}}}
+
+" Declare{x} is Def{x, none} unless x is a variable of the same place, and its value is none "
+Def{dc_x, 5}
+Def{dc_g, Lambda{Tuple{}, dc_x}}
+Apply{check, Tuple{Quote{Declare{dc_x}}, none}}
+Declare{dc_x}
+Apply{check, Tuple{Quote{Tuple{dc_x, Apply{dc_g, Tuple{}}}}, Tuple{5, 5}}}
+Declare{dc_y}
+Apply{check, Tuple{Quote{dc_y}, none}}
+" in a function: a parameter or a variable of the function, not a variable outside "
+Def{dc_f, Lambda{Tuple{a}, Do{Def{b, 2}, Declare{a}, Declare{b}, Declare{dc_x}, Tuple{a, b, dc_x}}}}
+Apply{check, Tuple{Quote{Apply{dc_f, Tuple{1}}}, Tuple{1, 2, none}}}
+Apply{check, Tuple{Quote{dc_x}, 5}}
+
+" the same in a function: the variables of a block are those of the function "
+Def{nm_blk, Lambda{Tuple{n}, Do{
+    Def{od, none},
+    Def{ev, Lambda{Tuple{m}, If{Apply{_eq, Tuple{m, 0}}, true, Apply{od, Tuple{Apply{_sub, Tuple{m, 1}}}}}}},
+    Set{od, Lambda{Tuple{m}, If{Apply{_eq, Tuple{m, 0}}, false, Apply{ev, Tuple{Apply{_sub, Tuple{m, 1}}}}}}},
+    Apply{ev, Tuple{n}}}}}
+Apply{check, Tuple{Quote{Tuple{Apply{nm_blk, Tuple{10}}, Apply{nm_blk, Tuple{7}}}}, Tuple{true, false}}}
+
+" a variable defined in a function is not visible to the function called from it "
+Def{nm_v, "global"}
+Def{nm_see, Lambda{Tuple{}, nm_v}}
+Def{nm_call, Lambda{Tuple{}, Do{Def{nm_v, "local"}, Apply{nm_see, Tuple{}}}}}
+Apply{check, Tuple{Quote{Apply{nm_call, Tuple{}}}, "global"}}
 
 " === Arrays and tables === "
 Def{arr, Apply{array, Tuple{3}}}

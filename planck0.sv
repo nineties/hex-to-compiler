@@ -428,6 +428,7 @@
 (long arrayS)
 (long plainS)
 (long DefS)
+(long DeclareS)
 (long SetS)
 (long ApplyS)
 (long DoS)
@@ -456,12 +457,28 @@
     (return (get e (+ 2 i)))
     )
 
-(long global_table) ; global variables (sym -> data)
+(long global_table) ; global variables (sym -> cell of the latest definition)
+(long cur_file)     ; the path of the file being loaded (0 while the builtins are made)
+
+; A cell is a global variable: | value | sym | file |. The value is 0 until the
+; definition runs. Definitions are in the order they are compiled: define_global
+; makes a new cell for the name, and the code compiled after it refers to the
+; new cell. file is the path of the file that defines it (0 for a builtin).
+(fun define_global (sym)
+    (var cell (allocate 12))
+    (set cell 0 0)
+    (set cell 1 sym)
+    (set cell 2 cur_file)
+    (if (! (table_update global_table sym cell))
+        (table_insert global_table sym cell))
+    (return cell)
+    )
 
 (fun init_tables ()
     (= symtable (make_table 0x10000 strhash streq))
     (= mexprtable (make_table 0x10000 mexprhash mexpreq))
     (= global_table (make_table 0x1000 symhash symeq))
+    (= cur_file 0)
     )
 
 (fun init_symbols ()
@@ -478,6 +495,7 @@
     (= arrayS   (sym "array"))
     (= plainS   (sym "plain"))
     (= DefS         (sym "Def"))
+    (= DeclareS     (sym "Declare"))
     (= SetS         (sym "Set"))
     (= ApplyS       (sym "Apply"))
     (= DoS          (sym "Do"))
@@ -891,8 +909,18 @@
 ;   never a valid value. Variables are shared locations: closures and
 ;   continuations refer to the same environment.
 ;
-;   Variables defined by top-level Def, and names that are not bound
-;   lexically, are global variables looked up in global_table at run time.
+;   Variables defined by top-level Def are global variables. A global variable
+;   is a cell (| value | sym |). The compiler finds the cell of a name in
+;   global_table, which holds the latest definition at that time, and puts it
+;   in the instruction. Def makes a new cell, so the code compiled before it
+;   keeps the old one. A name which is neither bound lexically nor defined at
+;   the top level is an error at compile time.
+;
+;   Declare{x} is Def{x, none} unless x is already a variable of the place
+;   where Def{x, ...} would define it: at the top level, a global variable
+;   defined by the file being loaded, and otherwise a variable of the same
+;   environment (the function, or the top-level code in a block). Then it does
+;   nothing and its value is none.
 ;
 ; frame (internal, allocated in the heap):
 ;   | caller | code | pc | env | sp | handler | size | operand stack ... |
@@ -910,9 +938,9 @@
 ;   CONST v         push v
 ;   LOAD d i sym    push slot i of the d-th parent environment
 ;   STORE d i       store the stack top to slot i of the d-th parent env
-;   GLOAD sym       push the global variable sym
-;   GDEF sym        define the global variable sym with the stack top
-;   GSET sym        update the global variable sym with the stack top
+;   GLOAD cell      push the value of the global variable cell
+;   GDEF cell       define the global variable cell with the stack top
+;   GSET cell       update the global variable cell with the stack top
 ;   POP             discard the stack top
 ;   JMP off         jump
 ;   JF off          pop, jump if it is false
@@ -1133,8 +1161,21 @@
     (stack_effect 1)
     )
 
+;  the cell of the global variable sym, or stop if there is none
+(fun global_cell (sym)
+    (var cell (table_lookup global_table sym))
+    (if (! cell) (do
+        (eputs "undefined variable: ")
+        (eprint sym)
+        (eputs "\n")
+        (exit 1)
+        ))
+    (return cell)
+    )
+
 (fun compile_var (sym)
     (var ent (cenv_lookup sym))
+    (var cell 0)
     (if ent
         (do
             (emit OP_LOAD)
@@ -1143,8 +1184,9 @@
             (emit sym)
             )
         (do
+            (= cell (global_cell sym))
             (emit OP_GLOAD)
-            (emit sym)
+            (emit cell)
             ))
     (stack_effect 1)
     )
@@ -1267,6 +1309,35 @@
     (stack_effect (- 1 n))
     )
 
+; define x with the stack top where the code is
+(fun compile_define (x)
+    (var slot 0)
+    (if (is_global_scope)
+        (do
+            (emit OP_GDEF)
+            (emit (define_global x))
+            )
+        (do
+            (= slot (cenv_add x))
+            (emit OP_STORE)
+            (emit 0)
+            (emit slot)
+            ))
+    )
+
+; whether x is a variable of the place where the code defines variables
+(fun defined_here (x)
+    (var ent 0)
+    (if (is_global_scope) (do
+        (= ent (table_lookup global_table x))
+        (if (|| (! ent) (|| (! (get ent 2)) (! cur_file))) (return 0))
+        (return (values_equal (get ent 2) cur_file))
+        ))
+    (= ent (cenv_lookup x))
+    (if (&& ent (== (get ent 1) (get cctx CX_LEVEL))) (return 1))
+    (return 0)
+    )
+
 (fun compile_mexpr (e tail)
     (var head (get e 1))
     (var arity (get_header_arg e))
@@ -1274,7 +1345,6 @@
     (var n 0)
     (var x 0)
     (var ent 0)
-    (var slot 0)
     (var saved 0)
     (var l0 0)
     (var l1 0)
@@ -1300,22 +1370,16 @@
         ))
     (if (== head DefS) (do
         (if (|| (!= arity 2) (!= (gettag (get e 2)) SymbolT)) (malformed e))
-        (= x (get e 2))
-        (if (is_global_scope)
-            (do
-                (compile (get e 3) 0)
-                (emit OP_GDEF)
-                (emit x)
-                )
-            (do
-                ; The variable is visible from its definition
-                ; so that recursive functions can be defined.
-                (= slot (cenv_add x))
-                (compile (get e 3) 0)
-                (emit OP_STORE)
-                (emit 0)
-                (emit slot)
-                ))
+        ; The right-hand side refers to the previous variable of the same
+        ; name. The new variable is made after it is compiled.
+        (compile (get e 3) 0)
+        (compile_define (get e 2))
+        (return 0)
+        ))
+    (if (== head DeclareS) (do
+        (if (|| (!= arity 1) (!= (gettag (get e 2)) SymbolT)) (malformed e))
+        (emit_const noneS)
+        (if (! (defined_here (get e 2))) (compile_define (get e 2)))
         (return 0)
         ))
     (if (== head SetS) (do
@@ -1331,7 +1395,7 @@
                 )
             (do
                 (emit OP_GSET)
-                (emit x)
+                (emit (global_cell x))
                 ))
         (return 0)
         ))
@@ -1754,23 +1818,20 @@
     )
 
 (fun op_gload ()
-    (var s (fetch))
-    (var v (table_lookup global_table s))
-    (if (! v) (runtime_error "undefined variable: " s))
+    (var cell (fetch))
+    (var v (get cell 0))
+    (if (! v) (runtime_error "undefined variable: " (get cell 1)))
     (vm_push v)
     )
 
 (fun op_gdef ()
-    (var s (fetch))
-    (var v (get (- vm_sp 4)))
-    (if (! (table_update global_table s v))
-        (table_insert global_table s v))
+    (var cell (fetch))
+    (set cell 0 (get (- vm_sp 4)))
     )
 
 (fun op_gset ()
-    (var s (fetch))
-    (if (! (table_update global_table s (get (- vm_sp 4))))
-        (runtime_error "undefined variable: " s))
+    (var cell (fetch))
+    (set cell 0 (get (- vm_sp 4)))
     )
 
 (fun op_pop () (-= vm_sp 4))
@@ -1819,7 +1880,8 @@
 (fun op_fusion ()
     (var g (vm_pop))
     (var f (vm_pop))
-    (vm_push (fusion f g))
+    ; none | g is g, so that the first f(p) = e after fun f is the function itself.
+    (if (== f noneS) (vm_push g) (vm_push (fusion f g)))
     )
 
 (fun op_handle ()
@@ -2451,6 +2513,14 @@
 
 (fun p_parse (s) (return (parse s)))
 
+; _set_file(path) makes path the file being loaded and returns the previous one
+(fun p_set_file (path)
+    (var prev cur_file)
+    (= cur_file path)
+    (if prev (return prev))
+    (return noneS)
+    )
+
 (fun p_exit (n)
     (check_int "exit" n)
     (exit (fixnum_to_int n))
@@ -2463,7 +2533,7 @@
     (set prim 1 fn)
     (set prim 2 s)
     (set prim 3 kind)
-    (table_insert global_table s prim)
+    (set (define_global s) 0 prim)
     )
 
 (fun init_prims ()
@@ -2520,6 +2590,7 @@
     (defprim "bit_sar" 2 p_bit_sar PRIM_NATIVE)
     (defprim "argv" 0 p_argv PRIM_NATIVE)
     (defprim "exit"    1 p_exit    PRIM_NATIVE)
+    (defprim "_set_file" 1 p_set_file PRIM_NATIVE)
     (defprim "eval"    1 0         PRIM_EVAL)
     )
 
@@ -2549,9 +2620,10 @@
     )
 
 ; The loop looks up the global variables `parse` and `eval` every time, so
-; a program can replace them (Def{parse, ...}, Def{eval, ...}) and the next
+; a program can replace them (Def{parse, ...}, Def{eval, ...} or Set) and the next
 ; top-level expression is parsed/evaluated by the new definitions. Apply{eval, ...}
-; in a program also calls the replaced eval.
+; in the code compiled after the replacement also calls the replaced eval; the code
+; compiled before keeps the old one unless the replacement is Set{eval, ...}.
 ;   parse: String -> Tuple{m-expr, rest String}   (initially the builtin parse)
 ;     When only white space is left, parse returns Tuple{Eof{}, rest} and the
 ;     loop stops. A replacement parse should pass Eof{} through.
@@ -2568,6 +2640,8 @@
     (var ret 0)
     (var e 0)
     (var more 1)
+    (var saved_file cur_file)
+    (= cur_file (str path))
     (while more (do
         (= ret (call_global parseS text))
         (if (|| (! (has_head TupleS ret))
@@ -2592,6 +2666,7 @@
             (= text (tup_get ret 1))
             ))
         ))
+    (= cur_file saved_file)
     )
 
 (fun main (argc argv)

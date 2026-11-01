@@ -37,8 +37,9 @@
 <h2>Top level</h2>
 <p><code>main</code> prepares the state, reads <code>planck/init.pk</code>, and then reads the program file given as the first argument.</p>
 <div class="example">
-<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L2597-L2609">planck0.sv:2597–2609</a></p>
-<pre>(fun main (argc argv)
+<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L2671-L2683">planck0.sv:2671–2683</a></p>
+<pre>
+(fun main (argc argv)
     (init_heap)
     (init_tables)
     (init_symbols)
@@ -49,16 +50,16 @@
     (interpret_file &quot;planck/init.pk&quot;)
     (= cmd_argc argc)
     (= cmd_argv argv)
-    (if (&gt; argc 1) (interpret_file (get argv 1)))
-    )</pre>
+    (if (&gt; argc 1) (interpret_file (get argv 1)))</pre>
 </div>
-<p><code>interpret_file</code> reads a file (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L2566-L2595"><code>planck0.sv:2566–2595</code></a>). For each expression it calls the global variables <code>parse</code> and <code>eval</code> again through <code>call_global</code>. <code>call_global</code> builds <code>Apply{name, Tuple{arg}}</code>, compiles it and runs it (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L2561-L2564"><code>planck0.sv:2561–2564</code></a>). Therefore a program that replaces <code>parse</code> has the next expression read by the new <code>parse</code>. The syntax of planck enters by this mechanism.</p>
+<p><code>interpret_file</code> reads a file (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L2638-L2670"><code>planck0.sv:2638–2670</code></a>). For each expression it calls the global variables <code>parse</code> and <code>eval</code> again through <code>call_global</code>. <code>call_global</code> builds <code>Apply{name, Tuple{arg}}</code>, compiles it and runs it (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L2633-L2636"><code>planck0.sv:2633–2636</code></a>). Therefore a program that replaces <code>parse</code> has the next expression read by the new <code>parse</code>. The syntax of planck enters by this mechanism.</p>
 <div class="example">
-<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L2551-L2560">planck0.sv:2551–2560</a></p>
+<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L2622-L2632">planck0.sv:2622–2632</a></p>
 <pre>; The loop looks up the global variables `parse` and `eval` every time, so
-; a program can replace them (Def{parse, ...}, Def{eval, ...}) and the next
+; a program can replace them (Def{parse, ...}, Def{eval, ...} or Set) and the next
 ; top-level expression is parsed/evaluated by the new definitions. Apply{eval, ...}
-; in a program also calls the replaced eval.
+; in the code compiled after the replacement also calls the replaced eval; the code
+; compiled before keeps the old one unless the replacement is Set{eval, ...}.
 ;   parse: String -&gt; Tuple{m-expr, rest String}   (initially the builtin parse)
 ;     When only white space is left, parse returns Tuple{Eof{}, rest} and the
 ;     loop stops. A replacement parse should pass Eof{} through.
@@ -99,9 +100,9 @@
 <p>The heap is a 1 GB region allocated by <code>mmap2</code> at startup and carved from the front. There is no GC (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L36-L67"><code>planck0.sv:36–67</code></a>).</p>
 
 <h2>The M-expression reader</h2>
-<p>The builtin <code>parse</code> reads four kinds of text: symbols, integers, strings, and <code>Head{...}</code>, where a <code>{</code> follows a symbol directly (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L784-L874"><code>planck0.sv:784–874</code></a>). An M-expression has at most 16 arguments.</p>
+<p>The builtin <code>parse</code> reads four kinds of text: symbols, integers, strings, and <code>Head{...}</code>, where a <code>{</code> follows a symbol directly (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L802-L892"><code>planck0.sv:802–892</code></a>). An M-expression has at most 16 arguments.</p>
 <div class="example">
-<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L830-L862">planck0.sv:830–862</a></p>
+<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L848-L880">planck0.sv:848–880</a></p>
 <pre>(fun parse_ (ret raw)
     (= raw (skip_spaces raw))
 
@@ -149,14 +150,15 @@ Tuple{Eof{}, &quot;&quot;}</pre>
 </div>
 
 <h2>The compiler</h2>
-<p><code>compile</code> turns an integer or a string into a constant and a symbol into a variable reference, and passes an M-expression to <code>compile_mexpr</code> (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L1445-L1460"><code>planck0.sv:1445–1460</code></a>).</p>
-<p><code>compile_mexpr</code> dispatches on the head (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L1270-L1443"><code>planck0.sv:1270–1443</code></a>). The special forms are <code>Apply</code>, <code>Def</code>, <code>Set</code>, <code>Do</code>, <code>If</code>, <code>While</code>, <code>Lambda</code>, <code>Fusion</code>, <code>Quote</code>, <code>QuasiQuote</code>, <code>Handle</code> and <code>Perform</code>. Any other head is a constructor: it evaluates the arguments and builds an M-expression with the same head.</p>
-<p>The compiler resolves a local variable to a pair (environment depth, position) at compile time. A top-level <code>Def</code> and an unbound name are global variables, which are looked up in a table at run time. This is why a top-level function can refer to itself.</p>
+<p><code>compile</code> turns an integer or a string into a constant and a symbol into a variable reference, and passes an M-expression to <code>compile_mexpr</code> (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L1509-L1524"><code>planck0.sv:1509–1524</code></a>).</p>
+<p><code>compile_mexpr</code> dispatches on the head (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L1341-L1507"><code>planck0.sv:1341–1507</code></a>). The special forms are <code>Apply</code>, <code>Def</code>, <code>Declare</code>, <code>Set</code>, <code>Do</code>, <code>If</code>, <code>While</code>, <code>Lambda</code>, <code>Fusion</code>, <code>Quote</code>, <code>QuasiQuote</code>, <code>Handle</code> and <code>Perform</code>. Any other head is a constructor: it evaluates the arguments and builds an M-expression with the same head.</p>
+<p>The compiler resolves a local variable to a pair (environment depth, position) at compile time. A global variable is a cell (three words: the value, the name and the file that defines it), and the compiler has a table <code>global_table</code> that gives the latest cell of a name. A top-level <code>Def</code> makes a new cell and replaces the entry of the table (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L467-L475"><code>planck0.sv:467–475</code></a>), and the instructions <code>GLOAD</code>, <code>GDEF</code> and <code>GSET</code> carry the cell instead of the name (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L1165-L1192"><code>planck0.sv:1165–1192</code></a>). The variable a name refers to is decided before the expression runs, and a function compiled earlier keeps referring to the old cell. <code>Set</code> writes to the current cell. A name that is neither local nor global stops the program with a message before the expression runs.</p>
+<p><code>Def</code> makes the cell after it compiles the right-hand side, so the right-hand side sees the previous variable. A function can refer to itself because the syntax reads a function definition as a <code>Declare{f}</code> that makes the cell first and a <code>Set</code> that puts the function in. Calling it before it is filled calls <code>none</code> and stops the program. <code>Declare{f}</code> compiles as <code>Def{f, none}</code> only when <code>f</code> is not yet a variable of the place: at the top level it looks up <code>global_table</code> and compares the file of the cell with <code>cur_file</code>, the file being loaded, which <code>interpret_file</code> and <code>_set_file</code> (called by <code>load</code>) set, and in a function it looks for an entry of the compile-time environment at the level of the function (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L1329-L1339"><code>planck0.sv:1329–1339</code></a>, <a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L1379-L1384"><code>planck0.sv:1379–1384</code></a>).</p>
 
 <h2>The virtual machine</h2>
 <p>The machine has 18 instructions. The design is described in the comments of the source.</p>
 <div class="example">
-<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L875-L948">planck0.sv:875–948</a></p>
+<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L893-L976">planck0.sv:893–976</a></p>
 <pre>; === Bytecode VM
 ;
 ; planck0 compiles each top-level expression into a code object and runs it
@@ -176,8 +178,18 @@ Tuple{Eof{}, &quot;&quot;}</pre>
 ;   never a valid value. Variables are shared locations: closures and
 ;   continuations refer to the same environment.
 ;
-;   Variables defined by top-level Def, and names that are not bound
-;   lexically, are global variables looked up in global_table at run time.
+;   Variables defined by top-level Def are global variables. A global variable
+;   is a cell (| value | sym |). The compiler finds the cell of a name in
+;   global_table, which holds the latest definition at that time, and puts it
+;   in the instruction. Def makes a new cell, so the code compiled before it
+;   keeps the old one. A name which is neither bound lexically nor defined at
+;   the top level is an error at compile time.
+;
+;   Declare{x} is Def{x, none} unless x is already a variable of the place
+;   where Def{x, ...} would define it: at the top level, a global variable
+;   defined by the file being loaded, and otherwise a variable of the same
+;   environment (the function, or the top-level code in a block). Then it does
+;   nothing and its value is none.
 ;
 ; frame (internal, allocated in the heap):
 ;   | caller | code | pc | env | sp | handler | size | operand stack ... |
@@ -195,9 +207,9 @@ Tuple{Eof{}, &quot;&quot;}</pre>
 ;   CONST v         push v
 ;   LOAD d i sym    push slot i of the d-th parent environment
 ;   STORE d i       store the stack top to slot i of the d-th parent env
-;   GLOAD sym       push the global variable sym
-;   GDEF sym        define the global variable sym with the stack top
-;   GSET sym        update the global variable sym with the stack top
+;   GLOAD cell      push the value of the global variable cell
+;   GDEF cell       define the global variable cell with the stack top
+;   GSET cell       update the global variable cell with the stack top
 ;   POP             discard the stack top
 ;   JMP off         jump
 ;   JF off          pop, jump if it is false
@@ -235,9 +247,9 @@ Tuple{Eof{}, &quot;&quot;}</pre>
 <p>Frames live on the heap, not on the machine stack, and the virtual machine does not call itself recursively. The state of a computation is the chain of frames from the current frame to the top level, so a continuation is a pointer to this chain.</p>
 
 <h2>Calls and pattern matching</h2>
-<p>At a call, <code>select</code> chooses the function that matches the arguments (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L1616-L1644"><code>planck0.sv:1616–1644</code></a>). A <code>Fusion</code> tries the left function and, on failure, the right one. A <code>Lambda</code> compares the number of arguments and then matches the patterns in order.</p>
+<p>At a call, <code>select</code> chooses the function that matches the arguments (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L1680-L1708"><code>planck0.sv:1680–1708</code></a>). A <code>Fusion</code> tries the left function and, on failure, the right one. A <code>Lambda</code> compares the number of arguments and then matches the patterns in order.</p>
 <div class="example">
-<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L1571-L1601">planck0.sv:1571–1601</a></p>
+<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L1635-L1665">planck0.sv:1635–1665</a></p>
 <pre>(fun match_pat (p v env idx)
     (var t (gettag p))
     (var i 0)
@@ -270,17 +282,18 @@ Tuple{Eof{}, &quot;&quot;}</pre>
     (return 0)
     )</pre>
 </div>
-<p><code>match_pat</code> writes the value to the next position of the new environment for a variable, compares equality for a <code>Quote</code>, and checks the kind for a <code>_TypeOf</code> before it matches the inner pattern. An M-expression pattern compares the head and the number of arguments, and recurses on each argument. When no function matches, the program stops with <code>matching failed</code> (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L1698-L1710"><code>planck0.sv:1698–1710</code></a>).</p>
-<p>The builtin <code>eval</code> compiles an M-expression as a top-level expression and runs it in a new frame (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L1675-L1679"><code>planck0.sv:1675–1679</code></a>).</p>
+<p><code>match_pat</code> writes the value to the next position of the new environment for a variable, compares equality for a <code>Quote</code>, and checks the kind for a <code>_TypeOf</code> before it matches the inner pattern. An M-expression pattern compares the head and the number of arguments, and recurses on each argument. When no function matches, the program stops with <code>matching failed</code> (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L1762-L1774"><code>planck0.sv:1762–1774</code></a>).</p>
+<p>The builtin <code>eval</code> compiles an M-expression as a top-level expression and runs it in a new frame (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L1739-L1743"><code>planck0.sv:1739–1743</code></a>).</p>
 
 <h2>Builtin functions</h2>
-<p><code>init_prims</code> registers the builtin functions in the global table with <code>defprim</code>. <code>defprim</code> takes the name, the number of arguments, the implementing function and the kind (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L2459-L2467"><code>planck0.sv:2459–2467</code></a>). The operators and the string concatenation are registered under the names that the sugar calls. These names start with <code>_</code>: <code>_add</code>, <code>_sub</code>, <code>_mul</code>, <code>_div</code>, <code>_mod</code>, <code>_lt</code>, <code>_le</code>, <code>_gt</code>, <code>_ge</code>, <code>_eq</code>, <code>_ne</code> and <code>_strcat</code> (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L2469-L2524"><code>planck0.sv:2469–2524</code></a>). Names without <code>_</code>, such as <code>add</code> and <code>strcat</code>, are not registered. A variable of the same name in a program does not change the meaning of an operator.</p>
+<p><code>init_prims</code> registers the builtin functions in the global table, making their cells, with <code>defprim</code>. <code>defprim</code> takes the name, the number of arguments, the implementing function and the kind (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L2529-L2537"><code>planck0.sv:2529–2537</code></a>). The operators and the string concatenation are registered under the names that the sugar calls. These names start with <code>_</code>: <code>_add</code>, <code>_sub</code>, <code>_mul</code>, <code>_div</code>, <code>_mod</code>, <code>_lt</code>, <code>_le</code>, <code>_gt</code>, <code>_ge</code>, <code>_eq</code>, <code>_ne</code> and <code>_strcat</code> (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L2539-L2595"><code>planck0.sv:2539–2595</code></a>). Names without <code>_</code>, such as <code>add</code> and <code>strcat</code>, are not registered. A variable of the same name in a program does not change the meaning of an operator.</p>
 
 <h2 id="effects">Effects</h2>
-<p><code>Handle</code> runs its body in a new frame and records the handler in that frame (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L1825-L1832"><code>planck0.sv:1825–1832</code></a>). <code>Perform</code> follows the chain from the current frame to the callers and looks for a frame that has a handler.</p>
+<p><code>Handle</code> runs its body in a new frame and records the handler in that frame (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L1887-L1894"><code>planck0.sv:1887–1894</code></a>). <code>Perform</code> follows the chain from the current frame to the callers and looks for a frame that has a handler.</p>
 <div class="example">
-<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L1842-L1864">planck0.sv:1842–1864</a></p>
-<pre>(fun op_perform ()
+<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L1903-L1925">planck0.sv:1903–1925</a></p>
+<pre>
+(fun op_perform ()
     (char[] 8 hargs)
     (var v (vm_pop))
     (var top vm_frame)
@@ -301,11 +314,10 @@ Tuple{Eof{}, &quot;&quot;}</pre>
             ))
         (= b (get b F_CALLER))
         ))
-    (runtime_error &quot;unhandled effect: &quot; v)
-    )</pre>
+    (runtime_error &quot;unhandled effect: &quot; v)</pre>
 </div>
 <p>When it finds one, it makes a continuation <code>k</code>, a pair of the current frame and the boundary frame, and matches the handler against <code>(v, k)</code>. When the handler does not match, the search continues outward. The value of the handler returns to the caller of the boundary frame and becomes the value of the <code>Handle</code> expression.</p>
-<p>Calling <code>k</code> copies the frames from the current frame to the boundary and runs the copy (<code>resume</code>, <a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L1646-L1663"><code>planck0.sv:1646–1663</code></a>). The original frames never run, so the same <code>k</code> can be called any number of times (multi-shot continuations).</p>
+<p>Calling <code>k</code> copies the frames from the current frame to the boundary and runs the copy (<code>resume</code>, <a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L1710-L1727"><code>planck0.sv:1710–1727</code></a>). The original frames never run, so the same <code>k</code> can be called any number of times (multi-shot continuations).</p>
 
 <nav class="pager"><a class="prev" href="bootstrap.html"><small>Previous</small>From machine code to planck0</a><a class="next" href="init.html"><small>Next</small>init.pk and M-expressions</a></nav>
 </main>

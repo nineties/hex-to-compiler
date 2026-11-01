@@ -55,6 +55,7 @@ test: pforth plisp.fs $(shell find plisp -name "*.lisp")
 test-planck0: planck0
 	./planck0 planck/test.pk
 	./planck0 planck/test_syntax.pk
+	./planck0 planck/test_define.pk
 	./planck0 planck/test_builtins.pk one "two words"
 	./planck0 planck/test_lib.pk
 	./planck0 planck/test_unparse.pk
@@ -65,3 +66,9 @@ test-planck0: planck0
 		diff -u $${f%.pk}.out tmp-example.out || exit 1; \
 		echo "$$f: ok"; \
 	done; rm -f tmp-example.out
+	@for f in planck/errors/*.pk; do \
+		./planck0 $$f > tmp-error.out 2> tmp-error.err && { echo "$$f: should stop"; exit 1; }; \
+		diff -u $${f%.pk}.out tmp-error.out || exit 1; \
+		diff -u $${f%.pk}.err tmp-error.err || exit 1; \
+		echo "$$f: stops"; \
+	done; rm -f tmp-error.out tmp-error.err

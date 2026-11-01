@@ -39,7 +39,7 @@
 <table>
 <tr><th>式</th><th>M式</th></tr>
 <tr><td><code>x := e</code></td><td><code>Def{x, e}</code></td></tr>
-<tr><td><code>f(p, ...) := e</code></td><td><code>Def{f, Lambda{Tuple{p, ...}, e}}</code></td></tr>
+<tr><td><code>f(p, ...) := e</code></td><td><code>Do{Declare{f}, Set{f, Fusion{f, Lambda{Tuple{p, ...}, e}}}}</code></td></tr>
 <tr><td><code>record T(f, ...)</code></td><td><code>Apply{_record_declare, Tuple{Quote{T}, Quote{Tuple{f, ...}}}}</code></td></tr>
 <tr><td><code>x = e</code></td><td><code>Set{x, e}</code></td></tr>
 <tr><td><code>a[i] = e</code></td><td><code>Apply{_index_set, Tuple{a, i, e}}</code></td></tr>
@@ -66,7 +66,8 @@
 <tr><td><code>return e</code>・<code>return</code>・<code>break</code>・<code>continue</code></td><td><code>Perform{Return{e}}</code>・<code>Perform{Return{none}}</code>・<code>Perform{Break{}}</code>・<code>Perform{Continue{}}</code></td></tr>
 <tr><td><code>match e { f }</code></td><td><code>Apply{f, Tuple{e}}</code></td></tr>
 <tr><td><code>f"a{e}b"</code></td><td class="wrap"><code>Apply{_strcat, Tuple{Apply{_strcat, Tuple{"a", Apply{_to_text, Tuple{e}}}}, "b"}}</code></td></tr>
-<tr><td>ブロックの中の <code>fun f(p, ...) e</code></td><td class="wrap">ブロックの先頭に <code>Def{f, none}</code>、その場所に <code>Set{f, Lambda{Tuple{p, ...}, e}}</code></td></tr>
+<tr><td><code>fun f</code></td><td><code>Def{f, none}</code></td></tr>
+<tr><td><code>f(p, ...) = e</code></td><td><code>Set{f, Fusion{f, Lambda{Tuple{p, ...}, e}}}</code></td></tr>
 <tr><td><code>handle e with h</code></td><td><code>Handle{e, h}</code></td></tr>
 <tr><td><code>perform e</code></td><td><code>Perform{e}</code></td></tr>
 <tr><td><code>()</code>・<code>(a, b, ...)</code></td><td><code>Tuple{}</code>・<code>Tuple{a, b, ...}</code></td></tr>
@@ -100,7 +101,7 @@ println(&#x27;(perform E{}))
 println(&#x27;(record T(a, b)))</pre>
 <p class="label">出力</p>
 <pre class="out">Def{x, 1}
-Def{f, Lambda{Tuple{x}, Apply{_add, Tuple{x, 1}}}}
+Do{Declare{f}, Set{f, Fusion{f, Lambda{Tuple{x}, Apply{_add, Tuple{x, 1}}}}}}
 Set{x, 2}
 Fusion{f, g}
 Lambda{Tuple{x}, x}
@@ -138,9 +139,26 @@ Apply{_record_declare, Tuple{Quote{T}, Quote{Tuple{a, b}}}}</pre>
 <p><code>record T(f, g, ...)</code> は、値 <code>T{a, b, ...}</code> の引数の名前を宣言します。値の作り方は変わりません。<code>t.f</code> は、<code>t</code> の頭について宣言した中で <code>f</code> の位置にある引数です。</p>
 <p>頭が違えば同じ名前の欄を持てます。同じ <code>T</code> をもう一度宣言すると名前が置き換わります。<code>.</code> は左の式に空白なしで続けます。頭が宣言されていない値や、欄 <code>f</code> がない値に <code>.f</code> を使うと、メッセージを出してプログラムが止まります。</p>
 
-<h2>fun</h2>
-<p><code>fun f(p, ...) e</code> はブロックの中で関数を宣言します。<code>f(p, ...) := e</code> と違い、ブロックの <code>fun</code> はすべてブロックの先頭で宣言されるので、後に書いた関数も呼べます。</p>
-<p>関数が入るのは <code>fun</code> を書いた場所です。そのためブロックの中でそれより前に宣言した変数が見え、その場所よりあとで呼べます。<code>fun</code> はブロックの中の式としてだけ書けます。<code>x := e</code> と同じく、ブロックを含む関数かプログラムの変数になります。</p>
+<h2 id="scope">変数の範囲</h2>
+<p>変数は静的（字句的）に決まり、名前がどの変数を指すかは式を実行する前に決まります。関数の本体の変数は、その関数か外側の関数の引数、またはそれらの関数でそれより前に定義した変数で、どれでもなければトップレベルでそれより前に定義した変数（大域変数）です。呼んだ側の変数は見えません。どの変数も指さない名前があると、その式を実行する前にメッセージを出してプログラムが止まります。関数は作られた場所の変数を持ち、変数は共有の場所なので、関数を作ったあとの代入も関数から見えます。</p>
+<p>トップレベルの定義は書いた順に決まります。後ろに書いた定義はそれより前の式から見えません。関数の定義 <code>f(p, ...) := e</code> の本体からは <code>f</code> 自身が見えます。同じ名前を <code>x := e</code> か <code>fun f</code> でもう一度定義すると新しい変数になります。前に作った関数は前の変数を指したままで、新しい変数が見えるのは定義より後ろの式だけです。<code>f(x) := 1</code>、<code>g() := f(0)</code>、<code>f := (x) -&gt; 2</code> の順に書くと、<code>g()</code> は <code>1</code> です。今ある変数を上書きするときは <code>x = e</code> と書きます。これは同じ変数への代入なので、前に作った関数からも新しい値が見えます。<code>f := (x) -&gt; 2</code> の代わりに <code>f = (x) -&gt; 2</code> と書くと、<code>g()</code> は <code>2</code> です。</p>
+<p>関数の定義 <code>f(p, ...) := e</code> は、書いた場所の変数に <code>f</code> がすでにあれば <code>f(p, ...) = e</code> と同じで、なければ <code>fun f</code> と <code>f(p, ...) = e</code> を続けて書いたのと同じです。後者は書いた場所で新しい <code>f</code> を定義します。場所の変数は、トップレベルでは同じファイルで定義した大域変数で、関数の中ではその関数の引数とその関数でそれより前に定義した変数です。別のファイル（<code>use</code> で読んだライブラリや <code>planck/init.pk</code>）で定義した大域変数や組み込み関数はその場所の変数ではないので、プログラムのトップレベルの <code>f(p, ...) := e</code> は新しい <code>f</code> を定義してそれを隠します。別のファイルで定義した <code>f</code> に場合を足すときは <code>f(p, ...) = e</code> と書きます。外側の関数の変数や、関数の中から見た大域変数もその場所の変数ではないので、そこでの <code>f(p, ...) := e</code> は新しい <code>f</code> を定義し、外の <code>f</code> は変わりません。トップレベルの <code>if</code> の枝や <code>while</code> の本体では、場所の変数はその枝や本体でそれより前に定義した変数です。同じ場所に書いた <code>f</code> の定義は1つの関数になり、書いた順に試されます。</p>
+<div class="example"><pre><code>fib(0) := 0
+fib(1) := 1
+fib(n) := fib(n - 1) + fib(n - 2)</code></pre></div>
+<p>互いに呼び合う関数は、先に <code>fun f</code> で名前だけを宣言します。<code>fun f</code> は値が <code>none</code> の変数 <code>f</code> を書いた場所で定義し、あとで <code>f(p, ...) = e</code> で埋めます。<code>f(p, ...) = e</code> は代入 <code>f = f | (p, ...) -&gt; e</code> で、<code>f</code> の関数の後ろに関数を足します。関数は書いた順に試されます。<code>none | g</code> は <code>g</code> なので、<code>fun f</code> のあとの最初の <code>f(p, ...) = e</code> は関数 <code>(p, ...) -&gt; e</code> そのものを代入します。引数の数が違う関数も足せます。宣言のあとに書いた関数からは <code>f</code> が見えます。埋める前に <code>f</code> を呼ぶと、<code>none</code> を呼ぶことになってプログラムが止まります。</p>
+<div class="example"><pre><code>fun odd
+even(n) := if (n == 0) true else odd(n - 1)
+odd(n) = if (n == 0) false else even(n - 1)
+
+fun fact
+fact(0) = 1
+fact(n) = n * fact(n - 1)   # fact(0) は 1</code></pre></div>
+<p><code>f = (n) if n &gt; 0 -&gt; 1</code> のあとのように <code>f</code> の値がガード付きの関数のときは、ガードが偽でも <code>f(p, ...) = e</code> で足した関数は呼ばれません。下の <code>h | g</code> と同じです。</p>
+<p>変数の定義 <code>x := e</code>（<code>x := (p) -&gt; e</code> も）は書いた場所で定義され、それより前の式からは外側の <code>x</code> が見えます。右辺 <code>e</code> から見えるのも前の <code>x</code> です。新しい <code>x</code> は右辺を評価したあとに作るので、前の <code>x</code> がなければ右辺の <code>x</code> は未定義です。自分を呼ぶ関数は <code>f(p, ...) := e</code> で書きます。トップレベルでもブロックの中でも同じです。</p>
+<div class="example"><pre><code>x := 1
+x := x + 1   # x は 2</code></pre></div>
+<p>ブロックの変数は、ブロックを含む関数かプログラムの変数です。</p>
 
 <h2 id="names">糖衣が呼ぶ名前</h2>
 <p>糖衣が読み替える先の関数は名前が <code>_</code> で始まり、<code>_</code> のない同名の関数はありません。したがってプログラムの <code>add</code> や <code>index_get</code> という変数は、<code>a + b</code> や <code>a[i]</code> の意味を変えません。</p>
