@@ -700,16 +700,16 @@ check(unless 1 > 2 { "a" } else { "b" }, "a")
 check(tree("unless c { a } else { b }"), 'If{c, Do{b}, Do{a}})
 
 # === a[i], a[i] = v and t[p -> e | ...] ===
-check(tree("a[i]"), 'Apply{index, Tuple{a, i}})
-check(tree("a[i][j]"), 'Apply{index, Tuple{Apply{index, Tuple{a, i}}, j}})
-check(tree("f(x)[i].g"), 'Apply{record_get, Tuple{Apply{index, Tuple{Apply{f, Tuple{x}}, i}}, Quote{g}}})
-check(tree("a[i](x)"), 'Apply{Apply{index, Tuple{a, i}}, Tuple{x}})
-check(tree("-a[i]"), 'Apply{sub, Tuple{0, Apply{index, Tuple{a, i}}}})
-check(tree("a[i] = v"), 'Apply{index_set, Tuple{a, i, v}})
-check(tree("a[i][j] = v"), 'Apply{index_set, Tuple{Apply{index, Tuple{a, i}}, j, v}})
-check(tree("a[i] = b[j] = v"), 'Apply{index_set, Tuple{a, i, Apply{index_set, Tuple{b, j, v}}}})
-check(tree("a[i] == v"), 'Apply{eq, Tuple{Apply{index, Tuple{a, i}}, v}})
-check(tree("t[x -> 1 | y -> 2]"), 'Apply{index, Tuple{t, Fusion{Lambda{Tuple{x}, 1}, Lambda{Tuple{y}, 2}}}})
+check(tree("a[i]"), 'Apply{_index, Tuple{a, i}})
+check(tree("a[i][j]"), 'Apply{_index, Tuple{Apply{_index, Tuple{a, i}}, j}})
+check(tree("f(x)[i].g"), 'Apply{record_get, Tuple{Apply{_index, Tuple{Apply{f, Tuple{x}}, i}}, Quote{g}}})
+check(tree("a[i](x)"), 'Apply{Apply{_index, Tuple{a, i}}, Tuple{x}})
+check(tree("-a[i]"), 'Apply{sub, Tuple{0, Apply{_index, Tuple{a, i}}}})
+check(tree("a[i] = v"), 'Apply{_index_set, Tuple{a, i, v}})
+check(tree("a[i][j] = v"), 'Apply{_index_set, Tuple{Apply{_index, Tuple{a, i}}, j, v}})
+check(tree("a[i] = b[j] = v"), 'Apply{_index_set, Tuple{a, i, Apply{_index_set, Tuple{b, j, v}}}})
+check(tree("a[i] == v"), 'Apply{eq, Tuple{Apply{_index, Tuple{a, i}}, v}})
+check(tree("t[x -> 1 | y -> 2]"), 'Apply{_index, Tuple{t, Fusion{Lambda{Tuple{x}, 1}, Lambda{Tuple{y}, 2}}}})
 # [ right after the expression, without a space, is an index. Otherwise it is a list.
 check(tree("a\n[1, 2]"), 'a)
 check(rest("a\n[1, 2]"), "[1, 2]")
@@ -754,15 +754,29 @@ check(('(f(x, y)))[1][0], 'x)
 record IP(x, y)
 check(IP{1, 2}['y], 2)
 check(IP{1, 2}[0], 1)
-# a kind of value of the program: index and index_set are extended in front
-index = (Matrix{w, _, d}, (i, j)) -> d[i * w + j] | index
-index_set = (Matrix{w, _, d}, (i, j), v) -> { d[i * w + j] = v } | index_set
+# a kind of value of the program: _index and _index_set are extended in front
+_index = (Matrix{w, _, d}, (i, j)) -> d[i * w + j] | _index
+_index_set = (Matrix{w, _, d}, (i, j), v) -> { d[i * w + j] = v } | _index_set
 im := Matrix{3, 2, array(6)}
 im[(1, 2)] = 8
 check(im[(1, 2)], 8)
 check(array_get(arg(im, 2), 5), 8)
 check(im[0], 3)
 check([1, 2][1], 2)
+# a variable named index or index_set does not hide a[i] and a[i] = v
+index_var_test() := {
+    index := 2
+    index_set := 7
+    xs := [10, 20, 30]
+    check(xs[index], 30)
+    ys := array(3)
+    ys[index] = index_set
+    check(ys[index], 7)
+    check(ys[index_set - 6], none)
+}
+index_var_test()
+index := 1
+check([5, 6][index], 6)
 
 # rewriting: the arms are tried in order, from the root down
 rt1 := 'F{G{1}, H{2}}
