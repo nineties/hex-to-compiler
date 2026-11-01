@@ -31,9 +31,11 @@ M-expressions are expressions of this syntax too.
    * - ``f(p, ...) := e``
      - ``Def{f, Lambda{Tuple{p, ...}, e}}``
    * - ``record T(f, ...)``
-     - ``Apply{record_declare, Tuple{Quote{T}, Quote{Tuple{f, ...}}}}``
+     - ``Apply{_record_declare, Tuple{Quote{T}, Quote{Tuple{f, ...}}}}``
    * - ``x = e``
      - ``Set{x, e}``
+   * - ``a[i] = e``
+     - ``Apply{_index_set, Tuple{a, i, e}}``
    * - ``f | g``
      - ``Fusion{f, g}``
    * - ``(p, ...) -> e``, ``p -> e``
@@ -43,21 +45,25 @@ M-expressions are expressions of this syntax too.
    * - ``a or b``, ``a and b``
      - ``If{a, true, b}``, ``If{a, b, false}``
    * - ``not a``
-     - ``Apply{not, Tuple{a}}``
+     - ``Apply{_not, Tuple{a}}``
    * - ``a == b`` ``a != b`` ``a < b`` ``a <= b`` ``a > b`` ``a >= b``
-     - ``Apply{eq, Tuple{a, b}}`` and ``ne`` ``lt`` ``le`` ``gt`` ``ge``
+     - ``Apply{_eq, Tuple{a, b}}`` and ``_ne`` ``_lt`` ``_le`` ``_gt`` ``_ge``
    * - ``a :: b``
      - ``Cons{a, b}``
    * - ``a + b`` ``a - b`` ``a * b`` ``a / b`` ``a % b``
-     - ``Apply{add, Tuple{a, b}}`` and ``sub`` ``mul`` ``div`` ``mod``
+     - ``Apply{_add, Tuple{a, b}}`` and ``_sub`` ``_mul`` ``_div`` ``_mod``
    * - ``-a``
-     - ``Apply{sub, Tuple{0, a}}``
+     - ``Apply{_sub, Tuple{0, a}}``
    * - ``'e``, :literal:`\`e`, ``!e``
      - ``Quote{e}``, ``QuasiQuote{e}``, ``UnQuote{e}``
    * - ``f(a, ...)``
      - ``Apply{f, Tuple{a, ...}}``
    * - ``t.f``
-     - ``Apply{record_get, Tuple{t, Quote{f}}}``
+     - ``Apply{_record_get, Tuple{t, Quote{f}}}``
+   * - ``a[i]``
+     - ``Apply{_index_get, Tuple{a, i}}``
+   * - ``t[p -> a | q if c -> b]``
+     - ``Apply{_index_get, Tuple{t, f}}``, where ``f`` is the function of the arms (see Indexing and rewriting)
    * - ``p @ type``
      - ``_TypeOf{p, type}``
    * - ``{ e; ... }``
@@ -75,7 +81,7 @@ M-expressions are expressions of this syntax too.
    * - ``match e { p if c -> a; ... }``
      - the arm applies when ``p`` matches and ``c`` is true
    * - ``f"a{e}b"``
-     - ``Apply{strcat, Tuple{Apply{strcat, Tuple{"a", Apply{to_text, Tuple{e}}}}, "b"}}``
+     - ``Apply{_strcat, Tuple{Apply{_strcat, Tuple{"a", Apply{_to_text, Tuple{e}}}}, "b"}}``
    * - ``fun f(p, ...) e`` in a block
      - ``Def{f, none}`` at the top of the block, and ``Set{f, Lambda{Tuple{p, ...}, e}}`` in its place
    * - ``handle e with h``
@@ -104,6 +110,10 @@ An ``if`` is an expression: ``y = if (c) 1 else 2``.
 and ``t.f`` is the argument of ``t`` at the position of the field ``f`` in the declaration for the head of ``t``.
 Values with different heads can have fields of the same name. Declaring ``T`` again replaces the names.
 A ``.`` follows its left operand with no space. A value whose head is not declared or has no field ``f`` stops the program with a message.
+
+``a[i]`` and ``a[i] = e`` are described in Indexing and rewriting. The ``[`` follows ``a`` with no space,
+so ``a`` followed by ``[1, 2]`` on the next line or after a space is two expressions.
+``a`` is a postfix expression such as ``x``, ``f(x)``, ``t.f`` or ``b[j]``: ``a[i][j] = e`` is ``Apply{_index_set, Tuple{a[i], j, e}}``.
 
 ``fun f(p, ...) e`` declares a function in a block, as ``f(p, ...) := e`` does, but all the ``fun`` of a block are
 declared at its top, so each function can call the functions declared after it. A function is assigned where its ``fun`` is,
@@ -143,12 +153,100 @@ Lexical rules:
   ``f"...{e}..."`` embeds the value of the expression ``e``, which may contain strings and f-strings;
   ``{{`` and ``}}`` are the braces themselves. A string without the prefix ``f`` embeds nothing.
 * ``#`` starts a comment up to the end of the line.
-* there is no space between ``f`` and ``(`` in ``f(a)``, and between ``Head`` and ``{`` in ``Head{a}``.
+* there is no space between ``f`` and ``(`` in ``f(a)``, between ``a`` and ``[`` in ``a[i]``, and between ``Head`` and ``{`` in ``Head{a}``.
 
 Expressions in a block are separated by ``;`` or newlines.
 A top-level expression ends with ``;``, a newline or the start of another expression.
 A binary ``-`` must be on the same line as its left operand,
 so a line starting with ``-1`` is a new expression. Other binary operators may start a line.
+
+Names the sugar calls
+---------------------
+
+The functions a piece of sugar expands to have a name starting with ``_``,
+and there is no function of the same name without ``_``.
+A variable named ``add`` or ``index_get`` in a program therefore does not change the meaning of ``a + b`` or ``a[i]``.
+The operators are ``_add`` ``_sub`` ``_mul`` ``_div`` ``_mod`` ``_lt`` ``_le`` ``_gt`` ``_ge`` ``_eq`` ``_ne`` ``_not``.
+A string with embedded values uses ``_strcat`` and ``_to_text``, ``t.f`` uses ``_record_get``,
+``record`` uses ``_record_declare`` and ``::=`` uses ``_define_rule``.
+``a[i]`` and ``a[i] = e`` use ``_index_get`` and ``_index_set``, defined below.
+A function that takes the operator as an argument is written with the sugar, e.g. ``sort((a, b) -> a < b, xs)``,
+and a tree made by the sugar has these names: ``a + b`` is ``Apply{_add, Tuple{a, b}}``.
+
+Indexing and rewriting
+----------------------
+
+``a[i]`` is ``_index_get(a, i)`` and ``a[i] = e`` is ``_index_set(a, i, e)``, whose value is the value of ``e``.
+``_index_get`` and ``_index_set`` are functions joined by ``|``, one for each kind of ``a``, tried in this order:
+
+.. list-table::
+   :header-rows: 1
+
+   * - ``a``
+     - ``i``
+     - ``a[i]``
+     - ``a[i] = e``
+   * - array
+     - integer
+     - ``array_get(a, i)``
+     - ``array_set(a, i, e)``
+   * - string
+     - integer
+     - ``ord(s, i)``, the byte
+     - stops, see below
+   * - table
+     - any value
+     - ``table_get(a, i, none)``: ``none`` for a missing key
+     - ``table_set(a, i, e)``
+   * - vector (``use("vector")``)
+     - integer
+     - ``vec_get(a, i)``
+     - ``vec_set(a, i, e)``
+   * - any value
+     - function
+     - ``subst(a, i)``, below
+     -
+   * - list
+     - integer
+     - the element at ``i``, counted from 0
+     - stops, see below
+   * - M-expression
+     - symbol
+     - ``_record_get(a, i)``, the field
+     - stops, see below
+   * - M-expression
+     - integer
+     - ``arg(a, i)``
+     - stops, see below
+
+A string, a list, a tuple and an M-expression are immutable:
+``a[i] = e`` on them stops the program with the message ``cannot assign to an element of a string, which is immutable: ...``.
+An array, a table, a vector and a kind of a program (added in front) can be written.
+An index outside a string, a list or the arguments of an M-expression stops the program with a message,
+and so does ``a[i]`` or ``a[i] = e`` that no kind accepts.
+A program adds a kind of its own in front of the others by assigning ``_index_get`` and ``_index_set``:
+
+.. code-block::
+
+   _index_get = (Matrix{w, _, d}, (i, j)) -> d[i * w + j] | _index_get
+   _index_set = (Matrix{w, _, d}, (i, j), e) -> { d[i * w + j] = e } | _index_set
+   m := Matrix{2, 2, array(4)}
+   m[(1, 0)] = 5
+
+``subst(t, f)`` rewrites the tree ``t`` with the function ``f``. Each part of ``t`` is tried from the root down:
+when a pattern of ``f`` matches the part, the part is replaced by the value of ``f`` and the parts inside it are not tried;
+otherwise the arguments of the part are tried and its head is kept. A part that is not an M-expression has no parts.
+
+.. code-block::
+
+   t := '(x * 1 + 0 * y)
+   t[Apply{'_mul, Tuple{a, 1}} -> a | Apply{'_mul, Tuple{0, _}} -> 0]    # x + 0
+
+``t[p -> a | q -> b]`` is the expression ``p -> a | q -> b`` in brackets, so its arms are tried in order.
+An arm may have a guard as in ``match``: in ``t[p if c -> a | q -> b]`` the arm applies when ``p`` matches and ``c`` is true,
+otherwise the next arm is tried, and a part that no arm applies to is gone into.
+The body of an arm is an expression up to ``->``, so ``|`` in a body needs parentheses.
+``'t[f]`` quotes ``t[f]``: a quoted tree to rewrite is written ``('e)[f]``.
 
 Grammar declarations
 --------------------
@@ -217,8 +315,8 @@ The value of the expression is the value of the rule, as a constant.
 
 The rule must be defined by an expression that is evaluated before the expression with the text is parsed.
 
-``peg_sources`` is a table from a rule name to the parsing expression given to ``define_rule``, with the actions not evaluated
-(``...`` replaced by the previous definition). ``peg_version`` increases at every ``define_rule``.
+``peg_sources`` is a table from a rule name to the parsing expression given to ``_define_rule``, with the actions not evaluated
+(``...`` replaced by the previous definition). ``peg_version`` increases at every ``_define_rule``.
 
 Values
 ------
@@ -316,13 +414,13 @@ Builtin functions
    * - Output
      - ``print`` ``println`` ``put``
    * - Integers
-     - ``add`` ``sub`` ``mul`` ``div`` ``mod``
+     - ``_add`` ``_sub`` ``_mul`` ``_div`` ``_mod``
    * - Comparison
-     - ``lt`` ``le`` ``gt`` ``ge`` ``eq`` ``ne``
+     - ``_lt`` ``_le`` ``_gt`` ``_ge`` ``_eq`` ``_ne``
    * - M-expressions
      - ``head`` ``arity`` ``arg`` ``mexpr`` ``push`` ``typeof``
    * - Strings
-     - ``strlen`` ``ord`` ``substr`` ``strcat`` ``intern`` ``symname``
+     - ``strlen`` ``ord`` ``substr`` ``_strcat`` ``intern`` ``symname``
    * - Arrays
      - ``array`` ``array_get`` ``array_set`` ``array_len`` ``hash``
    * - Files
@@ -330,30 +428,30 @@ Builtin functions
    * - Language
      - ``parse`` ``eval`` ``exit``
    * - ``planck/init.pk``
-     - ``true`` ``false`` ``none`` ``not`` ``load`` ``use`` ``table`` ``table_get`` ``table_set``
+     - ``true`` ``false`` ``none`` ``_not`` ``load`` ``use`` ``table`` ``table_get`` ``table_set``
    * - ``planck/peg.pk``
-     - ``peg_parse`` ``define_rule``
+     - ``peg_parse`` ``_define_rule``
    * - ``planck/syntax.pk``
-     - ``parse_mexpr`` ``to_text`` ``record_declare`` ``record_get`` ``peg_for``
+     - ``parse_mexpr`` ``_to_text`` ``_record_declare`` ``_record_get`` ``peg_for`` ``_index_get`` ``_index_set`` ``subst``
 
 * ``parse_mexpr(s)``: the parser of M-expressions, with the same arguments and result as ``parse``.
-* ``to_text(x)``: ``x`` for a string, the decimal text for an integer, and ``show(x)`` (``planck/lib/pretty.pk``) otherwise,
+* ``_to_text(x)``: ``x`` for a string, the decimal text for an integer, and ``show(x)`` (``planck/lib/pretty.pk``) otherwise,
   so a value other than a string or an integer in ``{e}`` needs ``use("pretty")``.
-  A string with embedded values is joined by ``strcat`` from the left, and an empty piece is left out.
-* ``record_declare(name, fields)``: set the field names of the head ``name`` (``fields`` is ``Tuple{f, ...}``). ``record_get(t, name)``: the field.
+  A string with embedded values is joined by ``_strcat`` from the left, and an empty piece is left out.
+* ``_record_declare(name, fields)``: set the field names of the head ``name`` (``fields`` is ``Tuple{f, ...}``). ``_record_get(t, name)``: the field.
 * ``peg_for(xs, f)``: call ``f`` with each element of the list or vector ``xs``, and return ``none``.
 * ``symname(sym)``: the name of the symbol as a string (the inverse of ``intern``).
 * ``strlen(s)``: the number of bytes. ``ord(s, i)``: the byte at ``i``, or ``-1`` when ``i`` is out of range.
-* ``substr(s, i, j)``: the bytes from ``i`` to ``j - 1``. ``strcat(a, b)``: ``a`` followed by ``b``.
+* ``substr(s, i, j)``: the bytes from ``i`` to ``j - 1``. ``_strcat(a, b)``: ``a`` followed by ``b``.
 * ``intern(s)``: the symbol named ``s``.
 * ``push(Head{a, ...}, x)``: ``Head{a, ..., x}``.
 * ``array(n)``: a new array of ``n`` elements, all ``none``. ``array_get(a, i)``, ``array_set(a, i, x)`` (returns ``x``) and ``array_len(a)``.
   An index outside ``0`` to ``n - 1`` is a runtime error.
-* ``hash(x)``: a non-negative integer. Values equal by ``eq`` have the same hash.
-* ``table()``: a new hash table, made of arrays. ``table_get(t, key, default)``, ``table_set(t, key, value)``.
-  Keys are compared by ``eq``.
+* ``hash(x)``: a non-negative integer. Values equal by ``_eq`` have the same hash.
+* ``table()``: a new hash table ``Table{a}``, where ``a`` is made of arrays. ``table_get(t, key, default)``, ``table_set(t, key, value)``.
+  Keys are compared by ``==``.
 * ``read_file(path)``: the contents of the file. ``load(path)``: parse and evaluate the file.
-* ``define_rule(name, e)``: define the rule by a parsing expression (see ``planck/peg.pk``).
+* ``_define_rule(name, e)``: define the rule by a parsing expression (see ``planck/peg.pk``).
 * ``use(name)``: ``load("planck/lib/<name>.pk")`` once.
 
 Libraries
@@ -397,9 +495,9 @@ List functions:
 * ``nth(xs, i)`` counts from 0. ``take(xs, n)`` and ``drop(xs, n)`` split ``xs`` after ``n`` elements.
 * ``find(p, xs)`` is the first element with ``p(x)`` or ``none``. ``index_of(x, xs)`` is the position or ``-1``.
 * ``zip(xs, ys)`` is ``[Tuple{x, y}, ...]`` as long as the shorter list. ``range(a, b)`` is ``[a, ..., b - 1]``.
-* ``sort(less, xs)`` is a stable merge sort by ``less(a, b)``, e.g. ``sort(lt, xs)``.
+* ``sort(less, xs)`` is a stable merge sort by ``less(a, b)``, e.g. ``sort((a, b) -> a < b, xs)``.
 
-A vector is a growable array: ``vec_push(v, x)`` appends and returns ``x``, ``vec_pop(v)`` removes and returns the last element.
+A vector is a growable array ``Vector{a}``: ``vec_push(v, x)`` appends and returns ``x``, ``vec_pop(v)`` removes and returns the last element.
 ``vec_get`` and ``vec_set`` stop the program for an index outside the elements.
 
 String functions:

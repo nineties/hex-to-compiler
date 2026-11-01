@@ -90,9 +90,9 @@ check(unparse(tree("return -x")), "return -x")
 check(unparse(tree("(return) - 1")), "(return) - 1")
 
 # a tree that was not made by the parser
-check(unparse('Apply{mul, Tuple{Apply{add, Tuple{1, 2}}, 3}}), "(1 + 2) * 3")
-check(unparse('Apply{sub, Tuple{0, 5}}), "- 5")
-check(unparse('Apply{add, Tuple{Apply{add, Tuple{1, 2}}, Apply{add, Tuple{3, 4}}}}), "1 + 2 + (3 + 4)")
+check(unparse('Apply{_mul, Tuple{Apply{_add, Tuple{1, 2}}, 3}}), "(1 + 2) * 3")
+check(unparse('Apply{_sub, Tuple{0, 5}}), "- 5")
+check(unparse('Apply{_add, Tuple{Apply{_add, Tuple{1, 2}}, Apply{_add, Tuple{3, 4}}}}), "1 + 2 + (3 + 4)")
 check(unparse('Def{Foo{}, 1}), "Def{Foo{}, 1}")
 check(unparse_try('expr, array(1)), none)
 
@@ -260,6 +260,18 @@ rt("{ fun f(x) x; fun g(y) y; f = 1 }")
 rt("{ x := none; fun f(a) a; f(1) }")
 rt("{ fun f(a) { for (i in a) { if (i) break }; 1 } }")
 rt("perform Return{1}")
+rt("a[i]")
+rt("a[i][j] = b[k]")
+rt("f(x)[i].g(y)")
+rt("a[i + 1] = a[i] * 2")
+rt("{ a[i] = 1; a[i] }")
+rt("t[x @ int -> x + 1]")
+rt("t[F{a} -> a | G{a, b} -> b]")
+rt("t[P{a, b} if a == b -> a | P{a, b} -> b]")
+rt("t[P{a, b} if a == b -> (x -> x)]")
+check(unparse(tree("_index_get(a, i)")), "a[i]")
+check(unparse(tree("_index_set(a, i, v)")), "a[i] = v")
+check(unparse(tree("t[P{a, b} if a == b -> a | x -> x]")), "t[P{a, b} if a == b -> a | x -> x]")
 
 # === Round trips of files ===
 file_trips(path) := {
@@ -276,14 +288,14 @@ file_trips("planck/lib/symbol.pk")
 file_trips("planck/lib/error.pk")
 
 # === A grammar written with ::= is run backwards too ===
-arith ::= a:arith "+" b:term { `Apply{add, Tuple{!a, !b}} } | a:arith "-" b:term { `Apply{sub, Tuple{!a, !b}} } | term
-term ::= a:term "*" b:factor { `Apply{mul, Tuple{!a, !b}} } | factor
+arith ::= a:arith "+" b:term { `Apply{_add, Tuple{!a, !b}} } | a:arith "-" b:term { `Apply{_sub, Tuple{!a, !b}} } | term
+term ::= a:term "*" b:factor { `Apply{_mul, Tuple{!a, !b}} } | factor
 factor ::= n:integer { n } | x:ident { x } | "(" e:arith ")" { e }
 check(unparse_as('arith, arith{| 1+2*3 |}), "1 + 2 * 3")
 check(unparse_as('arith, arith{| (1+2)*3 |}), "(1 + 2) * 3")
 check(unparse_as('arith, arith{| 1-(2-x) |}), "1 - (2 - x)")
-check(unparse_as('arith, 'Apply{mul, Tuple{Apply{add, Tuple{a, b}}, Apply{sub, Tuple{c, d}}}}), "(a + b) * (c - d)")
-check(unparse_try('arith, 'Apply{div, Tuple{1, 2}}), none)
+check(unparse_as('arith, 'Apply{_mul, Tuple{Apply{_add, Tuple{a, b}}, Apply{_sub, Tuple{c, d}}}}), "(a + b) * (c - d)")
+check(unparse_try('arith, 'Apply{_div, Tuple{1, 2}}), none)
 
 put("Tests passed "); print(passed); put("/"); println(passed + failed)
 put("Round trips "); println(trips)

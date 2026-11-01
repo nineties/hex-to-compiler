@@ -4,7 +4,7 @@
 # unparse(t) is a text that parses back to t with the rule expr.
 # The grammar is read from peg_sources (planck/peg.pk). An alternative of a rule
 #   Act{Seq{e1, e2, ...}, Lambda{Tuple{Tuple{l1, l2, ...}}, body}}
-# can be run backwards when body is a quasi-quotation (`Apply{add, Tuple{!a, !b}}`),
+# can be run backwards when body is a quasi-quotation (`Apply{_add, Tuple{!a, !b}}`),
 # Quote{c}, a label, or Tuple{labels}. Such an alternative is a template that
 # a tree is matched against. The labels bind the subtrees, and the elements of the sequence
 # are printed in order: texts as they are, rules by unparse_as(rule, subtree).
@@ -150,7 +150,7 @@ call_tmpl(c, labels) :=
         else if (f == 'peg_break and n == 0) `Perform{Break{}}
         else if (f == 'peg_continue and n == 0) `Perform{Continue{}}
         else if (f == 'peg_return and n == 1) `Perform{Return{!a}}
-        else if (f == 'peg_record and n == 2) `Apply{record_declare, Tuple{Quote{!a}, Quote{!b}}}
+        else if (f == 'peg_record and n == 2) `Apply{_record_declare, Tuple{Quote{!a}, Quote{!b}}}
         else bad
     }
 
@@ -201,7 +201,7 @@ const_text(e, depth) :=
         i := 0
         while (not is_bad(r) and i < arity(e)) {
             c := const_text(arg(e, i), depth)
-            r = if (is_bad(c)) bad else strcat(r, c)
+            r = if (is_bad(c)) bad else _strcat(r, c)
             i = i + 1
         }
         r
@@ -418,8 +418,8 @@ un_render(ps) := {
         if (strlen(s) > 0) {
             sp := not (glue or (is_mx(p) and head(p) == 'T) or no_space_before(s))
             if (glue and pfx == "-" and is_digit(ord(s, 0))) sp = true
-            if (sp) out = strcat(out, " ")
-            out = strcat(out, s)
+            if (sp) out = _strcat(out, " ")
+            out = _strcat(out, s)
             pfx = if (is_mx(p) and head(p) == 'P) s else ""
             glue = pfx != "" or is_bracket(s)
         }
@@ -510,12 +510,12 @@ try_fit(a, wrapped, t) := {
     } else if (is_custom(tm)) {
         txt := arg(tm, 1)(t)
         if (txt == none) none
-        else if (wrapped) strcat(arg(ug_paren, 2), strcat(txt, arg(ug_paren, 3)))
+        else if (wrapped) _strcat(arg(ug_paren, 2), _strcat(txt, arg(ug_paren, 3)))
         else txt
     } else if (un_match(tm, t, env)) {
         ps := items_pieces(alt_items(a), env)
         if (ps == none) none
-        else if (wrapped) strcat(arg(ug_paren, 2), strcat(un_render(ps), arg(ug_paren, 3)))
+        else if (wrapped) _strcat(arg(ug_paren, 2), _strcat(un_render(ps), arg(ug_paren, 3)))
         else un_render(ps)
     } else none
 }
@@ -549,7 +549,7 @@ unparse_try(r, t) := {
 # unparse_as(rule, t) is like unparse_try and stops the program when there is no text
 unparse_as(r, t) := {
     s := unparse_try(r, t)
-    if (s == none) panic(strcat("unparse: cannot print ", show(t))) else s
+    if (s == none) panic(_strcat("unparse: cannot print ", show(t))) else s
 }
 
 unparse(t) := unparse_as('expr, t)
@@ -567,7 +567,7 @@ unparse_custom(owner, spec, tail, f) := {
 # { ... } puts every expression on its own line, indented by 4 spaces.
 # if (c) a else b is used for If instead of c ? a : b.
 
-indent(s) := strcat("    ", join("\n    ", split(s, "\n")))
+indent(s) := _strcat("    ", join("\n    ", split(s, "\n")))
 
 # the texts of the arguments of t as expr, or none
 arg_texts(t) := {
@@ -624,7 +624,7 @@ fun_text(x) := {
     ps := list_pieces('pattern, ",", arg(lam, 0))
     b := unparse_pp('expr, un_strip('UnwrapReturn, arg(lam, 1)))
     if (ps == none or b == none) none
-    else strcat("fun ", strcat(symname(arg(x, 0)), strcat("(", strcat(un_render(ps), strcat(") ", b)))))
+    else _strcat("fun ", _strcat(symname(arg(x, 0)), _strcat("(", _strcat(un_render(ps), _strcat(") ", b)))))
 }
 
 # the text of each statement, or none
@@ -651,7 +651,7 @@ print_do(t) :=
         ss := block_texts(args_of(t))
         if (ss == none) none
         else if (arity(t) == 0) "{}"
-        else strcat("{\n", strcat(join("\n", map(indent, ss)), "\n}"))
+        else _strcat("{\n", _strcat(join("\n", map(indent, ss)), "\n}"))
     }
 
 # an If without else inside (not in { }) takes the else of an outer If
@@ -668,8 +668,8 @@ print_if(t) :=
         b := if (arg(t, 2) == none) "" else unparse_pp('expr, arg(t, 2))
         if (c == none or a == none or b == none) none
         else {
-            a2 := if (b != "" and has_open_if(arg(t, 1))) strcat("(", strcat(a, ")")) else a
-            strcat("if (", strcat(c, strcat(") ", strcat(a2, if (b == "") "" else strcat(" else ", b)))))
+            a2 := if (b != "" and has_open_if(arg(t, 1))) _strcat("(", _strcat(a, ")")) else a
+            _strcat("if (", _strcat(c, _strcat(") ", _strcat(a2, if (b == "") "" else _strcat(" else ", b)))))
         }
     }
 
@@ -681,14 +681,14 @@ unparse_custom('primary, 3, 'expr, print_if)
 
 # === Syntax made by functions that cannot be run backwards ===
 
-# f"...{e}...": strcat("a", to_text(e)) and so on, in the shape that peg_interp makes
+# f"...{e}...": _strcat("a", _to_text(e)) and so on, in the shape that peg_interp makes
 is_call2(t, f) := is_mx(t) and head(t) == 'Apply and arity(t) == 2 and arg(t, 0) == f and is_mx(arg(t, 1)) and head(arg(t, 1)) == 'Tuple
-is_text_hole(x) := is_call2(x, 'to_text) and arity(arg(x, 1)) == 1
+is_text_hole(x) := is_call2(x, '_to_text) and arity(arg(x, 1)) == 1
 is_text_lit(x) := typeof(x) == 'string and strlen(x) > 0
 
 # the pieces of an f-string as a list of S{text} and E{tree}, or none
 fstr_segs(t) :=
-    if (is_call2(t, 'strcat) and arity(arg(t, 1)) == 2) {
+    if (is_call2(t, '_strcat) and arity(arg(t, 1)) == 2) {
         l := fstr_segs(arg(arg(t, 1), 0))
         x := arg(arg(t, 1), 1)
         if (l == none) none
@@ -713,7 +713,7 @@ fstr_escape(s) := {
 }
 
 print_fstr(t) := {
-    segs := if (is_call2(t, 'strcat) or is_text_hole(t)) fstr_segs(t) else none
+    segs := if (is_call2(t, '_strcat) or is_text_hole(t)) fstr_segs(t) else none
     if (segs == none) none
     else {
         acc := []
@@ -723,10 +723,10 @@ print_fstr(t) := {
             else {
                 e := unparse_pp('expr, arg(sg, 0))
                 if (e == none) ok = false
-                else acc = strcat("{", strcat(if (starts_with(e, "{")) " " else "", strcat(e, "}"))) :: acc
+                else acc = _strcat("{", _strcat(if (starts_with(e, "{")) " " else "", _strcat(e, "}"))) :: acc
             }
         }, segs)
-        if (ok) strcat("f\"", strcat(join("", reverse(acc)), "\"")) else none
+        if (ok) _strcat("f\"", _strcat(join("", reverse(acc)), "\"")) else none
     }
 }
 
@@ -749,7 +749,7 @@ fusion_arms(f) :=
         if (a == none) none else [a]
     }
 
-rname(i) := intern(strcat("%r", int_to_str(i)))
+rname(i) := intern(_strcat("%r", int_to_str(i)))
 
 # the arms of a match with guards: Arm{pattern, guard, body}
 guarded_arms(t) := {
@@ -784,7 +784,7 @@ arm_text(a) := {
     g := if (is_mx(arg(a, 1)) and head(arg(a, 1)) == 'NoGuard) "" else unparse_pp('ternary, arg(a, 1))
     e := unparse_pp('expr, arg(a, 2))
     if (p == none or g == none or e == none) none
-    else strcat(p, strcat(if (g == "") "" else strcat(" if ", g), strcat(" -> ", e)))
+    else _strcat(p, _strcat(if (g == "") "" else _strcat(" if ", g), _strcat(" -> ", e)))
 }
 
 is_applied(t) := is_mx(t) and head(t) == 'Apply and arity(t) == 2 and is_mx(arg(t, 1)) and head(arg(t, 1)) == 'Tuple and arity(arg(t, 1)) == 1
@@ -806,10 +806,47 @@ print_match(t) := {
         s := unparse_pp('ternary, arg(arg(t, 1), 0))
         ts := map(arm_text, arms)
         if (s == none or any(x -> x == none, ts)) none
-        else strcat("match ", strcat(s, strcat(" {\n", strcat(join("\n", map(indent, ts)), "\n}"))))
+        else _strcat("match ", _strcat(s, _strcat(" {\n", _strcat(join("\n", map(indent, ts)), "\n}"))))
     }
 }
 
 unparse_custom('primary, 8, none, print_fstr)
 unparse_custom('sugar_primary, 6, 'expr, print_return0)
 unparse_custom('sugar_primary, 10, none, print_match)
+
+# t[p -> e | q if c -> g] with a guard: the inside is the function that match makes of the arms,
+# with the last function giving peg_skip instead of failing (_peg_rewrite in syntax.pk)
+skip_lambda := mexpr('Lambda, Tuple{'Tuple{_}, mexpr('Quote, Tuple{peg_skip})})
+
+rewrite_arms(f) :=
+    if (not is_guard_fun(f)) none
+    else {
+        d := arg(f, 1)
+        n := arity(d) - 2
+        if (n < 1 or arg(d, 0) != mexpr('Def, Tuple{rname(n), skip_lambda})) none
+        else {
+            r := Tuple{mexpr('Def, Tuple{rname(n), 'Lambda{Tuple{}, none}})}
+            i := 1
+            while (i < arity(d)) {
+                r = push(r, arg(d, i))
+                i = i + 1
+            }
+            guarded_arms(mexpr('Apply, Tuple{mexpr('Lambda, Tuple{arg(f, 0), mexpr('Do, r)}), Tuple{none}}))
+        }
+    }
+
+rewrite_arm_text(a) := {
+    p := unparse_pp('pattern, arg(a, 0))
+    g := if (is_mx(arg(a, 1)) and head(arg(a, 1)) == 'NoGuard) "" else unparse_pp('ternary, arg(a, 1))
+    e := unparse_pp('arrow, arg(a, 2))
+    if (p == none or g == none or e == none) none
+    else _strcat(p, _strcat(if (g == "") "" else _strcat(" if ", g), _strcat(" -> ", e)))
+}
+
+print_rewrite(f) := {
+    arms := rewrite_arms(f)
+    ts := if (arms == none) none else map(rewrite_arm_text, arms)
+    if (ts == none or any(x -> x == none, ts)) none else join(" | ", ts)
+}
+
+unparse_custom('index, 10, none, print_rewrite)

@@ -1,0 +1,49 @@
+# Rewrite a syntax tree with t[p -> e | ...]: algebraic simplification.
+use("unparse")
+
+# One pass. Each part of the tree is tried from the root down with the arms in order.
+# A part that an arm matches is replaced, and the parts inside it wait for the next pass.
+# '_add is the symbol _add, not a variable.
+step(e) := e[
+    Apply{'_add, Tuple{a @ int, b @ int}} -> a + b
+  | Apply{'_add, Tuple{a, 0}} -> a
+  | Apply{'_add, Tuple{0, a}} -> a
+  | Apply{'_add, Tuple{a, b}} if a == b -> `(2 * !a)
+  | Apply{'_sub, Tuple{a @ int, b @ int}} -> a - b
+  | Apply{'_sub, Tuple{a, 0}} -> a
+  | Apply{'_sub, Tuple{a, b}} if a == b -> 0
+  | Apply{'_mul, Tuple{a @ int, b @ int}} -> a * b
+  | Apply{'_mul, Tuple{_, 0}} -> 0
+  | Apply{'_mul, Tuple{0, _}} -> 0
+  | Apply{'_mul, Tuple{a, 1}} -> a
+  | Apply{'_mul, Tuple{1, a}} -> a
+]
+
+# Repeat until nothing changes, printing each pass.
+simplify(e) := {
+    n := step(e)
+    while (n != e) {
+        put("     => "); put(unparse(n)); put("\n")
+        e = n
+        n = step(e)
+    }
+    e
+}
+
+show(e) := {
+    put(unparse(e)); put("\n")
+    simplify(e)
+    put("\n")
+}
+
+show('(x + 0))
+show('(1 * (x + 0)))
+show('(2 + 3 * 4))
+show('((y - y) * z + w * 1))
+show('((a + b) + (a + b)))
+show('(0 * x + 1 * (y + 2 * 3)))
+
+# Arms written in place: f(a) becomes h(a, a) and g(a) becomes a.
+put(unparse('(f(x) + g(y)))); put("\n")
+r := ('(f(x) + g(y)))[Apply{'f, Tuple{a}} -> `h(!a, !a) | Apply{'g, Tuple{a}} -> a]
+put("     => "); put(unparse(r)); put("\n")
