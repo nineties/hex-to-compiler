@@ -413,15 +413,54 @@ ok(vasm{|
     }
 |})
 
-# an own value is overwritten
-ng(vasm{|
+# an own value that is overwritten is released (U32)
+ok(vasm{|
     fn overwrite() {
         var p: own i64
         p = box(1)
-        p = box(2)  # NG
+        p = box(2)
         free(p)
     }
-|}, 'leak)
+    fn overwrite_twice() {
+        var p: own i64
+        p = box(1)
+        p = box(2)
+        p = box(3)
+    }
+    fn overwrite_in_loop(n: i64) {
+        var p: own i64
+        var i: i64
+        p = box(0)
+        i = 0
+        while (i < n) {
+            p = box(i)
+            i = i + 1
+        }
+    }
+|})
+# the new value is freed twice, and the old borrow is not used after the overwrite
+ng(vasm{|
+    fn overwrite_free_twice() {
+        var p: own i64
+        p = box(1)
+        p = box(2)
+        free(p)
+        free(p)     # NG
+    }
+|}, 'freed)
+ng(vasm{|
+    fn overwrite_borrowed() {
+        var p: own i64
+        var v: i64
+        p = box(1)
+        region r {
+            var b: &r i64
+            b = &r p
+            p = box(2)      # NG
+            v = *b
+        }
+    }
+|}, 'borrowed)
 
 # freed in one branch only
 ng(vasm{|
@@ -471,8 +510,8 @@ ng(vasm{|
 check(map((VasmErr{k, _, _}) -> k, vasm_errors(this_file, vasm{|
     fn a1() { var v: i64; v = v }
     fn a2() { var v: i64; v = 1 }
-    fn a3() { var p: own i64; p = box(1); p = box(2) }
-|})), ['uninit, 'leak])
+    fn a3() { var p: own i64; p = box(1); free(p); free(p) }
+|})), ['uninit, 'freed])
 
 # the message with the position, at the second free
 shown_at := line_col(this_src, index_of_str(this_src, "free(p) }", index_of_str(this_src, "fn shown(", 0)))
@@ -731,11 +770,34 @@ ng(vasm{|
         free(n)     # NG
     }
 |}, 'type)
-ng(vasm{|
+# a result that is not kept is released (U32)
+ok(vasm{|
     fn dropped() {
-        box(1)      # NG
+        box(1)
     }
-|}, 'leak)
+    fn dropped_twice() {
+        box(1)
+        box(2)
+    }
+    fn make(n: i64) -> own i64 {
+        var p: own i64
+        p = box(n)
+        return p
+    }
+    fn dropped_user() {
+        make(3)
+    }
+|})
+# the borrow of an own value that is dropped is not used (a call is not an own value)
+ng(vasm{|
+    fn dropped_free() {
+        var p: own i64
+        p = box(1)
+        box(2)
+        free(p)
+        free(p)     # NG
+    }
+|}, 'freed)
 
 # === &mut given to a function is borrowed again for the call (U11) ===
 ok(vasm{|

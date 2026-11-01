@@ -523,15 +523,11 @@ vasm_call(at, st, f, args) := {
     ret := arg(sig, 2)
     if (length(ps) != length(args)) vasm_fail(at, 'type, f"{symname(f)} takes {length(ps)} arguments but {length(args)} are given")
     freeing := user == none and f == 'free
-    emptied := false
     if (freeing) each(a -> if (head(a) == 'Reg) {
         x := arg(a, 1)
         match vasm_status(st, x) {
             Freed{_} -> vasm_fail(at, 'freed, f"{symname(x)} is freed twice")
-          | Taken{_} -> {
-                emptied = true
-                vasm_set_status(st, x, 'init)
-            }
+          | Taken{_} -> vasm_set_status(st, x, 'init)
           | _ -> none
         }
         vasm_no_loans(at, st, x, "freed")
@@ -553,12 +549,7 @@ vasm_call(at, st, f, args) := {
         if (not vasm_match(arg(a, 0), p, t, rs, rsub, tsub)) vasm_fail(arg(a, 0), 'type, f"the argument is {vasm_show_type(t)} but {symname(f)} takes {vasm_show_type(p)}")
     }, zip(ps, args))
     if (freeing) {
-        u := table_get(tsub, 'T, I64{})
-        if (not emptied and vasm_owning(u)) {
-            x := symname(arg(args[0], 1))
-            if (head(u) == 'Arr) vasm_fail(at, 'leak, f"{x} is freed with own values in its elements")
-            vasm_fail(at, 'leak, f"{x} is freed with an own value in it; move it out with v = *{x} first")
-        }
+        # what is left in the value is freed with it (U32, koichi msg 20360)
         vasm_set_status(st, arg(args[0], 1), Freed{at})
     }
     if (user == none and f == 'alloc and vasm_owning(table_get(tsub, 'T, I64{}))) vasm_fail(at, 'owner, "alloc copies its value to every element, so the value does not own")
@@ -654,7 +645,7 @@ vasm_assign(at, st, x, t) := {
         vasm_fail(at, 'type, f"{symname(x)} is {vasm_show_type(dt)} but the value is {vasm_show_type(t)}")
     }
     vasm_no_loans(at, st, x, "assigned")
-    if (vasm_owns(dt, vasm_status(st, x))) vasm_fail(at, 'leak, f"{symname(x)} owns a value and is assigned again")
+    # what x owned before is released here (U32, koichi msg 20360)
     vasm_set_status(st, x, 'init)
 }
 
@@ -714,17 +705,12 @@ vasm_block(ss, st) := {
             u := if (refill) {
                 vasm_set_status(st, p, 'init)
                 vasm_cell(at, st, p, true)
-            } else {
-                u := vasm_cell(at, st, p, true)
-                if (vasm_owning(u)) vasm_fail(at, 'leak, f"the contents of {symname(p)} own a value and are written again; use swap(*{symname(p)}, v)")
-                u
-            }
+            } else vasm_cell(at, st, p, true)
             t := vasm_use(st, a)
             if (not vasm_fits(at, u, t)) vasm_fail(at, 'type, f"{symname(p)} points to {vasm_show_type(u)} but the value is {vasm_show_type(t)}")
         }
       | IStore{at, p, i, a} -> {
             u := vasm_elem(at, st, p, i, true)
-            if (vasm_owning(u)) vasm_fail(at, 'leak, f"the elements of {symname(p)} own values and are written again; use swap({symname(p)}[i], v)")
             t := vasm_use(st, a)
             if (not vasm_fits(at, u, t)) vasm_fail(at, 'type, f"the elements of {symname(p)} are {vasm_show_type(u)} but the value is {vasm_show_type(t)}")
         }
@@ -739,15 +725,14 @@ vasm_block(ss, st) := {
                     vasm_set_status(st, p, if (rest == []) 'init else Parts{rest})
                 } else {
                     vasm_need_field(at, st, p, f)
-                    if (vasm_owning(u)) vasm_fail(at, 'leak, f"{symname(p)}.{symname(f)} owns a value and is written again; use swap({symname(p)}.{symname(f)}, v)")
                 }
-            } else if (vasm_owning(u)) vasm_fail(at, 'leak, f"field {symname(f)} of {symname(p)} owns a value and is written again; use swap({symname(p)}.{symname(f)}, v)")
+            }
             t := vasm_use(st, a)
             if (not vasm_fits(at, u, t)) vasm_fail(at, 'type, f"field {symname(f)} of {symname(s)} is {vasm_show_type(u)} but the value is {vasm_show_type(t)}")
         }
       | CallS{at, f, args} -> {
-            t := vasm_call(at, st, f, args)
-            if (vasm_linear(t)) vasm_fail(at, 'leak, f"the result of {symname(f)} owns a value and is not kept")
+            # a result that owns a value and is not kept is released here (U32, koichi msg 20360)
+            vasm_call(at, st, f, args)
         }
       | IfS{at, c, a, b} -> {
             vasm_cond(st, c)

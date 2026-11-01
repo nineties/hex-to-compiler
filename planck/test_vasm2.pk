@@ -180,60 +180,104 @@ ng(vasm{|
         a = alloc(2, q)     # NG
     }
 |}, 'owner)
-# the outer own is freed with an own value in it
-ng(vasm{|
+# the outer own is freed together with what is left in it (U32)
+ok(vasm{|
     fn free_full() {
         var q: own i64
         var p: own own i64
         q = box(1)
         p = box(q)
-        free(p)     # NG
+        free(p)
     }
-|}, 'leak)
-ng(vasm{|
     fn free_elems(a: own [own i64]) {
-        free(a)     # NG
+        free(a)
     }
-|}, 'leak)
-ng(vasm{|
     struct Buf { data: own [u8], size: i64 }
     fn free_struct(b: own Buf) {
-        free(b)     # NG
+        free(b)
     }
-|}, 'leak)
-# an own value in a place is not written over
+    fn free_field_moved(b: own Buf) -> own [u8] {
+        var d: own [u8]
+        d = alloc(1, 0)
+        d = swap(b.data, d)
+        free(b)
+        return d
+    }
+|})
 ng(vasm{|
+    fn free_full_twice() {
+        var q: own i64
+        var p: own own i64
+        q = box(1)
+        p = box(q)
+        free(p)
+        free(p)     # NG
+    }
+|}, 'freed)
+ng(vasm{|
+    fn free_struct_use(b: own Buf) -> own [u8] {
+        var d: own [u8]
+        d = alloc(1, 0)
+        free(b)
+        d = swap(b.data, d)     # NG
+        return d
+    }
+    struct Buf { data: own [u8], size: i64 }
+|}, 'freed)
+# what is written over is released (U32)
+ok(vasm{|
     fn over_elem[r](a: &mut r [own i64]) {
         var x: own i64
         x = box(1)
-        a[0] = x    # NG
+        a[0] = x
     }
-|}, 'leak)
-ng(vasm{|
     struct Pair { left: own i64, right: own i64 }
     fn over_field[r](p: &mut r Pair) {
         var x: own i64
         x = box(1)
-        p.left = x  # NG
+        p.left = x
     }
-|}, 'leak)
-ng(vasm{|
     fn over_box(p: own own i64) {
         var q: own i64
         q = box(1)
-        *p = q      # NG
+        *p = q
         free(p)
     }
-|}, 'leak)
-ng(vasm{|
-    struct Pair { left: own i64, right: own i64 }
     fn over_reg(s: Pair) -> Pair {
         var x: own i64
         x = box(1)
-        s.left = x  # NG
+        s.left = x
         return s
     }
-|}, 'leak)
+    fn over_reg_twice(s: Pair) -> Pair {
+        var x: own i64
+        var y: own i64
+        x = box(1)
+        y = box(2)
+        s.left = x
+        s.left = y
+        return s
+    }
+|})
+# the value that was written over is not used again
+ng(vasm{|
+    fn over_moved(p: own own i64) {
+        var q: own i64
+        var r: own i64
+        q = box(1)
+        *p = q
+        free(q)     # NG
+        free(p)
+    }
+|}, 'moved)
+ng(vasm{|
+    fn over_elem_moved[r](a: &mut r [own i64]) {
+        var x: own i64
+        x = box(1)
+        a[0] = x
+        free(x)     # NG
+    }
+|}, 'moved)
 # the contents are moved out once
 ng(vasm{|
     fn out_twice(p: own own i64) {
