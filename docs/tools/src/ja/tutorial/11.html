@@ -1,0 +1,39 @@
+<!--title 11. vasm: 所有と借用の検査-->
+<h1>11. vasm: 所有と借用の検査</h1>
+<p class="lead"><code>use("vasm")</code> は、機械命令に近い低級な言語 vasm を <code>vasm{| ... |}</code> の中に書けるようにします。vasm のプログラムは関数と構造体の並びで、検査器が所有と借用の違反・解放後の使用・未初期化の読み出しを型の規則だけで拒みます。</p>
+
+<p>検査の結果は <code>vasm_errors(file, m)</code> が返す <code>VasmErr{kind, loc, msg}</code> のリストです。誤りのない関数は結果に現れず、1つの関数の誤りは最初の1件だけです。この章の例は、次の <code>report</code> で結果を1行ずつ書きます。</p>
+
+<h2>所有と借用</h2>
+<!--ex vasm_box-->
+<p><code>own i64</code> は <code>box</code> で確保した整数への、ただ1つの持ち主です。<code>region r { ... }</code> は借用の有効な範囲に名前を付け、<code>&amp;mut r p</code> はその中だけ <code>p</code> を書き換え可能に借ります。<code>bump</code> の <code>[r]</code> は呼び出しごとに決まる領域の引数で、<code>&amp;mut</code> を渡しても呼び出しの間だけ借り直されるので、<code>m</code> はそのあとも使えます。</p>
+
+<h2>解放後の使用</h2>
+<!--ex vasm_freed-->
+<p><code>free</code> した <code>own</code> は読めず、もう一度 <code>free</code> もできません。<code>q</code> を <code>p</code> に代入すると所有が <code>p</code> に移る（move）ので、<code>q</code> はそのあと使えません。</p>
+
+<h2>自動の解放</h2>
+<!--ex vasm_drop-->
+<p><code>own</code> を持った値は、持ち主がなくなる所で自動的に解放されます。ブロックや関数の終わり、上書き、文として捨てた関数の結果、<code>free</code> した値の中に残ったものが、その場所です。上の例はどれも誤りになりません。<code>free</code> は早く手放したいときに書きます。</p>
+
+<h2>借用の規則</h2>
+<!--ex vasm_borrow-->
+<p>共有の借用 <code>&amp;r</code> は同時にいくつでも持てます。<code>&amp;mut r</code> は1つだけで、借りている間は元の値を読むことも、書き換えることも、解放することもできません。</p>
+
+<h2>領域の内と外</h2>
+<!--ex vasm_escape-->
+<p>内側の領域の借用を外側のレジスタに入れると、領域が終わったあとに借用だけが残ります。逆に、外側の領域の借用を内側の領域の借用として使うことは、外のほうが長く生きるので許されます。</p>
+
+<h2>整数の幅</h2>
+<!--ex vasm_ints-->
+<p>整数の型は <code>i8</code> から <code>i64</code>、<code>u8</code> から <code>u64</code> で、演算の両辺は同じ型です。幅や符号を変えるには <code>as</code> を使います。リテラルは -32768 から 32767 までなので、大きな値はシフトと <code>|</code> で組み立てます。</p>
+
+<h2>配列と構造体</h2>
+<!--ex vasm_array-->
+<p><code>alloc(n, v)</code> は <code>v</code> を <code>n</code> 個並べた <code>own [T]</code> を作り、<code>len</code> は長さを返します。添字は <code>i64</code> で、範囲の検査は実行時に行う前提です。構造体は全部のフィールドを1回ずつ書いて作り、<code>own</code> を持たなければ整数と同じくコピーされます。</p>
+
+<h2>own を持つ値の入れ替え</h2>
+<!--ex vasm_swap-->
+<p><code>own</code> を持つ値は、配列の要素やポインタの指す先から読んでコピーすることができません（持ち主が2人になるため）。<code>swap(p[i], v)</code> は <code>v</code> を入れて前の値を取り出します。構造体のレジスタのフィールドへの書き込み <code>img.body = b</code> は、前の値を解放して入れ替えます。</p>
+
+<p>規則の全体は<a href="../reference/vasm.html">リファレンスの vasm</a>にあります。</p>

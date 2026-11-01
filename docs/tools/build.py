@@ -30,6 +30,7 @@ SECTIONS = {
             ("8", "8. レコード・局所関数・脱出"),
             ("9", "9. 変数の範囲"),
             ("10", "10. 添字と置き換え"),
+            ("11", "11. vasm: 所有と借用の検査"),
         ]),
         ("reference", "リファレンス", [
             ("index", "目次"),
@@ -38,6 +39,7 @@ SECTIONS = {
             ("grammar", "文法の宣言"),
             ("builtins", "組み込み関数"),
             ("library", "ライブラリ"),
+            ("vasm", "vasm"),
         ]),
         ("implementation", "処理系の実装", [
             ("index", "構成"),
@@ -61,6 +63,7 @@ SECTIONS = {
             ("8", "8. Records, local functions, escapes"),
             ("9", "9. Scope of variables"),
             ("10", "10. Indexing and rewriting"),
+            ("11", "11. vasm: checking ownership and borrows"),
         ]),
         ("reference", "Reference", [
             ("index", "Contents"),
@@ -69,6 +72,7 @@ SECTIONS = {
             ("grammar", "Grammar declarations"),
             ("builtins", "Builtin functions"),
             ("library", "Libraries"),
+            ("vasm", "vasm"),
         ]),
         ("implementation", "Implementation", [
             ("index", "Overview"),

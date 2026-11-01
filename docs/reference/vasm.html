@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vasm | hex-to-compiler project</title>
+<link rel="alternate" hreflang="en" href="../en/reference/vasm.html">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header class="site-header"><div class="inner">
+<a class="logo" href="../index.html"><span class="brand"><b>hex-to-compiler <i>project</i></b><small>自分自身をブートストラップする処理系</small></span></a>
+<nav class="site-nav">
+<a href="../index.html">概要</a>
+<a href="../tutorial/index.html">チュートリアル</a>
+<a class="here" href="../reference/index.html">リファレンス</a>
+<a href="../implementation/index.html">処理系の実装</a>
+<a href="https://github.com/nineties/hex-to-compiler">GitHub</a>
+<a class="lang-switch" lang="en" hreflang="en" href="../en/reference/vasm.html">English</a>
+</nav>
+</div></header>
+<div class="layout">
+<nav class="toc" aria-label="リファレンスの目次"><details open><summary>リファレンスの目次</summary>
+<h2>リファレンス</h2>
+<ol>
+<li><a href="index.html">目次</a></li>
+<li><a href="syntax.html">構文</a></li>
+<li><a href="values.html">値・パターン・M式</a></li>
+<li><a href="grammar.html">文法の宣言</a></li>
+<li><a href="builtins.html">組み込み関数</a></li>
+<li><a href="library.html">ライブラリ</a></li>
+<li><a class="here" href="vasm.html">vasm</a></li>
+</ol></details></nav>
+<main>
+<h1>vasm</h1>
+<p class="lead"><code>use("vasm")</code> が定義する低級言語です。<code>vasm{| ... |}</code> に書いた関数と構造体を、所有と借用の規則で検査します。解放後の使用・二重の解放・借用の違反・未初期化の読み出しは誤りです。検査は型の規則だけで、検査を外す口はありません。</p>
+
+<h2>プログラム</h2>
+<p>プログラムは構造体と関数の並びで、どちらもモジュールのどこに書いても全体から見えます。文は改行か <code>;</code> で区切ります。</p>
+<pre>struct S { f: T, g: T }
+fn f[r, ...](x: T, ...) -&gt; T { ... }</pre>
+<p>関数の <code>[r, ...]</code> は領域の引数で、呼び出しの引数の借用から決まります。決まらなければ誤りです。構造体の名前や関数の名前に、組み込みの関数と同じものは使えません。</p>
+
+<h2>型</h2>
+<table>
+<tr><th>型</th><th>意味</th></tr>
+<tr><td><code>i8</code> <code>i16</code> <code>i32</code> <code>i64</code> <code>u8</code> <code>u16</code> <code>u32</code> <code>u64</code></td><td>幅と符号を持つ整数</td></tr>
+<tr><td><code>bool</code></td><td>比較の結果と <code>if</code>・<code>while</code> の条件</td></tr>
+<tr><td>構造体の名前</td><td>全部のフィールドを持つ値</td></tr>
+<tr><td><code>own T</code></td><td><code>T</code> を指す持ち主。ちょうど1つ</td></tr>
+<tr><td><code>&amp;r T</code></td><td>領域 <code>r</code> の中の共有の借用</td></tr>
+<tr><td><code>&amp;mut r T</code></td><td>領域 <code>r</code> の中の排他の借用</td></tr>
+<tr><td><code>own [T]</code> <code>&amp;r [T]</code> <code>&amp;mut r [T]</code></td><td>配列。<code>[T]</code> は <code>own</code> か借用の中にだけ書ける</td></tr>
+</table>
+<p>構造体のフィールド・<code>own</code> の中身・配列の要素には <code>own</code> を入れられます。借用は入れられません。<code>own</code> を持つ型の値は、持ち主がいつも1人です。</p>
+
+<h2>命令</h2>
+<table>
+<tr><th>形</th><th>意味</th></tr>
+<tr><td><code>var x: T</code></td><td>レジスタの宣言。ブロックの終わりまで有効で、初めは未初期化</td></tr>
+<tr><td><code>x = a</code></td><td>コピー（<code>own</code> と <code>&amp;mut</code> は move）</td></tr>
+<tr><td><code>x = a op b</code></td><td><code>+ - * / %</code> <code>&amp; | ^</code> <code>&lt;&lt; &gt;&gt;</code> と比較 <code>&lt; &lt;= &gt; &gt;= == !=</code></td></tr>
+<tr><td><code>x = *p</code> <code>*p = a</code></td><td>箱の中身の読み書き</td></tr>
+<tr><td><code>x = p[i]</code> <code>p[i] = a</code></td><td>配列の要素の読み書き</td></tr>
+<tr><td><code>x = s.f</code> <code>s.f = a</code></td><td>フィールドの読み書き</td></tr>
+<tr><td><code>x = S{f: a, g: b}</code></td><td>構造体の値を作る。全部のフィールドを1回ずつ書く</td></tr>
+<tr><td><code>x = a as T</code></td><td>整数の幅と符号を変える</td></tr>
+<tr><td><code>x = f(a, ...)</code> <code>f(a, ...)</code></td><td>関数の呼び出し</td></tr>
+<tr><td><code>x = &amp;r p</code> <code>x = &amp;mut r p</code></td><td>借用</td></tr>
+<tr><td><code>return a</code></td><td>関数から戻る</td></tr>
+<tr><td><code>if (c) {...} else {...}</code> <code>while (c) {...}</code> <code>region r {...}</code></td><td>構造。条件は比較か <code>bool</code> のレジスタ</td></tr>
+</table>
+
+<h2>組み込みの関数</h2>
+<table>
+<tr><th>関数</th><th>意味</th></tr>
+<tr><td><code>box(v) -&gt; own T</code></td><td>値 <code>v</code> を入れた箱を作る</td></tr>
+<tr><td><code>free(p: own T)</code></td><td>解放する。解放した値は使えず、もう一度解放するのも誤り</td></tr>
+<tr><td><code>alloc(n: i64, v: T) -&gt; own [T]</code></td><td><code>v</code> のコピーを <code>n</code> 個並べた配列。<code>v</code> は <code>own</code> を持てない</td></tr>
+<tr><td><code>len(a: &amp;r [T]) -&gt; i64</code></td><td>配列の長さ</td></tr>
+<tr><td><code>swap(x, v: T) -&gt; T</code></td><td><code>x</code> に <code>v</code> を入れ、前の値を返す。<code>x</code> は <code>*p</code>・<code>p[i]</code>・<code>p.f</code> の形の場所</td></tr>
+</table>
+
+<h2>値と初期化</h2>
+<ul>
+<li>読み出せるのは初期化済みのレジスタだけです。<code>if</code> の後は両方の分岐で初期化したものだけ、<code>while</code> の後はループの前の状態です。</li>
+<li>整数の演算の両辺は同じ型です。幅や符号の違う整数は混ぜられず、<code>as</code> で合わせます。広げるときは元の符号で符号拡張かゼロ拡張、狭めるときは下位のビットを残します。</li>
+<li>整数のリテラルは代入先・引数・相手の項の型の範囲に入ることを検査します。リテラル1つで書けるのは -32768 から 32767 までです。大きな値は <code>m = 0x7F45</code>、<code>m = m &lt;&lt; 16</code>、<code>m = m | 0x4C46</code> のように組み立てます。</li>
+<li>配列の添字は <code>i64</code> です。添字が範囲に入るかは実行時の検査に回り、検査器は型と所有だけを見ます。配列を <code>*p</code> で丸ごと読み書きすることはできません。</li>
+<li>構造体の値は、<code>own</code> を持たなければ整数と同じくコピーされ、<code>own</code> を持てば move されます。<code>s.f</code> は、<code>s</code> が構造体のレジスタならその値のフィールド、構造体を指すポインタなら指す先のフィールドです。</li>
+</ul>
+
+<h2>所有</h2>
+<ul>
+<li><code>own</code> の値は、move するか <code>free</code> するかのどちらかを高々1回します。</li>
+<li>持ち主がなくなる所で、残った <code>own</code> は自動的に解放されます。ブロックや関数の終わり・<code>return</code>、上書き（<code>p = box(2)</code>・<code>*p = v</code>・<code>p[i] = v</code>・<code>s.f = v</code> の前の値）、文として捨てた関数の結果、<code>free</code> した値の中に残ったものです。箱の中身・構造体のフィールド・配列の要素のうち、取り出されていないものが解放されます。</li>
+<li>解放した値を使う・もう一度解放する・move した値を使うのは誤りです。</li>
+<li>片方の分岐だけで move や解放をした値は、その後に持ち主かどうかが決まらないので誤りです。ループは中で move した値を、次の周の前に入れ直す必要があります。</li>
+<li>関数は move した引数の持ち主を受け取ります。呼び出し元は渡した値をそのあと使えません。</li>
+</ul>
+
+<h2>own を持つ値の取り出し</h2>
+<ul>
+<li><code>x = *p</code> は、中身が <code>own</code> を持つとき中身を move して取り出します。<code>p</code> は <code>own</code> で、借りられていないこと。取り出したあとの <code>p</code> は中身の無い箱で、<code>*p = v</code> で入れ直すか <code>free(p)</code> するまで、読む・move する・借りることはできません。借用からは取り出せません。</li>
+<li>構造体のレジスタ <code>s</code> からは <code>x = s.f</code> で <code>own</code> を持つフィールドを move して取り出せます。取り出した欄を読む・もう一度取り出すのは誤りで、<code>s.f = v</code> で入れ直せます。取り出したあとの <code>s</code> は丸ごとは使えず、残った欄は <code>s</code> がなくなる所で解放されます。</li>
+<li>配列の要素やポインタの指す構造体のフィールドは、<code>swap(p[i], v)</code>・<code>swap(p.f, v)</code> で入れ替えて取り出します。<code>*p</code> も <code>swap(*p, v)</code> で入れ替えられます。場所は <code>own</code>（借りられていない）か <code>&amp;mut</code> から書けるものです。</li>
+<li><code>own</code> を持つ値を、配列の要素・ポインタの指す先・借用からコピーして読むことはできません。</li>
+</ul>
+
+<h2>借用と領域</h2>
+<ul>
+<li><code>x = &amp;r p</code> は、<code>p</code> が <code>r</code> より前に宣言され、<code>r</code> の中で生きていることを求めます。借りている間、<code>p</code> を move・解放・代入することはできません。<code>&amp;mut</code> で借りている間は、<code>*p</code>・<code>p[i]</code>・<code>p.f</code> も読めません。<code>r</code> の終わりで貸しが消えます。</li>
+<li>共有の借用は複製され、いくつでも持てます。<code>&amp;mut</code> はレジスタの間で使うと move されます。</li>
+<li>関数の借用の引数に渡した <code>&amp;mut</code> は、呼び出しの間だけ借り直され、move されません。同じ呼び出しの別の引数にもう一度渡すことはできません。関数の結果の型が借りた領域を含むときは、結果が借用を持ち出すので借り直しにならず、move されます。</li>
+<li><code>&amp;mut</code> は <code>&amp;</code> の引数に渡せます（呼び出しの間だけ共有で借り直す）。</li>
+<li>外の領域 <code>q</code> の借用は、<code>q</code> の内側に開いた領域 <code>r</code> の借用の所に渡せます。代入・<code>return</code>・引数のどれでも同じです。関数の領域の引数どうしには内外の関係が無く、関数の領域は関数の中で開いた領域より外です。</li>
+<li>関数の領域の引数は、渡された借用の領域のうち一番内側のものに決まります（ほかが全部それより外であること）。</li>
+<li>型 <code>&amp;r T</code> は <code>r</code> の中でしか書けません。<code>r</code> の外のレジスタに入れる、<code>r</code> の外へ返すのは誤りです。</li>
+</ul>
+
+<h2>誤りの種類</h2>
+<p><code>vasm_errors(file, m)</code> は <code>VasmErr{kind, loc, msg}</code> のリストを返します。<code>kind</code> は次のシンボルです。構造体と関数のそれぞれで、最初の誤り1件だけを返します。</p>
+<table>
+<tr><th>kind</th><th>誤り</th></tr>
+<tr><td><code>'type</code></td><td>型が合わない。整数の幅や符号の違い、リテラルの範囲、フィールドの不足</td></tr>
+<tr><td><code>'undefined</code></td><td>定義のない関数や構造体</td></tr>
+<tr><td><code>'uninit</code></td><td>初期化前の読み出し</td></tr>
+<tr><td><code>'moved</code></td><td>move した値、取り出した中身やフィールドの使用</td></tr>
+<tr><td><code>'freed</code></td><td>解放した値の使用、二重の解放</td></tr>
+<tr><td><code>'borrowed</code></td><td>借りている間の move・解放・代入・読み書き、借用の重なり</td></tr>
+<tr><td><code>'owner</code></td><td><code>own</code> を持つ値を持ち主でない場所からコピーする</td></tr>
+<tr><td><code>'region</code></td><td>領域が開いていない・すでに開いている・決まらない</td></tr>
+<tr><td><code>'escape</code></td><td>借用が領域の外に出る</td></tr>
+<tr><td><code>'branch</code></td><td>分岐の後で所有の状態が揃わない</td></tr>
+<tr><td><code>'loop</code></td><td>ループで move した値を入れ直さない</td></tr>
+</table>
+<p>例は<a href="../tutorial/11.html">チュートリアルの 11 章</a>にあります。<code>vasm_report(file, m)</code> は誤りを <code>file:行:列: メッセージ</code> で書き、誤りがなければ <code>ok</code> を書きます。</p>
+
+<nav class="pager"><a class="prev" href="library.html"><small>前のページ</small>ライブラリ</a></nav>
+</main>
+</div>
+<footer><div class="inner"><a href="https://github.com/nineties/hex-to-compiler">github.com/nineties/hex-to-compiler</a></div></footer>
+<script src="../assets/highlight.js"></script>
+</body>
+</html>

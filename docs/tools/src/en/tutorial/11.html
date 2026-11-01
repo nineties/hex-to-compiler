@@ -1,0 +1,39 @@
+<!--title 11. vasm: checking ownership and borrows-->
+<h1>11. vasm: checking ownership and borrows</h1>
+<p class="lead"><code>use("vasm")</code> lets you write vasm, a low-level language close to machine instructions, inside <code>vasm{| ... |}</code>. A vasm program is a list of functions and structs. The checker rejects ownership and borrow violations, uses after free and reads of uninitialized registers using type rules alone.</p>
+
+<p>The result of the check is the list of <code>VasmErr{kind, loc, msg}</code> that <code>vasm_errors(file, m)</code> returns. A function without an error does not appear in it, and a function has at most one error: the first. The examples in this chapter write the result line by line with the <code>report</code> function in each file.</p>
+
+<h2>Ownership and borrows</h2>
+<!--ex vasm_box-->
+<p><code>own i64</code> is the single owner of an integer allocated by <code>box</code>. <code>region r { ... }</code> names the extent in which a borrow is valid, and <code>&amp;mut r p</code> borrows <code>p</code> for writing inside it. The <code>[r]</code> of <code>bump</code> is a region parameter fixed at each call. A <code>&amp;mut</code> passed to a call is borrowed again for the duration of the call, so <code>m</code> can be used after it.</p>
+
+<h2>Use after free</h2>
+<!--ex vasm_freed-->
+<p>An <code>own</code> that has been freed cannot be read or freed again. Assigning <code>q</code> to <code>p</code> moves the ownership to <code>p</code>, so <code>q</code> cannot be used afterwards.</p>
+
+<h2>Automatic release</h2>
+<!--ex vasm_drop-->
+<p>A value that owns something is released automatically where its owner goes away: at the end of a block or a function, when it is overwritten, when the result of a call is discarded as a statement, and for what is left inside a value that is passed to <code>free</code>. None of the functions above is an error. <code>free</code> is for releasing a value earlier.</p>
+
+<h2>Rules for borrows</h2>
+<!--ex vasm_borrow-->
+<p>Any number of shared borrows <code>&amp;r</code> can exist at once. A <code>&amp;mut r</code> is exclusive: while it lives, the original value can be neither read, written nor freed.</p>
+
+<h2>Inside and outside of regions</h2>
+<!--ex vasm_escape-->
+<p>A borrow of an inner region put in an outer register would outlive its region. A borrow of an outer region can be used where a borrow of an inner region is expected, because the outer one lives longer.</p>
+
+<h2>Widths of integers</h2>
+<!--ex vasm_ints-->
+<p>The integer types are <code>i8</code> to <code>i64</code> and <code>u8</code> to <code>u64</code>, and both operands of an operator have the same type. Use <code>as</code> to change the width or the signedness. A literal ranges from -32768 to 32767, so a larger value is built with shifts and <code>|</code>.</p>
+
+<h2>Arrays and structs</h2>
+<!--ex vasm_array-->
+<p><code>alloc(n, v)</code> makes an <code>own [T]</code> of <code>n</code> copies of <code>v</code>, and <code>len</code> returns the length. An index is an <code>i64</code>, and checking its range is left to run time. A struct is built by giving every field once. It is copied like an integer unless it owns something.</p>
+
+<h2>Exchanging values that own</h2>
+<!--ex vasm_swap-->
+<p>A value that owns something cannot be copied out of an array element or the target of a pointer, because it would have two owners. <code>swap(p[i], v)</code> puts <code>v</code> in and returns the previous value. Writing a field of a struct register, as in <code>img.body = b</code>, releases the previous value and puts the new one in.</p>
+
+<p>All the rules are in <a href="../reference/vasm.html">vasm in the reference</a>.</p>
