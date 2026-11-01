@@ -1,0 +1,164 @@
+# tests for the builtins: strings, plain arrays, files, bit operations and command-line arguments
+# Run as: planck0 planck/test_builtins.pk -- one "two words"
+# Copyright (C) 2026 nineties
+
+passed := 0
+failed := 0
+
+check(actual, expected) := if (actual == expected) {
+    passed = passed + 1
+} else {
+    failed = failed + 1
+    put("Test failed: expected "); print(expected)
+    put(" but got "); println(actual)
+}
+
+# === indexing a string gives the character ===
+s := "hello"
+check(s[0], "h")
+check(s[4], "o")
+check(s[1] == "e", true)
+check(typeof(s[2]), 'string)
+check(strlen(s[0]), 1)
+check(ord(s[3], 0), 108)
+check(substr(s, 1, 3), "el")
+check(ord(s, 9), -1)
+
+# === plain arrays ===
+b := u8_array(4)
+check(typeof(b), 'plain)
+check(plain_kind(b), 'u8)
+check(plain_len(b), 4)
+check(b[0], 0)
+b[1] = 255
+b[3] = 7
+check(b[1], 255)
+check(b[3], 7)
+check(plain_get(b, 3), 7)
+check(plain_set(b, 2, 9), 9)
+check(b[2], 9)
+
+h := u16_array(3)
+check(plain_kind(h), 'u16)
+h[0] = 65535
+h[1] = 258
+check(h[0], 65535)
+check(h[1], 258)
+check(h[2], 0)
+
+w := i32_array(3)
+check(plain_kind(w), 'i32)
+w[0] = -5
+w[1] = 1073741823
+w[2] = -1073741824
+check(w[0], -5)
+check(w[1], 1073741823)
+check(w[2], -1073741824)
+check(plain_len(i32_array(0)), 0)
+
+# a[i] with the index from a variable and in a loop
+sum := 0
+i := 0
+while (i < 4) {
+    sum = sum + b[i]
+    i = i + 1
+}
+check(sum, 271)
+
+# plain_copy copies elements; the ranges of one array may overlap
+c := u8_array(6)
+plain_copy(c, 1, b, 0, 4)
+check(c[0], 0)
+check(c[1], 0)
+check(c[2], 255)
+check(c[3], 9)
+check(c[4], 7)
+check(c[5], 0)
+plain_copy(c, 0, c, 2, 3)
+check(c[0], 255)
+check(c[1], 9)
+check(c[2], 7)
+plain_copy(c, 2, c, 0, 3)
+check(c[2], 255)
+check(c[3], 9)
+check(c[4], 7)
+
+# a plain array is a value that is not equal to another with the same elements
+check(b == b, true)
+check(b == u8_array(4), false)
+
+# === files: a byte 0 is written and read back ===
+data := u8_array(5)
+data[0] = 0
+data[1] = 65
+data[2] = 0
+data[3] = 255
+data[4] = 10
+write_file("tmp-builtins.bin", data)
+back := read_bytes("tmp-builtins.bin")
+check(plain_len(back), 5)
+check(back[0], 0)
+check(back[1], 65)
+check(back[2], 0)
+check(back[3], 255)
+check(back[4], 10)
+text := read_file("tmp-builtins.bin")
+check(strlen(text), 5)
+check(ord(text, 0), 0)
+check(ord(text, 3), 255)
+check(text[1], "A")
+
+# a string with a 0 is written as it is
+write_file("tmp-builtins.bin", _strcat(_strcat("a", substr(read_file("tmp-builtins.bin"), 0, 1)), "z"))
+back = read_bytes("tmp-builtins.bin")
+check(plain_len(back), 3)
+check(back[0], 97)
+check(back[1], 0)
+check(back[2], 122)
+
+# an empty file, and the file is truncated
+write_file("tmp-builtins.bin", "")
+check(plain_len(read_bytes("tmp-builtins.bin")), 0)
+check(read_file("tmp-builtins.bin"), "")
+chmod("tmp-builtins.bin", 493)
+
+# === bit operations ===
+check(bit_and(12, 10), 8)
+check(bit_or(12, 10), 14)
+check(bit_xor(12, 10), 6)
+check(bit_and(-1, 255), 255)
+check(bit_and(-2, 7), 6)
+check(bit_or(-8, 3), -5)
+check(bit_xor(-1, 5), -6)
+check(bit_xor(5, 5), 0)
+check(bit_not(0), -1)
+check(bit_not(5), -6)
+check(bit_not(-1), 0)
+check(bit_shl(1, 0), 1)
+check(bit_shl(1, 10), 1024)
+check(bit_shl(3, 29), -536870912)
+check(bit_shl(1, 30), -1073741824)
+check(bit_shl(1, 31), 0)
+check(bit_shl(-1, 4), -16)
+check(bit_shr(1024, 10), 1)
+check(bit_shr(-1, 1), 1073741823)
+check(bit_shr(-1, 30), 1)
+check(bit_shr(-1, 31), 0)
+check(bit_shr(-1, 0), -1)
+check(bit_shr(5, 1), 2)
+check(bit_sar(-16, 2), -4)
+check(bit_sar(-1, 30), -1)
+check(bit_sar(-1, 31), -1)
+check(bit_sar(1024, 3), 128)
+check(bit_sar(-1073741824, 30), -1)
+check(bit_and(bit_shr(0x2345678, 8), 255), 0x56)
+
+# === command-line arguments ===
+args := command_args()
+check(typeof(args), 'array)
+check(array_len(args), 2)
+check(args[0], "one")
+check(args[1], "two words")
+
+put("Tests passed "); print(passed); put("/"); println(passed + failed)
+if (failed > 0) exit(1)

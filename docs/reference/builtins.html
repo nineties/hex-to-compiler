@@ -42,8 +42,10 @@
 <tr><td>M式</td><td><code>head</code> <code>arity</code> <code>arg</code> <code>mexpr</code> <code>push</code> <code>typeof</code></td></tr>
 <tr><td>文字列</td><td><code>strlen</code> <code>ord</code> <code>substr</code> <code>_strcat</code> <code>intern</code> <code>symname</code></td></tr>
 <tr><td>配列</td><td><code>array</code> <code>array_get</code> <code>array_set</code> <code>array_len</code> <code>hash</code></td></tr>
-<tr><td>ファイル</td><td><code>read_file</code></td></tr>
-<tr><td>言語</td><td><code>parse</code> <code>eval</code> <code>exit</code></td></tr>
+<tr><td>平らな配列</td><td><code>u8_array</code> <code>u16_array</code> <code>i32_array</code> <code>plain_get</code> <code>plain_set</code> <code>plain_len</code> <code>plain_kind</code> <code>plain_copy</code></td></tr>
+<tr><td>ビット演算</td><td><code>bit_and</code> <code>bit_or</code> <code>bit_xor</code> <code>bit_not</code> <code>bit_shl</code> <code>bit_shr</code> <code>bit_sar</code></td></tr>
+<tr><td>ファイル</td><td><code>read_file</code> <code>read_bytes</code> <code>write_file</code> <code>chmod</code></td></tr>
+<tr><td>言語</td><td><code>parse</code> <code>eval</code> <code>exit</code> <code>command_args</code></td></tr>
 <tr><td><code>planck/init.pk</code></td><td><code>true</code> <code>false</code> <code>none</code> <code>_not</code> <code>load</code> <code>use</code> <code>table</code> <code>table_get</code> <code>table_set</code></td></tr>
 <tr><td><code>planck/peg.pk</code></td><td><code>peg_parse</code> <code>_define_rule</code></td></tr>
 <tr><td><code>planck/syntax.pk</code></td><td><code>parse_mexpr</code> <code>_to_text</code> <code>_record_declare</code> <code>_record_get</code> <code>peg_for</code> <code>_index_get</code> <code>_index_set</code> <code>subst</code></td></tr>
@@ -88,8 +90,8 @@ println(0x1f + 0b101)</pre>
 <li><code>push(Head{a, ...}, x)</code> は <code>Head{a, ..., x}</code> です。</li>
 <li><code>mexpr(h, Tuple{a, ...})</code> は頭 <code>h</code> の M式 <code>h{a, ...}</code> を作ります。</li>
 <li><code>symname(sym)</code> はシンボルの名前を文字列で返します（<code>intern</code> の逆）。<code>intern(s)</code> は名前が <code>s</code> のシンボルです。</li>
-<li><code>strlen(s)</code> はバイト数です。<code>ord(s, i)</code> は <code>i</code> 番目のバイトで、<code>i</code> が範囲の外なら <code>-1</code> です。</li>
-<li><code>substr(s, i, j)</code> は <code>i</code> から <code>j - 1</code> までのバイトです。<code>_strcat(a, b)</code> は <code>a</code> のあとに <code>b</code> を続けたものです。</li>
+<li><code>strlen(s)</code> は文字数です。<code>ord(s, i)</code> は <code>i</code> 番目の文字の番号で、<code>i</code> が範囲の外なら <code>-1</code> です。<code>s[i]</code> は <code>i</code> 番目の文字を長さ1の文字列で返します。</li>
+<li><code>substr(s, i, j)</code> は <code>i</code> から <code>j - 1</code> 番目までの文字です。<code>_strcat(a, b)</code> は <code>a</code> のあとに <code>b</code> を続けたものです。</li>
 </ul>
 <div class="example">
 <p class="file">r_builtins.pk</p>
@@ -123,9 +125,53 @@ true</pre>
 <li><code>table()</code> は新しいハッシュ表 <code>Table{a}</code> です。<code>a</code> は配列でできています。<code>table_get(t, key, default)</code>・<code>table_set(t, key, value)</code>。キーは <code>==</code> で比べます。<code>t[key]</code> と <code>t[key] = value</code> でも読み書きできます（<a href="syntax.html#index">添字と置き換え</a>）。</li>
 </ul>
 
+<h2>平らな配列とビット演算</h2>
+<p>平らな配列は、タグのない整数を並べた配列です。要素の型は <code>u8</code>（0から255）・<code>u16</code>（0から65535）・<code>i32</code>（整数）で、作った直後は全部0です。</p>
+<ul>
+<li><code>u8_array(n)</code>・<code>u16_array(n)</code>・<code>i32_array(n)</code> は要素が <code>n</code> 個の新しい配列です。<code>a[i]</code> と <code>a[i] = x</code> で読み書きでき、<code>plain_get(a, i)</code>・<code>plain_set(a, i, x)</code>（<code>x</code> を返す）も同じです。型に収まらない値と範囲の外の位置は実行時エラーです。</li>
+<li><code>plain_len(a)</code> は要素数、<code>plain_kind(a)</code> は <code>'u8</code>・<code>'u16</code>・<code>'i32</code> です。<code>plain_copy(dst, di, src, si, n)</code> は <code>src</code> の <code>si</code> から <code>n</code> 個を <code>dst</code> の <code>di</code> 以降に写します。型は同じでなければならず、同じ配列の中で重なってもかまいません。</li>
+<li><code>bit_and(a, b)</code>・<code>bit_or(a, b)</code>・<code>bit_xor(a, b)</code>・<code>bit_not(a)</code> は、31ビットの2の補数の整数に対するビットごとの演算です。</li>
+<li><code>bit_shl(a, k)</code> は左に <code>k</code>（0から31）ビットずらし、あふれたビットを捨てて31ビットに収めます。<code>bit_shr(a, k)</code> は <code>a</code> を31ビットの符号なしとして右にずらす論理シフト、<code>bit_sar(a, k)</code> は符号を保つ算術シフトです。</li>
+</ul>
+<div class="example">
+<p class="file">r_plain.pk</p>
+<pre class="pk">b := u8_array(4)
+b[0] = 72
+b[1] = 0
+b[2] = 255
+println(plain_len(b))
+println(b[2])
+println(plain_kind(b))
+write_file(&quot;tmp-plain.bin&quot;, b)
+c := read_bytes(&quot;tmp-plain.bin&quot;)
+println(c[1])
+println(plain_len(c))
+println(bit_and(0xff0, 0x3c))
+println(bit_xor(5, 3))
+println(bit_shl(1, 20))
+println(bit_shr(-1, 28))
+println(bit_sar(-256, 4))
+s := &quot;ab&quot;
+println(s[1])</pre>
+<p class="label">出力</p>
+<pre class="out">4
+255
+u8
+0
+4
+48
+6
+1048576
+7
+-16
+&quot;b&quot;</pre>
+</div>
+
 <h2>ファイルと言語</h2>
 <ul>
-<li><code>read_file(path)</code> はファイルの中身です。<code>load(path)</code> はファイルを読んで評価します。</li>
+<li><code>read_file(path)</code> はファイルの中身で、0のバイトも含みます。<code>read_bytes(path)</code> は同じ中身の <code>u8</code> 配列です。<code>write_file(path, x)</code> は文字列か <code>u8</code> 配列 <code>x</code> の全バイトをファイルに書きます（なければ作り、あれば空にします。0のバイトもそのまま書きます）。<code>chmod(path, mode)</code> はファイルの権限を <code>mode</code> にします（<code>493</code> が8進の755）。</li>
+<li><code>command_args()</code> は、planck0 の引数のうち <code>--</code> より後の文字列の配列です。<code>planck0 a.pk -- x y</code> なら <code>"x"</code> と <code>"y"</code> の2要素で、<code>--</code> がなければ空です。<code>--</code> より前の引数は今までどおりファイルとして順に読みます。</li>
+<li><code>load(path)</code> はファイルを読んで評価します。</li>
 <li><code>use(name)</code> は <code>load("planck/lib/&lt;name&gt;.pk")</code> を1回だけします。</li>
 <li><code>parse</code> と <code>eval</code> は<a href="values.html">トップレベル</a>で使われる関数です。<code>exit(n)</code> は状態 <code>n</code> で終わります。</li>
 <li><code>_define_rule(name, e)</code> は構文解析式で規則を定義します（<a href="../implementation/peg.html">packrat パーサ</a>）。<code>peg_parse</code> は<a href="grammar.html">文法の宣言</a>にあります。</li>
