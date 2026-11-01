@@ -81,7 +81,7 @@ SECTIONS = {
 
 SITE = "hex-to-compiler project"
 UI = {
-    "ja": dict(sub="自分の靴ひもを引いて立ち上がる処理系", overview="概要", out="出力", prev="前のページ", next="次のページ", toc="の目次", switch="English", lang="ja"),
+    "ja": dict(sub="自分自身をブートストラップする処理系", overview="概要", out="出力", prev="前のページ", next="次のページ", toc="の目次", switch="English", lang="ja"),
     "en": dict(sub="A compiler that pulls itself up by its bootstraps.", overview="Overview", out="Output", prev="Previous", next="Next", toc=" contents", switch="日本語", lang="en"),
 }
 
@@ -326,13 +326,11 @@ def page(cur_sec, cur_page, title, body, toc_pages, sec_label):
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{full_title}</title>
 <link rel="alternate" hreflang="{other_code}" href="{other}">
-<link rel="icon" type="image/png" sizes="32x32" href="{up}assets/brand/favicon-32.png">
-<link rel="apple-touch-icon" href="{up}assets/brand/apple-touch-icon.png">
 <link rel="stylesheet" href="{up}assets/style.css">
 </head>
 <body>
 <header class="site-header"><div class="inner">
-<a class="logo" href="{href(cur_sec, None, None)}"><img src="{up}assets/brand/logo.webp" alt="" width="40" height="40"><span class="brand"><b>hex-to-compiler <i>project</i></b><small>{u["sub"]}</small></span></a>
+<a class="logo" href="{href(cur_sec, None, None)}"><span class="brand"><b>hex-to-compiler <i>project</i></b><small>{u["sub"]}</small></span></a>
 <nav class="site-nav">
 {nav(cur_sec)}
 <a href="{REPO}">GitHub</a>
