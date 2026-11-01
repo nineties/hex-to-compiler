@@ -3,10 +3,10 @@
 <p class="lead">planck0 reads only M-expressions. It compiles each top-level M-expression to bytecode as it reads it, and runs the bytecode on a virtual machine that keeps its frames on the heap. The source is the single file <a href="@REPO@/blob/main/planck0.sv">planck0.sv</a>.</p>
 
 <h2>Top level</h2>
-<p><code>main</code> prepares the state, reads <code>planck/init.pk</code>, and then reads the files on the command line in order.</p>
-<!--file planck0.sv 2300-2314-->
+<p><code>main</code> prepares the state, reads <code>planck/init.pk</code>, and then reads the program file given as the first argument.</p>
+<!--file planck0.sv 2597-2609-->
 <p><code>interpret_file</code> reads a file ([[planck0.sv#2566-2595]]). For each expression it calls the global variables <code>parse</code> and <code>eval</code> again through <code>call_global</code>. <code>call_global</code> builds <code>Apply{name, Tuple{arg}}</code>, compiles it and runs it ([[planck0.sv#2561-2564]]). Therefore a program that replaces <code>parse</code> has the next expression read by the new <code>parse</code>. The syntax of planck enters by this mechanism.</p>
-<!--file planck0.sv 2254-2263-->
+<!--file planck0.sv 2551-2560-->
 
 <h2>Value representation</h2>
 <p>A value is one 32-bit word. When the least significant bit is 1, the value is an integer shifted left by one bit. When it is 0, the value is a pointer to an object on the heap. An object has a header word that holds its kind and length.</p>
@@ -16,7 +16,7 @@
 
 <h2>The M-expression reader</h2>
 <p>The builtin <code>parse</code> reads four kinds of text: symbols, integers, strings, and <code>Head{...}</code>, where a <code>{</code> follows a symbol directly ([[planck0.sv#784-874]]). An M-expression has at most 16 arguments.</p>
-<!--file planck0.sv 812-844-->
+<!--file planck0.sv 830-862-->
 <p>After the syntax of planck is installed, this reader remains as <code>parse_mexpr</code>.</p>
 <!--ex i_parse-->
 
@@ -27,12 +27,12 @@
 
 <h2>The virtual machine</h2>
 <p>The machine has 18 instructions. The design is described in the comments of the source.</p>
-<!--file planck0.sv 857-930-->
+<!--file planck0.sv 875-948-->
 <p>Frames live on the heap, not on the machine stack, and the virtual machine does not call itself recursively. The state of a computation is the chain of frames from the current frame to the top level, so a continuation is a pointer to this chain.</p>
 
 <h2>Calls and pattern matching</h2>
 <p>At a call, <code>select</code> chooses the function that matches the arguments ([[planck0.sv#1616-1644]]). A <code>Fusion</code> tries the left function and, on failure, the right one. A <code>Lambda</code> compares the number of arguments and then matches the patterns in order.</p>
-<!--file planck0.sv 1553-1583-->
+<!--file planck0.sv 1571-1601-->
 <p><code>match_pat</code> writes the value to the next position of the new environment for a variable, compares equality for a <code>Quote</code>, and checks the kind for a <code>_TypeOf</code> before it matches the inner pattern. An M-expression pattern compares the head and the number of arguments, and recurses on each argument. When no function matches, the program stops with <code>matching failed</code> ([[planck0.sv#1698-1710]]).</p>
 <p>The builtin <code>eval</code> compiles an M-expression as a top-level expression and runs it in a new frame ([[planck0.sv#1675-1679]]).</p>
 
@@ -41,6 +41,6 @@
 
 <h2 id="effects">Effects</h2>
 <p><code>Handle</code> runs its body in a new frame and records the handler in that frame ([[planck0.sv#1825-1832]]). <code>Perform</code> follows the chain from the current frame to the callers and looks for a frame that has a handler.</p>
-<!--file planck0.sv 1823-1845-->
+<!--file planck0.sv 1842-1864-->
 <p>When it finds one, it makes a continuation <code>k</code>, a pair of the current frame and the boundary frame, and matches the handler against <code>(v, k)</code>. When the handler does not match, the search continues outward. The value of the handler returns to the caller of the boundary frame and becomes the value of the <code>Handle</code> expression.</p>
 <p>Calling <code>k</code> copies the frames from the current frame to the boundary and runs the copy (<code>resume</code>, [[planck0.sv#1646-1663]]). The original frames never run, so the same <code>k</code> can be called any number of times (multi-shot continuations).</p>

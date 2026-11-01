@@ -2,7 +2,7 @@ Planck Language Specification
 =============================
 
 Planck is a language for symbolic and language processing.
-``planck/init.pk`` is loaded first, then the given files are run in order.
+``planck/init.pk`` is loaded first, then the program file given as the first argument is run.
 Each top-level expression is parsed and evaluated one by one.
 
 ``planck/init.pk``, ``planck/peg.pk`` and ``planck/syntax.pk`` are written in M-expressions.
@@ -474,7 +474,7 @@ Builtin functions
    * - Files
      - ``read_file`` ``read_bytes`` ``write_file`` ``chmod``
    * - Language
-     - ``parse`` ``eval`` ``exit`` ``command_args``
+     - ``parse`` ``eval`` ``exit`` ``argv``
    * - ``planck/init.pk``
      - ``true`` ``false`` ``none`` ``_not`` ``load`` ``use`` ``table`` ``table_get`` ``table_set``
    * - ``planck/peg.pk``
@@ -509,7 +509,7 @@ Builtin functions
   ``bit_sar(a, k)`` is the arithmetic shift.
 * ``read_file(path)``: the contents of the file, including bytes 0. ``read_bytes(path)``: the same as a ``u8`` array.
   ``write_file(path, x)``: write all bytes of the string or ``u8`` array ``x`` to the file, which is created or emptied. ``chmod(path, mode)``.
-* ``command_args()``: the array of the strings after ``--`` in the arguments of the program; empty with no ``--``.
+* ``argv()``: the array of the command-line strings of the program, as ``argv`` of C ``main``: the first is the program file and the rest are its arguments.
 * ``load(path)``: parse and evaluate the file.
 * ``_define_rule(name, e)``: define the rule by a parsing expression (see ``planck/peg.pk``).
 * ``use(name)``: ``load("planck/lib/<name>.pk")`` once.

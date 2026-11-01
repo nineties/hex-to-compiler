@@ -2430,20 +2430,20 @@
     (return (fixnum (asr (fixnum_to_int a) (fixnum_to_int k))))
     )
 
-; --- command-line arguments: the words after "--" on the command line of planck0
+; --- command-line arguments: argv() is the array of the strings on the command line after planck0;
+; the first is the program file, the rest are its arguments
 (long cmd_argc)
 (long cmd_argv)
-(long cmd_first)
 
-(fun p_command_args ()
-    (var n (- cmd_argc cmd_first))
+(fun p_argv ()
+    (var n (- cmd_argc 1))
     (var a 0)
     (var i 0)
     (if (< n 0) (= n 0))
     (= a (allocate (* 4 (+ n 1))))
     (set a 0 (make_header ArrayT 1 n))
     (while (< i n) (do
-        (set a (+ i 1) (str (get cmd_argv (+ cmd_first i))))
+        (set a (+ i 1) (str (get cmd_argv (+ i 1))))
         (+= i 1)
         ))
     (return a)
@@ -2518,7 +2518,7 @@
     (defprim "bit_shl" 2 p_bit_shl PRIM_NATIVE)
     (defprim "bit_shr" 2 p_bit_shr PRIM_NATIVE)
     (defprim "bit_sar" 2 p_bit_sar PRIM_NATIVE)
-    (defprim "command_args" 0 p_command_args PRIM_NATIVE)
+    (defprim "argv" 0 p_argv PRIM_NATIVE)
     (defprim "exit"    1 p_exit    PRIM_NATIVE)
     (defprim "eval"    1 0         PRIM_EVAL)
     )
@@ -2595,7 +2595,6 @@
     )
 
 (fun main (argc argv)
-    (var i 1)
     (init_heap)
     (init_tables)
     (init_symbols)
@@ -2604,21 +2603,7 @@
     (init_prims)
 
     (interpret_file "planck/init.pk")
-    (var files argc)
     (= cmd_argc argc)
     (= cmd_argv argv)
-    (= cmd_first argc)
-    (while (< i argc) (do
-        (if (streq (get argv i) "--") (do
-            (= files i)
-            (= cmd_first (+ i 1))
-            (= i argc)
-            )
-            (+= i 1))
-        ))
-    (= i 1)
-    (while (< i files) (do
-        (interpret_file (get argv i))
-        (+= i 1)
-        ))
+    (if (> argc 1) (interpret_file (get argv 1)))
     )
