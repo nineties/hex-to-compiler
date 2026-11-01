@@ -86,6 +86,8 @@ M-expressions are expressions of this syntax too.
      - ``Tuple{}``, ``Tuple{a, b, ...}``
    * - ``[a, b, ...]``, ``[]``
      - ``Cons{a, Cons{b, ... Nil{}}}``, ``Nil{}``
+   * - ``name{| text |}``
+     - ``Quote{v}``, where ``v`` is the value of the rule ``name`` for ``text`` (see Text of a rule)
 
 The rows are ordered from the loosest binding to the tightest.
 ``|``, ``->`` and ``::`` group to the right, ``+ - * / %`` group to the left
@@ -192,6 +194,28 @@ A rule may be directly left recursive (``sum ::= a:sum "+" b:term { ... } | term
 
 ``peg_parse(rule, s)`` parses a prefix of ``s`` by the rule and returns ``Tuple{value, rest}``,
 ``Tuple{Eof{}, ""}`` when only blanks are left, or ``Tuple{SyntaxError{...}, ""}``.
+
+Text of a rule
+--------------
+
+``name{| text |}`` is an expression whose text is read by the rule ``name`` when the expression is parsed.
+There is no space between ``name`` and ``{|``.
+The text is read only by the rule (its strings, words and rules, with their blanks and comments),
+not by the tokens of the expressions around it.
+The rule decides where the text ends, and ``|}`` must follow, after blanks.
+So ``|}`` and ``}`` that the rule reads, for example in its strings or brackets, are a part of the text.
+A failure of the rule or a missing ``|}`` is a syntax error of the expression,
+at the farthest position the rule reached in the text.
+
+The value of the expression is the value of the rule, as a constant.
+
+.. code-block::
+
+   calc ::= a:calc "+" b:num { a + b } | num
+   num ::= integer
+   calc{| 1 + 2 + 3 |}        # 6, computed when the line is parsed
+
+The rule must be defined by an expression that is evaluated before the expression with the text is parsed.
 
 ``peg_sources`` is a table from a rule name to the parsing expression given to ``define_rule``, with the actions not evaluated
 (``...`` replaced by the previous definition). ``peg_version`` increases at every ``define_rule``.

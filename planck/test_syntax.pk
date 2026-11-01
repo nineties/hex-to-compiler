@@ -655,6 +655,45 @@ color ::= 'blue { 2 } | ...
 check(arg(peg_parse('color, "red"), 0), 1)
 check(arg(peg_parse('color, "blue"), 0), 2)
 
+# === Text of a rule: name{| text |} ===
+# the rule reads the text when the expression is parsed, and the value is a constant
+check(num{| 12 |}, 12)
+check(diff{| 10 - 3 - 2 |}, 5)
+check(diff{|10-3|}, 7)
+check(nums{| [1 2 3] |}, 'Tuple{1, 2, 3})
+check(color{| blue |}, 2)
+check(tree("num{| 12 |}"), 'Quote{12})
+check(tree("diff{| 10 - 3 - 2 |}"), 'Quote{5})
+check(tree("nums{| [] |}"), 'Quote{Tuple{}})
+check(rest("num{| 1 |} x"), "x")
+# blanks, newlines and comments inside are skipped by the rule
+check(diff{|
+    10   # ten
+    - 3
+|}, 7)
+# the text is read only by the rule: | before the end is text of the rule
+bars ::= xs:("|" integer)* { xs }
+check(bars{| |1 |2 |}, 'Tuple{Tuple{"|", 1}, Tuple{"|", 2}})
+# the rule decides the end, so |} inside a string or braces of the rule is text
+strs ::= xs:string* { xs }
+check(strs{| "a |} b" "c" |}, 'Tuple{"a |} b", "c"})
+braces ::= "{" xs:num* "}" { xs }
+check(braces{| {1 2} |}, 'Tuple{1, 2})
+# an ident followed by { is still an m-expression, and { | is a block
+check(tree("F{x}"), 'F{x})
+check(tree("num {1}"), 'num)
+# errors: the position is in the text of the rule
+check(tree("num{| x |}"), 'SyntaxError{"unexpected input", "x |}"})
+check(tree("diff{| 10 - 3 2 |}"), 'SyntaxError{"unexpected input", "2 |}"})
+check(tree("diff{| 10 -\n 3 4 |}"), 'SyntaxError{"unexpected input", "4 |}"})
+check(tree("num{| 1"), 'SyntaxError{"unexpected end of input"})
+check(tree("num{| 1 |"), 'SyntaxError{"unexpected input", "|"})
+check(head(tree("nosuch{| 1 |}")), 'SyntaxError)
+
+# a tree built by the rule may contain Quote and UnQuote of planck; it is the value as it is
+check(expr{| f(`!a) |}, 'Apply{f, Tuple{QuasiQuote{UnQuote{a}}}})
+check(expr{| 'a |}, 'Quote{a})
+
 # extend the syntax of planck
 primary ::= 'unless c:expr a:block 'else b:block { `If{!c, !b, !a} } | ...
 check(unless 1 > 2 { "a" } else { "b" }, "a")
