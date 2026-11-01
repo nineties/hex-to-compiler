@@ -469,5 +469,390 @@ check(map((VasmErr{_, loc, msg}) -> f"{show_loc(loc)}: {msg}", vasm_errors(this_
     fn shown() { var p: own i64; p = box(1); free(p); free(p) }
 |})), [f"planck/test_vasm.pk:{arg(shown_at, 0)}:{arg(shown_at, 1)}: p is freed twice"])
 
+# === integer types, arrays, structs and built-in functions (U4, U8, U9, U16) ===
+
+check(map(t -> vasm_show_type(t), [I8{}, U64{}, Own{Arr{U8{}}}, Ref{'shr, 'r, Arr{Named{'Point}}}]),
+    ["i8", "u64", "own [u8]", "&r [Point]"])
+m2 := vasm{|
+    struct Point { x: i64, y: i64 }
+    fn g(a: own [u8], p: Point) { b = box(1); free(b); v = a[0]; a[i] = 2; w = p.x; p.y = 3; q = Point{x: 1, y: 2} }
+|}
+check(map(head, arg(m2, 0)), ['Struct, 'Fn])
+check(map((Field{_, x, t}) -> Tuple{x, t}, arg(arg(m2, 0)[0], 2)), [Tuple{'x, I64{}}, Tuple{'y, I64{}}])
+check(map((Param{_, x, t}) -> t, arg(arg(m2, 0)[1], 3)), [Own{Arr{U8{}}}, Named{'Point}])
+body3 := arg(arg(m2, 0)[1], 5)
+check(map(head, body3), ['Assign, 'CallS, 'Assign, 'IStore, 'Assign, 'FStore, 'Assign])
+check(map(s -> if (head(s) == 'Assign) head(arg(s, 2)) else arg(s, 1), body3), ['Call, 'free, 'Index, 'a, 'Get, 'p, 'Make])
+# box and free are not words of the syntax but built-in functions
+check(arg(arg(body3[0], 2), 1), 'box)
+
+# integers of each width; a literal takes the type of the other operand or of the register
+ok(vasm{|
+    fn widths(a: u8, b: i32) -> u8 {
+        var c: u8
+        var d: i32
+        var e: u64
+        var f: bool
+        c = a + 1
+        c = c & 255
+        d = b * -2
+        e = 1000000000
+        f = c < a
+        if (d >= 0) { c = c << 1 }
+        return c
+    }
+    fn call_widths() -> u8 {
+        var r: u8
+        r = widths(200, -5)
+        return r
+    }
+|})
+ng(vasm{|
+    fn mixed(a: i8, b: i64) -> i64 {
+        var c: i64
+        c = a + b   # NG
+        return c
+    }
+|}, 'type)
+ng(vasm{|
+    fn too_big() {
+        var c: u8
+        c = 256     # NG
+    }
+|}, 'type)
+ng(vasm{|
+    fn negative_unsigned(n: u32) -> u32 {
+        var m: u32
+        m = n + -1  # NG
+        return m
+    }
+|}, 'type)
+ng(vasm{|
+    fn wrong_width(a: i32) -> i64 {
+        return a    # NG
+    }
+|}, 'type)
+
+# arrays: alloc(n, v) has n elements v; a[i] reads and writes; len gives the length
+ok(vasm{|
+    fn sum[r](a: &r [i64]) -> i64 {
+        var s: i64
+        var i: i64
+        var n: i64
+        var x: i64
+        s = 0
+        i = 0
+        n = len(a)
+        while (i < n) {
+            x = a[i]
+            s = s + x
+            i = i + 1
+        }
+        return s
+    }
+    fn fill[r](a: &mut r [i64], v: i64) {
+        var i: i64
+        var n: i64
+        i = 0
+        n = len(a)
+        while (i < n) {
+            a[i] = v
+            i = i + 1
+        }
+    }
+    fn arrays() -> i64 {
+        var a: own [i64]
+        var s: i64
+        a = alloc(4, 0)
+        a[0] = 5
+        region r {
+            var m: &mut r [i64]
+            m = &mut r a
+            fill(m, 2)
+        }
+        region r {
+            var b: &r [i64]
+            b = &r a
+            s = sum(b)
+        }
+        free(a)
+        return s
+    }
+|})
+ng(vasm{|
+    fn bad_index(a: own [i64], c: bool) -> i64 {
+        var x: i64
+        x = a[c]    # NG
+        free(a)
+        return x
+    }
+|}, 'type)
+ng(vasm{|
+    fn whole_array(a: own [i64]) -> i64 {
+        var x: i64
+        x = *a      # NG
+        free(a)
+        return x
+    }
+|}, 'type)
+ng(vasm{|
+    fn write_shared_array[r](a: &r [i64]) {
+        a[0] = 1    # NG
+    }
+|}, 'borrowed)
+ng(vasm{|
+    fn array_leak(n: i64) {
+        var a: own [u8]
+        a = alloc(n, 0)
+        return      # NG
+    }
+|}, 'leak)
+ng(vasm{|
+    fn bare_array() {
+        var a: [i64]    # NG
+    }
+|}, 'type)
+ng(vasm{|
+    fn elem_range(a: own [u8]) {
+        a[0] = 300  # NG
+        free(a)
+    }
+|}, 'type)
+
+# structs: a value of a struct is made with all its fields and copied; fields are read and written
+# in a register or through a pointer
+ok(vasm{|
+    struct Point { x: i64, y: i64 }
+    struct Header {
+        magic: u32
+        size: u16
+        origin: Point
+    }
+    fn norm1(p: Point) -> i64 {
+        var x: i64
+        var y: i64
+        x = p.x
+        y = p.y
+        x = x + y
+        return x
+    }
+    fn move_x[r](p: &mut r Point, x: i64) { p.x = x }
+    fn structs() -> i64 {
+        var p: Point
+        var b: own Point
+        var h: own [Header]
+        var e: Header
+        var v: i64
+        p = Point{x: 1, y: 2}
+        p.x = 3
+        b = box(p)
+        b.y = 4
+        region r {
+            var m: &mut r Point
+            m = &mut r b
+            move_x(m, 5)
+        }
+        p = *b
+        free(b)
+        e = Header{magic: 1179, size: 64, origin: p}
+        h = alloc(2, e)
+        e = h[1]
+        p = e.origin
+        free(h)
+        v = norm1(p)
+        return v
+    }
+|})
+ng(vasm{|
+    struct Point { x: i64, y: i64 }
+    fn missing() -> Point {
+        var p: Point
+        p = Point{x: 1}     # NG
+        return p
+    }
+|}, 'type)
+ng(vasm{|
+    struct Point { x: i64, y: i64 }
+    fn no_field(p: Point) -> i64 {
+        var v: i64
+        v = p.z     # NG
+        return v
+    }
+|}, 'type)
+ng(vasm{|
+    fn no_struct(p: own Pair) { free(p) }   # NG
+|}, 'undefined)
+ng(vasm{|
+    struct Node { value: i64, next: Node }  # NG
+|}, 'type)
+ng(vasm{|
+    struct Point { x: i64, y: i64 }
+    fn shared_field[r](p: &r Point) {
+        p.x = 1     # NG
+    }
+|}, 'borrowed)
+# the contents of a struct, an array and own do not own or borrow (U7, U18)
+ng(vasm{|
+    struct Cell {
+        p: own i64      # NG
+    }
+|}, 'type)
+ng(vasm{|
+    fn box_borrow() {
+        var p: own i64
+        p = box(1)
+        region r {
+            var b: &r i64
+            var c: own i64
+            b = &r p
+            c = box(b)      # NG
+        }
+        free(p)
+    }
+|}, 'type)
+
+# built-in functions: they are not defined again, and their types are checked like other functions
+ng(vasm{|
+    fn box(a: i64) -> i64 { return a }  # NG
+|}, 'type)
+ng(vasm{|
+    fn free_int(n: i64) {
+        free(n)     # NG
+    }
+|}, 'type)
+ng(vasm{|
+    fn dropped() {
+        box(1)      # NG
+    }
+|}, 'leak)
+
+# === &mut given to a function is borrowed again for the call (U11) ===
+ok(vasm{|
+    fn set[r](p: &mut r i64, v: i64) { *p = v }
+    fn get[r](p: &r i64) -> i64 {
+        var v: i64
+        v = *p
+        return v
+    }
+    fn reborrow() -> i64 {
+        var p: own i64
+        var v: i64
+        p = box(0)
+        region r {
+            var m: &mut r i64
+            m = &mut r p
+            set(m, 1)
+            set(m, 2)
+            v = get(m)
+            *m = v
+        }
+        v = *p
+        free(p)
+        return v
+    }
+|})
+ng(vasm{|
+    fn set2[r](a: &mut r i64, b: &mut r i64) { *a = 1; *b = 2 }
+    fn alias() {
+        var p: own i64
+        p = box(0)
+        region r {
+            var m: &mut r i64
+            m = &mut r p
+            set2(m, m)  # NG
+        }
+        free(p)
+    }
+|}, 'borrowed)
+# the result has the region of the parameter, so m is moved
+ng(vasm{|
+    fn id[r](p: &mut r i64) -> &mut r i64 { return p }
+    fn kept() {
+        var p: own i64
+        p = box(0)
+        region r {
+            var m: &mut r i64
+            var n: &mut r i64
+            m = &mut r p
+            n = id(m)
+            *m = 1      # NG
+        }
+        free(p)
+    }
+|}, 'moved)
+
+# === a borrow of an outer region is given where an inner region is expected (U13) ===
+ok(vasm{|
+    fn pick[r](a: &r i64, b: &r i64, first: bool) -> &r i64 {
+        if (first) { return a }
+        return b
+    }
+    fn nested() -> i64 {
+        var x: own i64
+        var y: own i64
+        var v: i64
+        x = box(1)
+        y = box(2)
+        region q {
+            var a: &q i64
+            a = &q x
+            region r {
+                var b: &r i64
+                var c: &r i64
+                var d: &r i64
+                b = &r y
+                c = pick(a, b, true)
+                d = a
+                v = *c
+            }
+        }
+        free(x)
+        free(y)
+        return v
+    }
+    fn from_param[q](a: &q i64) -> i64 {
+        var v: i64
+        region r {
+            var b: &r i64
+            b = a
+            v = *b
+        }
+        return v
+    }
+|})
+ng(vasm{|
+    fn pick[r](a: &r i64, b: &r i64) -> &r i64 { return a }
+    fn inner_result() -> i64 {
+        var x: own i64
+        var y: own i64
+        var v: i64
+        x = box(1)
+        y = box(2)
+        region q {
+            var a: &q i64
+            var c: &q i64
+            a = &q x
+            region r {
+                var b: &r i64
+                b = &r y
+                c = pick(a, b)      # NG
+            }
+            v = *c
+        }
+        free(x)
+        free(y)
+        return v
+    }
+|}, 'escape)
+# the regions of a function are not ordered
+ng(vasm{|
+    fn pick[r](a: &r i64, b: &r i64) -> &r i64 { return a }
+    fn two_params[q, s](a: &q i64, b: &s i64) -> &q i64 {
+        var c: &q i64
+        c = pick(a, b)  # NG
+        return c
+    }
+|}, 'type)
+
 put("Tests passed "); print(passed); put("/"); println(passed + failed)
 if (failed > 0) exit(1)
