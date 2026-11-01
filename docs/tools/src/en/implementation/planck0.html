@@ -4,9 +4,9 @@
 
 <h2>Top level</h2>
 <p><code>main</code> prepares the state, reads <code>planck/init.pk</code>, and then reads the program file given as the first argument.</p>
-<!--file planck0.sv 2627-2639-->
-<p><code>interpret_file</code> reads a file ([[planck0.sv#2597-2626]]). For each expression it calls the global variables <code>parse</code> and <code>eval</code> again through <code>call_global</code>. <code>call_global</code> builds <code>Apply{name, Tuple{arg}}</code>, compiles it and runs it ([[planck0.sv#2592-2595]]). Therefore a program that replaces <code>parse</code> has the next expression read by the new <code>parse</code>. The syntax of planck enters by this mechanism.</p>
-<!--file planck0.sv 2580-2590-->
+<!--file planck0.sv 2671-2683-->
+<p><code>interpret_file</code> reads a file ([[planck0.sv#2638-2670]]). For each expression it calls the global variables <code>parse</code> and <code>eval</code> again through <code>call_global</code>. <code>call_global</code> builds <code>Apply{name, Tuple{arg}}</code>, compiles it and runs it ([[planck0.sv#2633-2636]]). Therefore a program that replaces <code>parse</code> has the next expression read by the new <code>parse</code>. The syntax of planck enters by this mechanism.</p>
+<!--file planck0.sv 2622-2632-->
 
 <h2>Value representation</h2>
 <p>A value is one 32-bit word. When the least significant bit is 1, the value is an integer shifted left by one bit. When it is 0, the value is a pointer to an object on the heap. An object has a header word that holds its kind and length.</p>
@@ -15,33 +15,33 @@
 <p>The heap is a 1 GB region allocated by <code>mmap2</code> at startup and carved from the front. There is no GC ([[planck0.sv#36-67]]).</p>
 
 <h2>The M-expression reader</h2>
-<p>The builtin <code>parse</code> reads four kinds of text: symbols, integers, strings, and <code>Head{...}</code>, where a <code>{</code> follows a symbol directly ([[planck0.sv#797-887]]). An M-expression has at most 16 arguments.</p>
-<!--file planck0.sv 843-875-->
+<p>The builtin <code>parse</code> reads four kinds of text: symbols, integers, strings, and <code>Head{...}</code>, where a <code>{</code> follows a symbol directly ([[planck0.sv#802-892]]). An M-expression has at most 16 arguments.</p>
+<!--file planck0.sv 848-880-->
 <p>After the syntax of planck is installed, this reader remains as <code>parse_mexpr</code>.</p>
 <!--ex i_parse-->
 
 <h2>The compiler</h2>
-<p><code>compile</code> turns an integer or a string into a constant and a symbol into a variable reference, and passes an M-expression to <code>compile_mexpr</code> ([[planck0.sv#1477-1492]]).</p>
-<p><code>compile_mexpr</code> dispatches on the head ([[planck0.sv#1301-1475]]). The special forms are <code>Apply</code>, <code>Def</code>, <code>Set</code>, <code>Do</code>, <code>If</code>, <code>While</code>, <code>Lambda</code>, <code>Fusion</code>, <code>Quote</code>, <code>QuasiQuote</code>, <code>Handle</code> and <code>Perform</code>. Any other head is a constructor: it evaluates the arguments and builds an M-expression with the same head.</p>
-<p>The compiler resolves a local variable to a pair (environment depth, position) at compile time. A global variable is a cell (two words: the value and the name), and the compiler has a table <code>global_table</code> that gives the latest cell of a name. A top-level <code>Def</code> makes a new cell and replaces the entry of the table ([[planck0.sv#465-473]]), and the instructions <code>GLOAD</code>, <code>GDEF</code> and <code>GSET</code> carry the cell instead of the name ([[planck0.sv#1154-1181]]). The variable a name refers to is decided before the expression runs, and a function compiled earlier keeps referring to the old cell. <code>Set</code> writes to the current cell. A name that is neither local nor global stops the program with a message before the expression runs.</p>
-<p><code>Def</code> makes the cell after it compiles the right-hand side, so the right-hand side sees the previous variable. A function can refer to itself because the syntax reads a function definition as a <code>Def{f, none}</code> that makes the cell first and a <code>Set</code> that puts the function in. Calling it before it is filled calls <code>none</code> and stops the program.</p>
+<p><code>compile</code> turns an integer or a string into a constant and a symbol into a variable reference, and passes an M-expression to <code>compile_mexpr</code> ([[planck0.sv#1509-1524]]).</p>
+<p><code>compile_mexpr</code> dispatches on the head ([[planck0.sv#1341-1507]]). The special forms are <code>Apply</code>, <code>Def</code>, <code>Declare</code>, <code>Set</code>, <code>Do</code>, <code>If</code>, <code>While</code>, <code>Lambda</code>, <code>Fusion</code>, <code>Quote</code>, <code>QuasiQuote</code>, <code>Handle</code> and <code>Perform</code>. Any other head is a constructor: it evaluates the arguments and builds an M-expression with the same head.</p>
+<p>The compiler resolves a local variable to a pair (environment depth, position) at compile time. A global variable is a cell (three words: the value, the name and the file that defines it), and the compiler has a table <code>global_table</code> that gives the latest cell of a name. A top-level <code>Def</code> makes a new cell and replaces the entry of the table ([[planck0.sv#467-475]]), and the instructions <code>GLOAD</code>, <code>GDEF</code> and <code>GSET</code> carry the cell instead of the name ([[planck0.sv#1165-1192]]). The variable a name refers to is decided before the expression runs, and a function compiled earlier keeps referring to the old cell. <code>Set</code> writes to the current cell. A name that is neither local nor global stops the program with a message before the expression runs.</p>
+<p><code>Def</code> makes the cell after it compiles the right-hand side, so the right-hand side sees the previous variable. A function can refer to itself because the syntax reads a function definition as a <code>Declare{f}</code> that makes the cell first and a <code>Set</code> that puts the function in. Calling it before it is filled calls <code>none</code> and stops the program. <code>Declare{f}</code> compiles as <code>Def{f, none}</code> only when <code>f</code> is not yet a variable of the place: at the top level it looks up <code>global_table</code> and compares the file of the cell with <code>cur_file</code>, the file being loaded, which <code>interpret_file</code> and <code>_set_file</code> (called by <code>load</code>) set, and in a function it looks for an entry of the compile-time environment at the level of the function ([[planck0.sv#1329-1339]], [[planck0.sv#1379-1384]]).</p>
 
 <h2>The virtual machine</h2>
 <p>The machine has 18 instructions. The design is described in the comments of the source.</p>
-<!--file planck0.sv 888-965-->
+<!--file planck0.sv 893-976-->
 <p>Frames live on the heap, not on the machine stack, and the virtual machine does not call itself recursively. The state of a computation is the chain of frames from the current frame to the top level, so a continuation is a pointer to this chain.</p>
 
 <h2>Calls and pattern matching</h2>
-<p>At a call, <code>select</code> chooses the function that matches the arguments ([[planck0.sv#1648-1676]]). A <code>Fusion</code> tries the left function and, on failure, the right one. A <code>Lambda</code> compares the number of arguments and then matches the patterns in order.</p>
-<!--file planck0.sv 1603-1633-->
-<p><code>match_pat</code> writes the value to the next position of the new environment for a variable, compares equality for a <code>Quote</code>, and checks the kind for a <code>_TypeOf</code> before it matches the inner pattern. An M-expression pattern compares the head and the number of arguments, and recurses on each argument. When no function matches, the program stops with <code>matching failed</code> ([[planck0.sv#1730-1742]]).</p>
-<p>The builtin <code>eval</code> compiles an M-expression as a top-level expression and runs it in a new frame ([[planck0.sv#1707-1711]]).</p>
+<p>At a call, <code>select</code> chooses the function that matches the arguments ([[planck0.sv#1680-1708]]). A <code>Fusion</code> tries the left function and, on failure, the right one. A <code>Lambda</code> compares the number of arguments and then matches the patterns in order.</p>
+<!--file planck0.sv 1635-1665-->
+<p><code>match_pat</code> writes the value to the next position of the new environment for a variable, compares equality for a <code>Quote</code>, and checks the kind for a <code>_TypeOf</code> before it matches the inner pattern. An M-expression pattern compares the head and the number of arguments, and recurses on each argument. When no function matches, the program stops with <code>matching failed</code> ([[planck0.sv#1762-1774]]).</p>
+<p>The builtin <code>eval</code> compiles an M-expression as a top-level expression and runs it in a new frame ([[planck0.sv#1739-1743]]).</p>
 
 <h2>Builtin functions</h2>
-<p><code>init_prims</code> registers the builtin functions in the global table, making their cells, with <code>defprim</code>. <code>defprim</code> takes the name, the number of arguments, the implementing function and the kind ([[planck0.sv#2489-2497]]). The operators and the string concatenation are registered under the names that the sugar calls. These names start with <code>_</code>: <code>_add</code>, <code>_sub</code>, <code>_mul</code>, <code>_div</code>, <code>_mod</code>, <code>_lt</code>, <code>_le</code>, <code>_gt</code>, <code>_ge</code>, <code>_eq</code>, <code>_ne</code> and <code>_strcat</code> ([[planck0.sv#2499-2554]]). Names without <code>_</code>, such as <code>add</code> and <code>strcat</code>, are not registered. A variable of the same name in a program does not change the meaning of an operator.</p>
+<p><code>init_prims</code> registers the builtin functions in the global table, making their cells, with <code>defprim</code>. <code>defprim</code> takes the name, the number of arguments, the implementing function and the kind ([[planck0.sv#2529-2537]]). The operators and the string concatenation are registered under the names that the sugar calls. These names start with <code>_</code>: <code>_add</code>, <code>_sub</code>, <code>_mul</code>, <code>_div</code>, <code>_mod</code>, <code>_lt</code>, <code>_le</code>, <code>_gt</code>, <code>_ge</code>, <code>_eq</code>, <code>_ne</code> and <code>_strcat</code> ([[planck0.sv#2539-2595]]). Names without <code>_</code>, such as <code>add</code> and <code>strcat</code>, are not registered. A variable of the same name in a program does not change the meaning of an operator.</p>
 
 <h2 id="effects">Effects</h2>
-<p><code>Handle</code> runs its body in a new frame and records the handler in that frame ([[planck0.sv#1855-1862]]). <code>Perform</code> follows the chain from the current frame to the callers and looks for a frame that has a handler.</p>
-<!--file planck0.sv 1871-1893-->
+<p><code>Handle</code> runs its body in a new frame and records the handler in that frame ([[planck0.sv#1887-1894]]). <code>Perform</code> follows the chain from the current frame to the callers and looks for a frame that has a handler.</p>
+<!--file planck0.sv 1903-1925-->
 <p>When it finds one, it makes a continuation <code>k</code>, a pair of the current frame and the boundary frame, and matches the handler against <code>(v, k)</code>. When the handler does not match, the search continues outward. The value of the handler returns to the caller of the boundary frame and becomes the value of the <code>Handle</code> expression.</p>
-<p>Calling <code>k</code> copies the frames from the current frame to the boundary and runs the copy (<code>resume</code>, [[planck0.sv#1678-1695]]). The original frames never run, so the same <code>k</code> can be called any number of times (multi-shot continuations).</p>
+<p>Calling <code>k</code> copies the frames from the current frame to the boundary and runs the copy (<code>resume</code>, [[planck0.sv#1710-1727]]). The original frames never run, so the same <code>k</code> can be called any number of times (multi-shot continuations).</p>

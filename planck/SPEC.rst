@@ -29,7 +29,7 @@ M-expressions are expressions of this syntax too.
    * - ``x := e``
      - ``Def{x, e}``
    * - ``f(p, ...) := e``
-     - ``Do{Def{f, none}, Set{f, Fusion{f, Lambda{Tuple{p, ...}, e}}}}``
+     - ``Do{Declare{f}, Set{f, Fusion{f, Lambda{Tuple{p, ...}, e}}}}``
    * - ``record T(f, ...)``
      - ``Apply{_record_declare, Tuple{Quote{T}, Quote{Tuple{f, ...}}}}``
    * - ``x = e``
@@ -126,14 +126,28 @@ A function keeps the variables of the place where it was made,
 and they are shared locations: an assignment to them after the function was made is seen by the function.
 
 The top-level definitions are resolved in the order they are written. A definition written later is not visible to the expressions before it.
-The body of a function definition ``f(p, ...) := e`` sees ``f`` itself. Defining the same name again makes a new variable.
+The body of a function definition ``f(p, ...) := e`` sees ``f`` itself. Defining the same name again with ``x := e`` or ``fun f`` makes a new variable.
 The functions made before keep referring to the old variable, and only the expressions after the definition see the new one.
-With ``f(x) := 1``, ``g() := f(0)`` and ``f(x) := 2`` in this order, ``g()`` is ``1``.
+With ``f(x) := 1``, ``g() := f(0)`` and ``f := (x) -> 2`` in this order, ``g()`` is ``1``.
 To overwrite an existing variable, write ``x = e``. It is an assignment to the same variable,
-so the functions made before also see the new value. With ``f = (x) -> 2`` instead of ``f(x) := 2``, ``g()`` is ``2``.
+so the functions made before also see the new value. With ``f = (x) -> 2`` instead of ``f := (x) -> 2``, ``g()`` is ``2``.
 
-A function definition ``f(p, ...) := e`` is the same as ``fun f`` followed by ``f(p, ...) = e``,
-and at the top level and in a block it is defined where it is written. Functions that call each other first declare the name with ``fun f``.
+A function definition ``f(p, ...) := e`` is ``f(p, ...) = e`` when ``f`` is already a variable of the place where it is written,
+and otherwise ``fun f`` followed by ``f(p, ...) = e``, which defines a new ``f`` where it is written.
+The variables of the place are the global variables defined by the same file at the top level,
+and in a function the parameters of the function and the variables defined before it in the function.
+A global variable defined by another file, such as a library loaded by ``use`` or ``planck/init.pk``, or a builtin function, is not of the place,
+so ``f(p, ...) := e`` at the top level of a program defines a new ``f`` that hides it.
+A variable of a function around it, or a global variable seen from a function, is not of the place either,
+so ``f(p, ...) := e`` there defines a new ``f`` and does not change the ``f`` outside.
+In a branch of ``if`` or the body of ``while`` at the top level, the variables of the place are those defined before it in the branch or the body.
+Several definitions of ``f`` in one place make one function whose functions are tried in the order they are written::
+
+   fib(0) := 0
+   fib(1) := 1
+   fib(n) := fib(n - 1) + fib(n - 2)
+
+Functions that call each other first declare the name with ``fun f``.
 ``fun f`` defines a variable ``f`` whose value is ``none`` where it is written, and ``f(p, ...) = e`` later fills it.
 ``f(p, ...) = e`` is the assignment ``f = f | (p, ...) -> e``: it adds the function after the functions of ``f``,
 so the functions are tried in the order they are written. ``none | g`` is ``g``,
@@ -433,6 +447,9 @@ Special forms
      - Meaning
    * - ``Def{x, e}`` / ``Set{x, e}``
      - Define a variable (``e`` sees the previous ``x``) / assign a variable
+   * - ``Declare{x}``
+     - ``Def{x, none}``, or nothing when ``x`` is already a variable of the place where ``Def{x, e}`` defines ``x``
+       (at the top level, a global variable defined by the file being loaded). The value is ``none``
    * - ``Apply{f, Tuple{a, ...}}``
      - Call ``f``
    * - ``Do{e, ...}``
@@ -514,7 +531,7 @@ Builtin functions
    * - Files
      - ``read_file`` ``read_bytes`` ``write_file`` ``chmod``
    * - Language
-     - ``parse`` ``eval`` ``exit`` ``argv``
+     - ``parse`` ``eval`` ``exit`` ``argv`` ``_set_file``
    * - ``planck/init.pk``
      - ``true`` ``false`` ``none`` ``_not`` ``load`` ``use`` ``table`` ``table_get`` ``table_set``
    * - ``planck/peg.pk``
@@ -550,7 +567,9 @@ Builtin functions
 * ``read_file(path)``: the contents of the file, including bytes 0. ``read_bytes(path)``: the same as a ``u8`` array.
   ``write_file(path, x)``: write all bytes of the string or ``u8`` array ``x`` to the file, which is created or emptied. ``chmod(path, mode)``.
 * ``argv()``: the array of the command-line strings of the program, as ``argv`` of C ``main``: the first is the program file and the rest are its arguments.
-* ``load(path)``: parse and evaluate the file.
+* ``load(path)``: parse and evaluate the file. Its top-level expressions are evaluated with ``path`` as the file being loaded,
+  and the program file given as the first argument and ``planck/init.pk`` are the files being loaded while they run.
+* ``_set_file(path)``: make ``path`` the file being loaded and return the previous one (``none`` if there is none).
 * ``_define_rule(name, e)``: define the rule by a parsing expression (see ``planck/peg.pk``).
 * ``use(name)``: ``load("planck/lib/<name>.pk")`` once.
 

@@ -55,6 +55,7 @@ test: pforth plisp.fs $(shell find plisp -name "*.lisp")
 test-planck0: planck0
 	./planck0 planck/test.pk
 	./planck0 planck/test_syntax.pk
+	./planck0 planck/test_define.pk
 	./planck0 planck/test_builtins.pk one "two words"
 	./planck0 planck/test_lib.pk
 	./planck0 planck/test_unparse.pk
