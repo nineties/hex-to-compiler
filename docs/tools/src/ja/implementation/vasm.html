@@ -1,0 +1,58 @@
+<!--title vasm の検査器-->
+<h1>vasm の検査器</h1>
+<p class="lead"><a href="@REPO@/blob/main/planck/lib/vasm.pk">planck/lib/vasm.pk</a>（862行）は、機械命令に近い低級な言語 vasm の読み込みと検査を planck で書いたライブラリです。<code>use("vasm")</code> で読み、<code>vasm{| ... |}</code> に書いた関数と構造体の並びを、所有と借用の違反・解放後の使用・未初期化の読み出しについて型の規則だけで検査します。言語の規則は<a href="../reference/vasm.html">リファレンスの vasm</a>にあります。</p>
+
+<h2>入口</h2>
+<!--file planck/lib/vasm.pk 1-11-->
+<p><code>vasm{| ... |}</code> は <code>Module{[Struct{...}, Fn{...}, ...]}</code> に読まれ、検査は <code>vasm_check(m)</code> がこれを受け取って <code>VasmErr{kind, Pos{d}, msg}</code> のリストを返します。<code>vasm_errors(file, m)</code> は位置をファイルの <code>Loc{file, line, column}</code> に直し、<code>vasm_report(file, m)</code> はそれを <code>file:行:列: メッセージ</code> で書きます。誤りのない関数は結果に現れず、1つの関数の誤りは最初の1件だけです。この頁の例は、各ファイルの <code>report</code> で結果を1行ずつ書きます。</p>
+
+<h2>構文</h2>
+<p>vasm の構文は <a href="peg.html">packrat パーサ</a>の規則として <code>::=</code> で宣言します（[[planck/lib/vasm.pk#38-39]]）。予約語は <code>vasm_kw</code> に集め、名前は予約語でない識別子です。文の規則は頭ごとに選択肢を並べ、読んだ結果を <code>Decl{...}</code>・<code>IfS{...}</code>・<code>Assign{...}</code> などの M式にします。</p>
+<!--file planck/lib/vasm.pk 123-134-->
+<p>どの規則の結果にも、位置の <code>at</code> が入っています。<code>vasm_here</code> は何も読まずに、次の字句から本文の終わりまでの文字数を <code>Pos{d}</code> として返す規則です（[[planck/lib/vasm.pk#29-34]]）。検査の誤りはこの <code>Pos</code> を持ち、<code>vasm_errors</code> が本文の長さから引いて行と列にします。</p>
+
+<h2>型と検査の状態</h2>
+<p>型も M式です。整数は <code>I8{}</code> から <code>U64{}</code>、箱は <code>Own{u}</code>、借用は <code>Ref{'shr または 'mut, 領域, u}</code>、配列は <code>Arr{u}</code>、構造体は <code>Named{s}</code> です。</p>
+<!--file planck/lib/vasm.pk 186-198-->
+<p>関数ごとに、変数の宣言を <code>vasm_info</code>（名前から型へ）に、変数の状態を表の <code>Vs{status, loans}</code> に持ちます。<code>status</code> は初期化済み・未初期化・move 済み・解放済み・中身を取り出した箱・フィールドを取り出した構造体のどれかで、<code>loans</code> はその変数を借りている借用の並びです。<code>if</code> や <code>while</code> は状態の表を複製して分岐ごとに検査し、あとで突き合わせます。</p>
+<p>値が move されるかコピーされるかは型で決まります。<code>own</code> と <code>own</code> を持つ構造体は<em>線形</em>で、使うと move され、ちょうど1回 move か解放しなければなりません。整数・<code>bool</code>・<code>own</code> を持たない構造体と共有の借用はコピーされます。</p>
+<!--file planck/lib/vasm.pk 217-222-->
+
+<h2>所有</h2>
+<!--ex vasm_box-->
+<p><code>own i64</code> は <code>box</code> で確保した整数への、ただ1つの持ち主です。<code>bump</code> の <code>[r]</code> は呼び出しごとに決まる領域の引数です。<code>&amp;mut</code> を借用の引数に渡す呼び出しは、<code>vasm_reborrows</code> が呼び出しの間だけ借り直すものとして扱い、move しません（[[planck/lib/vasm.pk#511-517]]）。<code>m</code> がそのあとも使えるのはこのためです。</p>
+<!--ex vasm_freed-->
+<p>レジスタを読む前に <code>vasm_need_init</code> が状態を引き、未初期化・move 済み・解放済みならそれぞれ <code>'uninit</code>・<code>'moved</code>・<code>'freed</code> の誤りにします（[[planck/lib/vasm.pk#258-265]]）。<code>free</code> した <code>own</code> が読めず、もう一度 <code>free</code> もできないのは、<code>vasm_call</code> が <code>free</code> の引数を解放済みにするからです。<code>q</code> を <code>p</code> に代入すると <code>q</code> が move 済みになり、所有が <code>p</code> に移ります。</p>
+
+<h3>自動の解放</h3>
+<!--ex vasm_drop-->
+<p><code>own</code> を持った値は、持ち主がなくなる所で自動的に解放されるので、上の例はどれも誤りになりません。その場所は、ブロックや関数の終わり、上書き、文として捨てた関数の結果、<code>free</code> した値の中に残ったものです。解放は実行時の動作で、検査器は何も数えません。ブロックや関数の終わりで残りを調べる関数 <code>vasm_leak_all</code> は、解放の場所を示すために残してある空の関数です（[[planck/lib/vasm.pk#654-657]]）。上書きは <code>vasm_assign</code> が状態を初期化済みに戻すだけです（[[planck/lib/vasm.pk#642-652]]）。<code>free</code> は早く手放したいときに書きます。</p>
+
+<h2>借用と領域</h2>
+<!--ex vasm_borrow-->
+<p>借用した変数の <code>Vs</code> には <code>Loan{region, kind}</code> が入ります。借りている間の move・解放・代入は <code>vasm_no_loans</code> が、<code>&amp;mut</code> で借りている間の読み書きは <code>vasm_no_mut_loan</code> が拒みます（[[planck/lib/vasm.pk#294-295]]）。共有の借用は同時にいくつでも持てますが、<code>&amp;mut</code> は1つだけで、借りている間は元の値を読むことも書き換えることも解放することもできません。<code>region r { ... }</code> は <code>vasm_end_region</code> で終わりに <code>r</code> の貸しを消します（[[planck/lib/vasm.pk#691]]）。</p>
+<!--ex vasm_escape-->
+<p>領域の内外は <code>vasm_outlives(q, r)</code> が決めます。<code>q</code> が <code>r</code> と同じか、<code>r</code> が関数の中で開いた領域で <code>q</code> がそれより前に開いたものなら、<code>q</code> は <code>r</code> より長く生きます。関数の領域の引数どうしには順序がありません。</p>
+<!--file planck/lib/vasm.pk 325-327-->
+<!--file planck/lib/vasm.pk 334-345-->
+<p>代入や引数で借用の型が合うかは <code>vasm_fits</code> が見ます。外側の領域の借用を内側の領域の借用として使うのは外のほうが長く生きるので通り、逆は通りません。逆のうち、受け側が関数の中で開いた領域より外のレジスタである場合は、<code>vasm_escapes</code> が <code>'escape</code> の誤りにします。</p>
+
+<h2>分岐とループ</h2>
+<!--file planck/lib/vasm.pk 659-684-->
+<p><code>if</code> は両方の分岐を複製した状態で検査し、<code>vasm_merge</code> が突き合わせます。片方の分岐だけで move や解放をした値は、あとで持ち主かどうかが決まらないので <code>'branch</code> の誤りです。<code>return</code> で終わった分岐は、<code>.dead</code> の印を付けて突き合わせから外します。<code>while</code> は本体を2周分検査し、<code>vasm_loop_same</code> が、ループで move した値が次の周の前に入れ直されているかを見ます（<code>'loop</code>）。</p>
+
+<h2>整数の幅</h2>
+<!--ex vasm_ints-->
+<p>整数の型は <code>vasm_ints</code> の表（型・名前・ビット数・符号）に並べてあります（[[planck/lib/vasm.pk#159-166]]）。演算の両辺は同じ型で、幅や符号を変えるには <code>as</code> を使います。リテラルは、はじめ型のない <code>Lit{n}</code> で、整数の型に出会ったところで範囲を調べます。範囲は -32768 から 32767 までで、符号なしの型は 0 から、8 ビットの型はその型の範囲に狭まります（<code>vasm_lit_lo</code>・<code>vasm_lit_hi</code>、[[planck/lib/vasm.pk#167-170]]）。大きな値は、シフトと <code>|</code> で組み立てます。</p>
+
+<h2>配列と構造体</h2>
+<!--ex vasm_array-->
+<p>組み込みの関数は、型変数 <code>T</code> を含む型 <code>Sig{領域, 引数, 結果}</code> の表 <code>vasm_builtins</code> に並べてあります（[[planck/lib/vasm.pk#224-232]]）。<code>alloc(n, v)</code> は <code>v</code> を <code>n</code> 個並べた <code>own [T]</code> を作り、<code>len</code> は長さを返します。添字は <code>i64</code> で、範囲の検査は実行時に回し、検査器は型と所有だけを見ます。構造体は全部のフィールドを1回ずつ書いて作り、<code>own</code> を持たなければ整数と同じくコピーされます。<code>own</code> を持つかどうかは <code>vasm_owning</code> が、フィールドをたどって決めます（[[planck/lib/vasm.pk#200-212]]）。</p>
+
+<h3>own を持つ値の入れ替え</h3>
+<!--ex vasm_swap-->
+<p><code>own</code> を持つ値は、配列の要素やポインタの指す先から読んでコピーすることができません（持ち主が2人になるため）。<code>swap(p[i], v)</code> は <code>v</code> を入れて前の値を取り出します。引数の型 <code>Place{T}</code> は、<code>*p</code>・<code>p[i]</code>・<code>p.f</code> の形の場所だけを受けます。構造体のレジスタのフィールドへの書き込み <code>img.body = b</code> は、前の値を解放して入れ替えます。</p>
+
+<h2>誤りの返し方</h2>
+<!--file planck/lib/vasm.pk 830-848-->
+<p>検査の途中で誤りに出会うと <code>vasm_fail</code> が代数的エフェクト <code>VasmFail{at, kind, msg}</code> を起こします（<a href="../tutorial/5.html">代数的エフェクト</a>）。<code>vasm_check</code> は構造体と関数ごとに <code>handle</code> でこれを受け、<code>VasmErr</code> にして検査を打ち切るので、1つの関数の誤りは最初の1件になります。<code>kind</code> の種類は<a href="../reference/vasm.html">リファレンス</a>の表にあります。</p>

@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vasm | hex-to-compiler project</title>
+<link rel="alternate" hreflang="ja" href="../../reference/vasm.html">
+<link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+<header class="site-header"><div class="inner">
+<a class="logo" href="../index.html"><span class="brand"><b>hex-to-compiler <i>project</i></b><small>A compiler that pulls itself up by its bootstraps.</small></span></a>
+<nav class="site-nav">
+<a href="../index.html">Overview</a>
+<a href="../tutorial/index.html">Tutorial</a>
+<a class="here" href="../reference/index.html">Reference</a>
+<a href="../implementation/index.html">Implementation</a>
+<a href="https://github.com/nineties/hex-to-compiler">GitHub</a>
+<a class="lang-switch" lang="ja" hreflang="ja" href="../../reference/vasm.html">日本語</a>
+</nav>
+</div></header>
+<div class="layout">
+<nav class="toc" aria-label="Reference contents"><details open><summary>Reference contents</summary>
+<h2>Reference</h2>
+<ol>
+<li><a href="index.html">Contents</a></li>
+<li><a href="syntax.html">Syntax</a></li>
+<li><a href="values.html">Values, patterns, M-expressions</a></li>
+<li><a href="grammar.html">Grammar declarations</a></li>
+<li><a href="builtins.html">Builtin functions</a></li>
+<li><a href="library.html">Libraries</a></li>
+<li><a class="here" href="vasm.html">vasm</a></li>
+</ol></details></nav>
+<main>
+<h1>vasm</h1>
+<p class="lead"><code>use("vasm")</code> defines a low-level language. The functions and structs written in <code>vasm{| ... |}</code> are checked by the rules of ownership and borrowing. A use after free, a double free, a violation of borrowing and a read of an uninitialized register are errors. The check uses type rules alone and has no way to switch it off.</p>
+
+<h2>Programs</h2>
+<p>A program is a list of structs and functions. Both are visible from everywhere in the module. Statements are separated by newlines or <code>;</code>.</p>
+<pre>struct S { f: T, g: T }
+fn f[r, ...](x: T, ...) -&gt; T { ... }</pre>
+<p>The <code>[r, ...]</code> of a function are region parameters, fixed by the borrows of the arguments at a call. If one cannot be fixed, it is an error. A struct or a function cannot have the name of a built-in function.</p>
+
+<h2>Types</h2>
+<table>
+<tr><th>Type</th><th>Meaning</th></tr>
+<tr><td><code>i8</code> <code>i16</code> <code>i32</code> <code>i64</code> <code>u8</code> <code>u16</code> <code>u32</code> <code>u64</code></td><td>integers with a width and a signedness</td></tr>
+<tr><td><code>bool</code></td><td>the result of a comparison and the condition of <code>if</code> and <code>while</code></td></tr>
+<tr><td>a struct name</td><td>a value with all of its fields</td></tr>
+<tr><td><code>own T</code></td><td>the owner of a <code>T</code>; exactly one exists</td></tr>
+<tr><td><code>&amp;r T</code></td><td>a shared borrow in region <code>r</code></td></tr>
+<tr><td><code>&amp;mut r T</code></td><td>an exclusive borrow in region <code>r</code></td></tr>
+<tr><td><code>own [T]</code> <code>&amp;r [T]</code> <code>&amp;mut r [T]</code></td><td>arrays; <code>[T]</code> is written only inside <code>own</code> or a borrow</td></tr>
+</table>
+<p>A field of a struct, the contents of an <code>own</code> and the element of an array can be <code>own</code>. They cannot be borrows. A value of a type that owns something always has exactly one owner.</p>
+
+<h2>Instructions</h2>
+<table>
+<tr><th>Form</th><th>Meaning</th></tr>
+<tr><td><code>var x: T</code></td><td>declares a register, valid to the end of the block and uninitialized at first</td></tr>
+<tr><td><code>x = a</code></td><td>copy (<code>own</code> and <code>&amp;mut</code> are moved)</td></tr>
+<tr><td><code>x = a op b</code></td><td><code>+ - * / %</code> <code>&amp; | ^</code> <code>&lt;&lt; &gt;&gt;</code> and the comparisons <code>&lt; &lt;= &gt; &gt;= == !=</code></td></tr>
+<tr><td><code>x = *p</code> <code>*p = a</code></td><td>reads and writes the contents of a box</td></tr>
+<tr><td><code>x = p[i]</code> <code>p[i] = a</code></td><td>reads and writes an element of an array</td></tr>
+<tr><td><code>x = s.f</code> <code>s.f = a</code></td><td>reads and writes a field</td></tr>
+<tr><td><code>x = S{f: a, g: b}</code></td><td>builds a struct value; every field is given once</td></tr>
+<tr><td><code>x = a as T</code></td><td>changes the width and the signedness of an integer</td></tr>
+<tr><td><code>x = f(a, ...)</code> <code>f(a, ...)</code></td><td>calls a function</td></tr>
+<tr><td><code>x = &amp;r p</code> <code>x = &amp;mut r p</code></td><td>borrows</td></tr>
+<tr><td><code>return a</code></td><td>returns from the function</td></tr>
+<tr><td><code>if (c) {...} else {...}</code> <code>while (c) {...}</code> <code>region r {...}</code></td><td>structures; a condition is a comparison or a <code>bool</code> register</td></tr>
+</table>
+
+<h2>Built-in functions</h2>
+<table>
+<tr><th>Function</th><th>Meaning</th></tr>
+<tr><td><code>box(v) -&gt; own T</code></td><td>makes a box that holds <code>v</code></td></tr>
+<tr><td><code>free(p: own T)</code></td><td>releases it; a released value cannot be used, and releasing it again is an error</td></tr>
+<tr><td><code>alloc(n: i64, v: T) -&gt; own [T]</code></td><td>an array of <code>n</code> copies of <code>v</code>; <code>v</code> cannot own anything</td></tr>
+<tr><td><code>len(a: &amp;r [T]) -&gt; i64</code></td><td>the length of an array</td></tr>
+<tr><td><code>swap(x, v: T) -&gt; T</code></td><td>puts <code>v</code> in <code>x</code> and returns the previous value; <code>x</code> is a place of the form <code>*p</code>, <code>p[i]</code> or <code>p.f</code></td></tr>
+</table>
+
+<h2>Values and initialization</h2>
+<ul>
+<li>Only an initialized register can be read. After an <code>if</code>, only what both branches initialized is initialized; after a <code>while</code>, the state is the one before the loop.</li>
+<li>Both operands of an integer operation have the same type. Integers of different widths or signedness cannot be mixed; use <code>as</code> to match them. Widening extends the sign or zero-extends according to the source, and narrowing keeps the low bits.</li>
+<li>An integer literal is checked to be in the range of the type of its target, argument or other operand. A single literal ranges from -32768 to 32767. A larger value is built, as in <code>m = 0x7F45</code>, <code>m = m &lt;&lt; 16</code>, <code>m = m | 0x4C46</code>.</li>
+<li>An index is an <code>i64</code>. Whether it is in range is left to a run-time check; the checker looks at types and ownership only. An array cannot be read or written as a whole through <code>*p</code>.</li>
+<li>A struct value is copied like an integer unless it owns something, and is moved if it does. <code>s.f</code> is the field of the value if <code>s</code> is a struct register, and the field of the target if <code>s</code> is a pointer to a struct.</li>
+</ul>
+
+<h2>Ownership</h2>
+<ul>
+<li>An <code>own</code> value is moved or freed at most once.</li>
+<li>Where its owner goes away, what an <code>own</code> still holds is released automatically: at the end of a block or a function and at <code>return</code>; when it is overwritten (the previous value of <code>p = box(2)</code>, <code>*p = v</code>, <code>p[i] = v</code> and <code>s.f = v</code>); when the result of a call is discarded as a statement; and what is left in a value that is passed to <code>free</code>. The parts of a box, the fields of a struct and the elements of an array that have not been taken out are released.</li>
+<li>Using a released value, releasing it again and using a moved value are errors.</li>
+<li>A value that is moved or freed in only one branch has no determined owner afterwards, which is an error. A loop must give back, before the next iteration, a value it moves.</li>
+<li>A function takes the ownership of a moved argument. The caller cannot use the value afterwards.</li>
+</ul>
+
+<h2>Taking out what an own value holds</h2>
+<ul>
+<li>When the contents hold <code>own</code>, <code>x = *p</code> moves them out. <code>p</code> must be an <code>own</code> and not borrowed. Afterwards <code>p</code> is an empty box: it cannot be read, moved or borrowed until <code>*p = v</code> puts contents in again or <code>free(p)</code> frees it. Nothing can be taken out of a borrow.</li>
+<li>From a struct register <code>s</code>, <code>x = s.f</code> moves out a field that owns. Reading the field taken out or taking it out again is an error; <code>s.f = v</code> puts one back. Afterwards <code>s</code> cannot be used as a whole, and the remaining fields are released where <code>s</code> goes away.</li>
+<li>An element of an array and a field of the struct that a pointer points to are exchanged with <code>swap(p[i], v)</code> and <code>swap(p.f, v)</code>. <code>*p</code> is exchanged with <code>swap(*p, v)</code>. The place must be writable from an <code>own</code> (not borrowed) or a <code>&amp;mut</code>.</li>
+<li>A value that owns something cannot be copied out of an array element, the target of a pointer or a borrow.</li>
+</ul>
+
+<h2>Borrows and regions</h2>
+<ul>
+<li><code>x = &amp;r p</code> requires <code>p</code> to be declared before <code>r</code> and to live in <code>r</code>. While it is borrowed, <code>p</code> can be neither moved, freed nor assigned. While it is borrowed by <code>&amp;mut</code>, <code>*p</code>, <code>p[i]</code> and <code>p.f</code> cannot be read either. The loan ends at the end of <code>r</code>.</li>
+<li>A shared borrow is copied, and any number can exist. A <code>&amp;mut</code> is moved when it is used between registers.</li>
+<li>A <code>&amp;mut</code> passed to a borrowed parameter of a function is borrowed again for the call only and is not moved. It cannot be passed again to another argument of the same call. If the result type contains the region that was borrowed, the result carries the borrow out, so it is moved instead.</li>
+<li>A <code>&amp;mut</code> can be passed to a <code>&amp;</code> parameter (it is borrowed again as shared for the call).</li>
+<li>A borrow of an outer region <code>q</code> can be passed where a borrow of a region <code>r</code> opened inside <code>q</code> is expected, whether by assignment, <code>return</code> or an argument. The region parameters of a function have no inside-outside relation among them, and are outside the regions opened in the function.</li>
+<li>A region parameter of a function is the innermost region of the borrows that are passed (all the others must be outside it).</li>
+<li>The type <code>&amp;r T</code> can be written only inside <code>r</code>. Putting it in a register outside <code>r</code> or returning it out of <code>r</code> is an error.</li>
+</ul>
+
+<h2>Kinds of errors</h2>
+<p><code>vasm_errors(file, m)</code> returns a list of <code>VasmErr{kind, loc, msg}</code>, the first error of each struct and function. <code>kind</code> is one of the following symbols.</p>
+<table>
+<tr><th>kind</th><th>Error</th></tr>
+<tr><td><code>'type</code></td><td>a type does not match: a width or a signedness, the range of a literal, a missing field</td></tr>
+<tr><td><code>'undefined</code></td><td>an undefined function or struct</td></tr>
+<tr><td><code>'uninit</code></td><td>a read before initialization</td></tr>
+<tr><td><code>'moved</code></td><td>use of a moved value, or of contents or a field that was taken out</td></tr>
+<tr><td><code>'freed</code></td><td>use of a freed value, a double free</td></tr>
+<tr><td><code>'borrowed</code></td><td>a move, a free, an assignment or an access while borrowed; overlapping borrows</td></tr>
+<tr><td><code>'owner</code></td><td>copying a value that owns something from a place that is not its owner</td></tr>
+<tr><td><code>'region</code></td><td>a region that is not open, already open or not fixed</td></tr>
+<tr><td><code>'escape</code></td><td>a borrow that leaves its region</td></tr>
+<tr><td><code>'branch</code></td><td>the ownership differs after the branches</td></tr>
+<tr><td><code>'loop</code></td><td>a value moved in a loop is not given back</td></tr>
+</table>
+<p>Examples are in <a href="../implementation/vasm.html">The vasm checker</a>. <code>vasm_report(file, m)</code> writes the errors as <code>file:line:column: message</code>, or <code>ok</code> if there is none.</p>
+
+<nav class="pager"><a class="prev" href="library.html"><small>Previous</small>Libraries</a></nav>
+</main>
+</div>
+<footer><div class="inner"><a href="https://github.com/nineties/hex-to-compiler">github.com/nineties/hex-to-compiler</a></div></footer>
+<script src="../../assets/highlight.js"></script>
+</body>
+</html>
