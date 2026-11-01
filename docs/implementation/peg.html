@@ -48,24 +48,24 @@
 &quot;   And{e}, Not{e}  lookahead &quot;
 &quot;   Delimited{e, sep}, Delimited1{e, sep}  e separated by sep. The value is Tuple{v, ...} &quot;
 &quot;   Same{}          succeeds when the next token is on the same line &quot;
-&quot;   Act{e, f}       applies f to the value of e. f is an expression evaluated by define_rule &quot;
-&quot;   Prev{}          the previous definition of the rule (only as an alternative of define_rule) &quot;
+&quot;   Act{e, f}       applies f to the value of e. f is an expression evaluated by _define_rule &quot;
+&quot;   Prev{}          the previous definition of the rule (only as an alternative of _define_rule) &quot;
 &quot;   Fail{}          never matches &quot;
 
 &quot; Results of rules are memoized for each position. &quot;
 &quot; Direct left recursion (sum ::= sum \&quot;+\&quot; term | term) is handled by growing the seed. &quot;</pre>
 </div>
-<p><code>"7"</code> の1回以上の繰り返しは <code>Many1{"7"}</code>、その個数を値にするなら <code>Act{Many1{"7"}, t -> arity(t)}</code> です。<code>define_rule</code> で名前を付けると規則になります。</p>
+<p><code>"7"</code> の1回以上の繰り返しは <code>Many1{"7"}</code>、その個数を値にするなら <code>Act{Many1{"7"}, t -> arity(t)}</code> です。<code>_define_rule</code> で名前を付けると規則になります。</p>
 <div class="example">
 <p class="file">i_define.pk</p>
-<pre class="pk">define_rule(&#x27;sevens, &#x27;Act{Many1{&quot;7&quot;}, t -&gt; arity(t)})
+<pre class="pk">_define_rule(&#x27;sevens, &#x27;Act{Many1{&quot;7&quot;}, t -&gt; arity(t)})
 println(peg_parse(&#x27;sevens, &quot;7 7 7 rest&quot;))
 println(sevens{| 7 7 7 7 |})</pre>
 <p class="label">出力</p>
 <pre class="out">Tuple{3, &quot;rest&quot;}
 4</pre>
 </div>
-<p><code>::=</code> を使わずに定義した規則も <code>sevens{| ... |}</code> で使えます。<code>::=</code> 自体も <code>define_rule</code> の呼び出しに読み替えられます（<a href="syntax.html#decl">構文の定義</a>）。</p>
+<p><code>::=</code> を使わずに定義した規則も <code>sevens{| ... |}</code> で使えます。<code>::=</code> 自体も <code>_define_rule</code> の呼び出しに読み替えられます（<a href="syntax.html#decl">構文の定義</a>）。</p>
 
 <h2>解釈実行</h2>
 <p><code>peg_px(e, p)</code> は構文解析式 <code>e</code> を位置 <code>p</code> から試し、成功すれば次の位置を返して値を <code>peg_pv</code> に置きます。失敗は <code>-1</code> です。</p>
@@ -73,9 +73,9 @@ println(sevens{| 7 7 7 7 |})</pre>
 <p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L207-L212">planck/peg.pk:207–212</a></p>
 <pre class="pk">Def{peg_px, Lambda{Tuple{e, p}, Do{
     Def{t, Apply{typeof, Tuple{e}}},
-    If{Apply{eq, Tuple{t, Quote{string}}}, Apply{peg_lit, Tuple{e, Apply{peg_skip_ws, Tuple{p}}}},
-    If{Apply{eq, Tuple{t, Quote{symbol}}}, Apply{peg_call_rule, Tuple{e, p}},
-    If{Apply{eq, Tuple{t, Quote{function}}}, Apply{e, Tuple{p}},
+    If{Apply{_eq, Tuple{t, Quote{string}}}, Apply{peg_lit, Tuple{e, Apply{peg_skip_ws, Tuple{p}}}},
+    If{Apply{_eq, Tuple{t, Quote{symbol}}}, Apply{peg_call_rule, Tuple{e, p}},
+    If{Apply{_eq, Tuple{t, Quote{function}}}, Apply{e, Tuple{p}},
         Apply{Apply{table_get, Tuple{peg_handlers, Apply{head, Tuple{e}}, none}}, Tuple{e, p}}}}}}}}</pre>
 </div>
 <p>文字列は空白を読み飛ばしてから照合し、シンボルは規則として呼び、関数はそのまま呼びます。<code>Seq</code>・<code>Choice</code> などの M式は、頭ごとの処理を表 <code>peg_handlers</code> から引きます（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L170-L205"><code>planck/peg.pk:170–205</code></a>）。識別子や整数などの字句は、<a href="syntax.html">構文の定義</a>の側で関数として実装しています。</p>
@@ -99,16 +99,16 @@ println(sevens{| 7 7 7 7 |})</pre>
 <p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L247-L265">planck/peg.pk:247–265</a></p>
 <pre class="pk">Def{peg_run_rule, Lambda{Tuple{r, p, row, b}, Do{
     Def{body, Apply{table_get, Tuple{peg_rules, r, none}}},
-    Def{b1, Apply{add, Tuple{b, 1}}},
+    Def{b1, Apply{_add, Tuple{b, 1}}},
     Apply{array_set, Tuple{row, b, -2}},
     Def{q, Apply{peg_px, Tuple{body, p}}},
     Apply{array_set, Tuple{row, b, q}},
     Apply{array_set, Tuple{row, b1, peg_pv}},
-    If{Apply{eq, Tuple{Apply{array_get, Tuple{row, Apply{add, Tuple{b, 2}}}}, true}}, Do{
-        Def{go, Apply{ge, Tuple{q, 0}}},
+    If{Apply{_eq, Tuple{Apply{array_get, Tuple{row, Apply{_add, Tuple{b, 2}}}}, true}}, Do{
+        Def{go, Apply{_ge, Tuple{q, 0}}},
         While{go, Do{
             Set{q, Apply{peg_px, Tuple{body, p}}},
-            If{Apply{gt, Tuple{q, Apply{array_get, Tuple{row, b}}}},
+            If{Apply{_gt, Tuple{q, Apply{array_get, Tuple{row, b}}}},
                 Do{
                     Apply{array_set, Tuple{row, b, q}},
                     Apply{array_set, Tuple{row, b1, peg_pv}}},
@@ -122,9 +122,9 @@ println(sevens{| 7 7 7 7 |})</pre>
 <h2>規則の定義</h2>
 <div class="example">
 <p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L282-L291">planck/peg.pk:282–291</a></p>
-<pre class="pk">&quot; define_rule(name, e) defines or replaces the rule &quot;
-Def{define_rule, Lambda{Tuple{name, e}, Do{
-    If{Apply{eq, Tuple{Apply{table_get, Tuple{peg_ids, name, none}}, none}}, Do{
+<pre class="pk">&quot; _define_rule(name, e) defines or replaces the rule &quot;
+Def{_define_rule, Lambda{Tuple{name, e}, Do{
+    If{Apply{_eq, Tuple{Apply{table_get, Tuple{peg_ids, name, none}}, none}}, Do{
         Apply{table_set, Tuple{peg_ids, name, peg_nrules}},
         Set{peg_nrules, Apply{peg_inc, Tuple{peg_nrules}}}}, none},
     Def{old, Apply{table_get, Tuple{peg_rules, name, Fail{}}}},
@@ -133,7 +133,7 @@ Def{define_rule, Lambda{Tuple{name, e}, Do{
     Apply{table_set, Tuple{peg_rules, name, Apply{peg_subst_prev, Tuple{Apply{peg_prepare, Tuple{e}}, old}}}},
     name}}}</pre>
 </div>
-<p><code>define_rule</code> は規則に番号を振り、動作 <code>Act{e, f}</code> の <code>f</code> を評価してから表に入れます。選択肢の <code>Prev{}</code> はその規則の直前の定義に置き換えます。<code>::=</code> の <code>...</code> はこの <code>Prev{}</code> です。</p>
+<p><code>_define_rule</code> は規則に番号を振り、動作 <code>Act{e, f}</code> の <code>f</code> を評価してから表に入れます。選択肢の <code>Prev{}</code> はその規則の直前の定義に置き換えます。<code>::=</code> の <code>...</code> はこの <code>Prev{}</code> です。</p>
 <p>評価前の形は <code>peg_sources</code> に残します。<code>unparse</code> のように文法を読む道具はこの表を使います。</p>
 
 <h2>入口</h2>
