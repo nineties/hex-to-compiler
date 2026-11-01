@@ -66,7 +66,8 @@
 <tr><td><code>return e</code>, <code>return</code>, <code>break</code>, <code>continue</code></td><td><code>Perform{Return{e}}</code>, <code>Perform{Return{none}}</code>, <code>Perform{Break{}}</code>, <code>Perform{Continue{}}</code></td></tr>
 <tr><td><code>match e { f }</code></td><td><code>Apply{f, Tuple{e}}</code></td></tr>
 <tr><td><code>f"a{e}b"</code></td><td class="wrap"><code>Apply{_strcat, Tuple{Apply{_strcat, Tuple{"a", Apply{_to_text, Tuple{e}}}}, "b"}}</code></td></tr>
-<tr><td><code>f(p, ...) := e</code> in a block</td><td class="wrap"><code>Def{f, none}</code> at the top of the block, and <code>Set{f, Lambda{Tuple{p, ...}, e}}</code> in its place</td></tr>
+<tr><td><code>fun f</code></td><td><code>Fun{f}</code></td></tr>
+<tr><td><code>f(p, ...) = e</code></td><td><code>Set{f, Lambda{Tuple{p, ...}, e}}</code></td></tr>
 <tr><td><code>handle e with h</code></td><td><code>Handle{e, h}</code></td></tr>
 <tr><td><code>perform e</code></td><td><code>Perform{e}</code></td></tr>
 <tr><td><code>()</code>, <code>(a, b, ...)</code></td><td><code>Tuple{}</code>, <code>Tuple{a, b, ...}</code></td></tr>
@@ -140,8 +141,12 @@ Apply{_record_declare, Tuple{Quote{T}, Quote{Tuple{a, b}}}}</pre>
 
 <h2 id="scope">Scope of variables</h2>
 <p>Variables have lexical scope, and the variable a name refers to is decided before the expression runs. A variable in the body of a function is a parameter of that function or of a function around it, or a variable defined before it in those functions, and otherwise a variable defined before it at the top level (a global variable). The variables of the caller are not visible. If a name refers to no variable, the program stops with a message before the expression runs. A function keeps the variables of the place where it was made, and they are shared locations: an assignment to them after the function was made is seen by the function.</p>
-<p>The top-level definitions are resolved in the order they are written. A definition written later is not visible to the expressions before it, so functions that call each other are written in a block. The body of a function definition <code>f(p, ...) := e</code> sees <code>f</code> itself. Defining the same name again makes a new variable. The functions made before keep referring to the old variable, and only the expressions after the definition see the new one. With <code>f(x) := 1</code>, <code>g() := f(0)</code> and <code>f(x) := 2</code> in this order, <code>g()</code> is <code>1</code>. To overwrite an existing variable, write <code>x = e</code>. It is an assignment to the same variable, so the functions made before also see the new value. With <code>f = (x) -&gt; 2</code> instead of <code>f(x) := 2</code>, <code>g()</code> is <code>2</code>.</p>
-<p>A function definition <code>f(p, ...) := e</code> is written in the same way at the top level and in a block. In a block, <code>f</code> is defined at the top of the block, so the function definitions of a block see each other and can be mutually recursive. The function is assigned where its definition is, so it sees the variables defined before it in the block, and it can be called after that place. A variable definition <code>x := e</code> (also <code>x := (p) -&gt; e</code>) is defined where it is written, and the expressions before it see the <code>x</code> outside. A variable of a block is a variable of the function or the program that contains the block.</p>
+<p>The top-level definitions are resolved in the order they are written. A definition written later is not visible to the expressions before it. The body of a function definition <code>f(p, ...) := e</code> sees <code>f</code> itself. Defining the same name again makes a new variable. The functions made before keep referring to the old variable, and only the expressions after the definition see the new one. With <code>f(x) := 1</code>, <code>g() := f(0)</code> and <code>f(x) := 2</code> in this order, <code>g()</code> is <code>1</code>. To overwrite an existing variable, write <code>x = e</code>. It is an assignment to the same variable, so the functions made before also see the new value. With <code>f = (x) -&gt; 2</code> instead of <code>f(x) := 2</code>, <code>g()</code> is <code>2</code>.</p>
+<p>A function definition <code>f(p, ...) := e</code> is written in the same way at the top level and in a block, and in both it is defined where it is written. Functions that call each other first declare the name with <code>fun f</code>. <code>fun f</code> defines a variable <code>f</code> without a value where it is written, and <code>f(p, ...) = e</code> later fills it by assigning a function. <code>f(p, ...) = e</code> is the same assignment as <code>f = (p, ...) -&gt; e</code>. The functions written after the declaration see <code>f</code>. Calling <code>f</code> before it is filled stops the program with a message.</p>
+<div class="example"><pre><code>fun odd
+even(n) := if (n == 0) true else odd(n - 1)
+odd(n) = if (n == 0) false else even(n - 1)</code></pre></div>
+<p>A variable definition <code>x := e</code> (also <code>x := (p) -&gt; e</code>) is defined where it is written, and the expressions before it see the <code>x</code> outside. A variable of a block is a variable of the function or the program that contains the block.</p>
 
 <h2 id="names">Names the sugar calls</h2>
 <p>The functions a piece of sugar expands to have a name starting with <code>_</code>, and there is no function of the same name without <code>_</code>. A variable named <code>add</code> or <code>index_get</code> in a program therefore does not change the meaning of <code>a + b</code> or <code>a[i]</code>.</p>
@@ -228,7 +233,7 @@ println(unparse(u[Apply{&#x27;_mul, Tuple{a @ int, b @ int}} if a &gt; 1 -&gt; a
 
 <h2>Lexical rules</h2>
 <ul>
-<li>Identifiers are <code>[A-Za-z_][A-Za-z0-9_]*</code> except the reserved words<br><code>if else while and or handle with perform match record for in return break continue</code>.</li>
+<li>Identifiers are <code>[A-Za-z_][A-Za-z0-9_]*</code> except the reserved words<br><code>if else while and or handle with perform match record for in return break continue fun</code>.</li>
 <li>Integers are decimal (<code>10</code>, <code>-3</code>), <code>0x1f</code>, <code>0o17</code> or <code>0b101</code>.</li>
 <li>Strings are <code>"..."</code> in one line with the escapes <code>\a \b \t \n \v \f \r \" \' \\</code>. <code>f"...{e}..."</code> embeds the value of the expression <code>e</code>, which may contain strings and f-strings; <code>{{</code> and <code>}}</code> are the braces themselves. A string without the prefix <code>f</code> embeds nothing.</li>
 <li><code>#</code> starts a comment up to the end of the line.</li>

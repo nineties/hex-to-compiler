@@ -66,7 +66,8 @@
 <tr><td><code>return e</code>・<code>return</code>・<code>break</code>・<code>continue</code></td><td><code>Perform{Return{e}}</code>・<code>Perform{Return{none}}</code>・<code>Perform{Break{}}</code>・<code>Perform{Continue{}}</code></td></tr>
 <tr><td><code>match e { f }</code></td><td><code>Apply{f, Tuple{e}}</code></td></tr>
 <tr><td><code>f"a{e}b"</code></td><td class="wrap"><code>Apply{_strcat, Tuple{Apply{_strcat, Tuple{"a", Apply{_to_text, Tuple{e}}}}, "b"}}</code></td></tr>
-<tr><td>ブロックの中の <code>f(p, ...) := e</code></td><td class="wrap">ブロックの先頭に <code>Def{f, none}</code>、その場所に <code>Set{f, Lambda{Tuple{p, ...}, e}}</code></td></tr>
+<tr><td><code>fun f</code></td><td><code>Fun{f}</code></td></tr>
+<tr><td><code>f(p, ...) = e</code></td><td><code>Set{f, Lambda{Tuple{p, ...}, e}}</code></td></tr>
 <tr><td><code>handle e with h</code></td><td><code>Handle{e, h}</code></td></tr>
 <tr><td><code>perform e</code></td><td><code>Perform{e}</code></td></tr>
 <tr><td><code>()</code>・<code>(a, b, ...)</code></td><td><code>Tuple{}</code>・<code>Tuple{a, b, ...}</code></td></tr>
@@ -140,8 +141,12 @@ Apply{_record_declare, Tuple{Quote{T}, Quote{Tuple{a, b}}}}</pre>
 
 <h2 id="scope">変数の範囲</h2>
 <p>変数は静的（字句的）に決まり、名前がどの変数を指すかは式を実行する前に決まります。関数の本体の変数は、その関数か外側の関数の引数、またはそれらの関数でそれより前に定義した変数で、どれでもなければトップレベルでそれより前に定義した変数（大域変数）です。呼んだ側の変数は見えません。どの変数も指さない名前があると、その式を実行する前にメッセージを出してプログラムが止まります。関数は作られた場所の変数を持ち、変数は共有の場所なので、関数を作ったあとの代入も関数から見えます。</p>
-<p>トップレベルの定義は書いた順に決まります。後ろに書いた定義はそれより前の式から見えないので、互いに呼び合う関数はブロックの中に書きます。関数の定義 <code>f(p, ...) := e</code> の本体からは <code>f</code> 自身が見えます。同じ名前をもう一度定義すると新しい変数になります。前に作った関数は前の変数を指したままで、新しい変数が見えるのは定義より後ろの式だけです。<code>f(x) := 1</code>、<code>g() := f(0)</code>、<code>f(x) := 2</code> の順に書くと、<code>g()</code> は <code>1</code> です。今ある変数を上書きするときは <code>x = e</code> と書きます。これは同じ変数への代入なので、前に作った関数からも新しい値が見えます。<code>f(x) := 2</code> の代わりに <code>f = (x) -&gt; 2</code> と書くと、<code>g()</code> は <code>2</code> です。</p>
-<p>関数の定義 <code>f(p, ...) := e</code> はトップレベルでもブロックの中でも同じ形で書きます。ブロックの中では <code>f</code> をブロックの先頭で定義するので、ブロックの関数どうしは互いに見え、相互再帰が書けます。関数が入るのは定義を書いた場所です。そのためブロックの中でそれより前に定義した変数が見え、その場所よりあとで呼べます。変数の定義 <code>x := e</code>（<code>x := (p) -&gt; e</code> も）は書いた場所で定義され、それより前の式からは外側の <code>x</code> が見えます。ブロックの変数は、ブロックを含む関数かプログラムの変数です。</p>
+<p>トップレベルの定義は書いた順に決まります。後ろに書いた定義はそれより前の式から見えません。関数の定義 <code>f(p, ...) := e</code> の本体からは <code>f</code> 自身が見えます。同じ名前をもう一度定義すると新しい変数になります。前に作った関数は前の変数を指したままで、新しい変数が見えるのは定義より後ろの式だけです。<code>f(x) := 1</code>、<code>g() := f(0)</code>、<code>f(x) := 2</code> の順に書くと、<code>g()</code> は <code>1</code> です。今ある変数を上書きするときは <code>x = e</code> と書きます。これは同じ変数への代入なので、前に作った関数からも新しい値が見えます。<code>f(x) := 2</code> の代わりに <code>f = (x) -&gt; 2</code> と書くと、<code>g()</code> は <code>2</code> です。</p>
+<p>関数の定義 <code>f(p, ...) := e</code> はトップレベルでもブロックの中でも同じ形で書き、どちらでも書いた場所で定義されます。互いに呼び合う関数は、先に <code>fun f</code> で名前だけを宣言します。<code>fun f</code> はまだ値のない変数 <code>f</code> を書いた場所で定義し、あとで <code>f(p, ...) = e</code> で関数を代入して埋めます。<code>f(p, ...) = e</code> は <code>f = (p, ...) -&gt; e</code> と同じ代入です。宣言のあとに書いた関数からは <code>f</code> が見えます。埋める前に <code>f</code> を呼ぶと、メッセージを出してプログラムが止まります。</p>
+<div class="example"><pre><code>fun odd
+even(n) := if (n == 0) true else odd(n - 1)
+odd(n) = if (n == 0) false else even(n - 1)</code></pre></div>
+<p>変数の定義 <code>x := e</code>（<code>x := (p) -&gt; e</code> も）は書いた場所で定義され、それより前の式からは外側の <code>x</code> が見えます。ブロックの変数は、ブロックを含む関数かプログラムの変数です。</p>
 
 <h2 id="names">糖衣が呼ぶ名前</h2>
 <p>糖衣が読み替える先の関数は名前が <code>_</code> で始まり、<code>_</code> のない同名の関数はありません。したがってプログラムの <code>add</code> や <code>index_get</code> という変数は、<code>a + b</code> や <code>a[i]</code> の意味を変えません。</p>
@@ -228,7 +233,7 @@ println(unparse(u[Apply{&#x27;_mul, Tuple{a @ int, b @ int}} if a &gt; 1 -&gt; a
 
 <h2>字句</h2>
 <ul>
-<li>識別子は <code>[A-Za-z_][A-Za-z0-9_]*</code> です。ただし次の予約語は除きます。<br><code>if else while and or handle with perform match record for in return break continue</code></li>
+<li>識別子は <code>[A-Za-z_][A-Za-z0-9_]*</code> です。ただし次の予約語は除きます。<br><code>if else while and or handle with perform match record for in return break continue fun</code></li>
 <li>整数は10進（<code>10</code>・<code>-3</code>）・<code>0x1f</code>・<code>0o17</code>・<code>0b101</code> です。</li>
 <li>文字列は1行の <code>"..."</code> で、エスケープ <code>\a \b \t \n \v \f \r \" \' \\</code> が使えます。<code>f"...{e}..."</code> は式 <code>e</code> の値を埋め込みます。<code>e</code> の中に文字列や f 文字列を書けます。<code>{{</code> と <code>}}</code> は波括弧そのものです。<code>f</code> の付かない文字列は何も埋め込みません。</li>
 <li><code>#</code> から行の終わりまではコメントです。</li>
