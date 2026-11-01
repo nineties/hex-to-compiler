@@ -694,6 +694,73 @@ check(head(tree("nosuch{| 1 |}")), 'SyntaxError)
 check(expr{| f(`!a) |}, 'Apply{f, Tuple{QuasiQuote{UnQuote{a}}}})
 check(expr{| 'a |}, 'Quote{a})
 
+# === Patterns written as expressions ===
+check(tree("a@int + b@int -> a + b"), 'Lambda{Tuple{Apply{Quote{_add}, Tuple{_TypeOf{a, int}, _TypeOf{b, int}}}}, Apply{_add, Tuple{a, b}}})
+check(tree("a * b + c -> a"), 'Lambda{Tuple{Apply{Quote{_add}, Tuple{Apply{Quote{_mul}, Tuple{a, b}}, c}}}, a})
+check(tree("(a + b) * c -> a"), 'Lambda{Tuple{Apply{Quote{_mul}, Tuple{Apply{Quote{_add}, Tuple{a, b}}, c}}}, a})
+check(tree("a - b - c -> a"), 'Lambda{Tuple{Apply{Quote{_sub}, Tuple{Apply{Quote{_sub}, Tuple{a, b}}, c}}}, a})
+check(tree("a / b % c -> a"), 'Lambda{Tuple{Apply{Quote{_mod}, Tuple{Apply{Quote{_div}, Tuple{a, b}}, c}}}, a})
+check(tree("-a -> a"), 'Lambda{Tuple{Apply{Quote{_sub}, Tuple{0, a}}}, a})
+check(tree("-1 -> a"), 'Lambda{Tuple{-1}, a})
+check(tree("f(x, 1) -> x"), 'Lambda{Tuple{Apply{Quote{f}, Tuple{x, 1}}}, x})
+check(tree("f() -> 0"), 'Lambda{Tuple{Apply{Quote{f}, Tuple{}}}, 0})
+check(tree("[a, b + 1] -> a"), 'Lambda{Tuple{Cons{a, Cons{Apply{Quote{_add}, Tuple{b, 1}}, Nil{}}}}, a})
+check(tree("a + 1 :: b -> a"), 'Lambda{Tuple{Cons{Apply{Quote{_add}, Tuple{a, 1}}, b}}, a})
+check(tree("a == b -> a"), 'Lambda{Tuple{Apply{Quote{_eq}, Tuple{a, b}}}, a})
+check(tree("a < b + 1 -> a"), 'Lambda{Tuple{Apply{Quote{_lt}, Tuple{a, Apply{Quote{_add}, Tuple{b, 1}}}}}, a})
+check(tree("(not a, a and b, a or b) -> a"),
+      'Lambda{Tuple{Apply{Quote{_not}, Tuple{a}}, If{a, b, Quote{false}}, If{a, Quote{true}, b}}, a})
+check(tree("'(x + 1) -> 0"), 'Lambda{Tuple{Quote{Apply{_add, Tuple{x, 1}}}}, 0})
+check(tree("F{a + 1, g(b)} -> a"), 'Lambda{Tuple{F{Apply{Quote{_add}, Tuple{a, 1}}, Apply{Quote{g}, Tuple{b}}}}, a})
+check(tree("(a + b, c) -> a"), 'Lambda{Tuple{Apply{Quote{_add}, Tuple{a, b}}, c}, a})
+check(tree("((a, b)) -> a"), 'Lambda{Tuple{Tuple{a, b}}, a})
+check(tree("f(a + b) := a"), 'Def{f, Lambda{Tuple{Apply{Quote{_add}, Tuple{a, b}}}, a}})
+check(tree("match e { a + 0 -> a; _ -> e }"), 'Apply{Fusion{Lambda{Tuple{Apply{Quote{_add}, Tuple{a, 0}}}, a}, Lambda{Tuple{_}, e}}, Tuple{e}})
+# M-expressions are patterns as before: a variable in the place of the function binds it
+check(tree("Apply{f, Tuple{x}} -> f"), 'Lambda{Tuple{Apply{f, Tuple{x}}}, f})
+check(tree("Apply{'_add, Tuple{a @ int, b}} -> a"), 'Lambda{Tuple{Apply{Quote{_add}, Tuple{_TypeOf{a, int}, b}}}, a})
+# a pattern ends before -> and the guard
+check(tree("x - 1 -> x"), 'Lambda{Tuple{Apply{Quote{_sub}, Tuple{x, 1}}}, x})
+check(tree("x->x - 1"), 'Lambda{Tuple{x}, Apply{_sub, Tuple{x, 1}}})
+check(head(tree("a ? b : c -> a")), 'SyntaxError)
+
+# matching
+simp(e) := match e {
+    a@int + b@int -> a + b
+    a + 0 -> a
+    0 + a -> a
+    x * y if x == y -> `sq(!x)
+    f(x) -> x
+    _ -> e
+}
+check(simp('(1 + 2)), 3)
+check(simp('(x + 0)), 'x)
+check(simp('(0 + y)), 'y)
+check(simp('(z * z)), 'sq(z))
+check(simp('(z * w)), 'Apply{_mul, Tuple{z, w}})
+check(simp('(x + 1)), 'Apply{_add, Tuple{x, 1}})
+check(simp('f(5)), 5)
+check(simp('g(5)), 'Apply{g, Tuple{5}})
+check(match '((1 + 2) * 3) { (a + b) * c -> Tuple{a, b, c}; _ -> 0 }, Tuple{1, 2, 3})
+check(match '(1 + 2 * 3) { (a + b) * c -> 1; a + b * c -> 2; _ -> 0 }, 2)
+check(match '(-x) { -a -> a; _ -> 0 }, 'x)
+check(match '(not p) { not a -> a; _ -> 0 }, 'p)
+check(match '(p and q) { a or b -> 1; a and b -> b; _ -> 0 }, 'q)
+check(match '(a < b) { x > y -> 1; x < y -> 2; _ -> 0 }, 2)
+check(match '(a :: b) { x :: y -> y; _ -> 0 }, 'b)
+check(match '[1, 2] { [x] -> 1; [x, y] -> y; _ -> 0 }, 2)
+check(match [1, 2] { [x, y] -> x + y; _ -> 0 }, 3)
+check(match '(x + 1) { a@int + b@int -> 0; _ -> 1 }, 1)
+check(match 'F{1 + x} { F{a + b @ symbol} -> b; _ -> 0 }, 'x)
+check(match '(f(1)) { Apply{g, Tuple{x}} -> g; _ -> 0 }, 'f)
+check(match 'f(1, 2) { f(a) -> 1; f(a, b) -> b; _ -> 0 }, 2)
+swap(a + b) := `(!b + !a)
+check(swap('(1 + x)), 'Apply{_add, Tuple{x, 1}})
+check(((a - b) -> a)('(5 - 3)), 5)
+pacc := 0
+for (a * b in ['(1 * 2), '(3 * 4)]) pacc = pacc + a * b
+check(pacc, 14)
+
 # extend the syntax of planck
 primary ::= 'unless c:expr a:block 'else b:block { `If{!c, !b, !a} } | ...
 check(unless 1 > 2 { "a" } else { "b" }, "a")
@@ -818,6 +885,13 @@ check(('G{1})[G{a} -> a], 1)
 check(('F{1})[G{a} -> a], 'F{1})
 check([1, 2, 3][x @ int -> x * 10], [10, 20, 30])
 check(('(x * 1 + y))[Apply{_mul, Tuple{a, 1}} -> a], '(x + y))
+# patterns written as expressions in the arms
+check(('(x * 1 + y))[a * 1 -> a], '(x + y))
+check(('(1 + 2 * (3 + 4)))[a @ int + b @ int -> a + b], '(1 + 2 * 7))
+check(('(a + a + b))[a + b if a == b -> `(2 * !a)], '(2 * a + b))
+check(('(f(1) + g(2)))[f(x) -> x | g(x) -> x * 10], '(1 + 20))
+check(('(x + 0 * y))[a + 0 -> a | 0 * a -> 0], '(x + 0))
+check(tree("t[a @ int + b @ int -> a + b | -x -> x]"), 'Apply{_index_get, Tuple{t, Fusion{Lambda{Tuple{Apply{Quote{_add}, Tuple{_TypeOf{a, int}, _TypeOf{b, int}}}}, Apply{_add, Tuple{a, b}}}, Lambda{Tuple{Apply{Quote{_sub}, Tuple{0, x}}}, x}}}})
 # guards: when the guard is false the next arm is tried, and then the arguments
 rt2 := 'F{P{1, 1}, P{1, 2}}
 check(rt2[P{a, b} if a == b -> a], 'F{1, P{1, 2}})

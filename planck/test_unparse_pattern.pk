@@ -1,0 +1,62 @@
+# tests for planck/lib/unparse.pk: patterns
+# Copyright (C) 2026 nineties
+
+use("unparse")
+
+passed := 0
+failed := 0
+trips := 0
+
+check(actual, expected) := if (actual == expected) {
+    passed = passed + 1
+} else {
+    failed = failed + 1
+    put("Test failed: expected "); print(expected)
+    put(" but got "); println(actual)
+}
+
+tree(s) := arg(peg_parse('toplevel, s), 0)
+
+# round trip: the text of a tree parses to the tree, and printing again gives the same text
+trip(t) := {
+    out := unparse(t)
+    t2 := tree(out)
+    trips = trips + 1
+    check(t2, t)
+    check(unparse(t2), out)
+}
+rt(s) := trip(tree(s))
+
+# === Patterns written as expressions ===
+check(unparse(tree("a@int + b@int -> a + b")), "a @ int + b @ int -> a + b")
+check(unparse(tree("(a + b) * c -> a")), "(a + b) * c -> a")
+check(unparse(tree("((a, b)) -> a")), "Tuple{a, b} -> a")
+check(unparse(tree("Apply{'_add, Tuple{a, b}} -> a")), "a + b -> a")
+check(unparse(tree("Apply{f, Tuple{x}} -> f")), "Apply{f, Tuple{x}} -> f")
+check(unparse(tree("f(x) := match x { a + 0 -> a; x * y if x == y -> x; _ -> 0 }")),
+      "f(x) := match x {\n    a + 0 -> a\n    x * y if x == y -> x\n    _ -> 0\n}")
+rt("a@int + b@int -> a + b")
+rt("a * b + c -> a")
+rt("(a + b) * c -> a")
+rt("a - (b - c) -> a")
+rt("-a -> a")
+rt("-1 -> a")
+rt("f(x, 1) -> x")
+rt("f() -> 0")
+rt("[a, b + 1] -> a")
+rt("a + 1 :: b -> a")
+rt("(a :: b) + 1 -> a")
+rt("a < b + 1 -> a")
+rt("(not a, a and b, a or b) -> a")
+rt("(a or b) and c -> a")
+rt("'(x + 1) -> 0")
+rt("F{a + 1, g(b)} -> a")
+rt("(a + b, c) -> a")
+rt("f(a + b) := a")
+rt("Apply{f, Tuple{x}} -> f")
+rt("match e { a + 0 -> a; x * y if x == y -> x; _ -> e }")
+rt("for (a * b in xs) f(a)")
+
+put("Tests passed "); print(passed); put("/"); println(passed + failed)
+put("Round trips "); println(trips)
+if (failed > 0) exit(1)

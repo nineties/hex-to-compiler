@@ -141,8 +141,32 @@ The guard ``if c`` is evaluated after ``p`` matched, with the variables of ``p``
 When no arm applies the call fails as a call of a function with no matching pattern does.
 ``match`` binds ``%v`` and ``%r0``, ``%r1`` ... in the arms with guards, which no identifier can name.
 
-Parameters ``p`` are patterns: unary expressions such as ``x``, ``1``, ``'none``, ``Cons{x, xs}`` or ``x @ int``,
-and ``p :: q`` for ``Cons{p, q}``, e.g. ``(x :: xs) -> ...`` and ``f(x :: y :: rest) := ...``.
+Parameters ``p`` and the patterns of ``match`` and ``for`` are written as expressions up to ``or``,
+and are the M-expressions of the table above, which are matched as in Patterns below, with these rules:
+
+* the name of an operator or of a called function is a symbol: ``a + b`` is ``Apply{Quote{_add}, Tuple{a, b}}``,
+  ``-a`` is ``Apply{Quote{_sub}, Tuple{0, a}}`` and ``f(p, ...)`` is ``Apply{Quote{f}, Tuple{p, ...}}``,
+  so they match the trees of ``x + 1``, ``-x`` and ``f(1)``.
+  ``a and b`` and ``a or b`` are ``If{a, b, Quote{false}}`` and ``If{a, Quote{true}, b}``.
+* the other identifiers are variables. The arguments of ``Head{p, ...}`` are patterns,
+  so ``Apply{f, Tuple{x}}`` matches a call of any function with one argument and binds ``f``.
+* ``'e`` is ``Quote{e}`` for the expression ``e``.
+* the forms are the operators ``or and not == != <= >= < > :: + - * / %``, the unary ``-`` and ``'``, ``f(p, ...)``,
+  ``p @ type``, ``Head{p, ...}``, identifiers, integers, strings, ``()``, ``(p)``, ``(p, q, ...)`` and ``[p, ...]``,
+  with the same binding as in expressions: ``a @ int + b @ int`` is ``(a @ int) + (b @ int)``.
+
+.. code-block::
+
+   simp(e) := match e {
+       a @ int + b @ int -> a + b
+       a + 0 -> a
+       x * y if x == y -> `sq(!x)
+       _ -> e
+   }
+   simp('(1 + 2))    # 3
+   simp('(z * z))    # sq(z)
+   swap(a + b) := `(!b + !a)
+   (x :: xs) -> x
 
 Lexical rules:
 
@@ -240,7 +264,7 @@ otherwise the arguments of the part are tried and its head is kept. A part that 
 .. code-block::
 
    t := '(x * 1 + 0 * y)
-   t[Apply{'_mul, Tuple{a, 1}} -> a | Apply{'_mul, Tuple{0, _}} -> 0]    # x + 0
+   t[a * 1 -> a | 0 * _ -> 0]    # x + 0
 
 ``t[p -> a | q -> b]`` is the expression ``p -> a | q -> b`` in brackets, so its arms are tried in order.
 An arm may have a guard as in ``match``: in ``t[p if c -> a | q -> b]`` the arm applies when ``p`` matches and ``c`` is true,
@@ -374,7 +398,7 @@ its arguments are evaluated and an M-expression with the same head is built.
 Patterns
 --------
 
-A parameter pattern is one of:
+A parameter pattern of ``Lambda`` is one of:
 
 * a variable ``x``, or ``_`` (matches anything and binds nothing)
 * an integer or a string (matches an equal value)
