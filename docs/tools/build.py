@@ -88,7 +88,7 @@ LANG = "ja"
 
 # ステージの図。ノード: 名前, 説明 ja, 説明 en, 書かれている言語の key
 D_NODES = {
-    "xxd":    ("pforth.xxd", "16進ダンプ201行", "201-line hex dump", "mc"),
+    "xxd":    ("pforth.xxd", "16進ダンプ", "Hex dump", "mc"),
     "pforth": ("pforth", "1文字の語だけの Forth", "Forth with one-letter words", "mc"),
     "plisp":  ("plisp", "Forth の上の Lisp", "A Lisp on top of Forth", "fs"),
     "asm":    ("asm・sasm", "アセンブラと C 風の言語", "Assembler and C-like language", "lisp"),
@@ -103,14 +103,14 @@ D_LANG = {
     "sasm": ("sasm", "sasm"),
     "pk": ("M式・planck", "M-expr, planck"),
 }
-# 辺: 元, 先, ラベル（\n で改行）
+# 辺: 元, 先, ラベル（空）
 D_EDGES = [
-    ("xxd", "pforth", "xxd -r -c 8"),
-    ("pforth", "plisp", "pforth < plisp.fs"),
-    ("plisp", "asm", {"ja": "plisp で\n書く", "en": "written\nin plisp"}),
-    ("asm", "plisp2", "pforth < plisp.fs\nsasm.lisp plisp2.sv"),
-    ("plisp2", "planck0", "plisp2 sasm.lisp\nplanck0.sv planck0"),
-    ("planck0", "planck", "init.pk, peg.pk,\nsyntax.pk"),
+    ("xxd", "pforth", ""),
+    ("pforth", "plisp", ""),
+    ("plisp", "asm", ""),
+    ("asm", "plisp2", ""),
+    ("plisp2", "planck0", ""),
+    ("planck0", "planck", ""),
 ]
 D_STAGES = [
     (["xxd", "pforth", "plisp"], ("ステージ1　機械語 → Forth → Lisp", "Stage 1: machine code to Lisp")),
