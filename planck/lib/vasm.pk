@@ -1,0 +1,456 @@
+# vasm: a language with types, ownership and named regions, written in .pk files
+# Copyright (C) 2026 nineties
+#
+# vasm{| fn ... |} reads functions of the language and is Module{[Fn{...}, ...]}.
+# vasm_check(m) is the list of VasmErr{kind, Pos{d}, msg}, one for each function with an error,
+# and vasm_errors(file, m) gives the positions as Loc{file, line, column} of the file.
+
+use("list")
+use("table")
+use("string")
+use("error")
+
+# === Syntax ===
+
+# the elements of Tuple{a, ...} as a list
+vasm_tlist(t) := {
+    xs := []
+    i := arity(t) - 1
+    while (i >= 0) {
+        xs = arg(t, i) :: xs
+        i = i - 1
+    }
+    xs
+}
+
+# the list in the value Tuple{} or Tuple{xs} of e?
+vasm_opt_list(t) := if (arity(t) == 0) [] else arg(t, 0)
+
+# vasm_here reads nothing and is Pos{d}, where d is the number of characters from the next token to the end of the text.
+# The text parsed is the rest of the file, so d also counts to the end of the file.
+_define_rule('vasm_here, p -> {
+    peg_pv = Pos{peg_srclen - peg_skip_ws(p)}
+    p
+})
+_define_rule('vasm_same, 'Same{})
+_define_rule('vasm_newline, 'Not{Same{}})
+
+vasm_kw ::= ('fn | 'var | 'region | 'own | 'mut | 'box | 'free | 'i64 | 'bool | 'true | 'false | 'if | 'else | 'while | 'return)
+vasm_name ::= !vasm_kw x:ident { x }
+
+vasm_type ::= 'i64 { I64{} }
+    | 'bool { Bool{} }
+    | 'own t:vasm_type { Own{t} }
+    | "&" 'mut r:vasm_name t:vasm_type { Ref{'mut, r, t} }
+    | "&" r:vasm_name t:vasm_type { Ref{'shr, r, t} }
+
+vasm_operand ::= at:vasm_here n:integer { Imm{at, n} }
+    | at:vasm_here 'true { Imm{at, true} }
+    | at:vasm_here 'false { Imm{at, false} }
+    | at:vasm_here x:vasm_name { Reg{at, x} }
+
+vasm_binop ::= "+" { 'add } | "-" { 'sub } | "*" { 'mul } | "/" { 'div } | "%" { 'rem }
+    | "<<" { 'shl } | ">>" { 'shr } | "&" { 'bit_and } | "|" { 'bit_or } | "^" { 'bit_xor }
+    | "==" { 'eq } | "!=" { 'ne } | "<=" { 'le } | ">=" { 'ge } | "<" { 'lt } | ">" { 'gt }
+
+vasm_more_arg ::= "," a:vasm_operand { a }
+vasm_args ::= a:vasm_operand r:vasm_more_arg* { a :: vasm_tlist(r) }
+
+vasm_rhs ::= at:vasm_here "&" 'mut r:vasm_name y:vasm_name { Borrow{at, 'mut, r, y} }
+    | at:vasm_here "&" r:vasm_name y:vasm_name { Borrow{at, 'shr, r, y} }
+    | at:vasm_here "*" p:vasm_name { Load{at, p} }
+    | at:vasm_here 'box "(" a:vasm_operand ")" { Box{at, a} }
+    | at:vasm_here f:vasm_name "(" args:vasm_args? ")" { Call{at, f, vasm_opt_list(args)} }
+    | a:vasm_operand vasm_same op:vasm_binop b:vasm_operand { Bin{op, a, b} }
+    | a:vasm_operand { Mov{a} }
+
+vasm_cond ::= a:vasm_operand op:vasm_binop b:vasm_operand { Bin{op, a, b} } | a:vasm_operand { Mov{a} }
+
+vasm_stmt ::= at:vasm_here 'var x:vasm_name ":" t:vasm_type { Decl{at, x, t} }
+    | at:vasm_here 'if "(" c:vasm_cond ")" a:vasm_block 'else b:vasm_block { IfS{at, c, a, b} }
+    | at:vasm_here 'if "(" c:vasm_cond ")" a:vasm_block { IfS{at, c, a, []} }
+    | at:vasm_here 'while "(" c:vasm_cond ")" a:vasm_block { WhileS{at, c, a} }
+    | at:vasm_here 'region r:vasm_name a:vasm_block { RegionS{at, r, a} }
+    | at:vasm_here 'return vasm_same a:vasm_operand { Ret{at, a} }
+    | at:vasm_here 'return { Ret{at, none} }
+    | at:vasm_here 'free "(" p:vasm_name ")" { Free{at, p} }
+    | at:vasm_here "*" p:vasm_name "=" a:vasm_operand { Store{at, p, a} }
+    | at:vasm_here x:vasm_name "=" r:vasm_rhs { Assign{at, x, r} }
+    | at:vasm_here f:vasm_name "(" args:vasm_args? ")" { CallS{at, f, vasm_opt_list(args)} }
+
+vasm_sep ::= ";" | vasm_newline
+vasm_more_stmt ::= vasm_sep s:vasm_stmt { s }
+vasm_stmts ::= s:vasm_stmt r:vasm_more_stmt* { s :: vasm_tlist(r) }
+vasm_block ::= "{" ss:vasm_stmts? ";"? "}" { vasm_opt_list(ss) }
+
+vasm_param ::= at:vasm_here x:vasm_name ":" t:vasm_type { Param{at, x, t} }
+vasm_more_param ::= "," p:vasm_param { p }
+vasm_params ::= p:vasm_param r:vasm_more_param* { p :: vasm_tlist(r) }
+vasm_more_name ::= "," x:vasm_name { x }
+vasm_rparams ::= "[" x:vasm_name r:vasm_more_name* "]" { x :: vasm_tlist(r) }
+vasm_ret ::= "->" t:vasm_type { t }
+vasm_fn ::= at:vasm_here 'fn f:vasm_name rs:vasm_rparams? "(" ps:vasm_params? ")" rt:vasm_ret? body:vasm_block { Fn{at, f, vasm_opt_list(rs), vasm_opt_list(ps), if (arity(rt) == 0) Unit{} else arg(rt, 0), body} }
+
+vasm ::= fs:vasm_fn* { Module{vasm_tlist(fs)} }
+
+# === Types ===
+
+vasm_show_type(t) := match t {
+    I64{} -> "i64"
+  | Bool{} -> "bool"
+  | Unit{} -> "()"
+  | Own{u} -> _strcat("own ", vasm_show_type(u))
+  | Ref{k, r, u} -> _strcat(if (k == 'mut) f"&mut {symname(r)} " else f"&{symname(r)} ", vasm_show_type(u))
+}
+
+# i64 and bool are copied. own is linear: it is moved by a use and must be moved or freed once.
+# &mut is moved by a use. & is copied.
+vasm_plain(t) := t == I64{} or t == Bool{}
+vasm_linear(t) := head(t) == 'Own
+vasm_moves(t) := head(t) == 'Own or (head(t) == 'Ref and arg(t, 0) == 'mut)
+
+# === Checker state ===
+# vasm_info: name -> Info{type, regions open at the declaration}, for the variables in scope
+# a state: name -> Vs{status, loans}, and ".dead" -> true after return
+#   status: 'init, 'uninit, Moved{at} or Freed{at}; loans: [Loan{region, kind}, ...]
+
+vasm_sigs := table()
+vasm_info := table()
+vasm_regions := []
+vasm_fn_regions := []
+vasm_ret_type := Unit{}
+
+vasm_fail(at, kind, msg) := perform VasmFail{at, kind, msg}
+
+vasm_dead(st) := table_get(st, ".dead", false)
+vasm_status(st, x) := arg(table_get(st, x, none), 0)
+vasm_loans(st, x) := arg(table_get(st, x, none), 1)
+vasm_set_status(st, x, s) := table_set(st, x, Vs{s, vasm_loans(st, x)})
+vasm_set_loans(st, x, l) := table_set(st, x, Vs{vasm_status(st, x), l})
+
+vasm_copy_state(st) := {
+    s := table()
+    each(kv -> table_set(s, arg(kv, 0), arg(kv, 1)), table_items(st))
+    s
+}
+
+# the variables of a state, without the removed ones
+vasm_vars(st) := filter(x -> typeof(x) == 'symbol and table_get(st, x, none) != none, table_keys(st))
+
+vasm_lookup(at, x) := {
+    i := table_get(vasm_info, x, none)
+    if (i == none) vasm_fail(at, 'undefined, f"{symname(x)} is not declared")
+    i
+}
+vasm_type_of(at, x) := arg(vasm_lookup(at, x), 0)
+
+vasm_need_init(at, st, x) := match vasm_status(st, x) {
+    'init -> none
+  | 'uninit -> vasm_fail(at, 'uninit, f"{symname(x)} is read before it is initialized")
+  | Moved{_} -> vasm_fail(at, 'moved, f"{symname(x)} is used after it is moved")
+  | Freed{_} -> vasm_fail(at, 'freed, f"{symname(x)} is used after it is freed")
+}
+
+vasm_no_loans(at, st, x, what) := if (vasm_loans(st, x) != []) vasm_fail(at, 'borrowed, f"{symname(x)} is borrowed and cannot be {what}")
+vasm_no_mut_loan(at, st, x, what) := if (any(l -> arg(l, 1) == 'mut, vasm_loans(st, x))) vasm_fail(at, 'borrowed, f"{symname(x)} is borrowed as mut and cannot be {what}")
+
+vasm_type_ok(at, t) := match t {
+    Own{u} -> if (not vasm_plain(u)) vasm_fail(at, 'type, f"{vasm_show_type(t)}: the contents must be i64 or bool")
+  | Ref{_, r, u} -> {
+        if (not member(r, vasm_regions)) vasm_fail(at, 'region, f"region {symname(r)} is not in scope")
+        if (not vasm_plain(u)) vasm_fail(at, 'type, f"{vasm_show_type(t)}: the contents must be i64 or bool")
+    }
+  | _ -> none
+}
+
+vasm_declare(at, st, x, t, init) := {
+    if (table_get(vasm_info, x, none) != none) vasm_fail(at, 'type, f"{symname(x)} is already declared")
+    vasm_type_ok(at, t)
+    table_set(vasm_info, x, Info{t, vasm_regions})
+    table_set(st, x, Vs{if (init) 'init else 'uninit, []})
+}
+
+# === Operands and values ===
+
+vasm_pos(o) := match o {
+    Bin{_, a, _} -> arg(a, 0)
+  | Mov{a} -> arg(a, 0)
+  | _ -> arg(o, 0)
+}
+
+# the type of the operand o, which is read. own and &mut are moved.
+vasm_use(st, o) := match o {
+    Imm{_, n} -> if (typeof(n) == 'int) I64{} else Bool{}
+  | Reg{at, x} -> {
+        t := vasm_type_of(at, x)
+        vasm_need_init(at, st, x)
+        if (vasm_moves(t)) {
+            vasm_no_loans(at, st, x, "moved")
+            vasm_set_status(st, x, Moved{at})
+        }
+        t
+    }
+}
+
+# the type of the contents of the pointer p, to read (write is false) or write
+vasm_ptr(at, st, p, write) := {
+    t := vasm_type_of(at, p)
+    vasm_need_init(at, st, p)
+    match t {
+        Own{u} -> {
+            if (write) vasm_no_loans(at, st, p, "written") else vasm_no_mut_loan(at, st, p, "read")
+            u
+        }
+      | Ref{k, _, u} -> {
+            if (write and k != 'mut) vasm_fail(at, 'borrowed, f"{symname(p)} is a shared borrow and cannot be written")
+            u
+        }
+      | _ -> vasm_fail(at, 'type, f"{symname(p)} is {vasm_show_type(t)}, not a pointer")
+    }
+}
+
+# a parameter type with regions of the function matches an argument type; sub binds the regions
+vasm_match_type(pt, t, sub) := if (head(pt) == 'Ref and head(t) == 'Ref) {
+    r := table_get(sub, arg(pt, 1), none)
+    if (arg(pt, 0) != arg(t, 0) or arg(pt, 2) != arg(t, 2)) false
+    else if (r == none) {
+        table_set(sub, arg(pt, 1), arg(t, 1))
+        true
+    } else r == arg(t, 1)
+} else pt == t
+
+vasm_subst_type(t, sub) := match t {
+    Ref{k, r, u} -> Ref{k, table_get(sub, r, r), u}
+  | _ -> t
+}
+
+vasm_call(at, st, f, args) := {
+    sig := table_get(vasm_sigs, f, none)
+    if (sig == none) vasm_fail(at, 'undefined, f"function {symname(f)} is not defined")
+    ps := arg(sig, 1)
+    if (length(ps) != length(args)) vasm_fail(at, 'type, f"{symname(f)} takes {length(ps)} arguments but {length(args)} are given")
+    sub := table()
+    each(pa -> {
+        p := arg(pa, 0)
+        a := arg(pa, 1)
+        t := vasm_use(st, a)
+        if (not vasm_match_type(p, t, sub)) vasm_fail(arg(a, 0), 'type, f"the argument is {vasm_show_type(t)} but {symname(f)} takes {vasm_show_type(p)}")
+    }, zip(ps, args))
+    vasm_subst_type(arg(sig, 2), sub)
+}
+
+vasm_int_operand(o, t) := if (t != I64{}) vasm_fail(arg(o, 0), 'type, f"the operand is {vasm_show_type(t)}, not i64")
+
+# the type of the right-hand side r
+vasm_rhs(st, r) := match r {
+    Mov{o} -> vasm_use(st, o)
+  | Bin{op, a, b} -> {
+        ta := vasm_use(st, a)
+        tb := vasm_use(st, b)
+        if ((op == 'eq or op == 'ne) and ta == tb and vasm_plain(ta)) Bool{} else {
+            vasm_int_operand(a, ta)
+            vasm_int_operand(b, tb)
+            if (member(op, ['lt, 'le, 'gt, 'ge, 'eq, 'ne])) Bool{} else I64{}
+        }
+    }
+  | Load{at, p} -> vasm_ptr(at, st, p, false)
+  | Box{at, a} -> {
+        t := vasm_use(st, a)
+        if (not vasm_plain(t)) vasm_fail(at, 'type, f"box of {vasm_show_type(t)}: the contents must be i64 or bool")
+        Own{t}
+    }
+  | Call{at, f, args} -> {
+        t := vasm_call(at, st, f, args)
+        if (t == Unit{}) vasm_fail(at, 'type, f"{symname(f)} returns no value")
+        t
+    }
+  | Borrow{at, k, r, y} -> {
+        info := vasm_lookup(at, y)
+        yt := arg(info, 0)
+        if (head(yt) != 'Own) vasm_fail(at, 'type, f"{symname(y)} is {vasm_show_type(yt)}; only an own value is borrowed")
+        if (not member(r, vasm_regions)) vasm_fail(at, 'region, f"region {symname(r)} is not in scope")
+        if (member(r, arg(info, 1))) vasm_fail(at, 'region, f"{symname(y)} is declared in region {symname(r)} and does not live to its end")
+        vasm_need_init(at, st, y)
+        if (k == 'mut) vasm_no_loans(at, st, y, "borrowed as mut") else vasm_no_mut_loan(at, st, y, "borrowed")
+        vasm_set_loans(st, y, Loan{r, k} :: vasm_loans(st, y))
+        Ref{k, r, arg(yt, 0)}
+    }
+}
+
+vasm_cond(st, c) := {
+    t := vasm_rhs(st, c)
+    if (t != Bool{}) vasm_fail(vasm_pos(c), 'type, f"the condition is {vasm_show_type(t)}, not bool")
+}
+
+# a borrow of a region opened after the declaration of a variable is out of the scope of the variable
+vasm_escapes(dt, t, regions) := head(dt) == 'Ref and head(t) == 'Ref and arg(dt, 0) == arg(t, 0) and arg(dt, 2) == arg(t, 2) and not member(arg(t, 1), regions)
+
+vasm_assign(at, st, x, t) := {
+    info := vasm_lookup(at, x)
+    dt := arg(info, 0)
+    if (dt != t) {
+        if (vasm_escapes(dt, t, arg(info, 1))) vasm_fail(at, 'escape, f"a borrow of region {symname(arg(t, 1))} is put in {symname(x)}, which lives outside the region")
+        vasm_fail(at, 'type, f"{symname(x)} is {vasm_show_type(dt)} but the value is {vasm_show_type(t)}")
+    }
+    vasm_no_loans(at, st, x, "assigned")
+    if (vasm_linear(dt) and vasm_status(st, x) == 'init) vasm_fail(at, 'leak, f"{symname(x)} owns a value and is assigned again")
+    vasm_set_status(st, x, 'init)
+}
+
+vasm_leak_all(at, st) := each(x -> {
+    if (vasm_linear(arg(table_get(vasm_info, x, none), 0)) and vasm_status(st, x) == 'init) vasm_fail(at, 'leak, f"{symname(x)} still owns a value at the end of the function")
+}, vasm_vars(st))
+
+# the state after if: both branches must agree on own values
+vasm_merge(at, a, b) := if (vasm_dead(a)) b else if (vasm_dead(b)) a else {
+    m := table()
+    each(x -> {
+        t := arg(table_get(vasm_info, x, none), 0)
+        sa := vasm_status(a, x)
+        sb := vasm_status(b, x)
+        if ((sa == 'init) != (sb == 'init) and vasm_linear(t)) vasm_fail(at, 'branch, f"{symname(x)} is owned after one branch and not after the other")
+        s := if (sb == 'init) sa else sb
+        la := vasm_loans(a, x)
+        table_set(m, x, Vs{s, append(la, filter(l -> not member(l, la), vasm_loans(b, x)))})
+    }, vasm_vars(a))
+    m
+}
+
+vasm_replace(st, m) := {
+    each(x -> table_set(st, x, table_get(m, x, none)), vasm_vars(st))
+    table_set(st, ".dead", vasm_dead(m))
+}
+
+# a loop must give back the own and &mut values it moves
+vasm_loop_same(at, a, b) := each(x -> {
+    changed := (vasm_status(a, x) == 'init) != (vasm_status(b, x) == 'init)
+    if (vasm_moves(arg(table_get(vasm_info, x, none), 0)) and changed) vasm_fail(at, 'loop, f"{symname(x)} is moved or freed in the loop and not given a value again")
+}, vasm_vars(a))
+
+vasm_add_loans(st, b) := each(x -> {
+    la := vasm_loans(st, x)
+    vasm_set_loans(st, x, append(la, filter(l -> not member(l, la), vasm_loans(b, x))))
+}, vasm_vars(st))
+
+vasm_end_region(st, r) := each(x -> vasm_set_loans(st, x, filter(l -> arg(l, 0) != r, vasm_loans(st, x))), vasm_vars(st))
+
+# check the statements of a block with the state st, which is updated
+vasm_block(ss, st) := {
+    declared := []
+    for (s in ss) if (not vasm_dead(st)) match s {
+        Decl{at, x, t} -> {
+            vasm_declare(at, st, x, t, false)
+            declared = Tuple{x, at} :: declared
+        }
+      | Assign{at, x, r} -> vasm_assign(at, st, x, vasm_rhs(st, r))
+      | Store{at, p, a} -> {
+            u := vasm_ptr(at, st, p, true)
+            t := vasm_use(st, a)
+            if (t != u) vasm_fail(at, 'type, f"{symname(p)} points to {vasm_show_type(u)} but the value is {vasm_show_type(t)}")
+        }
+      | Free{at, p} -> {
+            t := vasm_type_of(at, p)
+            if (head(t) != 'Own) vasm_fail(at, 'type, f"{symname(p)} is {vasm_show_type(t)}; only an own value is freed")
+            match vasm_status(st, p) {
+                Freed{_} -> vasm_fail(at, 'freed, f"{symname(p)} is freed twice")
+              | _ -> none
+            }
+            vasm_need_init(at, st, p)
+            vasm_no_loans(at, st, p, "freed")
+            vasm_set_status(st, p, Freed{at})
+        }
+      | CallS{at, f, args} -> vasm_call(at, st, f, args)
+      | IfS{at, c, a, b} -> {
+            vasm_cond(st, c)
+            sa := vasm_copy_state(st)
+            vasm_block(a, sa)
+            sb := vasm_copy_state(st)
+            vasm_block(b, sb)
+            vasm_replace(st, vasm_merge(at, sa, sb))
+        }
+      | WhileS{at, c, body} -> {
+            vasm_cond(st, c)
+            s1 := vasm_copy_state(st)
+            vasm_block(body, s1)
+            if (not vasm_dead(s1)) {
+                vasm_loop_same(at, st, s1)
+                s2 := vasm_copy_state(st)
+                vasm_add_loans(s2, s1)
+                vasm_cond(s2, c)
+                vasm_block(body, s2)
+                vasm_add_loans(st, s2)
+            }
+        }
+      | RegionS{at, r, body} -> {
+            if (member(r, vasm_regions)) vasm_fail(at, 'region, f"region {symname(r)} is already open")
+            outer := vasm_regions
+            vasm_regions = r :: outer
+            vasm_block(body, st)
+            vasm_regions = outer
+            vasm_end_region(st, r)
+        }
+      | Ret{at, a} -> {
+            t := if (a == none) Unit{} else vasm_use(st, a)
+            if (t != vasm_ret_type) {
+                if (vasm_escapes(vasm_ret_type, t, vasm_fn_regions)) vasm_fail(at, 'escape, f"a borrow of region {symname(arg(t, 1))} is returned out of the region")
+                vasm_fail(at, 'type, f"the result is {vasm_show_type(vasm_ret_type)} but the value is {vasm_show_type(t)}")
+            }
+            vasm_leak_all(at, st)
+            table_set(st, ".dead", true)
+        }
+    }
+    each((Tuple{x, at}) -> {
+        owned := not vasm_dead(st) and vasm_linear(arg(table_get(vasm_info, x, none), 0)) and vasm_status(st, x) == 'init
+        if (owned) vasm_fail(at, 'leak, f"{symname(x)} still owns a value at the end of its block")
+        table_set(vasm_info, x, none)
+        table_set(st, x, none)
+    }, declared)
+}
+
+vasm_check_fn(d) := match d {
+    Fn{at, f, rs, ps, ret, body} -> {
+        vasm_info = table()
+        vasm_regions = rs
+        vasm_fn_regions = rs
+        vasm_ret_type = ret
+        each(r -> {
+            given := any(p -> head(arg(p, 2)) == 'Ref and arg(arg(p, 2), 1) == r, ps)
+            if (not given) vasm_fail(at, 'region, f"region {symname(r)} is not given by a parameter")
+        }, rs)
+        vasm_type_ok(at, ret)
+        st := table()
+        each((Param{pat, x, t}) -> vasm_declare(pat, st, x, t, true), ps)
+        vasm_block(body, st)
+        if (not vasm_dead(st)) {
+            if (ret != Unit{}) vasm_fail(at, 'type, f"{symname(f)} can end without returning {vasm_show_type(ret)}")
+            vasm_leak_all(at, st)
+        }
+    }
+}
+
+# the errors of the module m: [VasmErr{kind, Pos{d}, msg}, ...], the first error of each function
+vasm_check(m) := {
+    fns := arg(m, 0)
+    vasm_sigs = table()
+    each((Fn{at, f, rs, ps, ret, _}) -> table_set(vasm_sigs, f, Sig{rs, map(p -> arg(p, 2), ps), ret}), fns)
+    errs := []
+    each(d -> {
+        r := handle { vasm_check_fn(d); none } with (VasmFail{at, kind, msg}, k) -> VasmErr{kind, at, msg}
+        if (r != none) errs = r :: errs
+    }, fns)
+    reverse(errs)
+}
+
+# vasm_check with the positions in the file: [VasmErr{kind, Loc{file, line, column}, msg}, ...]
+vasm_errors(file, m) := {
+    src := read_file(file)
+    n := strlen(src)
+    map((VasmErr{kind, Pos{d}, msg}) -> VasmErr{kind, loc_at(file, src, n - d), msg}, vasm_check(m))
+}
+
+# print the errors as file:line:column: message, or "ok"
+vasm_report(file, m) := {
+    es := vasm_errors(file, m)
+    if (es == []) put("ok\n")
+    each((VasmErr{_, loc, msg}) -> put(f"{show_loc(loc)}: {msg}\n"), es)
+}

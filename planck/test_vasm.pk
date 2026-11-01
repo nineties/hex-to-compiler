@@ -1,4 +1,4 @@
-# tests for the low-level language of planck/lib/lowlevel.pk
+# tests for the vasm language of planck/lib/vasm.pk
 # Copyright (C) 2026 nineties
 
 passed := 0
@@ -12,18 +12,18 @@ check(actual, expected) := if (actual == expected) {
     put(" but got "); println(actual)
 }
 
-use("lowlevel")
+use("vasm")
 
-this_file := "planck/test_lowlevel.pk"
+this_file := "planck/test_vasm.pk"
 this_src := read_file(this_file)
 
 # the module has no error
-ok(m) := check(ll_errors(this_file, m), [])
+ok(m) := check(vasm_errors(this_file, m), [])
 
 # the module has one error of the kind, on the line marked with "# NG"
 ng(m, kind) := {
-    es := ll_errors(this_file, m)
-    check(map((LLErr{k, _, _}) -> k, es), [kind])
+    es := vasm_errors(this_file, m)
+    check(map((VasmErr{k, _, _}) -> k, es), [kind])
     if (length(es) == 1) {
         line := line_text(this_src, arg(arg(arg(es, 0), 1), 1))
         check(index_of_str(line, "# NG", 0) >= 0, true)
@@ -31,7 +31,7 @@ ng(m, kind) := {
 }
 
 # === syntax ===
-m := lowlevel{|
+m := vasm{|
     fn f(a: i64, b: &r i64) -> i64 { return a }
 |}
 fn_f := arg(m, 0)[0]
@@ -40,23 +40,23 @@ check(head(fn_f), 'Fn)
 check(arg(fn_f, 1), 'f)
 check(map((Param{_, x, t}) -> Tuple{x, t}, arg(fn_f, 3)), [Tuple{'a, I64{}}, Tuple{'b, Ref{'shr, 'r, I64{}}}])
 check(arg(fn_f, 4), I64{})
-body := arg(arg(lowlevel{| fn g() { x = a + 1; *p = 2; y = *p; return } |}, 0)[0], 5)
+body := arg(arg(vasm{| fn g() { x = a + 1; *p = 2; y = *p; return } |}, 0)[0], 5)
 check(map(head, body), ['Assign, 'Store, 'Assign, 'Ret])
 check(arg(arg(body, 0)[2], 0), 'add)
 check(head(arg(body[2], 2)), 'Load)
 # a new line separates statements: *p = 1 is not a multiplication
-body2 := arg(arg(lowlevel{| fn g() {
+body2 := arg(arg(vasm{| fn g() {
     x = a
     *p = 1
 } |}, 0)[0], 5)
 check(map(head, body2), ['Assign, 'Store])
-check(map(t -> ll_show_type(t), [I64{}, Own{Bool{}}, Ref{'mut, 'r, I64{}}, Ref{'shr, 'q, I64{}}]),
+check(map(t -> vasm_show_type(t), [I64{}, Own{Bool{}}, Ref{'mut, 'r, I64{}}, Ref{'shr, 'q, I64{}}]),
     ["i64", "own bool", "&mut r i64", "&q i64"])
 
 # === modules that pass ===
 
 # integers, if and while
-ok(lowlevel{|
+ok(vasm{|
     fn sum(n: i64) -> i64 {
         var s: i64
         var i: i64
@@ -84,7 +84,7 @@ ok(lowlevel{|
 |})
 
 # a value owned by a register is moved to another and freed once
-ok(lowlevel{|
+ok(vasm{|
     fn own_move() -> i64 {
         var p: own i64
         var q: own i64
@@ -99,7 +99,7 @@ ok(lowlevel{|
 |})
 
 # an own value is given to a function, which frees it, or is given back
-ok(lowlevel{|
+ok(vasm{|
     fn consume(p: own i64) { free(p) }
     fn inc(p: own i64) -> own i64 {
         var v: i64
@@ -117,7 +117,7 @@ ok(lowlevel{|
 |})
 
 # borrows in a region; the owner is used again after the region
-ok(lowlevel{|
+ok(vasm{|
     fn get[r](p: &r i64) -> i64 {
         var v: i64
         v = *p
@@ -149,7 +149,7 @@ ok(lowlevel{|
 |})
 
 # a function returns a borrow of a region given by its parameters
-ok(lowlevel{|
+ok(vasm{|
     fn pick[r](a: &r i64, b: &r i64, first: bool) -> &r i64 {
         if (first) { return a }
         return b
@@ -176,7 +176,7 @@ ok(lowlevel{|
 |})
 
 # a register is initialized in both branches; an own value is freed in both branches
-ok(lowlevel{|
+ok(vasm{|
     fn branches(c: bool, p: own i64) -> i64 {
         var v: i64
         if (c) {
@@ -205,7 +205,7 @@ ok(lowlevel{|
 # === modules that fail ===
 
 # moved twice
-ng(lowlevel{|
+ng(vasm{|
     fn twice_moved() {
         var p: own i64
         var q: own i64
@@ -219,7 +219,7 @@ ng(lowlevel{|
 |}, 'moved)
 
 # given to a function and used again
-ng(lowlevel{|
+ng(vasm{|
     fn consume(p: own i64) { free(p) }
     fn moved_by_call() {
         var p: own i64
@@ -230,7 +230,7 @@ ng(lowlevel{|
 |}, 'moved)
 
 # used after it is freed
-ng(lowlevel{|
+ng(vasm{|
     fn after_free() -> i64 {
         var p: own i64
         var v: i64
@@ -242,7 +242,7 @@ ng(lowlevel{|
 |}, 'freed)
 
 # freed twice
-ng(lowlevel{|
+ng(vasm{|
     fn double_free() {
         var p: own i64
         p = box(1)
@@ -252,7 +252,7 @@ ng(lowlevel{|
 |}, 'freed)
 
 # read before it is initialized
-ng(lowlevel{|
+ng(vasm{|
     fn uninit() -> i64 {
         var v: i64
         var w: i64
@@ -262,7 +262,7 @@ ng(lowlevel{|
 |}, 'uninit)
 
 # initialized in one branch only
-ng(lowlevel{|
+ng(vasm{|
     fn one_branch(c: bool) -> i64 {
         var v: i64
         if (c) { v = 1 }
@@ -271,7 +271,7 @@ ng(lowlevel{|
 |}, 'uninit)
 
 # initialized only in the loop, which may not run
-ng(lowlevel{|
+ng(vasm{|
     fn in_loop(n: i64) -> i64 {
         var v: i64
         while (n > 0) {
@@ -283,7 +283,7 @@ ng(lowlevel{|
 |}, 'uninit)
 
 # a borrow is put in a register outside its region
-ng(lowlevel{|
+ng(vasm{|
     fn escape_by_register() -> i64 {
         var p: own i64
         var v: i64
@@ -301,7 +301,7 @@ ng(lowlevel{|
 |}, 'escape)
 
 # a borrow of a region of the function is returned
-ng(lowlevel{|
+ng(vasm{|
     fn escape_by_return[q](a: &q i64) -> &q i64 {
         var p: own i64
         var b: &q i64
@@ -316,14 +316,14 @@ ng(lowlevel{|
 |}, 'escape)
 
 # a register of a type of a region is declared outside the region
-ng(lowlevel{|
+ng(vasm{|
     fn region_not_open() {
         var b: &r i64   # NG
     }
 |}, 'region)
 
 # borrowed into a region that outlives the owner
-ng(lowlevel{|
+ng(vasm{|
     fn short_owner() {
         region r {
             var p: own i64
@@ -336,7 +336,7 @@ ng(lowlevel{|
 |}, 'region)
 
 # freed while it is borrowed
-ng(lowlevel{|
+ng(vasm{|
     fn free_borrowed() {
         var p: own i64
         p = box(1)
@@ -349,7 +349,7 @@ ng(lowlevel{|
 |}, 'borrowed)
 
 # borrowed as mut twice
-ng(lowlevel{|
+ng(vasm{|
     fn two_mut() {
         var p: own i64
         p = box(1)
@@ -364,7 +364,7 @@ ng(lowlevel{|
 |}, 'borrowed)
 
 # read through the owner while it is borrowed as mut
-ng(lowlevel{|
+ng(vasm{|
     fn read_mut_borrowed() -> i64 {
         var p: own i64
         var v: i64
@@ -380,7 +380,7 @@ ng(lowlevel{|
 |}, 'borrowed)
 
 # written through a shared borrow
-ng(lowlevel{|
+ng(vasm{|
     fn write_shared() {
         var p: own i64
         p = box(1)
@@ -394,7 +394,7 @@ ng(lowlevel{|
 |}, 'borrowed)
 
 # an own value is not freed
-ng(lowlevel{|
+ng(vasm{|
     fn leak() -> i64 {
         var p: own i64
         p = box(1)
@@ -403,7 +403,7 @@ ng(lowlevel{|
 |}, 'leak)
 
 # an own value is overwritten
-ng(lowlevel{|
+ng(vasm{|
     fn overwrite() {
         var p: own i64
         p = box(1)
@@ -413,14 +413,14 @@ ng(lowlevel{|
 |}, 'leak)
 
 # freed in one branch only
-ng(lowlevel{|
+ng(vasm{|
     fn one_free(c: bool, p: own i64) {
         if (c) { free(p) }  # NG
     }
 |}, 'branch)
 
 # freed in a loop
-ng(lowlevel{|
+ng(vasm{|
     fn free_in_loop(n: i64) {
         var p: own i64
         p = box(1)
@@ -432,12 +432,12 @@ ng(lowlevel{|
 |}, 'loop)
 
 # types
-ng(lowlevel{|
+ng(vasm{|
     fn not_bool(n: i64) {
         if (n) { return }   # NG
     }
 |}, 'type)
-ng(lowlevel{|
+ng(vasm{|
     fn wrong_arg(p: own i64) {
         var q: own i64
         q = box(true)   # NG
@@ -445,19 +445,19 @@ ng(lowlevel{|
         free(p)
     }
 |}, 'type)
-ng(lowlevel{|
+ng(vasm{|
     fn no_return(n: i64) -> i64 {   # NG
         if (n > 0) { return n }
     }
 |}, 'type)
-ng(lowlevel{|
+ng(vasm{|
     fn undefined_function() {
         nothing(1)  # NG
     }
 |}, 'undefined)
 
 # one error for each function
-check(map((LLErr{k, _, _}) -> k, ll_errors(this_file, lowlevel{|
+check(map((VasmErr{k, _, _}) -> k, vasm_errors(this_file, vasm{|
     fn a1() { var v: i64; v = v }
     fn a2() { var v: i64; v = 1 }
     fn a3() { var p: own i64; p = box(1) }
@@ -465,9 +465,9 @@ check(map((LLErr{k, _, _}) -> k, ll_errors(this_file, lowlevel{|
 
 # the message with the position, at the second free
 shown_at := line_col(this_src, index_of_str(this_src, "free(p) }", index_of_str(this_src, "fn shown(", 0)))
-check(map((LLErr{_, loc, msg}) -> f"{show_loc(loc)}: {msg}", ll_errors(this_file, lowlevel{|
+check(map((VasmErr{_, loc, msg}) -> f"{show_loc(loc)}: {msg}", vasm_errors(this_file, vasm{|
     fn shown() { var p: own i64; p = box(1); free(p); free(p) }
-|})), [f"planck/test_lowlevel.pk:{arg(shown_at, 0)}:{arg(shown_at, 1)}: p is freed twice"])
+|})), [f"planck/test_vasm.pk:{arg(shown_at, 0)}:{arg(shown_at, 1)}: p is freed twice"])
 
 put("Tests passed "); print(passed); put("/"); println(passed + failed)
 if (failed > 0) exit(1)
