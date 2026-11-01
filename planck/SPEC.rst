@@ -163,13 +163,15 @@ so a line starting with ``-1`` is a new expression. Other binary operators may s
 Names the sugar calls
 ---------------------
 
-The functions a piece of sugar expands to are called by a name starting with ``_``,
-so that a variable named ``add`` or ``index_get`` in a program does not change the meaning of ``a + b`` or ``a[i]``.
-``_add`` ``_sub`` ``_mul`` ``_div`` ``_mod`` ``_lt`` ``_le`` ``_gt`` ``_ge`` ``_eq`` ``_ne`` ``_not`` ``_strcat`` ``_to_text``
-``_record_get`` ``_record_declare`` and ``_define_rule`` are the same functions as ``add``, ``sub`` ... ``define_rule``,
-and ``_index_get`` and ``_index_set`` are defined below.
-A program may call the names without ``_`` as ever.
-A tree made by the sugar has the names with ``_``: ``a + b`` is ``Apply{_add, Tuple{a, b}}``.
+The functions a piece of sugar expands to have a name starting with ``_``,
+and there is no function of the same name without ``_``.
+A variable named ``add`` or ``index_get`` in a program therefore does not change the meaning of ``a + b`` or ``a[i]``.
+The operators are ``_add`` ``_sub`` ``_mul`` ``_div`` ``_mod`` ``_lt`` ``_le`` ``_gt`` ``_ge`` ``_eq`` ``_ne`` ``_not``.
+A string with embedded values uses ``_strcat`` and ``_to_text``, ``t.f`` uses ``_record_get``,
+``record`` uses ``_record_declare`` and ``::=`` uses ``_define_rule``.
+``a[i]`` and ``a[i] = e`` use ``_index_get`` and ``_index_set``, defined below.
+A function that takes the operator as an argument is written with the sugar, e.g. ``sort((a, b) -> a < b, xs)``,
+and a tree made by the sugar has these names: ``a + b`` is ``Apply{_add, Tuple{a, b}}``.
 
 Indexing and rewriting
 ----------------------
@@ -210,7 +212,7 @@ Indexing and rewriting
      - stops, see below
    * - M-expression
      - symbol
-     - ``record_get(a, i)``, the field
+     - ``_record_get(a, i)``, the field
      - stops, see below
    * - M-expression
      - integer
@@ -313,8 +315,8 @@ The value of the expression is the value of the rule, as a constant.
 
 The rule must be defined by an expression that is evaluated before the expression with the text is parsed.
 
-``peg_sources`` is a table from a rule name to the parsing expression given to ``define_rule``, with the actions not evaluated
-(``...`` replaced by the previous definition). ``peg_version`` increases at every ``define_rule``.
+``peg_sources`` is a table from a rule name to the parsing expression given to ``_define_rule``, with the actions not evaluated
+(``...`` replaced by the previous definition). ``peg_version`` increases at every ``_define_rule``.
 
 Values
 ------
@@ -412,13 +414,13 @@ Builtin functions
    * - Output
      - ``print`` ``println`` ``put``
    * - Integers
-     - ``add`` ``sub`` ``mul`` ``div`` ``mod``
+     - ``_add`` ``_sub`` ``_mul`` ``_div`` ``_mod``
    * - Comparison
-     - ``lt`` ``le`` ``gt`` ``ge`` ``eq`` ``ne``
+     - ``_lt`` ``_le`` ``_gt`` ``_ge`` ``_eq`` ``_ne``
    * - M-expressions
      - ``head`` ``arity`` ``arg`` ``mexpr`` ``push`` ``typeof``
    * - Strings
-     - ``strlen`` ``ord`` ``substr`` ``strcat`` ``intern`` ``symname``
+     - ``strlen`` ``ord`` ``substr`` ``_strcat`` ``intern`` ``symname``
    * - Arrays
      - ``array`` ``array_get`` ``array_set`` ``array_len`` ``hash``
    * - Files
@@ -426,30 +428,30 @@ Builtin functions
    * - Language
      - ``parse`` ``eval`` ``exit``
    * - ``planck/init.pk``
-     - ``true`` ``false`` ``none`` ``not`` ``load`` ``use`` ``table`` ``table_get`` ``table_set``
+     - ``true`` ``false`` ``none`` ``_not`` ``load`` ``use`` ``table`` ``table_get`` ``table_set``
    * - ``planck/peg.pk``
-     - ``peg_parse`` ``define_rule``
+     - ``peg_parse`` ``_define_rule``
    * - ``planck/syntax.pk``
-     - ``parse_mexpr`` ``to_text`` ``record_declare`` ``record_get`` ``peg_for`` ``_index_get`` ``_index_set`` ``subst`` and the names of "Names the sugar calls"
+     - ``parse_mexpr`` ``_to_text`` ``_record_declare`` ``_record_get`` ``peg_for`` ``_index_get`` ``_index_set`` ``subst``
 
 * ``parse_mexpr(s)``: the parser of M-expressions, with the same arguments and result as ``parse``.
-* ``to_text(x)``: ``x`` for a string, the decimal text for an integer, and ``show(x)`` (``planck/lib/pretty.pk``) otherwise,
+* ``_to_text(x)``: ``x`` for a string, the decimal text for an integer, and ``show(x)`` (``planck/lib/pretty.pk``) otherwise,
   so a value other than a string or an integer in ``{e}`` needs ``use("pretty")``.
-  A string with embedded values is joined by ``strcat`` from the left, and an empty piece is left out.
-* ``record_declare(name, fields)``: set the field names of the head ``name`` (``fields`` is ``Tuple{f, ...}``). ``record_get(t, name)``: the field.
+  A string with embedded values is joined by ``_strcat`` from the left, and an empty piece is left out.
+* ``_record_declare(name, fields)``: set the field names of the head ``name`` (``fields`` is ``Tuple{f, ...}``). ``_record_get(t, name)``: the field.
 * ``peg_for(xs, f)``: call ``f`` with each element of the list or vector ``xs``, and return ``none``.
 * ``symname(sym)``: the name of the symbol as a string (the inverse of ``intern``).
 * ``strlen(s)``: the number of bytes. ``ord(s, i)``: the byte at ``i``, or ``-1`` when ``i`` is out of range.
-* ``substr(s, i, j)``: the bytes from ``i`` to ``j - 1``. ``strcat(a, b)``: ``a`` followed by ``b``.
+* ``substr(s, i, j)``: the bytes from ``i`` to ``j - 1``. ``_strcat(a, b)``: ``a`` followed by ``b``.
 * ``intern(s)``: the symbol named ``s``.
 * ``push(Head{a, ...}, x)``: ``Head{a, ..., x}``.
 * ``array(n)``: a new array of ``n`` elements, all ``none``. ``array_get(a, i)``, ``array_set(a, i, x)`` (returns ``x``) and ``array_len(a)``.
   An index outside ``0`` to ``n - 1`` is a runtime error.
-* ``hash(x)``: a non-negative integer. Values equal by ``eq`` have the same hash.
+* ``hash(x)``: a non-negative integer. Values equal by ``_eq`` have the same hash.
 * ``table()``: a new hash table ``Table{a}``, where ``a`` is made of arrays. ``table_get(t, key, default)``, ``table_set(t, key, value)``.
-  Keys are compared by ``eq``.
+  Keys are compared by ``==``.
 * ``read_file(path)``: the contents of the file. ``load(path)``: parse and evaluate the file.
-* ``define_rule(name, e)``: define the rule by a parsing expression (see ``planck/peg.pk``).
+* ``_define_rule(name, e)``: define the rule by a parsing expression (see ``planck/peg.pk``).
 * ``use(name)``: ``load("planck/lib/<name>.pk")`` once.
 
 Libraries
@@ -493,7 +495,7 @@ List functions:
 * ``nth(xs, i)`` counts from 0. ``take(xs, n)`` and ``drop(xs, n)`` split ``xs`` after ``n`` elements.
 * ``find(p, xs)`` is the first element with ``p(x)`` or ``none``. ``index_of(x, xs)`` is the position or ``-1``.
 * ``zip(xs, ys)`` is ``[Tuple{x, y}, ...]`` as long as the shorter list. ``range(a, b)`` is ``[a, ..., b - 1]``.
-* ``sort(less, xs)`` is a stable merge sort by ``less(a, b)``, e.g. ``sort(lt, xs)``.
+* ``sort(less, xs)`` is a stable merge sort by ``less(a, b)``, e.g. ``sort((a, b) -> a < b, xs)``.
 
 A vector is a growable array ``Vector{a}``: ``vec_push(v, x)`` appends and returns ``x``, ``vec_pop(v)`` removes and returns the last element.
 ``vec_get`` and ``vec_set`` stop the program for an index outside the elements.
