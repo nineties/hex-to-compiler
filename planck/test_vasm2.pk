@@ -630,5 +630,108 @@ check(map((VasmErr{_, loc, msg}) -> f"{show_loc(loc)}: {msg}", vasm_errors(this_
     fn shown() { var c: u32; c = 65536 }
 |})), [f"planck/test_vasm2.pk:{arg(shown_at, 0)}:{arg(shown_at, 1)}: 65536 is out of the range of a literal, -32768 to 32767; make it with << and |"])
 
+# === string literals ===
+
+# syntax: a literal is an operand with the bytes of the string; &static T is a type
+sbody := arg(arg(vasm{| fn g() { x = "a\tb"; f("c", 1) } |}, 0)[0], 5)
+check(map(head, append([arg(arg(sbody[0], 2), 0)], arg(sbody[1], 2))), ['Str, 'Str, 'Imm])
+check(arg(arg(arg(sbody[0], 2), 0), 1), "a\tb")
+check(map((Param{_, x, t}) -> Tuple{x, t}, arg(arg(vasm{| fn g(s: &static [u8]) {} |}, 0)[0], 3)), [Tuple{'s, Ref{'shr, 'static, Arr{U8{}}}}])
+check(vasm_show_type(Ref{'shr, 'static, Arr{U8{}}}), "&static [u8]")
+
+# a literal is a shared borrow of an array of u8 that lasts to the end of the program
+ok(vasm{|
+    fn literals() -> i64 {
+        var n: i64
+        n = write(1, "hello\n")
+        n = len("abc")
+        return n
+    }
+|})
+# kept in a register of type &static, returned, and given where a borrow of any region is taken
+ok(vasm{|
+    fn name() -> &static [u8] {
+        return "name"
+    }
+    fn size[r](s: &r [u8]) -> i64 {
+        var n: i64
+        n = len(s)
+        return n
+    }
+    fn use_literals() -> i64 {
+        var s: &static [u8]
+        var n: i64
+        var c: u8
+        s = name()
+        n = size("x")
+        n = size(s)
+        c = s[0]
+        region q {
+            var t: &q [u8]
+            t = "inside"
+            n = size(t)
+            n = size("y")
+        }
+        return n
+    }
+|})
+ng(vasm{|
+    fn not_a_number() -> i64 {
+        var n: i64
+        n = "text"      # NG
+        return n
+    }
+|}, 'type)
+ng(vasm{|
+    fn not_mutable() {
+        var s: &static [u8]
+        s = "abc"
+        s[0] = 65       # NG
+    }
+|}, 'borrowed)
+ng(vasm{|
+    fn not_owned() {
+        var a: own [u8]
+        a = "abc"       # NG
+    }
+|}, 'type)
+ng(vasm{|
+    fn no_free() {
+        free("abc")     # NG
+    }
+|}, 'type)
+ng(vasm{|
+    fn no_own_of_borrow() {
+        var p: own &static [u8]     # NG
+    }
+|}, 'type)
+# a borrow of a region that ends is not a borrow of static
+ng(vasm{|
+    fn short_lived() -> &static [u8] {
+        var a: own [u8]
+        var s: &static [u8]
+        a = alloc(3, 65)
+        region r {
+            var b: &r [u8]
+            b = &r a
+            s = b       # NG
+        }
+        free(a)
+        return s
+    }
+|}, 'escape)
+# the same literal is stored once
+use("vasm_ir")
+lowered := vasm_lower(vasm{|
+    fn twice() {
+        write(1, "same")
+        write(1, "other")
+        write(1, "same")
+    }
+|})
+check(map((IRData{n, sec, _, b, _}) -> Tuple{n, sec, vec_to_list(b)}, vasm_strings()),
+    [Tuple{"__str0", ".rodata", [4, 0, 0, 0, 0, 0, 0, 0, 115, 97, 109, 101]},
+     Tuple{"__str1", ".rodata", [5, 0, 0, 0, 0, 0, 0, 0, 111, 116, 104, 101, 114]}])
+
 put("Tests passed "); print(passed); put("/"); println(passed + failed)
 if (failed > 0) exit(1)

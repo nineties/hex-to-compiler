@@ -8,6 +8,8 @@
 #   own T and a borrow are the address of the value; own [T] and a borrow of [T] are the address of a block
 #   that holds the number of elements (4 bytes), 4 bytes of padding and then the elements
 #   __alloc(n) is the address of n bytes and __free(p) gives them back; both are defined by the runtime
+#   a string literal is an array of u8 in .rodata with the same layout (the length, 4 bytes of padding and the bytes, no terminator);
+#   its value is the address, and the same literal is stored once (vasm_strings)
 # Values:
 #   i8 i16 u8 u16 and bool are kept in 32-bit registers in the sign or zero extended form of their type
 #   a struct value is kept in one register for each of its scalar fields, in the order of the fields (a register holds an own value as an address, 0 when moved)
@@ -25,6 +27,7 @@ use("list")
 use("table")
 use("vector")
 use("string")
+use("bytes")
 use("ir")
 
 # === State ===
@@ -39,8 +42,13 @@ vi_ret := Unit{}
 vi_sret := -1
 vi_extra := vec_new()
 vi_made := table()
+vi_strings := table()
+vi_string_list := vec_new()
 
 fun vi_drop_name
+fun vi_string_name
+fun vi_ptr
+fun vi_opnd
 fun vi_stmt
 fun vi_block
 fun vi_use
@@ -300,6 +308,37 @@ vi_pair_type(a, b, expected) := {
 vi_use(o, t) := match o {
     Imm{_, n} -> vi_val1(if (t == none) I64{} else t, K{if (n == true) 1 else if (n == false) 0 else n})
   | Reg{_, x} -> if (vi_linear(vi_var_type(x))) vi_take(x) else vi_var_val(x)
+  | Str{_, s} -> {
+        r := ir_vreg(vi_f, 32)
+        ve(I{'la, [D{r}, S{vi_string_name(s), 0}]})
+        vi_val1(Ref{'shr, 'static, Arr{U8{}}}, U{r})
+    }
+}
+
+# the name of the data of the string literal s, which is made when it is first asked for
+vi_string_name(s) := {
+    n := table_get(vi_strings, s, none)
+    if (n == none) {
+        n = f"__str{vec_len(vi_string_list)}"
+        table_set(vi_strings, s, n)
+        vec_push(vi_string_list, s)
+    }
+    n
+}
+
+# the data of the string literals of the module lowered last: [IRData{...}, ...] for x86_compile
+vasm_strings() := map(s -> {
+    b := bb_new()
+    bb_u32(b, strlen(s))
+    bb_u32(b, 0)
+    bb_str(b, s)
+    IRData{table_get(vi_strings, s, none), ".rodata", 4, b, false}
+}, vec_to_list(vi_string_list))
+
+# the address register of the array operand o, which is a register or a string literal
+vi_array_ptr(o) := match o {
+    Reg{_, x} -> vi_ptr(x)
+  | _ -> vi_ureg(vi_opnd(o, none), I32{})
 }
 
 vi_opnd(o, t) := vi_scalar(vi_use(o, t))
@@ -516,24 +555,24 @@ vi_call(f, args, expected) := {
             []
         }
       | 'len -> {
-            x := arg(args[0], 1)
+            a := vi_array_ptr(args[0])
             n := ir_vreg(vi_f, 32)
             d := ir_vreg(vi_f, 64)
-            ve(I{'ld, [W{'w32}, D{n}, M{U{vi_ptr(x)}, 0}]})
+            ve(I{'ld, [W{'w32}, D{n}, M{U{a}, 0}]})
             ve(I{'zext64, [D{d}, U{n}]})
             vi_val1(I64{}, U{d})
         }
       | 'write -> {
-            x := arg(args[1], 1)
             fdw := vi_ureg(vi_opnd(args[0], I64{}), I64{})
+            a := vi_array_ptr(args[1])
             fd := ir_vreg(vi_f, 32)
             n := ir_vreg(vi_f, 32)
             buf := ir_vreg(vi_f, 32)
             r := ir_vreg(vi_f, 32)
             d := ir_vreg(vi_f, 64)
             ve(I{'trunc, [D{fd}, U{fdw}]})
-            ve(I{'ld, [W{'w32}, D{n}, M{U{vi_ptr(x)}, 0}]})
-            ve(I{'add, [D{buf}, U{vi_ptr(x)}, K{8}]})
+            ve(I{'ld, [W{'w32}, D{n}, M{U{a}, 0}]})
+            ve(I{'add, [D{buf}, U{a}, K{8}]})
             ve(I{'os, [N{'write}, Us{[fd, buf, n]}, D{r}]})
             ve(I{'sext64, [D{d}, U{r}]})
             vi_val1(I64{}, U{d})
@@ -790,6 +829,8 @@ vasm_lower_only(Module{items}, names) := {
     vi_sinfos = table()
     vi_extra = vec_new()
     vi_made = table()
+    vi_strings = table()
+    vi_string_list = vec_new()
     each(d -> match d {
         Struct{_, s, fs} -> if (table_get(vi_structs, s, none) == none) table_set(vi_structs, s, fs)
       | Fn{_, name, _, _, _, _} -> table_set(vi_sigs, name, d)

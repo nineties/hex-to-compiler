@@ -17,6 +17,7 @@
 <tr><td><code>&amp;r T</code></td><td>a shared borrow in region <code>r</code></td></tr>
 <tr><td><code>&amp;mut r T</code></td><td>an exclusive borrow in region <code>r</code></td></tr>
 <tr><td><code>own [T]</code> <code>&amp;r [T]</code> <code>&amp;mut r [T]</code></td><td>arrays; <code>[T]</code> is written only inside <code>own</code> or a borrow</td></tr>
+<tr><td><code>&amp;static T</code></td><td>a shared borrow that lasts to the end of the program; the type of a string literal is <code>&amp;static [u8]</code></td></tr>
 </table>
 <p>A field of a struct, the contents of an <code>own</code> and the element of an array can be <code>own</code>. They cannot be borrows. A value of a type that owns something always has exactly one owner.</p>
 
@@ -54,6 +55,7 @@
 <li>Only an initialized register can be read. After an <code>if</code>, only what both branches initialized is initialized; after a <code>while</code>, the state is the one before the loop.</li>
 <li>Both operands of an integer operation have the same type. Integers of different widths or signedness cannot be mixed; use <code>as</code> to match them. Widening extends the sign or zero-extends according to the source, and narrowing keeps the low bits.</li>
 <li>An integer literal is checked to be in the range of the type of its target, argument or other operand. A single literal ranges from -32768 to 32767. A larger value is built, as in <code>m = 0x7F45</code>, <code>m = m &lt;&lt; 16</code>, <code>m = m | 0x4C46</code>.</li>
+<li>A string literal <code>"..."</code> is an array of <code>u8</code> in read-only data. It has the escapes of planck strings, the bytes are those of the source, and there is no terminator: <code>len</code> gives the number of bytes. Its type is <code>&amp;static [u8]</code>, so it can be written where an operand is taken, as in <code>write(1, "hello\n")</code>, <code>return "name"</code> and <code>s = "abc"</code>. The same literal is stored once. As with any shared borrow, the elements cannot be written.</li>
 <li>An index is an <code>i64</code>. Whether it is in range is left to a run-time check; the checker looks at types and ownership only. An array cannot be read or written as a whole through <code>*p</code>.</li>
 <li>A struct value is copied like an integer unless it owns something, and is moved if it does. <code>s.f</code> is the field of the value if <code>s</code> is a struct register, and the field of the target if <code>s</code> is a pointer to a struct.</li>
 </ul>
@@ -83,6 +85,7 @@
 <li>A <code>&amp;mut</code> can be passed to a <code>&amp;</code> parameter (it is borrowed again as shared for the call).</li>
 <li>A borrow of an outer region <code>q</code> can be passed where a borrow of a region <code>r</code> opened inside <code>q</code> is expected, whether by assignment, <code>return</code> or an argument. The region parameters of a function have no inside-outside relation among them, and are outside the regions opened in the function.</li>
 <li>A region parameter of a function is the innermost region of the borrows that are passed (all the others must be outside it).</li>
+<li>The region <code>static</code> outlives every other region. A borrow of <code>static</code> can be put where a borrow of any region is expected, and passed for a region parameter, which then is <code>static</code> if nothing else is passed for it. A borrow of another region cannot be put where <code>&amp;static</code> is expected. <code>static</code> cannot be the name of a region or of a variable, and only a string literal makes a borrow of it.</li>
 <li>The type <code>&amp;r T</code> can be written only inside <code>r</code>. Putting it in a register outside <code>r</code> or returning it out of <code>r</code> is an error.</li>
 </ul>
 
