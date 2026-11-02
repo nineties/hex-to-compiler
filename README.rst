@@ -5,6 +5,8 @@ hex-to-compiler
    :target: https://github.com/nineties/hex-to-compiler/actions/workflows/runtests.yaml
    :alt: run tests
 
+Documentation: https://nineties.github.io/hex-to-compiler/ (`English <https://nineties.github.io/hex-to-compiler/en/>`_ / `日本語 <https://nineties.github.io/hex-to-compiler/ja/>`_)
+
 Overview
 --------
 
