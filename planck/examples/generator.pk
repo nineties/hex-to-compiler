@@ -1,62 +1,52 @@
-" Generators by an effect "
+# Generators by an effect
 
-" walk a binary tree and Yield each value "
-Def{walk, none}
-Set{walk, Fusion{
-    Lambda{Tuple{Leaf{}}, none},
-    Lambda{Tuple{Node{l, v, r}}, Do{
-        Apply{walk, Tuple{l}},
-        Perform{Yield{v}},
-        Apply{walk, Tuple{r}}}}}}
+# walk a binary tree and Yield each value
+fun walk
+walk = (Leaf{}) -> none
+     | (Node{l, v, r}) -> {
+    walk(l)
+    perform Yield{v}
+    walk(r)
+}
 
-Def{leaf, Lambda{Tuple{v}, Node{Leaf{}, v, Leaf{}}}}
-Def{t1, Node{Node{Apply{leaf, Tuple{1}}, 2, Apply{leaf, Tuple{3}}}, 4, Apply{leaf, Tuple{5}}}}
-Def{t2, Node{Apply{leaf, Tuple{1}}, 2, Node{Apply{leaf, Tuple{3}}, 4, Apply{leaf, Tuple{5}}}}}
-Def{t3, Node{Apply{leaf, Tuple{1}}, 2, Node{Apply{leaf, Tuple{3}}, 4, Apply{leaf, Tuple{6}}}}}
+leaf(v) := Node{Leaf{}, v, Leaf{}}
+t1 := Node{Node{leaf(1), 2, leaf(3)}, 4, leaf(5)}
+t2 := Node{leaf(1), 2, Node{leaf(3), 4, leaf(5)}}
+t3 := Node{leaf(1), 2, Node{leaf(3), 4, leaf(6)}}
 
-" print each value "
-Handle{Apply{walk, Tuple{t1}},
-    Lambda{Tuple{Yield{v}, k}, Do{
-        Apply{put, Tuple{"yield "}},
-        Apply{println, Tuple{v}},
-        Apply{k, Tuple{none}}}}}
+# print each value
+handle walk(t1) with (Yield{v}, k) -> {
+    put("yield ")
+    println(v)
+    k(none)
+}
 
-" collect values into a list "
-Def{to_list, Lambda{Tuple{t},
-    Handle{Do{Apply{walk, Tuple{t}}, Nil{}},
-        Lambda{Tuple{Yield{v}, k}, Cons{v, Apply{k, Tuple{none}}}}}}}
-Apply{println, Tuple{Apply{to_list, Tuple{t1}}}}
+# collect values into a list
+to_list(t) := handle { walk(t); [] } with (Yield{v}, k) -> v :: k(none)
+println(to_list(t1))
 
-" take the first n values and stop walking "
-Def{take, Lambda{Tuple{n, t}, Do{
-    Def{count, 0},
-    Handle{Do{Apply{walk, Tuple{t}}, Nil{}},
-        Lambda{Tuple{Yield{v}, k},
-            If{Apply{_lt, Tuple{count, n}},
-                Do{
-                    Set{count, Apply{_add, Tuple{count, 1}}},
-                    Cons{v, Apply{k, Tuple{none}}}},
-                Nil{}}}}}}}
-Apply{println, Tuple{Apply{take, Tuple{2, t1}}}}
+# take the first n values and stop walking
+take(n, t) := {
+    count := 0
+    handle { walk(t); [] } with (Yield{v}, k) ->
+        if (count < n) {
+            count = count + 1
+            v :: k(none)
+        } else []
+}
+println(take(2, t1))
 
-" an iterator: Next{value, continuation} or Done{} "
-Def{iter, Lambda{Tuple{t},
-    Handle{Do{Apply{walk, Tuple{t}}, Done{}},
-        Lambda{Tuple{Yield{v}, k}, Next{v, k}}}}}
+# an iterator: Next{value, continuation} or Done{}
+iter(t) := handle { walk(t); Done{} } with (Yield{v}, k) -> Next{v, k}
 
-" same fringe problem: compare two trees value by value "
-Def{same_iter, none}
-Set{same_iter, Fusion{Fusion{
-    Lambda{Tuple{Done{}, Done{}}, true},
-    Lambda{Tuple{Next{a, k1}, Next{b, k2}},
-        If{Apply{_eq, Tuple{a, b}},
-            Apply{same_iter, Tuple{Apply{k1, Tuple{none}}, Apply{k2, Tuple{none}}}},
-            false}}},
-    Lambda{Tuple{_, _}, false}}}
-Def{same_fringe, Lambda{Tuple{a, b},
-    Apply{same_iter, Tuple{Apply{iter, Tuple{a}}, Apply{iter, Tuple{b}}}}}}
+# same fringe problem: compare two trees value by value
+fun same_iter
+same_iter = (Done{}, Done{}) -> true
+          | (Next{a, k1}, Next{b, k2}) -> a == b ? same_iter(k1(none), k2(none)) : false
+          | (_, _) -> false
+same_fringe(a, b) := same_iter(iter(a), iter(b))
 
-Apply{put, Tuple{"same_fringe(t1, t2) = "}}
-Apply{println, Tuple{Apply{same_fringe, Tuple{t1, t2}}}}
-Apply{put, Tuple{"same_fringe(t1, t3) = "}}
-Apply{println, Tuple{Apply{same_fringe, Tuple{t1, t3}}}}
+put("same_fringe(t1, t2) = ")
+println(same_fringe(t1, t2))
+put("same_fringe(t1, t3) = ")
+println(same_fringe(t1, t3))

@@ -1,76 +1,61 @@
-" Lists made of Cons{head, tail} and Nil{} "
+# Lists made of Cons{head, tail} and Nil{}, written x :: xs and []
 
-" An m-expr whose head is not a builtin form is a constructor: "
-" Cons{1, Nil{}} evaluates its arguments and builds the m-expr. "
+# An m-expr whose head is not a builtin form is a constructor:
+# Cons{1, Nil{}} evaluates its arguments and builds the m-expr.
 
-Def{range, none}
-Set{range, Lambda{Tuple{a, b},
-    If{Apply{_ge, Tuple{a, b}},
-        Nil{},
-        Cons{a, Apply{range, Tuple{Apply{_add, Tuple{a, 1}}, b}}}}}}
+range(a, b) := if (a >= b) [] else a :: range(a + 1, b)
 
-Def{map, none}
-Set{map, Fusion{
-    Lambda{Tuple{f, Nil{}}, Nil{}},
-    Lambda{Tuple{f, Cons{x, xs}}, Cons{Apply{f, Tuple{x}}, Apply{map, Tuple{f, xs}}}}}}
+fun map
+map = (f, Nil{}) -> []
+    | (f, x :: xs) -> f(x) :: map(f, xs)
 
-Def{filter, none}
-Set{filter, Fusion{
-    Lambda{Tuple{p, Nil{}}, Nil{}},
-    Lambda{Tuple{p, Cons{x, xs}},
-        If{Apply{p, Tuple{x}},
-            Cons{x, Apply{filter, Tuple{p, xs}}},
-            Apply{filter, Tuple{p, xs}}}}}}
+fun filter
+filter = (p, Nil{}) -> []
+       | (p, x :: xs) -> if (p(x)) x :: filter(p, xs) else filter(p, xs)
 
-Def{foldl, none}
-Set{foldl, Fusion{
-    Lambda{Tuple{f, acc, Nil{}}, acc},
-    Lambda{Tuple{f, acc, Cons{x, xs}}, Apply{foldl, Tuple{f, Apply{f, Tuple{acc, x}}, xs}}}}}
+fun foldl
+foldl = (f, acc, Nil{}) -> acc
+      | (f, acc, x :: xs) -> foldl(f, f(acc, x), xs)
 
-Def{append, none}
-Set{append, Fusion{
-    Lambda{Tuple{Nil{}, ys}, ys},
-    Lambda{Tuple{Cons{x, xs}, ys}, Cons{x, Apply{append, Tuple{xs, ys}}}}}}
+fun append
+append = (Nil{}, ys) -> ys
+       | (x :: xs, ys) -> x :: append(xs, ys)
 
-Def{reverse, Lambda{Tuple{xs},
-    Apply{foldl, Tuple{Lambda{Tuple{acc, x}, Cons{x, acc}}, Nil{}, xs}}}}
+reverse(xs) := foldl((acc, x) -> x :: acc, [], xs)
 
-Def{length, Lambda{Tuple{xs},
-    Apply{foldl, Tuple{Lambda{Tuple{n, _}, Apply{_add, Tuple{n, 1}}}, 0, xs}}}}
+length(xs) := foldl((n, _) -> n + 1, 0, xs)
 
-Def{sum, Lambda{Tuple{xs}, Apply{foldl, Tuple{_add, 0, xs}}}}
+sum(xs) := foldl(_add, 0, xs)
 
-Def{qsort, none}
-Set{qsort, Fusion{
-    Lambda{Tuple{Nil{}}, Nil{}},
-    Lambda{Tuple{Cons{p, xs}}, Apply{append, Tuple{
-        Apply{qsort, Tuple{Apply{filter, Tuple{Lambda{Tuple{x}, Apply{_lt, Tuple{x, p}}}, xs}}}},
-        Cons{p, Apply{qsort, Tuple{Apply{filter, Tuple{Lambda{Tuple{x}, Apply{_ge, Tuple{x, p}}}, xs}}}}}}}}}}
+fun qsort
+qsort = (Nil{}) -> []
+      | (p :: xs) -> append(qsort(filter(x -> x < p, xs)), p :: qsort(filter(x -> x >= p, xs)))
 
-" print a list as [x, y, ...] "
-Def{print_elems, none}
-Set{print_elems, Fusion{Fusion{
-    Lambda{Tuple{Nil{}}, none},
-    Lambda{Tuple{Cons{x, Nil{}}}, Apply{print, Tuple{x}}}},
-    Lambda{Tuple{Cons{x, xs}}, Do{
-        Apply{print, Tuple{x}},
-        Apply{put, Tuple{", "}},
-        Apply{print_elems, Tuple{xs}}}}}}
-Def{show, Lambda{Tuple{label, xs}, Do{
-    Apply{put, Tuple{label}},
-    Apply{put, Tuple{"["}},
-    Apply{print_elems, Tuple{xs}},
-    Apply{put, Tuple{"]\n"}}}}}
+# print a list as [x, y, ...]
+fun print_elems
+print_elems = (Nil{}) -> none
+            | (x :: Nil{}) -> print(x)
+            | (x :: xs) -> {
+    print(x)
+    put(", ")
+    print_elems(xs)
+}
+show(label, xs) := {
+    put(label)
+    put("[")
+    print_elems(xs)
+    put("]\n")
+}
 
-Def{xs, Apply{range, Tuple{1, 11}}}
-Apply{show, Tuple{"xs      = ", xs}}
-Apply{show, Tuple{"squares = ", Apply{map, Tuple{Lambda{Tuple{x}, Apply{_mul, Tuple{x, x}}}, xs}}}}
-Apply{show, Tuple{"evens   = ", Apply{filter, Tuple{Lambda{Tuple{x}, Apply{_eq, Tuple{Apply{_mod, Tuple{x, 2}}, 0}}}, xs}}}}
-Apply{show, Tuple{"reverse = ", Apply{reverse, Tuple{xs}}}}
-Apply{put, Tuple{"length  = "}} Apply{println, Tuple{Apply{length, Tuple{xs}}}}
-Apply{put, Tuple{"sum     = "}} Apply{println, Tuple{Apply{sum, Tuple{xs}}}}
+xs := range(1, 11)
+show("xs      = ", xs)
+show("squares = ", map(x -> x * x, xs))
+show("evens   = ", filter(x -> x % 2 == 0, xs))
+show("reverse = ", reverse(xs))
+put("length  = "); println(length(xs))
+put("sum     = "); println(sum(xs))
 
-Def{ys, Cons{31, Cons{4, Cons{15, Cons{9, Cons{26, Cons{5, Cons{3, Cons{5, Nil{}}}}}}}}}}
-Apply{show, Tuple{"ys      = ", ys}}
-Apply{show, Tuple{"sorted  = ", Apply{qsort, Tuple{ys}}}}
-Apply{println, Tuple{Apply{range, Tuple{1, 4}}}}
+ys := [31, 4, 15, 9, 26, 5, 3, 5]
+show("ys      = ", ys)
+show("sorted  = ", qsort(ys))
+println(range(1, 4))

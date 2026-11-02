@@ -1,39 +1,41 @@
-" State by an effect, without mutable variables "
+# State by an effect, without mutable variables
 
-" run_state{f, init} runs f with the state init and returns Tuple{result, state}. "
-" The handler returns a function which takes the current state. "
-Def{run_state, Lambda{Tuple{f, init},
-    Apply{
-        Handle{
-            Do{Def{r, Apply{f, Tuple{}}}, Lambda{Tuple{s}, Tuple{r, s}}},
-            Fusion{
-                Lambda{Tuple{Get{}, k}, Lambda{Tuple{s}, Apply{Apply{k, Tuple{s}}, Tuple{s}}}},
-                Lambda{Tuple{Put{v}, k}, Lambda{Tuple{s}, Apply{Apply{k, Tuple{none}}, Tuple{v}}}}}},
-        Tuple{init}}}}
+# run_state(f, init) runs f with the state init and returns (result, state).
+# The handler returns a function which takes the current state.
+run_state(f, init) := {
+    g := handle {
+        r := f()
+        s -> (r, s)
+    } with (Get{}, k) -> (s -> k(s)(s))
+         | (Put{v}, k) -> (s -> k(none)(v))
+    g(init)
+}
 
-Def{get, Lambda{Tuple{}, Perform{Get{}}}}
-Def{put_state, Lambda{Tuple{v}, Perform{Put{v}}}}
+get() := perform Get{}
+put_state(v) := perform Put{v}
 
-" a counter "
-Def{tick, Lambda{Tuple{}, Do{
-    Def{n, Apply{get, Tuple{}}},
-    Apply{put_state, Tuple{Apply{_add, Tuple{n, 1}}}},
-    n}}}
+# a counter
+tick() := {
+    n := get()
+    put_state(n + 1)
+    n
+}
 
-Apply{println, Tuple{Apply{run_state, Tuple{Lambda{Tuple{}, Do{
-    Apply{tick, Tuple{}},
-    Apply{tick, Tuple{}},
-    Apply{tick, Tuple{}},
-    Apply{_mul, Tuple{Apply{get, Tuple{}}, 10}}}}, 0}}}}
+println(run_state(() -> {
+    tick()
+    tick()
+    tick()
+    get() * 10
+}, 0))
 
-" number the nodes of a tree from left to right "
-Def{label, none}
-Set{label, Fusion{
-    Lambda{Tuple{Leaf{}}, Leaf{}},
-    Lambda{Tuple{Node{l, v, r}}, Do{
-        Def{l2, Apply{label, Tuple{l}}},
-        Def{i, Apply{tick, Tuple{}}},
-        Node{l2, Tuple{i, v}, Apply{label, Tuple{r}}}}}}}
+# number the nodes of a tree from left to right
+fun label
+label = (Leaf{}) -> Leaf{}
+      | (Node{l, v, r}) -> {
+    l2 := label(l)
+    i := tick()
+    Node{l2, (i, v), label(r)}
+}
 
-Def{tree, Node{Node{Leaf{}, "a", Leaf{}}, "b", Node{Node{Leaf{}, "c", Leaf{}}, "d", Leaf{}}}}
-Apply{println, Tuple{Apply{run_state, Tuple{Lambda{Tuple{}, Apply{label, Tuple{tree}}}, 100}}}}
+tree := Node{Node{Leaf{}, "a", Leaf{}}, "b", Node{Node{Leaf{}, "c", Leaf{}}, "d", Leaf{}}}
+println(run_state(() -> label(tree), 100))

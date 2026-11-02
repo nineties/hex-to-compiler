@@ -1,33 +1,25 @@
-" Exceptions by an effect "
+# Exceptions by an effect
 
-Def{safe_div, Lambda{Tuple{a, b},
-    If{Apply{_eq, Tuple{b, 0}},
-        Perform{Raise{"division by zero"}},
-        Apply{_div, Tuple{a, b}}}}}
+safe_div(a, b) := if (b == 0) perform Raise{"division by zero"} else a / b
 
-" try{f} returns Ok{value} or Error{message}. "
-" The handler does not resume the continuation. "
-Def{try, Lambda{Tuple{f},
-    Handle{Ok{Apply{f, Tuple{}}},
-        Lambda{Tuple{Raise{msg}, k}, Error{msg}}}}}
+# try(f) returns Ok{value} or Error{message}.
+# The handler does not resume the continuation.
+try(f) := handle Ok{f()} with (Raise{msg}, k) -> Error{msg}
 
-Apply{println, Tuple{Apply{try, Tuple{Lambda{Tuple{}, Apply{safe_div, Tuple{10, 2}}}}}}}
-Apply{println, Tuple{Apply{try, Tuple{Lambda{Tuple{}, Apply{safe_div, Tuple{10, 0}}}}}}}
+println(try(() -> safe_div(10, 2)))
+println(try(() -> safe_div(10, 0)))
 
-" The computation after the error is skipped. "
-Apply{println, Tuple{Apply{try, Tuple{Lambda{Tuple{}, Do{
-    Apply{put, Tuple{"before\n"}},
-    Apply{safe_div, Tuple{1, 0}},
-    Apply{put, Tuple{"after\n"}}}}}}}}
+# The computation after the error is skipped.
+println(try(() -> {
+    put("before\n")
+    safe_div(1, 0)
+    put("after\n")
+}))
 
-" A handler can also recover by resuming with a default value. "
-Def{with_default, Lambda{Tuple{v, f},
-    Handle{Apply{f, Tuple{}},
-        Lambda{Tuple{Raise{_}, k}, Apply{k, Tuple{v}}}}}}
-Apply{println, Tuple{Apply{with_default, Tuple{0, Lambda{Tuple{},
-    Apply{_add, Tuple{Apply{safe_div, Tuple{10, 0}}, Apply{safe_div, Tuple{10, 5}}}}}}}}}
+# A handler can also recover by resuming with a default value.
+with_default(v, f) := handle f() with (Raise{_}, k) -> k(v)
+println(with_default(0, () -> safe_div(10, 0) + safe_div(10, 5)))
 
-" Effects not handled by the inner handler go to the outer one. "
-Apply{println, Tuple{Apply{try, Tuple{Lambda{Tuple{},
-    Handle{Apply{_add, Tuple{Perform{Ask{}}, Apply{safe_div, Tuple{1, 0}}}},
-        Lambda{Tuple{Ask{}, k}, Apply{k, Tuple{1}}}}}}}}}
+# Effects not handled by the inner handler go to the outer one.
+println(try(() ->
+    handle (perform Ask{}) + safe_div(1, 0) with (Ask{}, k) -> k(1)))
