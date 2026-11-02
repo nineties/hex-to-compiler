@@ -37,27 +37,27 @@
 (long heap_end)
 (long heap_pos)
 (fun init_heap ()
-    (var heap_block_size 1024)  ; 1GB
-    (*= heap_block_size 1024)
-    (*= heap_block_size 1024)
-    (var addr (mmap2 0 heap_block_size
-        (| PROT_READ PROT_WRITE)
-        (| MAP_PRIVATE MAP_ANONYMOUS)
-        -1 0))
-    (if (u>= addr 0xfffff001) (do
-        (eputs "mmap2 failed\n")
-        (exit 1)
+    (var mb 3800)  ; the largest region mmap2 gives: from 3800MB down by 256MB to 1GB (3824MB on x86_64)
+    (var addr 0xfffff001)
+    (while (u>= addr 0xfffff001) (do
+        (if (< mb 1024) (do
+            (eputs "mmap2 failed\n")
+            (exit 1)
+            ))
+        (= addr (mmap2 0 (* mb 1048576)
+            (| PROT_READ PROT_WRITE) (| MAP_PRIVATE MAP_ANONYMOUS) -1 0))
+        (if (u>= addr 0xfffff001) (-= mb 256))
         ))
     (= heap_root addr)
     (= heap_pos (align addr))
-    (= heap_end (+ addr heap_block_size))
+    (= heap_end (+ addr (* mb 1048576)))
     )
 
 ; There is no GC in planck0. Memory obtained by mmap is zero-filled
 ; and never reused, so newly allocated memory is always zero.
 (fun allocate (size)
     (= size (align size))
-    (if (>= (+ heap_pos size) heap_end) (do
+    (if (u>= (+ heap_pos size) heap_end) (do
         (eputs "memory allocation error\n")
         (exit 1)
         ))

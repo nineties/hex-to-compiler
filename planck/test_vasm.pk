@@ -927,5 +927,121 @@ ng(vasm{|
     }
 |}, 'type)
 
+# === services of the system: write and exit ===
+ok(vasm{|
+    fn say[r](s: &r [u8]) -> i64 {
+        var n: i64
+        n = write(1, s)
+        return n
+    }
+    fn services() {
+        var a: own [u8]
+        var n: i64
+        a = alloc(3, 65)
+        region r {
+            var b: &r [u8]
+            b = &r a
+            n = say(b)
+            n = write(2, b)
+        }
+        free(a)
+        exit(n)
+    }
+|})
+# the file and the status are integers
+ng(vasm{|
+    fn bad_fd[r](s: &r [u8], c: bool) {
+        var n: i64
+        n = write(c, s)     # NG
+    }
+|}, 'type)
+ng(vasm{|
+    fn bad_status(c: bool) {
+        exit(c)     # NG
+    }
+|}, 'type)
+ng(vasm{|
+    fn bad_count[r](s: &r [u8]) {
+        var n: i64
+        n = write(s)    # NG
+    }
+|}, 'type)
+# the result is i64
+ng(vasm{|
+    fn bad_result[r](s: &r [u8]) {
+        var n: i32
+        n = write(1, s)     # NG
+    }
+|}, 'type)
+# the data is a borrow of an array of u8, not an address, an integer, an owner or another element type
+ng(vasm{|
+    fn bad_address() {
+        var n: i64
+        n = write(1, 4096)  # NG
+    }
+|}, 'type)
+ng(vasm{|
+    fn bad_owner(a: own [u8]) {
+        var n: i64
+        n = write(1, a)     # NG
+        free(a)
+    }
+|}, 'type)
+ng(vasm{|
+    fn bad_element[r](s: &r [i64]) {
+        var n: i64
+        n = write(1, s)     # NG
+    }
+|}, 'type)
+ng(vasm{|
+    fn bad_box[r](s: &r u8) {
+        var n: i64
+        n = write(1, s)     # NG
+    }
+|}, 'type)
+# the array is only borrowed: it cannot be freed while the write borrows it, and it is not moved by the write
+ng(vasm{|
+    fn free_while_borrowed() {
+        var a: own [u8]
+        var n: i64
+        a = alloc(3, 65)
+        region r {
+            var b: &r [u8]
+            b = &r a
+            n = write(1, b)
+            free(a)     # NG
+            n = write(1, b)
+        }
+    }
+|}, 'borrowed)
+ng(vasm{|
+    fn write_freed() {
+        var a: own [u8]
+        var n: i64
+        a = alloc(3, 65)
+        free(a)
+        region r {
+            var b: &r [u8]
+            b = &r a    # NG
+            n = write(1, b)
+        }
+    }
+|}, 'freed)
+# a borrow that is not set cannot be written
+ng(vasm{|
+    fn write_uninit() {
+        var n: i64
+        region r {
+            var b: &r [u8]
+            n = write(1, b)     # NG
+        }
+    }
+|}, 'uninit)
+# the names of the services belong to the language
+ng(vasm{|
+    fn write(a: i64) {  # NG
+    }
+|}, 'type)
+
 put("Tests passed "); print(passed); put("/"); println(passed + failed)
 if (failed > 0) exit(1)

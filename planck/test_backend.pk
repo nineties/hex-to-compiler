@@ -1,0 +1,241 @@
+# tests for the stages of the code generator: bitset, bytes, ir, cfg, sched, regalloc, x86enc, obj, link and elf
+# Copyright (C) 2026 nineties
+
+passed := 0
+failed := 0
+
+check(actual, expected) := if (actual == expected) {
+    passed = passed + 1
+} else {
+    failed = failed + 1
+    put("Test failed: expected "); print(expected)
+    put(" but got "); println(actual)
+}
+
+use("x86")
+use("link")
+use("elf")
+
+# === bitset ===
+s := bits_new(100)
+each(i -> bits_add(s, i), [3, 31, 64, 99])
+check(bits_to_list(s), [3, 31, 64, 99])
+check(bits_has(s, 31), true)
+check(bits_has(s, 32), false)
+bits_del(s, 31)
+check(bits_to_list(s), [3, 64, 99])
+t := bits_new(100)
+bits_add(t, 5)
+bits_add(t, 64)
+check(bits_union(s, t), true)
+check(bits_union(s, t), false)
+check(bits_to_list(s), [3, 5, 64, 99])
+bits_minus(s, t)
+check(bits_to_list(s), [3, 99])
+check(bits_count(s), 2)
+check(bits_equal(s, bits_copy(s)), true)
+check(bits_equal(s, t), false)
+
+# === bytes ===
+b := bb_new()
+bb_u32(b, -2)
+bb_u16(b, 258)
+bb_str(b, "AB")
+check(vec_to_list(b), [254, 255, 255, 255, 2, 1, 65, 66])
+bb_set_u32(b, 0, 16909060)
+check(take(vec_to_list(b), 4), [4, 3, 2, 1])
+bb_align(b, 16)
+check(bb_len(b), 16)
+check(bb_to_u8(b)[7], 66)
+
+# === ir ===
+i1 := I{'add, [D{40}, U{41}, K{1}]}
+check(ir_defs(i1), [40])
+check(ir_uses(i1), [41])
+i2 := I{'mov, [D{40}, M{U{41}, 4}]}
+check(ir_uses(i2), [41])
+i3 := I{'call, [S{"f", 0}, Us{[40, 41]}, Ds{[42]}]}
+check(ir_uses(i3), [40, 41])
+check(ir_defs(i3), [42])
+i4 := I{'add, [DU{40}, U{41}, ID{8}]}
+check(ir_defs(i4), [40, 8])
+check(ir_uses(i4), [40, 41])
+check(ir_explicit(i4), [DU{40}, U{41}])
+check(ir_map_regs(r -> r + 1, i2), I{'mov, [D{41}, M{U{42}, 4}]})
+check(ir_show(i1), "  add d40, u41, 1")
+
+# === cfg: blocks and live registers ===
+code := [
+    I{'mov, [D{40}, K{0}]},
+    I{'label, [L{0}]},
+    I{'add, [DU{40}, K{1}, ID{8}]},
+    I{'jcc, [Cc{'lt}, L{0}, IU{8}]},
+    I{'mov, [D{0}, U{40}]},
+    I{'ret, [IU{0}]}]
+bs := cfg_blocks(code)
+check(array_len(bs), 3)
+check(arg(array_get(bs, 0), 1), [1])
+check(arg(array_get(bs, 1), 1), [1, 2])
+check(arg(array_get(bs, 2), 1), [])
+lv := cfg_live(bs, 64)
+check(bits_to_list(array_get(arg(lv, 0), 1)), [40])
+check(bits_to_list(array_get(arg(lv, 1), 0)), [40])
+check(cfg_flatten(bs), code)
+
+# === sched: the loads start first so that the additions do not wait ===
+ld1 := I{'mov, [D{40}, M{U{33}, 0}]}
+ad1 := I{'add, [DU{40}, K{1}, ID{8}]}
+ld2 := I{'mov, [D{41}, M{U{34}, 0}]}
+ad2 := I{'add, [DU{41}, K{1}, ID{8}]}
+check(sched_code([ld1, ad1, ld2, ad2], x86_sched_model), [ld1, ld2, ad1, ad2])
+# a store stays between the loads that it separates
+st1 := I{'mov, [M{U{35}, 0}, U{40}]}
+ld3 := I{'mov, [D{42}, M{U{36}, 0}]}
+check(sched_code([ld1, st1, ld3], x86_sched_model), [ld1, st1, ld3])
+# the label and the terminator stay at the ends of a block
+blk := [I{'label, [L{3}]}, ld1, ad1, ld2, ad2, I{'ret, [IU{0}]}]
+check(sched_code(blk, x86_sched_model), [I{'label, [L{3}]}, ld1, ld2, ad1, ad2, I{'ret, [IU{0}]}])
+
+# === regalloc ===
+# a straight line code is run to see that the allocation keeps the result: values on the stack are in mem
+run(code) := {
+    regs := table()
+    mem := table()
+    val := o -> match o {
+        K{n} -> n
+      | U{r} -> table_get(regs, r, 0)
+      | MF{k, n, d} -> table_get(mem, Tuple{k, n, d}, 0)
+    }
+    each(i -> match i {
+        I{'mov, [D{d}, s]} -> table_set(regs, d, val(s))
+      | I{'mov, [MF{k, n, d}, s]} -> table_set(mem, Tuple{k, n, d}, val(s))
+      | I{'add, [DU{d}, s, _]} -> table_set(regs, d, table_get(regs, d, 0) + val(s))
+      | I{'ret, _} -> none
+    }, code)
+    table_get(regs, 0, 0)
+}
+
+f := ir_fn("t")
+vs := map(i -> ir_vreg(f, 32), range(0, 8))
+acc := ir_vreg(f, 32)
+each((Tuple{v, n}) -> ir_emit(f, I{'mov, [D{v}, K{n}]}), zip(vs, range(1, 9)))
+ir_emit(f, I{'mov, [D{acc}, K{0}]})
+each(v -> ir_emit(f, I{'add, [DU{acc}, U{v}, ID{8}]}), vs)
+ir_emit(f, I{'mov, [D{0}, U{acc}]})
+ir_emit(f, I{'ret, [IU{0}]})
+ra_code := ra_allocate(f, x86_ra)
+check(any(i -> any(r -> ir_is_vreg(r), append(ir_uses(i), ir_defs(i))), ra_code), false)
+check(run(ra_code), 36)
+# nine values do not fit in six registers, so some are kept in stack slots
+check(any(i -> any(o -> head(o) == 'MF, ir_explicit(i)), ra_code), true)
+check(length(vec_to_list(table_get(ir_meta(f), 'slots, none))) > 0, true)
+
+# registers that are used as bytes get one of eax, ecx, edx and ebx
+g := ir_fn("u")
+bregs := map(i -> ir_vreg(g, 32), range(0, 4))
+each(v -> ir_set_class(g, v, 'byte), bregs)
+each((Tuple{v, n}) -> ir_emit(g, I{'mov, [D{v}, K{n}]}), zip(bregs, range(1, 5)))
+each(v -> ir_emit(g, I{'mov, [M{U{5}, -4}, U{v}]}), bregs)
+ir_emit(g, I{'ret, []})
+gcode := ra_allocate(g, x86_ra)
+used := map(i -> arg(ir_ops(i)[0], 0), filter(i -> ir_op(i) == 'mov and head(ir_ops(i)[0]) == 'D, gcode))
+check(sort((a, b) -> a < b, used), [0, 1, 2, 3])
+
+# === os: the services of the system become system calls ===
+os_out := []
+os_emit := i -> { os_out = i :: os_out }
+os_select(os_emit, 'write, [40, 41, 42], 43)
+check(map(ir_show, reverse(os_out)), ["  mov d0, 4", "  mov d3, u40", "  mov d1, u41", "  mov d2, u42", "  int 128, iu0, id0, iu3, iu1, iu2", "  mov d43, u0"])
+os_out = []
+os_select(os_emit, 'exit, [40], 41)
+check(map(ir_show, reverse(os_out)), ["  mov d0, 1", "  mov d3, u40", "  int 128, iu0, id0, iu3", "  mov d41, u0"])
+os_out = []
+os_select(os_emit, 'grow, [40], 41)
+check(map(ir_op, reverse(os_out)), ['mov, 'mov, 'int, 'mov])
+os_out = []
+os_select(os_emit, 'abort, [], none)
+check(map(ir_show, reverse(os_out)), ["  mov d0, 252", "  mov d3, 134", "  int 128, iu0, iu3", "  ud2 "])
+check(ir_show(I{'os, [N{'write}, Us{[1, 2, 3]}, D{4}]}), "  os write, u[1 2 3], d4")
+
+# === x86enc ===
+enc(xs) := {
+    o := obj_new("t")
+    em := em_new(o, ".text")
+    x86_emit_code(em, xs)
+    vec_to_list(obj_buf(obj_sec(o, ".text", 'code, 16)))
+}
+check(enc([I{'mov, [D{0}, U{3}]}]), [137, 216])
+check(enc([I{'mov, [D{0}, K{1}]}]), [184, 1, 0, 0, 0])
+check(enc([I{'add, [DU{0}, K{1}, ID{8}]}]), [131, 192, 1])
+check(enc([I{'add, [DU{0}, K{1000}, ID{8}]}]), [129, 192, 232, 3, 0, 0])
+check(enc([I{'sub, [DU{1}, U{2}, ID{8}]}]), [41, 209])
+check(enc([I{'cmp, [U{0}, K{5}, ID{8}]}]), [131, 248, 5])
+check(enc([I{'push, [U{5}]}]), [85])
+check(enc([I{'push, [K{5}]}]), [106, 5])
+check(enc([I{'push, [K{1000}]}]), [104, 232, 3, 0, 0])
+check(enc([I{'pop, [D{5}]}]), [93])
+check(enc([I{'ret, []}]), [195])
+check(enc([I{'mov, [M{U{5}, -4}, U{0}]}]), [137, 69, 252])
+check(enc([I{'mov, [D{1}, M{U{4}, 8}]}]), [139, 76, 36, 8])
+check(enc([I{'mov, [D{0}, M{U{5}, 0}]}]), [139, 69, 0])
+check(enc([I{'mov, [D{0}, M{U{3}, 0}]}]), [139, 3])
+check(enc([I{'mov, [M{U{3}, 70000}, K{7}]}]), [199, 131, 112, 17, 1, 0, 7, 0, 0, 0])
+check(enc([I{'imul, [DU{0}, U{1}, ID{8}]}]), [15, 175, 193])
+check(enc([I{'cdq, []}]), [153])
+check(enc([I{'idiv, [U{1}, IU{0}, IU{2}, ID{0}, ID{2}, ID{8}]}]), [247, 249])
+check(enc([I{'div, [U{1}, IU{0}, IU{2}, ID{0}, ID{2}, ID{8}]}]), [247, 241])
+check(enc([I{'neg, [DU{0}, ID{8}]}]), [247, 216])
+check(enc([I{'not, [DU{0}]}]), [247, 208])
+check(enc([I{'setcc, [Cc{'lt}, D{0}]}]), [15, 156, 192])
+check(enc([I{'movzxb, [D{0}, U{0}]}]), [15, 182, 192])
+check(enc([I{'movsxb, [D{1}, U{2}]}]), [15, 190, 202])
+check(enc([I{'movsxw, [D{1}, U{2}]}]), [15, 191, 202])
+check(enc([I{'lea, [D{0}, MX{U{3}, U{1}, 4, 8}]}]), [141, 68, 139, 8])
+check(enc([I{'shl, [DU{0}, K{3}, ID{8}]}]), [193, 224, 3])
+check(enc([I{'sar, [DU{0}, IU{1}, ID{8}]}]), [211, 248])
+check(enc([I{'movb, [M{U{3}, 0}, U{1}]}]), [136, 11])
+check(enc([I{'movb, [M{U{3}, 0}, K{9}]}]), [198, 3, 9])
+check(enc([I{'movw, [M{U{3}, 0}, U{1}]}]), [102, 137, 11])
+check(enc([I{'int, [K{128}]}]), [205, 128])
+check(enc([I{'ud2, []}]), [15, 11])
+# jumps are to a label of the function; a jump to the next label is left out
+check(enc([I{'label, [L{0}]}, I{'jmp, [L{0}]}]), [233, 251, 255, 255, 255])
+check(enc([I{'jcc, [Cc{'ne}, L{1}]}, I{'label, [L{1}]}]), [15, 133, 0, 0, 0, 0])
+check(enc([I{'jmp, [L{1}]}, I{'label, [L{1}]}]), [])
+o1 := obj_new("c")
+em1 := em_new(o1, ".text")
+x86_emit_code(em1, [I{'call, [S{"f", 0}]}, I{'mov, [D{0}, S{"g", 8}]}])
+check(obj_relocs(o1), [Rel{".text", 1, 'Pc32, "f", -4}, Rel{".text", 6, 'Abs32, "g", 8}])
+
+# === link and elf ===
+oa := obj_new("a")
+ea := em_new(oa, ".text")
+obj_define(oa, "f", ".text", em_pos(ea), true)
+x86_emit_code(ea, [I{'ret, []}])
+ob := obj_new("b")
+eb := em_new(ob, ".text")
+obj_define(ob, "_start", ".text", em_pos(eb), true)
+x86_emit_code(eb, [I{'call, [S{"f", 0}]}, I{'mov, [D{0}, S{"v", 0}]}])
+db := obj_sec(ob, ".data", 'data, 4)
+obj_define(ob, "v", ".data", bb_len(obj_buf(db)), true)
+bb_u32(obj_buf(db), 77)
+img := link([oa, ob], "_start", 134512640)
+check(arg(img, 0), 134512640 + 128 + 16)
+segs := arg(img, 1)
+check(length(segs), 2)
+text := arg(segs[0], 2)
+# f is at 128, _start at 128 + 16: the call goes back by 16 + 5
+check(map(i -> bb_get(text, i), range(144, 149)), [232, 235, 255, 255, 255])
+# the data segment starts one page after its place in the file
+vaddr := arg(segs[1], 0)
+check(vaddr, 134512640 + arg(segs[1], 1) + 4096)
+check(bb_get(arg(segs[1], 2), 0), 77)
+check(map(i -> bb_get(text, i), range(150, 154)), [vaddr % 256, bit_and(bit_sar(vaddr, 8), 255), bit_and(bit_sar(vaddr, 16), 255), bit_and(bit_sar(vaddr, 24), 255)])
+check(table_get(arg(img, 2), "v", 0), vaddr)
+file := elf32_image('x86, arg(img, 0), segs)
+check(map(i -> bb_get(file, i), range(0, 8)), [127, 69, 76, 70, 1, 1, 1, 0])
+check(map(i -> bb_get(file, i), range(16, 20)), [2, 0, 3, 0])
+check(bb_get(file, arg(segs[1], 1)), 77)
+
+put("Tests passed "); print(passed); put("/"); println(passed + failed)
+if (failed > 0) exit(1)

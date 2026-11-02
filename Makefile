@@ -40,6 +40,10 @@ planck0: planck0.sv plisp2 $(SASM_LIBS)
 	-mv tmp-$@ $@
 	-chmod +x $@
 
+
+VASM_EXAMPLES := $(wildcard planck/vasm/*.vasm)
+BACKEND_EXAMPLES := $(wildcard planck/backend/*.pk)
+
 .PHONY: clean test test-planck0
 clean:
 	rm -f pforth
@@ -74,3 +78,17 @@ test-planck0: planck0
 		diff -u $${f%.pk}.err tmp-error.err || exit 1; \
 		echo "$$f: stops"; \
 	done; rm -f tmp-error.out tmp-error.err
+	./planck0 planck/test_backend.pk
+	@for f in $(BACKEND_EXAMPLES); do \
+		./planck0 $$f tmp-backend || exit 1; \
+		./tmp-backend > tmp-backend.out || exit 1; \
+		diff -u $${f%.pk}.out tmp-backend.out || exit 1; \
+		echo "$$f: ok"; \
+	done; rm -f tmp-backend tmp-backend.out
+	@for f in $(VASM_EXAMPLES); do \
+		./planck0 planck/vasmc.pk $$f tmp-vasm || exit 1; \
+		./tmp-vasm > tmp-vasm.out; s=$$?; \
+		[ "$$s" = "$$(cat $${f%.vasm}.status)" ] || { echo "$$f: exit status $$s"; exit 1; }; \
+		if [ -f $${f%.vasm}.out ]; then diff -u $${f%.vasm}.out tmp-vasm.out || exit 1; fi; \
+		echo "$$f: ok"; \
+	done; rm -f tmp-vasm tmp-vasm.out
