@@ -379,12 +379,18 @@ The items and the action are on the same line as ``::=`` or ``|``.
      - the text, after blanks and comments
    * - ``'word``
      - the word, not followed by ``[A-Za-z0-9_]``
+   * - ``nospace("text")``
+     - the text, with no blanks or comments before it
+   * - ``same``
+     - nothing, when the next token is on the same line as the position
    * - ``name``
      - the rule
    * - ``(a | b ...)``
      - a choice
    * - ``e*``, ``e+``, ``e?``
      - zero or more, one or more, optional
+   * - ``delimited(e, sep)``, ``delimited1(e, sep)``
+     - ``e`` separated by ``sep``: zero or more, one or more. The value is ``Tuple{v, ...}``
    * - ``&e``, ``!e``
      - lookahead: ``e`` matches / does not match, without consuming
    * - ``label:e``
