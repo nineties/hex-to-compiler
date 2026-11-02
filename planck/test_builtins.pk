@@ -122,6 +122,82 @@ check(plain_len(read_bytes("tmp-builtins.bin")), 0)
 check(read_file("tmp-builtins.bin"), "")
 chmod("tmp-builtins.bin", 493)
 
+# files that may fail
+check(try_read_file("tmp-builtins-none/none.txt"), none)
+check(try_write_file("tmp-builtins-none/none.txt", "a"), false)
+check(try_mkdir("tmp-builtins-dir"), true)
+check(try_mkdir("tmp-builtins-dir"), true)
+check(try_mkdir("tmp-builtins-none/a/b"), false)
+check(try_write_file("tmp-builtins-dir/f.txt", "abc\n"), true)
+check(try_read_file("tmp-builtins-dir/f.txt"), "abc\n")
+check(try_write_file("tmp-builtins-dir/f.txt", ""), true)
+check(try_read_file("tmp-builtins-dir/f.txt"), "")
+check(try_mkdir("tmp-builtins-dir/f.txt"), true)
+
+# === digest: SHA-256 as 64 hexadecimal digits ===
+check(digest(""), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+check(digest("abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+check(digest("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"), "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1")
+check(digest("abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmnoijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu"), "cf5b16a778af8380036ce59e7b0492370b249b11e8f07a51afac45037afee9d1")
+check(digest("a") != digest("b"), true)
+long := "aaaaaaaaaa"
+n := 0
+while (n < 5) {
+    long = _strcat(_strcat(long, long), long)
+    n = n + 1
+}
+check(strlen(long), 2430)
+check(digest(long) == digest(_strcat(substr(long, 0, 1000), substr(long, 1000, 2430))), true)
+
+# === _show: the text of a value that parse_mexpr reads back ===
+t := 'Foo{1, -5, "a\nb\"c\\", Bar{}, baz}
+check(_show(t), "Foo{1, -5, \"a\\nb\\\"c\\\\\", Bar{}, baz}")
+check(arg(parse_mexpr(_show(t)), 0), t)
+check(_show("a\tb"), "\"a\\tb\"")
+check(_show(-1073741824), "-1073741824")
+check(_show((x) -> x), none)
+check(_show(Foo{(x) -> x}), none)
+check(_show(array(2)), none)
+check(_show(u8_array(2)), none)
+check(_show(intern("a b")), none)
+
+# M-expressions of up to 64 arguments, and a string of any length, are read by parse_mexpr
+many := "T{1"
+i := 1
+while (i < 64) {
+    many = _strcat(many, ", 2")
+    i = i + 1
+}
+check(arity(arg(parse_mexpr(_strcat(many, "}")), 0)), 64)
+check(head(arg(parse_mexpr(_strcat(many, ", 3}")), 0)), 'SyntaxError)
+deep := ""
+i = 0
+while (i < 1000) {
+    deep = _strcat(deep, "A{")
+    i = i + 1
+}
+deep = _strcat(deep, "1")
+i = 0
+while (i < 1000) {
+    deep = _strcat(deep, "}")
+    i = i + 1
+}
+check(head(arg(parse_mexpr(deep), 0)), 'A)
+big := "x"
+i = 0
+while (i < 14) {
+    big = _strcat(big, big)
+    i = i + 1
+}
+check(strlen(big), 16384)
+check(arg(parse_mexpr(_strcat(_strcat("\"", big), "\"")), 0), big)
+
+# === _eval_state: the state of evaluation ===
+st := _eval_state()
+check(typeof(st), 'string)
+check(strlen(st), 64)
+check(_eval_state() != st, true)
+
 # === bit operations ===
 check(bit_and(12, 10), 8)
 check(bit_or(12, 10), 14)

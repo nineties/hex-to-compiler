@@ -51,6 +51,7 @@ clean:
 	rm -f planck0
 	rm -f $(ASM_EXAMPLE_TARGETS)
 	rm -f $(SASM_EXAMPLE_TARGETS)
+	rm -rf .planck-cache
 
 test: pforth plisp.fs $(shell find plisp -name "*.lisp")
 	./pforth < plisp.fs plisp/test.lisp
@@ -93,3 +94,4 @@ test-planck0: planck0
 		if [ -f $${f%.vasm}.out ]; then diff -u $${f%.vasm}.out tmp-vasm.out || exit 1; fi; \
 		echo "$$f: ok"; \
 	done; rm -f tmp-vasm tmp-vasm.out
+	sh tools/test_cache.sh

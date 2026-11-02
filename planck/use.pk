@@ -1,0 +1,235 @@
+" use: loads a library once. The parsed expressions of a library are kept in a cache directory. "
+" Copyright (C) 2026 nineties "
+
+" This file is written in M-expressions: it is read before the syntax of planck/syntax.pk is used "
+" and it is read by every run, so it must not need the parser of planck/peg.pk. "
+
+" A library is read as the expressions that parse gives, and the expressions are evaluated one by one. "
+" What parse gives for the next expression depends on everything evaluated before it "
+" (the grammar, the definitions, the interpreter), so the cache keeps for each expression "
+" the state of evaluation _eval_state() in which it was parsed, and an expression is taken from "
+" the cache only when the state now is the same. The first expression of a library "
+" that differs is parsed again, and so are the expressions after it. "
+" A cache file is found by the path of the library and the state at the start, and holds "
+" the digest of the text of the library, so a changed library never uses an old file. "
+" A file that cannot be read, written or trusted is ignored. "
+
+" The text of a cache file is the digest of the rest, a newline, and the text of "
+"   Cache{\"1\", path, digest of the library, n, B{S{state, end, tree}, ..., B{... Z{state}}}} "
+" where the n steps S are the expressions of the library in order: the state before the expression "
+" was parsed, the offset in the text after it, and the expression. Z has the state at the end. "
+
+Def{used_libs, Apply{table, Tuple{}}}
+
+" the parser of M-expressions: parse before planck/syntax.pk replaces it "
+Def{_use_parse, parse}
+
+" the directory of the cache files, in the directory where the interpreter runs "
+Def{_use_dir, ".planck-cache"}
+
+" the number of steps in a block B{...} of a cache file "
+Def{_use_block, 60}
+
+" _use_grow(a, n) is the array of twice the length of a, with the first n elements of a "
+Def{_use_grow, Lambda{Tuple{a, n}, Do{
+    Def{b, Apply{array, Tuple{Apply{_mul, Tuple{Apply{array_len, Tuple{a}}, 2}}}}},
+    Def{i, 0},
+    While{Apply{_lt, Tuple{i, n}}, Do{
+        Apply{array_set, Tuple{b, i, Apply{array_get, Tuple{a, i}}}},
+        Set{i, Apply{_add, Tuple{i, 1}}}}},
+    b}}}
+
+Def{_use_file, Lambda{Tuple{path, state}, Do{
+    Def{key, Apply{digest, Tuple{Apply{_strcat, Tuple{Apply{_strcat, Tuple{path, "\n"}}, state}}}}},
+    Apply{_strcat, Tuple{Apply{_strcat, Tuple{_use_dir, "/"}}, Apply{_strcat, Tuple{key, ".cache"}}}}}}}
+
+" _use_head(m, h) is true when m is an M-expression with the head h "
+Def{_use_head, Lambda{Tuple{m, h},
+    If{Apply{_eq, Tuple{Apply{typeof, Tuple{m}}, Quote{mexpr}}},
+        Apply{_eq, Tuple{Apply{head, Tuple{m}}, h}},
+        false}}}
+
+" _use_steps(m, path, td) is Tuple{n, states, ends, trees, state at the end} for the cache entry m "
+" of the library at path with the digest td, and none when m is not such an entry "
+Def{_use_steps, Lambda{Tuple{m, path, td}, Do{
+    Def{r, none},
+    Def{ok, Apply{_use_head, Tuple{m, Quote{Cache}}}},
+    Def{n, 0},
+    Def{gs, none},
+    Def{ends, none},
+    Def{trees, none},
+    Def{i, 0},
+    Def{j, 0},
+    Def{node, none},
+    Def{s, none},
+    If{ok, Set{ok, Apply{_eq, Tuple{Apply{arity, Tuple{m}}, 5}}}, none},
+    If{ok, Set{ok, Apply{_eq, Tuple{Apply{arg, Tuple{m, 0}}, "1"}}}, none},
+    If{ok, Set{ok, Apply{_eq, Tuple{Apply{arg, Tuple{m, 1}}, path}}}, none},
+    If{ok, Set{ok, Apply{_eq, Tuple{Apply{arg, Tuple{m, 2}}, td}}}, none},
+    If{ok, Set{ok, Apply{_eq, Tuple{Apply{typeof, Tuple{Apply{arg, Tuple{m, 3}}}}, Quote{int}}}}, none},
+    If{ok, Set{ok, If{Apply{_ge, Tuple{Apply{arg, Tuple{m, 3}}, 0}}, Apply{_le, Tuple{Apply{arg, Tuple{m, 3}}, 1000000}}, false}}, none},
+    If{ok, Do{
+        Set{n, Apply{arg, Tuple{m, 3}}},
+        Set{gs, Apply{array, Tuple{Apply{_add, Tuple{n, 1}}}}},
+        Set{ends, Apply{array, Tuple{Apply{_add, Tuple{n, 1}}}}},
+        Set{trees, Apply{array, Tuple{Apply{_add, Tuple{n, 1}}}}},
+        Set{node, Apply{arg, Tuple{m, 4}}},
+        While{If{Apply{_use_head, Tuple{node, Quote{B}}}, Apply{_ge, Tuple{Apply{arity, Tuple{node}}, 1}}, false}, Do{
+            Set{j, 0},
+            While{Apply{_lt, Tuple{j, Apply{_sub, Tuple{Apply{arity, Tuple{node}}, 1}}}}, Do{
+                Set{s, Apply{arg, Tuple{node, j}}},
+                If{If{Apply{_use_head, Tuple{s, Quote{S}}},
+                        If{Apply{_eq, Tuple{Apply{arity, Tuple{s}}, 3}}, Apply{_lt, Tuple{i, n}}, false},
+                        false},
+                    Do{
+                        Apply{array_set, Tuple{gs, i, Apply{arg, Tuple{s, 0}}}},
+                        Apply{array_set, Tuple{ends, i, Apply{arg, Tuple{s, 1}}}},
+                        Apply{array_set, Tuple{trees, i, Apply{arg, Tuple{s, 2}}}},
+                        Set{i, Apply{_add, Tuple{i, 1}}}},
+                    Set{i, Apply{_add, Tuple{n, 1}}}},
+                Set{j, Apply{_add, Tuple{j, 1}}}}},
+            Set{node, Apply{arg, Tuple{node, Apply{_sub, Tuple{Apply{arity, Tuple{node}}, 1}}}}}}},
+        If{If{Apply{_eq, Tuple{i, n}},
+                If{Apply{_use_head, Tuple{node, Quote{Z}}}, Apply{_eq, Tuple{Apply{arity, Tuple{node}}, 1}}, false},
+                false},
+            Set{r, Tuple{n, gs, ends, trees, Apply{arg, Tuple{node, 0}}}},
+            none}}, none},
+    r}}}
+
+" _use_read(file, path, td) is the steps of the cache file, or none "
+Def{_use_read, Lambda{Tuple{file, path, td}, Do{
+    Def{s, Apply{try_read_file, Tuple{file}}},
+    Def{r, none},
+    Def{body, none},
+    If{If{Apply{_ne, Tuple{s, none}}, Apply{_gt, Tuple{Apply{strlen, Tuple{s}}, 65}}, false}, Do{
+        Set{body, Apply{substr, Tuple{s, 65, Apply{strlen, Tuple{s}}}}},
+        If{Apply{_eq, Tuple{Apply{digest, Tuple{body}}, Apply{substr, Tuple{s, 0, 64}}}},
+            Set{r, Apply{_use_steps, Tuple{Apply{arg, Tuple{Apply{_use_parse, Tuple{body}}, 0}}, path, td}}},
+            none}},
+        none},
+    r}}}
+
+" _use_write(file, path, td, n, gs, ends, trees, last) writes the cache file. "
+" Nothing happens when it cannot be written or the steps have no text. "
+Def{_use_write, Lambda{Tuple{file, path, td, n, gs, ends, trees, last}, Do{
+    Def{chain, Z{last}},
+    Def{k, Apply{_div, Tuple{Apply{_sub, Tuple{n, 1}}, _use_block}}},
+    Def{lo, 0},
+    Def{hi, 0},
+    Def{i, 0},
+    Def{node, none},
+    Def{body, none},
+    While{If{Apply{_gt, Tuple{n, 0}}, Apply{_ge, Tuple{k, 0}}, false}, Do{
+        Set{lo, Apply{_mul, Tuple{k, _use_block}}},
+        Set{hi, Apply{_add, Tuple{lo, _use_block}}},
+        If{Apply{_gt, Tuple{hi, n}}, Set{hi, n}, none},
+        Set{node, B{}},
+        Set{i, lo},
+        While{Apply{_lt, Tuple{i, hi}}, Do{
+            Set{node, Apply{push, Tuple{node, S{Apply{array_get, Tuple{gs, i}}, Apply{array_get, Tuple{ends, i}}, Apply{array_get, Tuple{trees, i}}}}}},
+            Set{i, Apply{_add, Tuple{i, 1}}}}},
+        Set{chain, Apply{push, Tuple{node, chain}}},
+        Set{k, Apply{_sub, Tuple{k, 1}}}}},
+    Set{body, Apply{_show, Tuple{Cache{"1", path, td, n, chain}}}},
+    If{Apply{_ne, Tuple{body, none}}, Do{
+        Apply{try_mkdir, Tuple{_use_dir}},
+        Apply{try_write_file, Tuple{file, Apply{_strcat, Tuple{Apply{_strcat, Tuple{Apply{digest, Tuple{body}}, "\n"}}, body}}}}},
+        none},
+    none}}}
+
+" _use_load(path) parses and evaluates the library like load, "
+" taking the expressions from the cache while it is valid. "
+Def{_use_load, Lambda{Tuple{path}, Do{
+    Def{text, Apply{read_file, Tuple{path}}},
+    Def{td, Apply{digest, Tuple{text}}},
+    Def{len, Apply{strlen, Tuple{text}}},
+    Def{state, Apply{_eval_state, Tuple{}}},
+    Def{file, none},
+    Def{old, none},
+    Def{old_n, 0},
+    Def{old_gs, none},
+    Def{old_ends, none},
+    Def{old_trees, none},
+    Def{old_last, none},
+    If{Apply{_ne, Tuple{state, none}}, Do{
+        Set{file, Apply{_use_file, Tuple{path, state}}},
+        Set{old, Apply{_use_read, Tuple{file, path, td}}}}, none},
+    If{Apply{_ne, Tuple{old, none}}, Do{
+        Set{old_n, Apply{arg, Tuple{old, 0}}},
+        Set{old_gs, Apply{arg, Tuple{old, 1}}},
+        Set{old_ends, Apply{arg, Tuple{old, 2}}},
+        Set{old_trees, Apply{arg, Tuple{old, 3}}},
+        Set{old_last, Apply{arg, Tuple{old, 4}}}}, none},
+    Def{prev, Apply{_set_file, Tuple{path}}},
+    Def{gs, Apply{array, Tuple{64}}},
+    Def{ends, Apply{array, Tuple{64}}},
+    Def{trees, Apply{array, Tuple{64}}},
+    Def{n, 0},
+    Def{k, 0},
+    Def{pos, 0},
+    Def{rest, text},
+    Def{rest_pos, 0},
+    Def{replay, Apply{_ne, Tuple{old, none}}},
+    Def{changed, false},
+    Def{cacheable, Apply{_ne, Tuple{state, none}}},
+    Def{done, false},
+    Def{last, none},
+    Def{g, none},
+    Def{e, none},
+    Def{end, 0},
+    Def{r, none},
+    While{Apply{_not, Tuple{done}}, Do{
+        Set{g, Apply{_eval_state, Tuple{}}},
+        If{If{replay, If{Apply{_ne, Tuple{g, none}}, If{Apply{_lt, Tuple{k, old_n}}, Apply{_eq, Tuple{Apply{array_get, Tuple{old_gs, k}}, g}}, false}, false}, false},
+            Do{
+                Set{e, Apply{array_get, Tuple{old_trees, k}}},
+                Set{end, Apply{array_get, Tuple{old_ends, k}}},
+                Set{k, Apply{_add, Tuple{k, 1}}}},
+        If{If{replay, If{Apply{_ne, Tuple{g, none}}, If{Apply{_eq, Tuple{k, old_n}}, Apply{_eq, Tuple{old_last, g}}, false}, false}, false},
+            Do{
+                Set{done, true},
+                Set{last, g}},
+            Do{
+                Set{replay, false},
+                Set{changed, true},
+                If{Apply{_ne, Tuple{rest_pos, pos}}, Do{
+                    Set{rest, Apply{substr, Tuple{text, pos, len}}},
+                    Set{rest_pos, pos}}, none},
+                Set{r, Apply{parse, Tuple{rest}}},
+                Set{e, Apply{arg, Tuple{r, 0}}},
+                If{Apply{_eq, Tuple{e, Eof{}}},
+                    Do{
+                        Set{done, true},
+                        Set{last, g}},
+                If{If{Apply{_eq, Tuple{Apply{typeof, Tuple{e}}, Quote{mexpr}}}, Apply{_eq, Tuple{Apply{head, Tuple{e}}, Quote{SyntaxError}}}, false},
+                    Do{
+                        Apply{put, Tuple{path}},
+                        Apply{put, Tuple{": syntax error: "}},
+                        Apply{println, Tuple{e}},
+                        Apply{exit, Tuple{1}}},
+                    Do{
+                        Set{rest, Apply{arg, Tuple{r, 1}}},
+                        Set{end, Apply{_sub, Tuple{len, Apply{strlen, Tuple{rest}}}}},
+                        Set{rest_pos, end}}}}}}},
+        If{Apply{_not, Tuple{done}}, Do{
+            If{Apply{_eq, Tuple{g, none}}, Set{cacheable, false}, none},
+            If{Apply{_eq, Tuple{n, Apply{array_len, Tuple{gs}}}}, Do{
+                Set{gs, Apply{_use_grow, Tuple{gs, n}}},
+                Set{ends, Apply{_use_grow, Tuple{ends, n}}},
+                Set{trees, Apply{_use_grow, Tuple{trees, n}}}}, none},
+            Apply{array_set, Tuple{gs, n, g}},
+            Apply{array_set, Tuple{ends, n, end}},
+            Apply{array_set, Tuple{trees, n, e}},
+            Set{n, Apply{_add, Tuple{n, 1}}},
+            Set{pos, end},
+            Apply{eval, Tuple{e}}}, none}}},
+    Apply{_set_file, Tuple{prev}},
+    If{If{cacheable, If{changed, Apply{_ne, Tuple{last, none}}, false}, false},
+        Apply{_use_write, Tuple{file, path, td, n, gs, ends, trees, last}},
+        none},
+    none}}}
+
+" use(name) loads planck/lib/<name>.pk once "
+Def{use, Lambda{Tuple{name}, If{Apply{table_get, Tuple{used_libs, name, false}}, none, Do{
+    Apply{table_set, Tuple{used_libs, name, true}},
+    Apply{_use_load, Tuple{Apply{_strcat, Tuple{Apply{_strcat, Tuple{"planck/lib/", name}}, ".pk"}}}}}}}}

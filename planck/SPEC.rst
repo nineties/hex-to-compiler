@@ -12,7 +12,7 @@ and replaces ``parse``, so the given files are read by the syntax below.
 M-expressions
 -------------
 
-Symbols (``x``), integers (``42``, ``-1``), strings (``"abc"``) and ``Head{a, b, ...}``.
+Symbols (``x``), integers (``42``, ``-1``), strings (``"abc"``, up to 65535 bytes) and ``Head{a, b, ...}`` (up to 64 arguments).
 A string used as a top-level expression has no effect, so it serves as a comment.
 
 Syntax
@@ -522,7 +522,7 @@ Builtin functions
    * - M-expressions
      - ``head`` ``arity`` ``arg`` ``mexpr`` ``push`` ``typeof``
    * - Strings
-     - ``strlen`` ``ord`` ``substr`` ``_strcat`` ``intern`` ``symname``
+     - ``strlen`` ``ord`` ``substr`` ``_strcat`` ``intern`` ``symname`` ``digest``
    * - Arrays
      - ``array`` ``array_get`` ``array_set`` ``array_len`` ``hash``
    * - Plain arrays
@@ -530,11 +530,13 @@ Builtin functions
    * - Bit operations
      - ``bit_and`` ``bit_or`` ``bit_xor`` ``bit_not`` ``bit_shl`` ``bit_shr`` ``bit_sar``
    * - Files
-     - ``read_file`` ``read_bytes`` ``write_file`` ``chmod``
+     - ``read_file`` ``read_bytes`` ``write_file`` ``chmod`` ``try_read_file`` ``try_write_file`` ``try_mkdir``
    * - Language
-     - ``parse`` ``eval`` ``exit`` ``argv`` ``_set_file``
+     - ``parse`` ``eval`` ``exit`` ``argv`` ``_set_file`` ``_show`` ``_eval_state``
    * - ``planck/init.pk``
-     - ``true`` ``false`` ``none`` ``_not`` ``load`` ``use`` ``table`` ``table_get`` ``table_set``
+     - ``true`` ``false`` ``none`` ``_not`` ``load`` ``table`` ``table_get`` ``table_set``
+   * - ``planck/use.pk``
+     - ``use`` ``used_libs``
    * - ``planck/peg.pk``
      - ``peg_parse`` ``_define_rule``
    * - ``planck/syntax.pk``
@@ -572,13 +574,35 @@ Builtin functions
   and the program file given as the first argument and ``planck/init.pk`` are the files being loaded while they run.
 * ``_set_file(path)``: make ``path`` the file being loaded and return the previous one (``none`` if there is none).
 * ``_define_rule(name, e)``: define the rule by a parsing expression (see ``planck/peg.pk``).
-* ``use(name)``: ``load("planck/lib/<name>.pk")`` once.
+* ``try_read_file(path)``: ``read_file(path)``, or ``none`` when the file cannot be read.
+  ``try_write_file(path, s)``: ``write_file(path, s)`` for a string ``s``, and ``true``, or ``false`` when the file cannot be written.
+  ``try_mkdir(path)``: make the directory, and ``true`` when it exists afterwards, ``false`` otherwise.
+* ``digest(s)``: the SHA-256 digest of the string ``s`` as 64 hexadecimal digits.
+* ``_show(x)``: the text of the M-expression ``x``, which ``parse_mexpr`` reads back as ``x``,
+  or ``none`` when ``x`` has a part that has no such text (a function, an array, a symbol that is not an identifier, a string of 65536 bytes or more).
+* ``_eval_state()``: the state of evaluation, as 64 hexadecimal digits.
+  It is the digest of the interpreter, the files being loaded and the text of every expression that ``eval`` has been called with, in order,
+  so it is the same exactly when the same expressions were evaluated in the same order by the same interpreter.
+  It is ``none`` after ``eval`` was called with an expression that has a part without text (see ``_show``).
+* ``use(name)``: ``load("planck/lib/<name>.pk")`` once, with the cache below.
 
 Libraries
 ---------
 
 The files of ``planck/lib`` are written in the syntax above and are loaded by ``use("name")``.
 Each file uses the files it needs. Lists are ``Cons{x, xs}`` and ``Nil{}``, and the code of a character is the integer that ``ord`` returns.
+
+``use`` keeps the expressions that a library is parsed into in the directory ``.planck-cache`` of the current directory,
+and takes them from there instead of parsing the text again. The program behaves as without the cache.
+An expression is taken from the cache only when the text of the library is the same and the state of evaluation (``_eval_state()``)
+is the same as when the expression was parsed. The state covers the interpreter, ``planck/syntax.pk``, the grammar declarations
+and everything else evaluated before, including the libraries that the library uses and the program that uses it.
+So when a library, a library it uses, the grammar or the interpreter changes, the expressions from the first one that is affected on are parsed again.
+Parsing and evaluation are the same as without the cache otherwise, so how a library is parsed must not depend on anything outside the evaluated expressions,
+such as the command line or a file read by the program.
+A cache file that cannot be read or does not match its digest is ignored, and one that cannot be written is skipped.
+Nothing is cached after an expression with a part without text (see ``_show``) is evaluated.
+Removing ``.planck-cache`` is always safe.
 
 .. list-table::
    :header-rows: 1

@@ -85,7 +85,7 @@ Stage3 starts with ``planck0``, an implementation of the Planck language written
 ``planck0`` treats a string as a sequence of bytes, so it handles ASCII characters only.
 The language is described in `planck/SPEC.rst <https://github.com/nineties/hex-to-compiler/blob/main/planck/SPEC.rst>`_.
 `planck/examples <https://github.com/nineties/hex-to-compiler/tree/main/planck/examples>`_ has sample programs,
-and ``make test-planck0`` runs ``planck/test.pk``, ``planck/test_syntax.pk``, ``planck/test_define.pk``, ``planck/test_builtins.pk``, ``planck/test_lib.pk``, ``planck/test_unparse.pk``, ``planck/test_unparse_pattern.pk``, ``planck/test_unparse_file.pk``, ``planck/test_highlight.pk`` and the examples.
+and ``make test-planck0`` runs ``planck/test.pk``, ``planck/test_syntax.pk``, ``planck/test_define.pk``, ``planck/test_builtins.pk``, ``planck/test_lib.pk``, ``planck/test_unparse.pk``, ``planck/test_unparse_pattern.pk``, ``planck/test_unparse_file.pk``, ``planck/test_highlight.pk``, the examples and ``tools/test_cache.sh``.
 
 ``planck0 planck/vasmc.pk prog.vasm prog`` compiles a vasm source file to a 32-bit x86 Linux executable, with no assembler or linker of another system.
 The stages are libraries in ``planck/lib``: ``ir``, ``wide``, ``sched``, ``regalloc``, ``x86``, ``x86enc``, ``os``, ``obj``, ``link`` and ``elf``, which do not depend on vasm, and ``vasm_ir``, ``vasm_rt`` and ``vasm_build``.

@@ -548,6 +548,26 @@
     )
 
 ; ==== Printing
+
+; The text of a value is written to the file descriptor chan, or to the byte buffer
+; (sb_buf) when chan is CHAN_MEM. print_lossy is set when the text is not read back
+; by parse as the same value (a function, an array, a symbol that is not an identifier ...).
+(def CHAN_MEM -1)
+(def PARSE_STR_MAX 65536)
+(long print_lossy)
+
+(fun cputs (chan s)
+    (if (== chan CHAN_MEM) (sb_puts s) (fputs chan s))
+    )
+
+(fun cputc (chan c)
+    (if (== chan CHAN_MEM) (sb_putc c) (fputc chan c))
+    )
+
+(fun cputi (chan n)
+    (if (== chan CHAN_MEM) (sb_putn n) (fputi chan n))
+    )
+
 (fun escape_char (c)
     (if (== c 0) (return (char "0")))
     (if (== c 7) (return (char "a")))
@@ -580,82 +600,94 @@
 (fun fprint_str (chan str)
     (var c 0)
     (var v 0)
+    (if (>= (str_len str) PARSE_STR_MAX) (= print_lossy 1))
     (= str (str_text str))
-    (fputs chan "\"")
+    (cputs chan "\"")
     (while (getb str 0) (do
         (= c (getb str 0))
         (= v (escape_char c))
         (if (< v 0)
-            (fputc chan c)
+            (cputc chan c)
             (do
-                (fputs chan "\\")
-                (fputc chan v)
+                (cputs chan "\\")
+                (cputc chan v)
             ))
         (+= str 1)
         ))
-    (fputs chan "\"")
+    (cputs chan "\"")
     )
 
 (fun fprint_mexpr (chan e)
     (var i 0)
     (var arity  (get_header_arg e))
     (fprint chan (get e 1))
-    (fputs chan "{")
+    (cputs chan "{")
     (while (< i arity) (do
         (fprint chan (get e (+ i 2)))
         (+= i 1)
-        (if (< i arity) (fputs chan ", "))
+        (if (< i arity) (cputs chan ", "))
         ))
-    (fputs chan "}")
+    (cputs chan "}")
     )
 
 (fun fprint_lambda (chan e)
     (var pats (get (get e 1) 2)) ; patterns of the code object
     (var i 0)
     (var arity (get_header_arg e))
-    (fputs chan "<lambda:(")
+    (cputs chan "<lambda:(")
     (while (< i arity) (do
         (fprint chan (get pats (+ 2 i)))
         (+= i 1)
-        (if (< i arity) (fputs chan ", "))
+        (if (< i arity) (cputs chan ", "))
         ))
-    (fputs chan ")>")
+    (cputs chan ")>")
     )
 
 ; <u8[n]>, <u16[n]> or <i32[n]>
 (fun fprint_plain (chan e)
     (var kind (get e 1))
-    (fputs chan "<")
-    (if (== kind 0) (fputs chan "u8")
-    (if (== kind 1) (fputs chan "u16")
-        (fputs chan "i32")))
-    (fputs chan "[")
-    (fputi chan (get_header_arg e))
-    (fputs chan "]>")
+    (cputs chan "<")
+    (if (== kind 0) (cputs chan "u8")
+    (if (== kind 1) (cputs chan "u16")
+        (cputs chan "i32")))
+    (cputs chan "[")
+    (cputi chan (get_header_arg e))
+    (cputs chan "]>")
     )
 
 (fun fprint (chan e)
     (var t (gettag e))
-    (if (== t IntT) (fputi chan (fixnum_to_int e))
-    (if (== t SymbolT) (fputs chan (sym_name e))
+    (if (== t IntT) (cputi chan (fixnum_to_int e))
+    (if (== t SymbolT) (do
+        (if (! (is_identifier (sym_name e))) (= print_lossy 1))
+        (cputs chan (sym_name e))
+        )
     (if (== t StringT) (fprint_str chan e)
     (if (== t MexprT) (fprint_mexpr chan e)
+        (do
+            (= print_lossy 1)
+            (fprint_other chan e)
+            )))))
+    )
+
+(fun fprint_other (chan e)
+    (var t (gettag e))
     (if (== t LambdaT) (fprint_lambda chan e)
     (if (== t PrimT) (do
-        (fputs chan "<prim:")
+        (cputs chan "<prim:")
         (fprint chan (get e 2))
-        (fputs chan ">")
+        (cputs chan ">")
         )
-    (if (== t ContT) (fputs chan "<cont>")
-    (if (== t ArrayT) (fputs chan "<array>")
+    (if (== t ContT) (cputs chan "<cont>")
+    (if (== t ArrayT) (cputs chan "<array>")
     (if (== t PlainT) (fprint_plain chan e)
     (if (== t FusionT) (do
         (fprint chan (get e 1))
-        (fputs chan "|")
+        (cputs chan "|")
         (fprint chan (get e 2))
         )
-        (fputs chan "<?>")
-        ))))))))))
+        (cputs chan "<?>")
+        ))))))
     )
 (fun eprint (e) (fprint STDERR e))
 
@@ -758,10 +790,12 @@
     (not_reachable "parse_int")
     )
 
-(char[] 4096 parse_str_buf)
+(long parse_str_buf)
 (fun parse_str (ret raw)
-    (var end parse_str_buf)
+    (var end 0)
     (var c 0)
+    (if (! parse_str_buf) (= parse_str_buf (allocate PARSE_STR_MAX)))
+    (= end parse_str_buf)
     (+= raw 1)  ; skip '"'
     (while (getb raw) (do
         (= c (getb raw))
@@ -785,20 +819,47 @@
             (set ret (syntax_error "unterminated string literal"))
             (return (+ raw 1))
             )
+        (if (>= (- end parse_str_buf) (- PARSE_STR_MAX 1)) (do
+            (set ret (syntax_error "string literal is too long"))
+            (return raw)
+            )
         (do
             (setb end c)
             (+= end 1)
             (+= raw 1)
-            ))))
+            )))))
         ))
     (set ret (syntax_error "unterminated string literal"))
     (return raw)
     )
 
 
+; The arguments of the M-exprs being read are kept in parse_arena: a frame of
+; PARSE_FRAME bytes (a header, the head and MAX_ARITY arguments) for each nesting level.
+(def PARSE_FRAME 264)
+(def PARSE_DEPTH 4096)
+(long parse_arena)
+(long parse_sp)
+
 (fun parse_mexpr (ret head raw)
+    (var buf parse_sp)
+    (var r 0)
+    (if (! parse_arena) (do
+        (= parse_arena (allocate (* PARSE_FRAME PARSE_DEPTH)))
+        (= buf parse_arena)
+        ))
+    (if (u>= (+ buf PARSE_FRAME) (+ parse_arena (* PARSE_FRAME PARSE_DEPTH))) (do
+        (set ret (syntax_error "M-exprs are nested too deep"))
+        (return (+ raw 1))
+        ))
+    (= parse_sp (+ buf PARSE_FRAME))
+    (= r (parse_mexpr_in ret head raw buf))
+    (= parse_sp buf)
+    (return r)
+    )
+
+(fun parse_mexpr_in (ret head raw mexpr_buf)
     (char[] 4 tmp)
-    (char[] 72 mexpr_buf) ; buffer for m-expr with 16 arity at maximum
     (var arity 0)
     (+= raw 1)  ; skip {
 
@@ -821,7 +882,7 @@
 
     (while (== (getb raw) (char ",")) (do
         (+= raw 1) ; skip ,
-        (if (>= arity 16) (do
+        (if (>= arity MAX_ARITY) (do
             (set ret (syntax_error "too many arguments"))
             (return raw)
             ))
@@ -1785,6 +1846,7 @@
         ))
     (if (== t PrimT) (do
         (if (== (get callee 3) PRIM_EVAL) (do
+            (state_note (get args 0))
             (= code (compile_toplevel (get args 0)))
             (enter code (new_env code 0) caller 0)
             (return 0)
@@ -2313,6 +2375,15 @@
     (return (read_file (get path 1)))
     )
 
+; try_read_file(path): the contents of the file as a string, or none when it cannot be read
+(fun p_try_read_file (path)
+    (var s 0)
+    (expect StringT path)
+    (= s (read_file_or (get path 1) 1))
+    (if s (return s))
+    (return noneS)
+    )
+
 ; --- plain arrays: arrays of unboxed u8, u16 and i32 elements
 ; layout: | header (length, mutable, PlainT) | kind | elements |
 ; kind: 0 = u8, 1 = u16, 2 = i32. The elements are zero at first.
@@ -2440,6 +2511,17 @@
 ; write_file(path, x): write all bytes of the string or u8 array x to the file,
 ; which is created or truncated. A byte 0 is written as it is.
 (fun p_write_file (path x)
+    (write_file_or path x 0)
+    (return noneS)
+    )
+
+; try_write_file(path, x): write_file, but the result is true, or false when the file cannot be written
+(fun p_try_write_file (path x)
+    (if (write_file_or path x 1) (return trueS))
+    (return falseS)
+    )
+
+(fun write_file_or (path x quiet)
     (var p 0)
     (var n 0)
     (var fd 0)
@@ -2451,20 +2533,30 @@
         )
         (do
             (expect PlainT x)
-            (if (!= (get x 1) 0) (runtime_error "write_file: u8 array is expected: " x))
+            (if (!= (get x 1) 0) (do
+                (if quiet (return 0))
+                (runtime_error "write_file: u8 array is expected: " x)
+                ))
             (= p (plain_data x))
             (= n (get_header_arg x))
         ))
     (= fd (open (get path 1) (| O_WRONLY (| O_CREAT O_TRUNC))))
-    (if (< fd 0) (runtime_error "write_file: open failed: " path))
+    (if (< fd 0) (do
+        (if quiet (return 0))
+        (runtime_error "write_file: open failed: " path)
+        ))
     (while (> n 0) (do
         (= r (write fd p n))
-        (if (<= r 0) (runtime_error "write_file: write failed: " path))
+        (if (<= r 0) (do
+            (close fd)
+            (if quiet (return 0))
+            (runtime_error "write_file: write failed: " path)
+            ))
         (+= p r)
         (-= n r)
         ))
     (close fd)
-    (return noneS)
+    (return 1)
     )
 
 ; read_bytes(path): the contents of the file as a u8 array
@@ -2497,6 +2589,266 @@
     (if (< (syscall SYS_CHMOD (get path 1) (fixnum_to_int mode)) 0)
         (runtime_error "chmod failed: " path))
     (return noneS)
+    )
+
+(def SYS_MKDIR 39)
+
+; try_mkdir(path): true when the directory exists after the call, false otherwise
+(fun p_try_mkdir (path)
+    (var r 0)
+    (expect StringT path)
+    (= r (syscall SYS_MKDIR (get path 1) 0x1ed))
+    (if (|| (>= r 0) (== r -17)) (return trueS))
+    (return falseS)
+    )
+
+; --- SHA-256
+
+(char[] 256 sha_k)      ; round constants
+(char[] 32 sha_h)       ; hash state
+(char[] 256 sha_w)      ; message schedule
+(char[] 128 sha_tail)   ; the last one or two blocks
+(char[] 68 sha_hex)     ; hexadecimal digest of the last sha256 call
+(long sha_ready)
+
+; words from hexadecimal digits (a literal of sasm has 31 bits at most)
+(fun sha_words (dst src count)
+    (var i 0)
+    (var w 0)
+    (var c 0)
+    (while (< i (* count 8)) (do
+        (= c (getb src i))
+        (if (<= c (char "9")) (= c (- c (char "0"))) (= c (- c 87)))
+        (= w (| (<< w 4) c))
+        (if (== (& i 7) 7) (do
+            (set dst (>> i 3) w)
+            (= w 0)
+            ))
+        (+= i 1)
+        ))
+    )
+
+(fun sha_rotr (x n)
+    (return (| (>> x n) (<< x (- 32 n))))
+    )
+
+; process the 64 bytes at p
+(fun sha_block (p)
+    (var i 0)
+    (var a 0)
+    (var b 0)
+    (var c 0)
+    (var d 0)
+    (var e 0)
+    (var f 0)
+    (var g 0)
+    (var h 0)
+    (var t1 0)
+    (var t2 0)
+    (var x 0)
+    (var y 0)
+    (while (< i 16) (do
+        (set sha_w i (| (| (<< (getb p 0) 24) (<< (getb p 1) 16)) (| (<< (getb p 2) 8) (getb p 3))))
+        (+= p 4)
+        (+= i 1)
+        ))
+    (while (< i 64) (do
+        (= x (get sha_w (- i 15)))
+        (= y (get sha_w (- i 2)))
+        (set sha_w i (+ (+ (get sha_w (- i 16)) (^ (^ (sha_rotr x 7) (sha_rotr x 18)) (>> x 3)))
+                        (+ (get sha_w (- i 7)) (^ (^ (sha_rotr y 17) (sha_rotr y 19)) (>> y 10)))))
+        (+= i 1)
+        ))
+    (= a (get sha_h 0))
+    (= b (get sha_h 1))
+    (= c (get sha_h 2))
+    (= d (get sha_h 3))
+    (= e (get sha_h 4))
+    (= f (get sha_h 5))
+    (= g (get sha_h 6))
+    (= h (get sha_h 7))
+    (= i 0)
+    (while (< i 64) (do
+        (= t1 (+ (+ h (^ (^ (sha_rotr e 6) (sha_rotr e 11)) (sha_rotr e 25)))
+                 (+ (+ (^ (& e f) (& (^ e -1) g)) (get sha_k i)) (get sha_w i))))
+        (= t2 (+ (^ (^ (sha_rotr a 2) (sha_rotr a 13)) (sha_rotr a 22))
+                 (^ (^ (& a b) (& a c)) (& b c))))
+        (= h g)
+        (= g f)
+        (= f e)
+        (= e (+ d t1))
+        (= d c)
+        (= c b)
+        (= b a)
+        (= a (+ t1 t2))
+        (+= i 1)
+        ))
+    (set sha_h 0 (+ (get sha_h 0) a))
+    (set sha_h 1 (+ (get sha_h 1) b))
+    (set sha_h 2 (+ (get sha_h 2) c))
+    (set sha_h 3 (+ (get sha_h 3) d))
+    (set sha_h 4 (+ (get sha_h 4) e))
+    (set sha_h 5 (+ (get sha_h 5) f))
+    (set sha_h 6 (+ (get sha_h 6) g))
+    (set sha_h 7 (+ (get sha_h 7) h))
+    )
+
+; sha256(p, n, out): the SHA-256 digest of the n bytes at p, as 64 hexadecimal digits and a 0 byte at out
+(fun sha256 (p n out)
+    (var i 0)
+    (var rem (& n 63))
+    (var full (>> n 6))
+    (var tl 64)
+    (var bits (<< n 3))
+    (if (! sha_ready) (do
+        (sha_words sha_k "428a2f9871374491b5c0fbcfe9b5dba53956c25b59f111f1923f82a4ab1c5ed5d807aa9812835b01243185be550c7dc372be5d7480deb1fe9bdc06a7c19bf174e49b69c1efbe47860fc19dc6240ca1cc2de92c6f4a7484aa5cb0a9dc76f988da983e5152a831c66db00327c8bf597fc7c6e00bf3d5a7914706ca63511429296727b70a852e1b21384d2c6dfc53380d13650a7354766a0abb81c2c92e92722c85a2bfe8a1a81a664bc24b8b70c76c51a3d192e819d6990624f40e3585106aa07019a4c1161e376c082748774c34b0bcb5391c0cb34ed8aa4a5b9cca4f682e6ff3748f82ee78a5636f84c878148cc7020890befffaa4506cebbef9a3f7c67178f2" 64)
+        (= sha_ready 1)
+        ))
+    (sha_words sha_h "6a09e667bb67ae853c6ef372a54ff53a510e527f9b05688c1f83d9ab5be0cd19" 8)
+    (while (< i full) (do
+        (sha_block (+ p (<< i 6)))
+        (+= i 1)
+        ))
+    (= i 0)
+    (while (< i 128) (do
+        (setb sha_tail i 0)
+        (+= i 1)
+        ))
+    (memcpy sha_tail (+ p (<< full 6)) rem)
+    (setb sha_tail rem 0x80)
+    (if (>= rem 56) (= tl 128))
+    (setb sha_tail (- tl 5) (>> n 29))
+    (setb sha_tail (- tl 4) (>> bits 24))
+    (setb sha_tail (- tl 3) (>> bits 16))
+    (setb sha_tail (- tl 2) (>> bits 8))
+    (setb sha_tail (- tl 1) bits)
+    (sha_block sha_tail)
+    (if (== tl 128) (sha_block (+ sha_tail 64)))
+    (= i 0)
+    (while (< i 64) (do
+        (setb out i (int2char (& (>> (get sha_h (>> i 3)) (- 28 (* 4 (& i 7)))) 15)))
+        (+= i 1)
+        ))
+    (setb out 64 0)
+    )
+
+; digest(s): the SHA-256 digest of the string s, as 64 hexadecimal digits
+(fun p_digest (s)
+    (expect StringT s)
+    (sha256 (get s 1) (str_len s) sha_hex)
+    (return (str (strndup sha_hex 64)))
+    )
+
+; --- the text of a value in memory
+
+(long sb_buf)
+(long sb_len)
+(long sb_cap)
+
+(fun sb_putbytes (p n)
+    (var cap sb_cap)
+    (var nb 0)
+    (if (> (+ sb_len n) cap) (do
+        (= cap (+ (* cap 2) 65536))
+        (while (< cap (+ sb_len n)) (= cap (* cap 2)))
+        (= nb (allocate cap))
+        (memcpy nb sb_buf sb_len)
+        (= sb_buf nb)
+        (= sb_cap cap)
+        ))
+    (memcpy (+ sb_buf sb_len) p n)
+    (+= sb_len n)
+    )
+
+(fun sb_puts (s)
+    (sb_putbytes s (strlen s))
+    )
+
+(fun sb_putc (c)
+    (char[] 4 b)
+    (setb b 0 c)
+    (sb_putbytes b 1)
+    )
+
+; the decimal digits of n
+(fun sb_putn (n)
+    (char[] 12 digits)
+    (var i 11)
+    (var neg 0)
+    (if (< n 0) (do
+        (= neg 1)
+        (= n (- 0 n))
+        ))
+    (setb digits i 0)
+    (while (|| (== i 11) (> n 0)) (do
+        (-= i 1)
+        (setb digits i (+ (char "0") (% n 10)))
+        (/= n 10)
+        ))
+    (if neg (sb_putc (char "-")))
+    (sb_puts (+ digits i))
+    )
+
+(fun is_identifier (name)
+    (if (! (is_symbol_leading_char (getb name))) (return 0))
+    (while (getb name) (do
+        (if (! (is_symbol_following_char (getb name))) (return 0))
+        (+= name 1)
+        ))
+    (return 1)
+    )
+
+; the text of e into the buffer, which parse reads back as e unless print_lossy is set
+(fun show_value (e)
+    (= print_lossy 0)
+    (= sb_len 0)
+    (fprint CHAN_MEM e)
+    )
+
+; _show(e): the text of e, which parse reads back as e, or none when e has no such text
+(fun p_show (e)
+    (show_value e)
+    (if print_lossy (return noneS))
+    (return (str_n (strndup sb_buf sb_len) sb_len))
+    )
+
+; --- the state of evaluation
+;
+; state_hex is the SHA-256 digest of this executable, updated by every eval with
+; the file being loaded and the text of the evaluated expression. It stands for everything
+; that has been evaluated, so the same state means the same grammar, definitions and builtins.
+; state_ok is 0 when the state cannot be told: the executable cannot be read or
+; an evaluated expression has a value that has no text.
+
+(char[] 68 state_hex)
+(long state_ok)
+
+(fun state_init ()
+    (var s (read_file_or "/proc/self/exe" 1))
+    (= state_ok 0)
+    (if (! s) (return 0))
+    (sha256 (get s 1) (str_len s) state_hex)
+    (= state_ok 1)
+    )
+
+(fun state_note (e)
+    (if (! state_ok) (return 0))
+    (show_value e)
+    (if print_lossy (do
+        (= state_ok 0)
+        (return 0)
+        ))
+    (sb_putc 10)
+    (if cur_file (sb_puts (str_text cur_file)))
+    (sb_putc 10)
+    (sb_puts state_hex)
+    (sha256 sb_buf sb_len state_hex)
+    )
+
+; _eval_state(): the state of evaluation as 64 hexadecimal digits, or none when it cannot be told
+(fun p_eval_state ()
+    (if (! state_ok) (return noneS))
+    (return (str (strndup state_hex 64)))
     )
 
 ; --- bit operations on integers (31-bit, two's complement)
@@ -2634,6 +2986,12 @@
     (defprim "write_file" 2 p_write_file PRIM_NATIVE)
     (defprim "read_bytes" 1 p_read_bytes PRIM_NATIVE)
     (defprim "chmod"   2 p_chmod   PRIM_NATIVE)
+    (defprim "try_read_file" 1 p_try_read_file PRIM_NATIVE)
+    (defprim "try_write_file" 2 p_try_write_file PRIM_NATIVE)
+    (defprim "try_mkdir" 1 p_try_mkdir PRIM_NATIVE)
+    (defprim "digest"  1 p_digest  PRIM_NATIVE)
+    (defprim "_show"   1 p_show    PRIM_NATIVE)
+    (defprim "_eval_state" 0 p_eval_state PRIM_NATIVE)
     (defprim "u8_array" 1 p_u8_array PRIM_NATIVE)
     (defprim "u16_array" 1 p_u16_array PRIM_NATIVE)
     (defprim "i32_array" 1 p_i32_array PRIM_NATIVE)
@@ -2658,19 +3016,27 @@
 ; === Interpreter
 
 (fun read_file (path)
+    (return (read_file_or path 0))
+    )
+
+; read_file, but the result is 0 instead of stopping the program when quiet is set
+(fun read_file_or (path quiet)
     (var fd (open path O_RDONLY))
     (if (< fd 0) (do
+        (if quiet (return 0))
         (eputs "open failed: ") (eputs path) (eputs "\n")
         (exit 1)))
 
     (var file_size (fsize fd))
     (if (< file_size 0) (do
+        (if quiet (return 0))
         (eputs "fstat failed: ") (eputs path) (eputs "\n")
         (exit 1)))
 
     (var buf (allocate (+ file_size 1))) ; +1 for \0
     (var r (read fd buf file_size))
     (if (< r file_size) (do
+        (if quiet (return 0))
         (eputs "read failed: ") (eputs path) (eputs "\n")
         (exit 1)
         ))
@@ -2739,6 +3105,7 @@
     (init_compiler)
     (init_vm)
     (init_prims)
+    (state_init)
 
     (interpret_file "planck/init.pk")
     (= cmd_argc argc)
