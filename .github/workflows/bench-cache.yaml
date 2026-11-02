@@ -1,0 +1,29 @@
+name: bench cache
+
+on:
+    push:
+        branches: ["parse-cache-bench"]
+jobs:
+    bench:
+        runs-on: ubuntu-latest
+        timeout-minutes: 180
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+            - name: build pforth and plisp2
+              run: make pforth plisp2
+            - name: build planck0 of this branch
+              run: make planck0
+            - name: build planck0 of main
+              run: |
+                  mkdir ../base
+                  git archive origin/main | tar -x -C ../base
+                  cp pforth plisp2 ../base/
+                  make -C ../base planck0
+            - name: measure
+              run: sh tools/bench_cache.sh "$PWD/../base" "$PWD" | tee bench-cache.txt
+            - uses: actions/upload-artifact@v4
+              with:
+                  name: bench-cache
+                  path: bench-cache.txt
