@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>8. レコード・局所関数・脱出 | hex-to-compiler project</title>
+<link rel="alternate" hreflang="en" href="../../en/tutorial/8.html">
+<link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+<header class="site-header"><div class="inner">
+<a class="logo" href="../index.html"><span class="brand"><b>hex-to-compiler <i>project</i></b><small>自分自身をブートストラップする処理系</small></span></a>
+<nav class="site-nav">
+<a href="../index.html">概要</a>
+<a class="here" href="../tutorial/index.html">チュートリアル</a>
+<a href="../reference/index.html">リファレンス</a>
+<a href="../implementation/index.html">処理系の実装</a>
+<a href="https://github.com/nineties/hex-to-compiler">GitHub</a>
+<a class="lang-switch" lang="en" hreflang="en" href="../../en/tutorial/8.html">English</a>
+</nav>
+</div></header>
+<div class="layout">
+<nav class="toc" aria-label="チュートリアルの目次"><details open><summary>チュートリアルの目次</summary>
+<h2>チュートリアル</h2>
+<ol>
+<li><a href="index.html">前提と実行</a></li>
+<li><a href="1.html">1. 式・束縛・関数</a></li>
+<li><a href="2.html">2. 値と M式</a></li>
+<li><a href="3.html">3. パターンと融合</a></li>
+<li><a href="4.html">4. ライブラリ</a></li>
+<li><a href="5.html">5. 代数的エフェクト</a></li>
+<li><a href="6.html">6. クオートと評価器</a></li>
+<li><a href="7.html">7. 文法の拡張</a></li>
+<li><a class="here" href="8.html">8. レコード・局所関数・脱出</a></li>
+<li><a href="9.html">9. 変数の範囲</a></li>
+<li><a href="10.html">10. 添字と置き換え</a></li>
+</ol></details></nav>
+<main>
+<h1>8. レコード・局所関数・脱出</h1>
+<p class="lead"><code>record</code> は M式の引数に名前を付ける宣言です。<code>return</code>・<code>break</code>・<code>continue</code> は<a href="5.html">5章</a>のエフェクトとして実装されています。</p>
+
+<h2>record</h2>
+<div class="example">
+<p class="file">t8_record.pk</p>
+<pre class="pk"><span class="tok-kw">record</span> <span class="tok-name">Point</span><span class="tok-op">(</span><span class="tok-name">x</span><span class="tok-op">,</span> <span class="tok-name">y</span><span class="tok-op">)</span>
+<span class="tok-name">p</span> <span class="tok-op">:=</span> <span class="tok-name">Point</span><span class="tok-op">{</span><span class="tok-num">3</span><span class="tok-op">,</span> <span class="tok-num">4</span><span class="tok-op">}</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">p</span><span class="tok-op">.</span><span class="tok-name">x</span> <span class="tok-op">*</span> <span class="tok-name">p</span><span class="tok-op">.</span><span class="tok-name">x</span> <span class="tok-op">+</span> <span class="tok-name">p</span><span class="tok-op">.</span><span class="tok-name">y</span> <span class="tok-op">*</span> <span class="tok-name">p</span><span class="tok-op">.</span><span class="tok-name">y</span><span class="tok-op">)</span>
+
+<span class="tok-name">move</span><span class="tok-op">(</span><span class="tok-name">p</span><span class="tok-op">,</span> <span class="tok-name">dx</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-name">Point</span><span class="tok-op">{</span><span class="tok-name">p</span><span class="tok-op">.</span><span class="tok-name">x</span> <span class="tok-op">+</span> <span class="tok-name">dx</span><span class="tok-op">,</span> <span class="tok-name">p</span><span class="tok-op">.</span><span class="tok-name">y</span><span class="tok-op">}</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">move</span><span class="tok-op">(</span><span class="tok-name">p</span><span class="tok-op">,</span> <span class="tok-num">10</span><span class="tok-op">)</span><span class="tok-op">)</span></pre>
+<p class="label">出力</p>
+<pre class="out">25
+Point{13, 4}</pre>
+</div>
+<p><code>record Point(x, y)</code> は頭 <code>Point</code> の0番目と1番目の引数に名前を付けるだけで、値は <code>Point{3, 4}</code> のままです。パターンでも分解できます。<code>.</code> の前に空白は置けません。</p>
+
+<h2>局所関数</h2>
+<div class="example">
+<p class="file">t8_local.pk</p>
+<pre class="pk"><span class="tok-name">parity</span><span class="tok-op">(</span><span class="tok-name">n</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-op">{</span>
+    <span class="tok-kw">fun</span> <span class="tok-name">is_odd</span>
+    <span class="tok-name">is_even</span><span class="tok-op">(</span><span class="tok-name">n</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-kw">if</span> <span class="tok-op">(</span><span class="tok-name">n</span> <span class="tok-op">==</span> <span class="tok-num">0</span><span class="tok-op">)</span> <span class="tok-name">true</span> <span class="tok-kw">else</span> <span class="tok-name">is_odd</span><span class="tok-op">(</span><span class="tok-name">n</span> <span class="tok-op">-</span> <span class="tok-num">1</span><span class="tok-op">)</span>
+    <span class="tok-name">is_odd</span><span class="tok-op">(</span><span class="tok-name">n</span><span class="tok-op">)</span> <span class="tok-op">=</span> <span class="tok-kw">if</span> <span class="tok-op">(</span><span class="tok-name">n</span> <span class="tok-op">==</span> <span class="tok-num">0</span><span class="tok-op">)</span> <span class="tok-name">false</span> <span class="tok-kw">else</span> <span class="tok-name">is_even</span><span class="tok-op">(</span><span class="tok-name">n</span> <span class="tok-op">-</span> <span class="tok-num">1</span><span class="tok-op">)</span>
+    <span class="tok-kw">if</span> <span class="tok-op">(</span><span class="tok-name">is_even</span><span class="tok-op">(</span><span class="tok-name">n</span><span class="tok-op">)</span><span class="tok-op">)</span> <span class="tok-str">"even"</span> <span class="tok-kw">else</span> <span class="tok-str">"odd"</span>
+<span class="tok-op">}</span>
+<span class="tok-name">put</span><span class="tok-op">(</span><span class="tok-name">parity</span><span class="tok-op">(</span><span class="tok-num">10</span><span class="tok-op">)</span><span class="tok-op">)</span><span class="tok-op">;</span> <span class="tok-name">put</span><span class="tok-op">(</span><span class="tok-str">"\n"</span><span class="tok-op">)</span>
+<span class="tok-name">put</span><span class="tok-op">(</span><span class="tok-name">parity</span><span class="tok-op">(</span><span class="tok-num">7</span><span class="tok-op">)</span><span class="tok-op">)</span><span class="tok-op">;</span> <span class="tok-name">put</span><span class="tok-op">(</span><span class="tok-str">"\n"</span><span class="tok-op">)</span></pre>
+<p class="label">出力</p>
+<pre class="out">even
+odd</pre>
+</div>
+<p>ブロックの中の <code>f(x) := ...</code> はトップレベルと同じ形の関数定義です。書いた場所で定義されるので、互いに呼び合う関数は先に <code>fun f</code> で名前を宣言し、あとで <code>f(x) = ...</code> で埋めます。関数の本体が見るのは定義した場所の変数で、呼んだ側の変数ではありません（<a href="../reference/syntax.html#scope">変数の範囲</a>）。</p>
+
+<h2>return・break・continue</h2>
+<div class="example">
+<p class="file">t8_return.pk</p>
+<pre class="pk"><span class="tok-name">find_first</span><span class="tok-op">(</span><span class="tok-name">p</span><span class="tok-op">,</span> <span class="tok-name">xs</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-op">{</span>
+    <span class="tok-kw">for</span> <span class="tok-op">(</span><span class="tok-name">x</span> <span class="tok-kw">in</span> <span class="tok-name">xs</span><span class="tok-op">)</span> <span class="tok-kw">if</span> <span class="tok-op">(</span><span class="tok-name">p</span><span class="tok-op">(</span><span class="tok-name">x</span><span class="tok-op">)</span><span class="tok-op">)</span> <span class="tok-kw">return</span> <span class="tok-name">x</span>
+    <span class="tok-name">none</span>
+<span class="tok-op">}</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">find_first</span><span class="tok-op">(</span><span class="tok-name">x</span> <span class="tok-op">-&gt;</span> <span class="tok-name">x</span> <span class="tok-op">&gt;</span> <span class="tok-num">3</span><span class="tok-op">,</span> <span class="tok-op">[</span><span class="tok-num">1</span><span class="tok-op">,</span> <span class="tok-num">5</span><span class="tok-op">,</span> <span class="tok-num">2</span><span class="tok-op">,</span> <span class="tok-num">7</span><span class="tok-op">]</span><span class="tok-op">)</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">find_first</span><span class="tok-op">(</span><span class="tok-name">x</span> <span class="tok-op">-&gt;</span> <span class="tok-name">x</span> <span class="tok-op">&gt;</span> <span class="tok-num">9</span><span class="tok-op">,</span> <span class="tok-op">[</span><span class="tok-num">1</span><span class="tok-op">,</span> <span class="tok-num">5</span><span class="tok-op">,</span> <span class="tok-num">2</span><span class="tok-op">,</span> <span class="tok-num">7</span><span class="tok-op">]</span><span class="tok-op">)</span><span class="tok-op">)</span>
+
+<span class="tok-name">n</span> <span class="tok-op">:=</span> <span class="tok-num">0</span>
+<span class="tok-name">odd_sum</span> <span class="tok-op">:=</span> <span class="tok-num">0</span>
+<span class="tok-kw">while</span> <span class="tok-op">(</span><span class="tok-name">true</span><span class="tok-op">)</span> <span class="tok-op">{</span>
+    <span class="tok-name">n</span> <span class="tok-op">=</span> <span class="tok-name">n</span> <span class="tok-op">+</span> <span class="tok-num">1</span>
+    <span class="tok-kw">if</span> <span class="tok-op">(</span><span class="tok-name">n</span> <span class="tok-op">&gt;</span> <span class="tok-num">10</span><span class="tok-op">)</span> <span class="tok-kw">break</span>
+    <span class="tok-kw">if</span> <span class="tok-op">(</span><span class="tok-name">n</span> <span class="tok-op">%</span> <span class="tok-num">2</span> <span class="tok-op">==</span> <span class="tok-num">0</span><span class="tok-op">)</span> <span class="tok-kw">continue</span>
+    <span class="tok-name">odd_sum</span> <span class="tok-op">=</span> <span class="tok-name">odd_sum</span> <span class="tok-op">+</span> <span class="tok-name">n</span>
+<span class="tok-op">}</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">odd_sum</span><span class="tok-op">)</span></pre>
+<p class="label">出力</p>
+<pre class="out">5
+none
+25</pre>
+</div>
+<p><code>return e</code> は囲む関数から抜けます。<code>for</code> の本体は関数ですが、その中の <code>return</code> は外の <code>find_first</code> から抜けます。<code>break</code>・<code>continue</code> は一番内側の <code>while</code> か <code>for</code> に効きます。</p>
+<nav class="pager"><a class="prev" href="7.html"><small>前のページ</small>7. 文法の拡張</a><a class="next" href="9.html"><small>次のページ</small>9. 変数の範囲</a></nav>
+</main>
+</div>
+<footer><div class="inner"><a href="https://github.com/nineties/hex-to-compiler">github.com/nineties/hex-to-compiler</a></div></footer>
+<script src="../../assets/page.js"></script>
+</body>
+</html>

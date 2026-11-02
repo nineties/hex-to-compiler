@@ -1,0 +1,207 @@
+# highlight: planck source text to HTML with the tokens in spans
+# Copyright (C) 2026 nineties
+#
+# highlight(src) parses src with the current grammar (planck/peg.pk, planck/syntax.pk)
+# and returns src with HTML escapes where each token is in <span class="tok-...">.
+# The grammar has no marks for colors. The classes come from what the parser matches:
+#   kw    a text in a rule that is a word (Key{"if"}, "in"), and a 'word of a grammar
+#   op    a text in a rule that is not a word ("(", ":=", "|>")
+#   name  ident
+#   num   integer
+#   str   string and the parts of a string with values
+#   com   a comment (the blanks and comments that the parser skips)
+# A rule declaration (name ::= ...) in src is defined while src is read, so that the
+# syntax it adds colors the rest of src. Its actions are left out, because they may use
+# what src defines later. The rules are restored when highlight returns.
+# Where src does not parse, the line of the failure is left and reading goes on from the next line.
+
+use("base")
+use("list")
+use("string")
+use("table")
+use("vector")
+
+hl_classes := table()
+table_set(hl_classes, 'ident, "name")
+table_set(hl_classes, 'integer, "num")
+table_set(hl_classes, 'string, "str")
+table_set(hl_classes, 'keyword, "kw")
+table_set(hl_classes, 'istr_open, "str")
+table_set(hl_classes, 'istr_text, "str")
+table_set(hl_classes, 'istr_close, "str")
+table_set(hl_classes, 'istr_hole, "op")
+
+# the marks of the text being read: the end and the class of the token which starts at each position.
+# The longest token wins. For the same text, a word of the syntax wins over a name,
+# which the rules tried before it also match.
+hl_text := ""
+hl_ends := none
+hl_classes_at := none
+hl_base := 0
+
+hl_note(p, q, cls) := {
+    i := hl_base + p
+    e := hl_base + q
+    if (q > p and i < strlen(hl_text)) {
+        old := array_get(hl_ends, i)
+        if (old == none or old < e or (old == e and array_get(hl_classes_at, i) == "name")) {
+            array_set(hl_ends, i, e)
+            array_set(hl_classes_at, i, cls)
+        }
+    }
+}
+
+# the parser's functions, called through these while reading
+hl_orig_lit := peg_lit
+hl_orig_key := peg_px_key
+hl_orig_call := peg_call_rule
+
+hl_lit(s, p) := {
+    q := hl_orig_lit(s, p)
+    if (q >= 0 and strlen(s) > 0) {
+        hl_note(q - strlen(s), q, if (is_alpha(ord(s, 0))) "kw" else "op")
+    }
+    q
+}
+
+hl_key(s, p) := {
+    q := hl_orig_key(s, p)
+    if (q >= 0) hl_note(q - strlen(s), q, "kw")
+    q
+}
+
+hl_call(r, p) := {
+    q := hl_orig_call(r, p)
+    if (q >= 0) {
+        cls := table_get(hl_classes, r, none)
+        if (cls != none) hl_note(peg_skip_ws(p), q, cls)
+    }
+    q
+}
+
+hl_esc(s) := {
+    b := strbuf_new()
+    n := strlen(s)
+    start := 0
+    i := 0
+    while (i < n) {
+        c := ord(s, i)
+        r := if (c == 38) "&amp;" else if (c == 60) "&lt;" else if (c == 62) "&gt;" else none
+        if (r != none) {
+            strbuf_add(b, substr(s, start, i))
+            strbuf_add(b, r)
+            start = i + 1
+        }
+        i = i + 1
+    }
+    strbuf_add(b, substr(s, start, n))
+    strbuf_str(b)
+}
+
+hl_span(cls, s) := _strcat(_strcat(_strcat("<span class=\"tok-", cls), "\">"), _strcat(hl_esc(s), "</span>"))
+
+# s[a:z] is outside the tokens: blanks and comments
+hl_gap(b, s, a, z) := {
+    i := a
+    start := a
+    while (i < z) {
+        if (ord(s, i) == 35) {
+            j := i
+            while (j < z and ord(s, j) != 10) j = j + 1
+            strbuf_add(b, hl_esc(substr(s, start, i)))
+            strbuf_add(b, hl_span("com", substr(s, i, j)))
+            start = j
+            i = j
+        } else {
+            i = i + 1
+        }
+    }
+    strbuf_add(b, hl_esc(substr(s, start, z)))
+}
+
+hl_render(s) := {
+    b := strbuf_new()
+    n := strlen(s)
+    cur := 0
+    i := 0
+    while (i < n) {
+        e := array_get(hl_ends, i)
+        if (e != none and i >= cur) {
+            hl_gap(b, s, cur, i)
+            strbuf_add(b, hl_span(array_get(hl_classes_at, i), substr(s, i, e)))
+            cur = e
+            i = e
+        } else {
+            i = i + 1
+        }
+    }
+    hl_gap(b, s, cur, n)
+    strbuf_str(b)
+}
+
+is_syntax_error(t) := typeof(t) == 'mexpr and head(t) == 'SyntaxError
+
+# the name of a rule declaration Apply{_define_rule, Tuple{Quote{name}, Quote{e}}}, or none
+hl_rule_name(t) :=
+    if (typeof(t) == 'mexpr and head(t) == 'Apply and arity(t) == 2 and arg(t, 0) == '_define_rule)
+        arg(arg(arg(t, 1), 0), 0)
+    else none
+
+# the parsing expression e without the actions
+hl_strip(e) :=
+    if (typeof(e) != 'mexpr) e
+    else if (head(e) == 'Act and arg(e, 0) == "...") Prev{}
+    else if (head(e) == 'Act) hl_strip(arg(e, 0))
+    else peg_map_args(hl_strip, e)
+
+# the position after the line which holds p
+hl_next_line(s, p) := {
+    n := strlen(s)
+    q := p
+    while (q < n and ord(s, q) != 10) q = q + 1
+    if (q < n) q + 1 else n
+}
+
+highlight(src) := {
+    n := strlen(src)
+    hl_text = src
+    hl_ends = array(n + 1)
+    hl_classes_at = array(n + 1)
+    saved := Tuple{}
+    version := peg_version
+    peg_lit = hl_lit
+    peg_px_key = hl_key
+    peg_call_rule = hl_call
+    pos := 0
+    go := true
+    while (go) {
+        hl_base = pos
+        r := peg_parse('toplevel, substr(src, pos, n))
+        t := arg(r, 0)
+        if (t == Eof{}) {
+            go = false
+        } else if (is_syntax_error(t)) {
+            pos = hl_next_line(src, pos + peg_far)
+            if (pos >= n) go = false
+        } else {
+            name := hl_rule_name(t)
+            if (name != none) {
+                saved = push(saved, Tuple{name, table_get(peg_rules, name, none), table_get(peg_sources, name, none)})
+                _define_rule(name, hl_strip(arg(arg(arg(t, 1), 1), 0)))
+            }
+            pos = n - strlen(arg(r, 1))
+        }
+    }
+    peg_lit = hl_orig_lit
+    peg_px_key = hl_orig_key
+    peg_call_rule = hl_orig_call
+    i := arity(saved) - 1
+    while (i >= 0) {
+        s := arg(saved, i)
+        table_set(peg_rules, arg(s, 0), if (arg(s, 1) == none) Fail{} else arg(s, 1))
+        table_set(peg_sources, arg(s, 0), if (arg(s, 2) == none) Fail{} else arg(s, 2))
+        i = i - 1
+    }
+    peg_version = version
+    hl_render(src)
+}

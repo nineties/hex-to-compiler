@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>9. 変数の範囲 | hex-to-compiler project</title>
+<link rel="alternate" hreflang="en" href="../../en/tutorial/9.html">
+<link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+<header class="site-header"><div class="inner">
+<a class="logo" href="../index.html"><span class="brand"><b>hex-to-compiler <i>project</i></b><small>自分自身をブートストラップする処理系</small></span></a>
+<nav class="site-nav">
+<a href="../index.html">概要</a>
+<a class="here" href="../tutorial/index.html">チュートリアル</a>
+<a href="../reference/index.html">リファレンス</a>
+<a href="../implementation/index.html">処理系の実装</a>
+<a href="https://github.com/nineties/hex-to-compiler">GitHub</a>
+<a class="lang-switch" lang="en" hreflang="en" href="../../en/tutorial/9.html">English</a>
+</nav>
+</div></header>
+<div class="layout">
+<nav class="toc" aria-label="チュートリアルの目次"><details open><summary>チュートリアルの目次</summary>
+<h2>チュートリアル</h2>
+<ol>
+<li><a href="index.html">前提と実行</a></li>
+<li><a href="1.html">1. 式・束縛・関数</a></li>
+<li><a href="2.html">2. 値と M式</a></li>
+<li><a href="3.html">3. パターンと融合</a></li>
+<li><a href="4.html">4. ライブラリ</a></li>
+<li><a href="5.html">5. 代数的エフェクト</a></li>
+<li><a href="6.html">6. クオートと評価器</a></li>
+<li><a href="7.html">7. 文法の拡張</a></li>
+<li><a href="8.html">8. レコード・局所関数・脱出</a></li>
+<li><a class="here" href="9.html">9. 変数の範囲</a></li>
+<li><a href="10.html">10. 添字と置き換え</a></li>
+</ol></details></nav>
+<main>
+<h1>9. 変数の範囲</h1>
+<p class="lead">名前がどの変数を指すかは、プログラムの書かれた位置から、式を実行する前に決まります。関数に定義を追加するか隠すかは<a href="3.html">3章</a>にあります。</p>
+
+<h2>名前の解決</h2>
+<div class="example">
+<p class="file">t1_scope.pk</p>
+<pre class="pk"><span class="tok-name">n</span> <span class="tok-op">:=</span> <span class="tok-num">5</span>
+<span class="tok-name">read_n</span><span class="tok-op">(</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-name">n</span>
+<span class="tok-name">caller</span><span class="tok-op">(</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-op">{</span>
+    <span class="tok-name">n</span> <span class="tok-op">:=</span> <span class="tok-num">100</span>
+    <span class="tok-name">read_n</span><span class="tok-op">(</span><span class="tok-op">)</span>
+<span class="tok-op">}</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">caller</span><span class="tok-op">(</span><span class="tok-op">)</span><span class="tok-op">)</span>
+
+<span class="tok-name">x</span> <span class="tok-op">:=</span> <span class="tok-num">1</span>
+<span class="tok-name">get</span><span class="tok-op">(</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-name">x</span>
+<span class="tok-name">x</span> <span class="tok-op">:=</span> <span class="tok-name">x</span> <span class="tok-op">+</span> <span class="tok-num">1</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">x</span><span class="tok-op">,</span> <span class="tok-name">get</span><span class="tok-op">(</span><span class="tok-op">)</span><span class="tok-op">}</span><span class="tok-op">)</span>
+<span class="tok-name">x</span> <span class="tok-op">=</span> <span class="tok-num">10</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">x</span><span class="tok-op">,</span> <span class="tok-name">get</span><span class="tok-op">(</span><span class="tok-op">)</span><span class="tok-op">}</span><span class="tok-op">)</span></pre>
+<p class="label">出力</p>
+<pre class="out">5
+Tuple{2, 1}
+Tuple{10, 1}</pre>
+</div>
+<p>変数の範囲は字句的で、名前がどの変数を指すかは、式を実行する前に、プログラムの書かれた位置から決まります。関数の本体から見えるのは、その関数と外側の関数の引数と変数、およびトップレベルでそれより前に定義した変数です。呼んだ側の変数は見えません。<code>read_n()</code> は <code>caller</code> の中の <code>n</code> ではなく、トップレベルの <code>n</code> を読みます。</p>
+<p>同じ名前を <code>:=</code> でもう一度定義すると新しい変数ができ、前に作った関数は前の変数を指したままです。<code>get</code> は最初の <code>x</code> を指すので、<code>x = 10</code> が代入する新しい <code>x</code> は見えません。</p>
+<div class="example">
+<p class="file">e_undefined.pk</p>
+<pre class="pk"><span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-str">"start"</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">later</span><span class="tok-op">)</span>
+<span class="tok-name">later</span> <span class="tok-op">:=</span> <span class="tok-num">2</span></pre>
+<p class="label">出力</p>
+<pre class="out">&quot;start&quot;
+undefined variable: later</pre>
+</div>
+<p>どの変数も指さない名前があると、その式を実行する前にメッセージを出してプログラムが止まります。<code>later</code> は3行目で定義されていて、2行目からは見えません。1行目は先に実行されるので <code>"start"</code> は出ます。</p>
+
+<p>規則の全体は<a href="../reference/syntax.html#scope">リファレンスの変数の範囲</a>にあります。</p>
+
+<nav class="pager"><a class="prev" href="8.html"><small>前のページ</small>8. レコード・局所関数・脱出</a><a class="next" href="10.html"><small>次のページ</small>10. 添字と置き換え</a></nav>
+</main>
+</div>
+<footer><div class="inner"><a href="https://github.com/nineties/hex-to-compiler">github.com/nineties/hex-to-compiler</a></div></footer>
+<script src="../../assets/page.js"></script>
+</body>
+</html>

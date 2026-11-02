@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>3. パターンと融合 | hex-to-compiler project</title>
+<link rel="alternate" hreflang="en" href="../../en/tutorial/3.html">
+<link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+<header class="site-header"><div class="inner">
+<a class="logo" href="../index.html"><span class="brand"><b>hex-to-compiler <i>project</i></b><small>自分自身をブートストラップする処理系</small></span></a>
+<nav class="site-nav">
+<a href="../index.html">概要</a>
+<a class="here" href="../tutorial/index.html">チュートリアル</a>
+<a href="../reference/index.html">リファレンス</a>
+<a href="../implementation/index.html">処理系の実装</a>
+<a href="https://github.com/nineties/hex-to-compiler">GitHub</a>
+<a class="lang-switch" lang="en" hreflang="en" href="../../en/tutorial/3.html">English</a>
+</nav>
+</div></header>
+<div class="layout">
+<nav class="toc" aria-label="チュートリアルの目次"><details open><summary>チュートリアルの目次</summary>
+<h2>チュートリアル</h2>
+<ol>
+<li><a href="index.html">前提と実行</a></li>
+<li><a href="1.html">1. 式・束縛・関数</a></li>
+<li><a href="2.html">2. 値と M式</a></li>
+<li><a class="here" href="3.html">3. パターンと融合</a></li>
+<li><a href="4.html">4. ライブラリ</a></li>
+<li><a href="5.html">5. 代数的エフェクト</a></li>
+<li><a href="6.html">6. クオートと評価器</a></li>
+<li><a href="7.html">7. 文法の拡張</a></li>
+<li><a href="8.html">8. レコード・局所関数・脱出</a></li>
+<li><a href="9.html">9. 変数の範囲</a></li>
+<li><a href="10.html">10. 添字と置き換え</a></li>
+</ol></details></nav>
+<main>
+<h1>3. パターンと融合</h1>
+<p class="lead">無名関数の引数はパターンです。<code>f | g</code>（融合）は <code>f</code> のパターンが合わなければ <code>g</code> を試す関数で、場合分けはこれで書きます。</p>
+
+<div class="example">
+<p class="file">t3_fib.pk</p>
+<pre class="pk"><span class="tok-kw">fun</span> <span class="tok-name">fib</span>
+<span class="tok-name">fib</span> <span class="tok-op">=</span> <span class="tok-op">(</span><span class="tok-num">0</span><span class="tok-op">)</span> <span class="tok-op">-&gt;</span> <span class="tok-num">0</span>
+     <span class="tok-op">|</span> <span class="tok-op">(</span><span class="tok-num">1</span><span class="tok-op">)</span> <span class="tok-op">-&gt;</span> <span class="tok-num">1</span>
+     <span class="tok-op">|</span> <span class="tok-op">(</span><span class="tok-name">n</span><span class="tok-op">)</span> <span class="tok-op">-&gt;</span> <span class="tok-name">fib</span><span class="tok-op">(</span><span class="tok-name">n</span> <span class="tok-op">-</span> <span class="tok-num">1</span><span class="tok-op">)</span> <span class="tok-op">+</span> <span class="tok-name">fib</span><span class="tok-op">(</span><span class="tok-name">n</span> <span class="tok-op">-</span> <span class="tok-num">2</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">fib</span><span class="tok-op">(</span><span class="tok-num">20</span><span class="tok-op">)</span><span class="tok-op">)</span></pre>
+<p class="label">出力</p>
+<pre class="out">6765</pre>
+</div>
+<p>融合は左から試し、最初に合った無名関数を呼びます。どれも合わなければ <code>matching failed</code> で止まります。<code>|</code> は右結合です。</p>
+
+<p><code>f(p, ...) = e</code> は <code>f = f | (p, ...) -&gt; e</code> で、<code>f</code> の後ろに定義を追加します。同じ関数を定義ごとの行に分けて書けて、行は書いた順に試されます。</p>
+
+<div class="example">
+<p class="file">t3_fib_lines.pk</p>
+<pre class="pk"><span class="tok-name">fib</span><span class="tok-op">(</span><span class="tok-num">0</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-num">0</span>
+<span class="tok-name">fib</span><span class="tok-op">(</span><span class="tok-num">1</span><span class="tok-op">)</span> <span class="tok-op">=</span> <span class="tok-num">1</span>
+<span class="tok-name">fib</span><span class="tok-op">(</span><span class="tok-name">n</span><span class="tok-op">)</span> <span class="tok-op">=</span> <span class="tok-name">fib</span><span class="tok-op">(</span><span class="tok-name">n</span> <span class="tok-op">-</span> <span class="tok-num">1</span><span class="tok-op">)</span> <span class="tok-op">+</span> <span class="tok-name">fib</span><span class="tok-op">(</span><span class="tok-name">n</span> <span class="tok-op">-</span> <span class="tok-num">2</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">fib</span><span class="tok-op">(</span><span class="tok-num">20</span><span class="tok-op">)</span><span class="tok-op">)</span></pre>
+<p class="label">出力</p>
+<pre class="out">6765</pre>
+</div>
+<p>同じ場所に <code>f</code> が定義済みなら <code>f(p, ...) := e</code> でも <code>f</code> に定義が加わるので、行はすべて <code>:=</code> で書いても構いません。同じ名前で隠すときのことは後の節にあります。</p>
+
+<h2>パターン</h2>
+<table>
+<tr><th>パターン</th><th>合う値</th></tr>
+<tr><td><code>x</code>・<code>_</code></td><td>任意。<code>x</code> は束縛し、<code>_</code> は束縛しない</td></tr>
+<tr><td><code>0</code>・<code>"abc"</code></td><td>等しい整数・文字列</td></tr>
+<tr><td><code>'none</code></td><td>等しいシンボル（<code>Quote{none}</code>）</td></tr>
+<tr><td><code>Head{p, ...}</code></td><td>頭と引数の数が一致し、各引数が <code>p, ...</code> に合う M式</td></tr>
+<tr><td><code>p :: q</code>・<code>[p, q]</code>・<code>[]</code></td><td><code>Cons</code>・<code>Nil</code> のパターン</td></tr>
+<tr><td><code>p @ int</code></td><td><code>p</code> に合い、<code>typeof</code> が <code>int</code> の値</td></tr>
+</table>
+<div class="example">
+<p class="file">t3_list.pk</p>
+<pre class="pk"><span class="tok-kw">fun</span> <span class="tok-name">len</span>
+<span class="tok-name">len</span> <span class="tok-op">=</span> <span class="tok-op">(</span><span class="tok-name">Nil</span><span class="tok-op">{</span><span class="tok-op">}</span><span class="tok-op">)</span> <span class="tok-op">-&gt;</span> <span class="tok-num">0</span> <span class="tok-op">|</span> <span class="tok-op">(</span><span class="tok-name">_</span> <span class="tok-op">::</span> <span class="tok-name">xs</span><span class="tok-op">)</span> <span class="tok-op">-&gt;</span> <span class="tok-num">1</span> <span class="tok-op">+</span> <span class="tok-name">len</span><span class="tok-op">(</span><span class="tok-name">xs</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">len</span><span class="tok-op">(</span><span class="tok-op">[</span><span class="tok-num">5</span><span class="tok-op">,</span> <span class="tok-num">6</span><span class="tok-op">,</span> <span class="tok-num">7</span><span class="tok-op">]</span><span class="tok-op">)</span><span class="tok-op">)</span>
+
+<span class="tok-kw">fun</span> <span class="tok-name">sum</span>
+<span class="tok-name">sum</span> <span class="tok-op">=</span> <span class="tok-op">(</span><span class="tok-op">[</span><span class="tok-op">]</span><span class="tok-op">)</span> <span class="tok-op">-&gt;</span> <span class="tok-num">0</span> <span class="tok-op">|</span> <span class="tok-op">(</span><span class="tok-name">x</span> <span class="tok-op">::</span> <span class="tok-name">xs</span><span class="tok-op">)</span> <span class="tok-op">-&gt;</span> <span class="tok-name">x</span> <span class="tok-op">+</span> <span class="tok-name">sum</span><span class="tok-op">(</span><span class="tok-name">xs</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">sum</span><span class="tok-op">(</span><span class="tok-op">[</span><span class="tok-num">1</span><span class="tok-op">,</span> <span class="tok-num">2</span><span class="tok-op">,</span> <span class="tok-num">3</span><span class="tok-op">,</span> <span class="tok-num">4</span><span class="tok-op">]</span><span class="tok-op">)</span><span class="tok-op">)</span>
+
+<span class="tok-name">swap2</span> <span class="tok-op">:=</span> <span class="tok-op">(</span><span class="tok-op">[</span><span class="tok-name">a</span><span class="tok-op">,</span> <span class="tok-name">b</span><span class="tok-op">]</span><span class="tok-op">)</span> <span class="tok-op">-&gt;</span> <span class="tok-op">[</span><span class="tok-name">b</span><span class="tok-op">,</span> <span class="tok-name">a</span><span class="tok-op">]</span> <span class="tok-op">|</span> <span class="tok-op">(</span><span class="tok-name">xs</span><span class="tok-op">)</span> <span class="tok-op">-&gt;</span> <span class="tok-name">xs</span>
+<span class="tok-name">use</span><span class="tok-op">(</span><span class="tok-str">"pretty"</span><span class="tok-op">)</span>
+<span class="tok-name">put</span><span class="tok-op">(</span><span class="tok-str">f"</span><span class="tok-op">{</span><span class="tok-name">swap2</span><span class="tok-op">(</span><span class="tok-op">[</span><span class="tok-num">1</span><span class="tok-op">,</span> <span class="tok-num">2</span><span class="tok-op">]</span><span class="tok-op">)</span><span class="tok-op">}</span> <span class="tok-op">{</span><span class="tok-name">swap2</span><span class="tok-op">(</span><span class="tok-op">[</span><span class="tok-num">1</span><span class="tok-op">,</span> <span class="tok-num">2</span><span class="tok-op">,</span> <span class="tok-num">3</span><span class="tok-op">]</span><span class="tok-op">)</span><span class="tok-op">}</span><span class="tok-str">\n</span><span class="tok-str">"</span><span class="tok-op">)</span></pre>
+<p class="label">出力</p>
+<pre class="out">3
+10
+[2, 1] [1, 2, 3]</pre>
+</div>
+<div class="example">
+<p class="file">t3_type.pk</p>
+<pre class="pk"><span class="tok-name">describe</span> <span class="tok-op">:=</span> <span class="tok-op">(</span><span class="tok-name">n</span> <span class="tok-op">@</span> <span class="tok-name">int</span><span class="tok-op">)</span> <span class="tok-op">-&gt;</span> <span class="tok-str">f"</span><span class="tok-str">integer </span><span class="tok-op">{</span><span class="tok-name">n</span><span class="tok-op">}</span><span class="tok-str">"</span>
+          <span class="tok-op">|</span> <span class="tok-op">(</span><span class="tok-name">s</span> <span class="tok-op">@</span> <span class="tok-name">string</span><span class="tok-op">)</span> <span class="tok-op">-&gt;</span> <span class="tok-str">f"</span><span class="tok-str">string </span><span class="tok-op">{</span><span class="tok-name">s</span><span class="tok-op">}</span><span class="tok-str">"</span>
+          <span class="tok-op">|</span> <span class="tok-op">(</span><span class="tok-name">_</span><span class="tok-op">)</span> <span class="tok-op">-&gt;</span> <span class="tok-str">"other"</span>
+<span class="tok-name">put</span><span class="tok-op">(</span><span class="tok-name">describe</span><span class="tok-op">(</span><span class="tok-num">1</span><span class="tok-op">)</span><span class="tok-op">)</span><span class="tok-op">;</span> <span class="tok-name">put</span><span class="tok-op">(</span><span class="tok-str">"\n"</span><span class="tok-op">)</span>
+<span class="tok-name">put</span><span class="tok-op">(</span><span class="tok-name">describe</span><span class="tok-op">(</span><span class="tok-str">"abc"</span><span class="tok-op">)</span><span class="tok-op">)</span><span class="tok-op">;</span> <span class="tok-name">put</span><span class="tok-op">(</span><span class="tok-str">"\n"</span><span class="tok-op">)</span>
+<span class="tok-name">put</span><span class="tok-op">(</span><span class="tok-name">describe</span><span class="tok-op">(</span><span class="tok-op">'</span><span class="tok-name">x</span><span class="tok-op">)</span><span class="tok-op">)</span><span class="tok-op">;</span> <span class="tok-name">put</span><span class="tok-op">(</span><span class="tok-str">"\n"</span><span class="tok-op">)</span></pre>
+<p class="label">出力</p>
+<pre class="out">integer 1
+string abc
+other</pre>
+</div>
+
+<h2>定義の追加</h2>
+<div class="example">
+<p class="file">t3_extend.pk</p>
+<pre class="pk"><span class="tok-name">greet</span> <span class="tok-op">:=</span> <span class="tok-op">(</span><span class="tok-name">_</span><span class="tok-op">)</span> <span class="tok-op">-&gt;</span> <span class="tok-str">"hello"</span>
+<span class="tok-name">put</span><span class="tok-op">(</span><span class="tok-name">greet</span><span class="tok-op">(</span><span class="tok-str">"en"</span><span class="tok-op">)</span><span class="tok-op">)</span><span class="tok-op">;</span> <span class="tok-name">put</span><span class="tok-op">(</span><span class="tok-str">"\n"</span><span class="tok-op">)</span>
+
+<span class="tok-name">greet</span> <span class="tok-op">=</span> <span class="tok-op">(</span><span class="tok-str">"fr"</span><span class="tok-op">)</span> <span class="tok-op">-&gt;</span> <span class="tok-str">"bonjour"</span> <span class="tok-op">|</span> <span class="tok-name">greet</span>
+<span class="tok-name">put</span><span class="tok-op">(</span><span class="tok-name">greet</span><span class="tok-op">(</span><span class="tok-str">"fr"</span><span class="tok-op">)</span><span class="tok-op">)</span><span class="tok-op">;</span> <span class="tok-name">put</span><span class="tok-op">(</span><span class="tok-str">"\n"</span><span class="tok-op">)</span>
+<span class="tok-name">put</span><span class="tok-op">(</span><span class="tok-name">greet</span><span class="tok-op">(</span><span class="tok-str">"de"</span><span class="tok-op">)</span><span class="tok-op">)</span><span class="tok-op">;</span> <span class="tok-name">put</span><span class="tok-op">(</span><span class="tok-str">"\n"</span><span class="tok-op">)</span></pre>
+<p class="label">出力</p>
+<pre class="out">hello
+bonjour
+hello</pre>
+</div>
+<p>融合は値なので、既存の関数の前に定義を追加して代入し直せます。</p>
+
+<h2>関数に定義を追加する・同じ名前で隠す</h2>
+<div class="example">
+<p class="file">t8_place.pk</p>
+<pre class="pk"><span class="tok-name">fib</span><span class="tok-op">(</span><span class="tok-num">0</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-num">0</span>
+<span class="tok-name">fib</span><span class="tok-op">(</span><span class="tok-num">1</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-num">1</span>
+<span class="tok-name">fib</span><span class="tok-op">(</span><span class="tok-name">n</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-name">fib</span><span class="tok-op">(</span><span class="tok-name">n</span> <span class="tok-op">-</span> <span class="tok-num">1</span><span class="tok-op">)</span> <span class="tok-op">+</span> <span class="tok-name">fib</span><span class="tok-op">(</span><span class="tok-name">n</span> <span class="tok-op">-</span> <span class="tok-num">2</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">fib</span><span class="tok-op">(</span><span class="tok-num">10</span><span class="tok-op">)</span><span class="tok-op">)</span>
+
+<span class="tok-name">name</span><span class="tok-op">(</span><span class="tok-name">x</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-str">"outer"</span>
+<span class="tok-name">inner</span><span class="tok-op">(</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-op">{</span>
+    <span class="tok-name">name</span><span class="tok-op">(</span><span class="tok-num">0</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-str">"inner"</span>
+    <span class="tok-name">name</span><span class="tok-op">(</span><span class="tok-num">0</span><span class="tok-op">)</span>
+<span class="tok-op">}</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">inner</span><span class="tok-op">(</span><span class="tok-op">)</span><span class="tok-op">,</span> <span class="tok-name">name</span><span class="tok-op">(</span><span class="tok-num">0</span><span class="tok-op">)</span><span class="tok-op">,</span> <span class="tok-name">name</span><span class="tok-op">(</span><span class="tok-num">1</span><span class="tok-op">)</span><span class="tok-op">}</span><span class="tok-op">)</span></pre>
+<p class="label">出力</p>
+<pre class="out">55
+Tuple{&quot;inner&quot;, &quot;outer&quot;, &quot;outer&quot;}</pre>
+</div>
+<p><code>f(p, ...) := e</code> と書くと、同じ場所に <code>f</code> が定義済みなら <code>f</code> に定義が1つ加わり、なければ新しい <code>f</code> が定義されます。場所は、トップレベルでは同じファイル、関数の中ではその関数の引数と、その関数でそれより前に定義した変数です。外の <code>name</code> は <code>inner</code> の中の場所の変数ではないので、<code>inner</code> の中の <code>name(0) := "inner"</code> は新しい <code>name</code> を定義し、外の <code>name</code> は変わりません。</p>
+<div class="example">
+<p class="file">t8_library.pk</p>
+<pre class="pk"><span class="tok-name">use</span><span class="tok-op">(</span><span class="tok-str">"list"</span><span class="tok-op">)</span>
+<span class="tok-name">last</span><span class="tok-op">(</span><span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">a</span><span class="tok-op">,</span> <span class="tok-name">b</span><span class="tok-op">}</span><span class="tok-op">)</span> <span class="tok-op">=</span> <span class="tok-name">b</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">last</span><span class="tok-op">(</span><span class="tok-op">[</span><span class="tok-num">1</span><span class="tok-op">,</span> <span class="tok-num">2</span><span class="tok-op">,</span> <span class="tok-num">3</span><span class="tok-op">]</span><span class="tok-op">)</span><span class="tok-op">,</span> <span class="tok-name">last</span><span class="tok-op">(</span><span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-num">4</span><span class="tok-op">,</span> <span class="tok-num">5</span><span class="tok-op">}</span><span class="tok-op">)</span><span class="tok-op">}</span><span class="tok-op">)</span>
+<span class="tok-name">sum</span><span class="tok-op">(</span><span class="tok-name">xs</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-str">"mine"</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">sum</span><span class="tok-op">(</span><span class="tok-op">[</span><span class="tok-num">1</span><span class="tok-op">,</span> <span class="tok-num">2</span><span class="tok-op">]</span><span class="tok-op">)</span><span class="tok-op">)</span></pre>
+<p class="label">出力</p>
+<pre class="out">Tuple{3, 5}
+&quot;mine&quot;</pre>
+</div>
+<p>別のファイルで定義した関数と組み込み関数も、プログラムのトップレベルでは同じ場所の変数ではありません。<code>sum(xs) := ...</code> は新しい <code>sum</code> を定義して <code>use("list")</code> の <code>sum</code> を隠します。ライブラリの関数に定義を追加するときは <code>last(Tuple{a, b}) = b</code> のように <code>=</code> で書き、追加した定義は元の定義のあとに試されます。名前がどの変数を指すかは<a href="9.html">9章</a>にあります。</p>
+
+<h2>match</h2>
+<div class="example">
+<p class="file">t3_match.pk</p>
+<pre class="pk"><span class="tok-name">classify</span><span class="tok-op">(</span><span class="tok-name">n</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-kw">match</span> <span class="tok-name">n</span> <span class="tok-op">{</span>
+    <span class="tok-num">0</span> <span class="tok-op">-&gt;</span> <span class="tok-str">"zero"</span>
+  <span class="tok-op">|</span> <span class="tok-name">n</span> <span class="tok-kw">if</span> <span class="tok-name">n</span> <span class="tok-op">&lt;</span> <span class="tok-num">0</span> <span class="tok-op">-&gt;</span> <span class="tok-str">"negative"</span>
+  <span class="tok-op">|</span> <span class="tok-name">n</span> <span class="tok-kw">if</span> <span class="tok-name">n</span> <span class="tok-op">%</span> <span class="tok-num">2</span> <span class="tok-op">==</span> <span class="tok-num">0</span> <span class="tok-op">-&gt;</span> <span class="tok-str">"even"</span>
+  <span class="tok-op">|</span> <span class="tok-name">_</span> <span class="tok-op">-&gt;</span> <span class="tok-str">"odd"</span>
+<span class="tok-op">}</span>
+<span class="tok-name">put</span><span class="tok-op">(</span><span class="tok-name">classify</span><span class="tok-op">(</span><span class="tok-num">0</span><span class="tok-op">)</span><span class="tok-op">)</span><span class="tok-op">;</span> <span class="tok-name">put</span><span class="tok-op">(</span><span class="tok-str">" "</span><span class="tok-op">)</span>
+<span class="tok-name">put</span><span class="tok-op">(</span><span class="tok-name">classify</span><span class="tok-op">(</span><span class="tok-num">-4</span><span class="tok-op">)</span><span class="tok-op">)</span><span class="tok-op">;</span> <span class="tok-name">put</span><span class="tok-op">(</span><span class="tok-str">" "</span><span class="tok-op">)</span>
+<span class="tok-name">put</span><span class="tok-op">(</span><span class="tok-name">classify</span><span class="tok-op">(</span><span class="tok-num">6</span><span class="tok-op">)</span><span class="tok-op">)</span><span class="tok-op">;</span> <span class="tok-name">put</span><span class="tok-op">(</span><span class="tok-str">" "</span><span class="tok-op">)</span>
+<span class="tok-name">put</span><span class="tok-op">(</span><span class="tok-name">classify</span><span class="tok-op">(</span><span class="tok-num">7</span><span class="tok-op">)</span><span class="tok-op">)</span><span class="tok-op">;</span> <span class="tok-name">put</span><span class="tok-op">(</span><span class="tok-str">"\n"</span><span class="tok-op">)</span></pre>
+<p class="label">出力</p>
+<pre class="out">zero negative even odd</pre>
+</div>
+<p><code>match e { f }</code> は <code>e</code> を1回評価し、関数 <code>f</code> に渡して呼びます。<code>f</code> は腕を <code>|</code> でつないだ関数で、上から試します。<code>p if c -&gt; a</code> はガードで、<code>c</code> が偽なら次の腕に進みます。</p>
+
+<h2>記号微分</h2>
+<div class="example">
+<p class="file">t3_deriv.pk</p>
+<pre class="pk"><span class="tok-kw">fun</span> <span class="tok-name">d</span>
+<span class="tok-name">d</span> <span class="tok-op">=</span> <span class="tok-op">(</span><span class="tok-name">n</span> <span class="tok-op">@</span> <span class="tok-name">int</span><span class="tok-op">,</span> <span class="tok-name">x</span><span class="tok-op">)</span> <span class="tok-op">-&gt;</span> <span class="tok-num">0</span>
+   <span class="tok-op">|</span> <span class="tok-op">(</span><span class="tok-name">y</span> <span class="tok-op">@</span> <span class="tok-name">symbol</span><span class="tok-op">,</span> <span class="tok-name">x</span><span class="tok-op">)</span> <span class="tok-op">-&gt;</span> <span class="tok-kw">if</span> <span class="tok-op">(</span><span class="tok-name">y</span> <span class="tok-op">==</span> <span class="tok-name">x</span><span class="tok-op">)</span> <span class="tok-num">1</span> <span class="tok-kw">else</span> <span class="tok-num">0</span>
+   <span class="tok-op">|</span> <span class="tok-op">(</span><span class="tok-name">Add</span><span class="tok-op">{</span><span class="tok-name">a</span><span class="tok-op">,</span> <span class="tok-name">b</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">x</span><span class="tok-op">)</span> <span class="tok-op">-&gt;</span> <span class="tok-name">Add</span><span class="tok-op">{</span><span class="tok-name">d</span><span class="tok-op">(</span><span class="tok-name">a</span><span class="tok-op">,</span> <span class="tok-name">x</span><span class="tok-op">)</span><span class="tok-op">,</span> <span class="tok-name">d</span><span class="tok-op">(</span><span class="tok-name">b</span><span class="tok-op">,</span> <span class="tok-name">x</span><span class="tok-op">)</span><span class="tok-op">}</span>
+   <span class="tok-op">|</span> <span class="tok-op">(</span><span class="tok-name">Mul</span><span class="tok-op">{</span><span class="tok-name">a</span><span class="tok-op">,</span> <span class="tok-name">b</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">x</span><span class="tok-op">)</span> <span class="tok-op">-&gt;</span> <span class="tok-name">Add</span><span class="tok-op">{</span><span class="tok-name">Mul</span><span class="tok-op">{</span><span class="tok-name">d</span><span class="tok-op">(</span><span class="tok-name">a</span><span class="tok-op">,</span> <span class="tok-name">x</span><span class="tok-op">)</span><span class="tok-op">,</span> <span class="tok-name">b</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">Mul</span><span class="tok-op">{</span><span class="tok-name">a</span><span class="tok-op">,</span> <span class="tok-name">d</span><span class="tok-op">(</span><span class="tok-name">b</span><span class="tok-op">,</span> <span class="tok-name">x</span><span class="tok-op">)</span><span class="tok-op">}</span><span class="tok-op">}</span>
+
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">d</span><span class="tok-op">(</span><span class="tok-op">'</span><span class="tok-name">Add</span><span class="tok-op">{</span><span class="tok-name">x</span><span class="tok-op">,</span> <span class="tok-num">3</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-op">'</span><span class="tok-name">x</span><span class="tok-op">)</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">d</span><span class="tok-op">(</span><span class="tok-op">'</span><span class="tok-name">Mul</span><span class="tok-op">{</span><span class="tok-name">x</span><span class="tok-op">,</span> <span class="tok-name">y</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-op">'</span><span class="tok-name">x</span><span class="tok-op">)</span><span class="tok-op">)</span></pre>
+<p class="label">出力</p>
+<pre class="out">Add{1, 0}
+Add{Mul{1, y}, Mul{x, 0}}</pre>
+</div>
+<p><code>'Add{x, 3}</code> はクオートで、評価せずに M式のまま渡します（<a href="6.html">6章</a>）。簡約まで入れた版は <a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/examples/deriv.pk">planck/examples/deriv.pk</a> です。</p>
+
+<nav class="pager"><a class="prev" href="2.html"><small>前のページ</small>2. 値と M式</a><a class="next" href="4.html"><small>次のページ</small>4. ライブラリ</a></nav>
+</main>
+</div>
+<footer><div class="inner"><a href="https://github.com/nineties/hex-to-compiler">github.com/nineties/hex-to-compiler</a></div></footer>
+<script src="../../assets/page.js"></script>
+</body>
+</html>
