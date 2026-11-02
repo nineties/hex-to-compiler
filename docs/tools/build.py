@@ -4,17 +4,20 @@
   <!--ex NAME-->     examples/NAME.pk と examples/NAME.out を「コード＋出力」で入れる
   <!--src NAME-->    examples/NAME.pk だけを入れる
   <!--out NAME-->    examples/NAME.out だけを入れる
+  <!--text NAME-->   examples/NAME.txt を planck 以外のコードとして入れる
   <!--diagram-->     ステージの図（インライン SVG、幅の広い版と狭い版）を入れる
+planck のコードは色付きの HTML にして入れる。色付きの HTML は planck の highlight(planck/lib/highlight.pk)が作り、
+hl/<コードの sha1 の先頭12桁>.html に置く(highlight.sh が GCP で作る)。build.py --texts DIR は、色付けが要るコードを DIR/<同じ名前>.pk に書き出す。
 1行目は <!--title タイトル--> にする。
 src/ja/ が日本語、src/en/ が英語。日本語は docs/ja/ に、英語は docs/en/ に書く。
 docs/index.html は言語を選ぶ入口、docs/tutorial/ などの URL には docs/ja/ への移動だけの頁を書く。
 """
-import html, re, sys
+import hashlib, html, re, sys
 from pathlib import Path
 
 T = Path(__file__).resolve().parent
 W = T.parent.parent
-SRC, EX, OUT = T / "src", T / "examples", W / "docs"
+SRC, EX, OUT, HL = T / "src", T / "examples", W / "docs", T / "hl"
 REPO = "https://github.com/nineties/hex-to-compiler"
 
 SECTIONS = {
@@ -224,6 +227,7 @@ def diagram(lang):
 
 
 used = set()
+used_hl = set()
 
 
 def ex_file(name, ext):
@@ -234,8 +238,24 @@ def ex_file(name, ext):
     return p.read_text(encoding="utf-8")
 
 
+TEXTS = None
+
+
+def highlighted(text):
+    """planck のコードの色付きの HTML"""
+    key = hashlib.sha1(text.encode("utf-8")).hexdigest()[:12]
+    if TEXTS is not None:
+        (TEXTS / f"{key}.pk").write_text(text, encoding="utf-8")
+        return html.escape(text)
+    p = HL / f"{key}.html"
+    if not p.exists():
+        sys.exit(f"missing {p}: run highlight.sh")
+    used_hl.add(p.name)
+    return p.read_text(encoding="utf-8")
+
+
 def code_block(name):
-    return f'<p class="file">{name}.pk</p>\n<pre class="pk">{html.escape(ex_file(name, "pk").rstrip(chr(10)))}</pre>'
+    return f'<p class="file">{name}.pk</p>\n<pre class="pk">{highlighted(ex_file(name, "pk").rstrip(chr(10)))}</pre>'
 
 
 def out_block(name):
@@ -248,6 +268,7 @@ def expand(body):
     body = re.sub(r"<!--ex (\w+)-->", lambda m: f'<div class="example">\n{code_block(m[1])}\n{out_block(m[1])}\n</div>', body)
     body = re.sub(r"<!--src (\w+)-->", lambda m: f'<div class="example">\n{code_block(m[1])}\n</div>', body)
     body = re.sub(r"<!--out (\w+)-->", lambda m: f'<div class="example">\n{out_block(m[1])}\n</div>', body)
+    body = re.sub(r"<!--text (\w+)-->", lambda m: f'<pre>{html.escape(ex_file(m[1], "txt").rstrip(chr(10)))}</pre>', body)
     body = re.sub(r"<!--file ([\w./-]+) (\d+)-(\d+)-->", excerpt, body)
     body = re.sub(r"\[\[([\w./-]+)#(\d+)(?:-(\d+))?\]\]", line_link, body)
     body = body.replace("@REPO@", REPO)
@@ -259,10 +280,13 @@ def excerpt(m):
     ls = (W / f).read_text(encoding="utf-8").splitlines()
     if b > len(ls):
         sys.exit(f"excerpt out of range: {m[0]}")
-    cls = ' class="pk"' if f.endswith(".pk") else ""
     text = "\n".join(ls[a - 1:b])
+    if f.endswith(".pk"):
+        cls, body = ' class="pk"', highlighted(text)
+    else:
+        cls, body = "", html.escape(text)
     return (f'<div class="example">\n<p class="file"><a href="{REPO}/blob/main/{f}#L{a}-L{b}">{f}:{a}–{b}</a></p>\n'
-            f'<pre{cls}>{html.escape(text)}</pre>\n</div>')
+            f'<pre{cls}>{body}</pre>\n</div>')
 
 
 def line_link(m):
@@ -351,7 +375,7 @@ def page(cur_sec, cur_page, title, body, toc_pages, sec_label):
 </main>
 </div>
 <footer><div class="inner"><a href="{REPO}">github.com/nineties/hex-to-compiler</a></div></footer>
-<script src="{up}assets/highlight.js"></script>
+<script src="{up}assets/page.js"></script>
 </body>
 </html>
 '''
@@ -438,10 +462,17 @@ def build_entrance():
 
 
 def main():
+    global TEXTS
+    if len(sys.argv) == 3 and sys.argv[1] == "--texts":
+        TEXTS = Path(sys.argv[2])
+        TEXTS.mkdir(parents=True, exist_ok=True)
     build_entrance()
     counts = {lang: build_lang(lang) for lang in ("ja", "en") if (SRC / lang).exists()}
     unused = sorted(p.stem for p in EX.glob("*.pk") if p.stem not in used)
-    print("built pages:", counts, "examples used:", len(used), "unused:", unused)
+    stale = sorted(p.name for p in HL.glob("*.html") if p.name not in used_hl) if TEXTS is None else []
+    if TEXTS is not None:
+        (TEXTS / "index.txt").write_text("".join(f"{q.stem}\n" for q in sorted(TEXTS.glob("*.pk"))), encoding="utf-8")
+    print("built pages:", counts, "examples used:", len(used), "unused:", unused, "highlighted:", len(used_hl), "stale:", stale)
 
 
 main()

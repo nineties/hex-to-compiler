@@ -1,0 +1,103 @@
+# tests for planck/lib/highlight.pk
+# Copyright (C) 2026 nineties
+
+use("highlight")
+
+passed := 0
+failed := 0
+
+check(actual, expected) := if (actual == expected) {
+    passed = passed + 1
+} else {
+    failed = failed + 1
+    put("Test failed: expected "); print(expected)
+    put(" but got "); println(actual)
+}
+
+at(h, i, t) := i + strlen(t) <= strlen(h) and substr(h, i, i + strlen(t)) == t
+
+# the text of an output: the tags removed and the escapes undone
+plain(h) := {
+    b := strbuf_new()
+    n := strlen(h)
+    i := 0
+    while (i < n) {
+        if (ord(h, i) == 60) {
+            while (ord(h, i) != 62) i = i + 1
+            i = i + 1
+        } else if (at(h, i, "&lt;")) {
+            strbuf_add(b, "<")
+            i = i + 4
+        } else if (at(h, i, "&gt;")) {
+            strbuf_add(b, ">")
+            i = i + 4
+        } else if (at(h, i, "&amp;")) {
+            strbuf_add(b, "&")
+            i = i + 5
+        } else {
+            strbuf_add(b, substr(h, i, i + 1))
+            i = i + 1
+        }
+    }
+    strbuf_str(b)
+}
+
+has(h, part) := index_of_str(h, part, 0) >= 0
+
+# === Classes ===
+check(highlight("x := 1"),
+      "<span class=\"tok-name\">x</span> <span class=\"tok-op\">:=</span> <span class=\"tok-num\">1</span>")
+check(highlight("if (a) b else c"),
+      "<span class=\"tok-kw\">if</span> <span class=\"tok-op\">(</span><span class=\"tok-name\">a</span><span class=\"tok-op\">)</span> <span class=\"tok-name\">b</span> <span class=\"tok-kw\">else</span> <span class=\"tok-name\">c</span>")
+check(highlight("put(\"a b\")"),
+      "<span class=\"tok-name\">put</span><span class=\"tok-op\">(</span><span class=\"tok-str\">\"a b\"</span><span class=\"tok-op\">)</span>")
+check(highlight("f\"n = {n}\""),
+      "<span class=\"tok-str\">f\"</span><span class=\"tok-str\">n = </span><span class=\"tok-op\">{</span><span class=\"tok-name\">n</span><span class=\"tok-op\">}</span><span class=\"tok-str\">\"</span>")
+
+# === Comments and escapes ===
+check(highlight("# a <b> & c\nx"), "<span class=\"tok-com\"># a &lt;b&gt; &amp; c</span>\n<span class=\"tok-name\">x</span>")
+check(highlight("x # t"), "<span class=\"tok-name\">x</span> <span class=\"tok-com\"># t</span>")
+check(highlight("a < b and c > d"),
+      "<span class=\"tok-name\">a</span> <span class=\"tok-op\">&lt;</span> <span class=\"tok-name\">b</span> <span class=\"tok-kw\">and</span> <span class=\"tok-name\">c</span> <span class=\"tok-op\">&gt;</span> <span class=\"tok-name\">d</span>")
+check(highlight("\"#\" # \"x\""), "<span class=\"tok-str\">\"#\"</span> <span class=\"tok-com\"># \"x\"</span>")
+check(highlight(""), "")
+
+# === Without the tags the output is the source ===
+srcs := [
+    "a := [1, 2, 3]\nb := a[0] + 0x1f - 0b101\n",
+    "fib(n) := if (n < 2) n else fib(n - 1) + fib(n - 2)\nprintln(fib(10))\n",
+    "handle { perform 1 } with Tuple{Tuple{v, k}, k(v)}\n",
+    "while (i < 3) {\n    i = i + 1 # step\n}\n",
+    "'sym ` Apply{!f, Tuple{!x}}",
+    "a < b & c > \"<&>\"\n\n\n# end"
+]
+for (s in srcs) check(plain(highlight(s)), s)
+
+# partial text: the part which does not parse is left as it is
+check(plain(highlight("x := 1\n)) ?? (\ny := if (a) b else c\n")), "x := 1\n)) ?? (\ny := if (a) b else c\n")
+check(has(highlight("x := 1\n)) ?? (\ny := if (a) b else c\n"), "<span class=\"tok-kw\">else</span>"), true)
+
+# files of the repository
+for (f in ["planck/lib/list.pk", "planck/examples/extend.pk", "planck/examples/calc.pk"]) {
+    s := read_file(f)
+    check(plain(highlight(s)), s)
+}
+
+# === A rule declared in the text colors the rest of the text ===
+ext := "primary ::= 'for i:ident 'in a:add_expr \"..\" b:add_expr body:block { `Do{!i} } | ...\nfor i in 1..5 { println(i) }\n"
+version := peg_version
+h := highlight(ext)
+check(plain(h), ext)
+check(has(h, "<span class=\"tok-kw\">for</span> <span class=\"tok-name\">i</span> <span class=\"tok-kw\">in</span> <span class=\"tok-num\">1</span><span class=\"tok-op\">..</span><span class=\"tok-num\">5</span>"), true)
+check(peg_version, version)
+# the rule is gone after highlight, so the same text no longer reads as the extension
+h2 := highlight("for i in 1..5 { println(i) }\n")
+check(has(h2, "<span class=\"tok-op\">..</span>"), false)
+
+# a word added by a declaration is a keyword where it is used, and a name where the declaration is gone
+un := "primary ::= 'unless \"(\" c:expr \")\" a:expr { `If{!c, none, !a} } | ...\nunless (1 > 2) put(1)\n"
+check(has(highlight(un), "<span class=\"tok-kw\">unless</span> <span class=\"tok-op\">(</span>"), true)
+check(has(highlight("unless (1 > 2) put(1)\n"), "<span class=\"tok-kw\">unless</span>"), false)
+
+put("Tests passed "); print(passed); put("/"); println(passed + failed)
+if (failed > 0) exit(1)
