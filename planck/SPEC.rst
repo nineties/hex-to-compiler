@@ -542,7 +542,7 @@ Builtin functions
      - ``parse`` ``eval`` ``exit`` ``argv`` ``_set_file``
    * - ``planck/init.pk``
      - ``true`` ``false`` ``none`` ``_not`` ``load`` ``table`` ``table_get`` ``table_set``
-   * - ``planck/use.pk``
+   * - ``planck/lib/use.pk``
      - ``use`` ``used_libs``
    * - ``planck/peg.pk``
      - ``peg_parse`` ``_define_rule``
@@ -592,7 +592,7 @@ Each file uses the files it needs. Lists are ``Cons{x, xs}`` and ``Nil{}``, and 
 Preprocessed libraries
 ~~~~~~~~~~~~~~~~~~~~~~
 
-Running the program ``planck/preprocess.pk`` with the names of libraries as arguments parses the chosen libraries into M-expressions in advance.
+Running the program ``tools/preprocess.pk`` with the names of libraries as arguments parses the chosen libraries into M-expressions in advance.
 It loads each named library as ``use("name")`` does, with the libraries it uses, and writes the M-expressions that each library is parsed into
 to ``planck/lib/<name>.pkm``, one M-expression on each line.
 Nothing is evaluated in advance: ``use`` reads the M-expressions of ``planck/lib/<name>.pkm`` and evaluates them one by one,
