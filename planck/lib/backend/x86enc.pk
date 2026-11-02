@@ -1,0 +1,308 @@
+# x86enc: encodes instructions of ir.pk as 32-bit x86 machine code
+# Copyright (C) 2026 nineties
+#
+# The registers 0 to 7 are eax, ecx, edx, ebx, esp, ebp, esi and edi, and 8 stands for the flags, which are not encoded.
+# The operations are:
+#   mov ALU(add bor band sub bxor cmp adc sbb) test imul neg not mul div idiv cdq shl shr sar
+#   lea movb movw movzxb movsxb movzxw movsxw push pop call ret jmp jcc setcc int ud2
+# and a label instruction I{'label, [L{l}]}. A shift by cl is I{op, [DU{d}, IU{1}]}. A memory operand is M, MX or MG; the stack slots (MF) are replaced by M with ebp before.
+# An emitter writes the code of functions to a section of an object (obj.pk): Em{obj, sec, buf, labels, fixups}.
+
+use("base")
+use("list")
+use("table")
+use("vector")
+use("bytes")
+use("backend/obj")
+use("backend/ir")
+
+fun x86_modrm_base
+fun x86_alu_entry
+fun x86_alu_op
+fun x86_two
+fun x86_f7
+
+x86_eax := 0
+x86_ecx := 1
+x86_edx := 2
+x86_ebx := 3
+x86_esp := 4
+x86_ebp := 5
+x86_esi := 6
+x86_edi := 7
+x86_flags := 8
+
+x86_regnames := ["eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi"]
+
+# em_new(o, secname) writes to the section secname of the object o, which is made if it is not there
+em_new(o, secname) := {
+    s := obj_sec(o, secname, 'code, 16)
+    Em{o, secname, obj_buf(s), table(), vec_new()}
+}
+
+em_pos(Em{_, _, b, _, _}) := bb_len(b)
+em_u8(Em{_, _, b, _, _}, n) := bb_u8(b, n)
+em_u32(Em{_, _, b, _, _}, n) := bb_u32(b, n)
+
+em_bytes(em, xs) := each(x -> em_u8(em, x), xs)
+
+em_label(Em{_, _, b, labels, _}, l) := table_set(labels, l, bb_len(b))
+
+# a 32-bit field that holds the displacement to the label l from the end of the field
+em_rel32(Em{_, _, b, _, fixups}, l) := {
+    vec_push(fixups, Tuple{bb_len(b), l})
+    bb_u32(b, 0)
+}
+
+# em_finish(em) fills in the displacements to the labels of the function that was written
+em_finish(Em{_, _, b, labels, fixups}) := {
+    each((Tuple{at, l}) -> {
+        t := table_get(labels, l, -1)
+        if (t < 0) panic(f"em_finish: label L{l} is not in the function")
+        bb_set_u32(b, at, t - (at + 4))
+    }, vec_to_list(fixups))
+}
+
+# a 32-bit field that is the address of the symbol plus off (kind 'Abs32), or the displacement to it (kind 'Pc32)
+em_sym(Em{o, sec, b, _, _}, kind, name, off) := {
+    obj_reloc(o, sec, bb_len(b), kind, name, if (kind == 'Pc32) off - 4 else off)
+    bb_u32(b, 0)
+}
+
+x86_scale(s) := if (s == 1) 0 else if (s == 2) 1 else if (s == 4) 2 else if (s == 8) 3 else panic("x86: the scale of an index is 1, 2, 4 or 8")
+
+x86_reg(o) := match o {
+    D{r} -> r
+  | U{r} -> r
+  | DU{r} -> r
+  | _ -> panic("x86: a register is expected")
+}
+
+x86_is_mem(o) := member(head(o), ['M, 'MX, 'MG])
+x86_fits8(n) := n >= -128 and n <= 127
+
+# em_modrm(em, reg, rm) writes the ModRM byte, the SIB byte and the displacement. reg is the number in the reg field.
+# rm is a register number or a memory operand.
+em_modrm(em, reg, rm) := match rm {
+    r @ int -> em_u8(em, 192 + reg * 8 + r)
+  | M{U{b}, d} -> x86_modrm_base(em, reg, b, none, 0, d)
+  | MX{U{b}, U{x}, s, d} -> x86_modrm_base(em, reg, b, x, s, d)
+  | MX{'none, U{x}, s, d} -> {
+        em_u8(em, reg * 8 + 4)
+        em_u8(em, x86_scale(s) * 64 + x * 8 + 5)
+        em_u32(em, d)
+    }
+  | MG{name, d} -> {
+        em_u8(em, reg * 8 + 5)
+        em_sym(em, 'Abs32, name, d)
+    }
+  | _ -> panic("x86: a memory operand is expected")
+}
+
+x86_modrm_base(em, reg, b, x, s, d) := {
+    mod := if (d == 0 and b != 5) 0 else if (x86_fits8(d)) 1 else 2
+    if (x == none and b != 4) em_u8(em, mod * 64 + reg * 8 + b)
+    else {
+        if (x == 4) panic("x86: esp cannot be an index")
+        em_u8(em, mod * 64 + reg * 8 + 4)
+        em_u8(em, (if (x == none) 0 else x86_scale(s)) * 64 + (if (x == none) 4 else x) * 8 + b)
+    }
+    if (mod == 1) em_u8(em, d) else if (mod == 2) em_u32(em, d)
+}
+
+# the operand rm of an instruction: a register number or a memory operand
+x86_rm(o) := match o {
+    D{r} -> r
+  | U{r} -> r
+  | DU{r} -> r
+  | _ -> if (x86_is_mem(o)) o else panic("x86: a register or a memory operand is expected")
+}
+
+x86_byte_reg(r) := if (r >= 4) panic(f"x86: {r} has no 8-bit register") else r
+
+# the opcodes of the ALU operations: the opcode of op r/m32, r32 and the digit of the immediate forms
+x86_alu := [Tuple{'add, 1, 0}, Tuple{'bor, 9, 1}, Tuple{'adc, 17, 2}, Tuple{'sbb, 25, 3}, Tuple{'band, 33, 4},
+            Tuple{'sub, 41, 5}, Tuple{'bxor, 49, 6}, Tuple{'cmp, 57, 7}]
+
+# the condition codes
+x86_cc := [Tuple{'eq, 4}, Tuple{'ne, 5}, Tuple{'lt, 12}, Tuple{'ge, 13}, Tuple{'le, 14}, Tuple{'gt, 15},
+           Tuple{'ltu, 2}, Tuple{'geu, 3}, Tuple{'leu, 6}, Tuple{'gtu, 7}]
+
+x86_cc_code(c) := {
+    e := find(e -> arg(e, 0) == c, x86_cc)
+    if (e == none) panic(f"x86: unknown condition {c}")
+    e[1]
+}
+
+x86_shift_digit(op) := if (op == 'shl) 4 else if (op == 'shr) 5 else 7
+
+# x86_emit(em, i) writes the instruction i. A jump to the label that follows is left out by x86_emit_code.
+x86_emit(em, i) := match I{ir_op(i), ir_explicit(i)} {
+    I{'label, [L{l}]} -> em_label(em, l)
+  | I{'mov, [D{d}, U{s}]} -> {
+        em_u8(em, 137)
+        em_modrm(em, s, d)
+    }
+  | I{'mov, [D{d}, K{n}]} -> {
+        em_u8(em, 184 + d)
+        em_u32(em, n)
+    }
+  | I{'mov, [D{d}, S{name, off}]} -> {
+        em_u8(em, 184 + d)
+        em_sym(em, 'Abs32, name, off)
+    }
+  | I{'mov, [D{d}, m]} -> {
+        em_u8(em, 139)
+        em_modrm(em, d, m)
+    }
+  | I{'mov, [m, U{s}]} -> {
+        em_u8(em, 137)
+        em_modrm(em, s, m)
+    }
+  | I{'mov, [m, K{n}]} -> {
+        em_u8(em, 199)
+        em_modrm(em, 0, m)
+        em_u32(em, n)
+    }
+  | I{'movb, [m, U{s}]} -> {
+        em_u8(em, 136)
+        em_modrm(em, x86_byte_reg(s), m)
+    }
+  | I{'movb, [m, K{n}]} -> {
+        em_u8(em, 198)
+        em_modrm(em, 0, m)
+        em_u8(em, n)
+    }
+  | I{'movw, [m, U{s}]} -> {
+        em_u8(em, 102)
+        em_u8(em, 137)
+        em_modrm(em, s, m)
+    }
+  | I{'movw, [m, K{n}]} -> {
+        em_u8(em, 102)
+        em_u8(em, 199)
+        em_modrm(em, 0, m)
+        em_u8(em, bit_and(n, 255))
+        em_u8(em, bit_sar(n, 8))
+    }
+  | I{'movzxb, [D{d}, s]} -> x86_two(em, 182, d, if (x86_is_mem(s)) s else x86_byte_reg(x86_reg(s)))
+  | I{'movsxb, [D{d}, s]} -> x86_two(em, 190, d, if (x86_is_mem(s)) s else x86_byte_reg(x86_reg(s)))
+  | I{'movzxw, [D{d}, s]} -> x86_two(em, 183, d, x86_rm(s))
+  | I{'movsxw, [D{d}, s]} -> x86_two(em, 191, d, x86_rm(s))
+  | I{'lea, [D{d}, m]} -> {
+        em_u8(em, 141)
+        em_modrm(em, d, m)
+    }
+  | I{'imul, [DU{d}, s]} -> x86_two(em, 175, d, x86_rm(s))
+  | I{'neg, [DU{d}]} -> x86_f7(em, 3, d)
+  | I{'not, [DU{d}]} -> x86_f7(em, 2, d)
+  | I{'mul, [U{s}]} -> x86_f7(em, 4, s)
+  | I{'idiv, [U{s}]} -> x86_f7(em, 7, s)
+  | I{'div, [U{s}]} -> x86_f7(em, 6, s)
+  | I{'cdq, []} -> em_u8(em, 153)
+  | I{'test, [U{a}, U{b}]} -> {
+        em_u8(em, 133)
+        em_modrm(em, b, a)
+    }
+  | I{op, [DU{d}]} if op == 'shl or op == 'shr or op == 'sar -> {
+        em_u8(em, 211)
+        em_modrm(em, x86_shift_digit(op), d)
+    }
+  | I{op, [DU{d}, K{n}]} if op == 'shl or op == 'shr or op == 'sar -> {
+        em_u8(em, 193)
+        em_modrm(em, x86_shift_digit(op), d)
+        em_u8(em, n)
+    }
+  | I{'push, [U{r}]} -> em_u8(em, 80 + r)
+  | I{'push, [K{n}]} -> if (x86_fits8(n)) em_bytes(em, [106, bit_and(n, 255)]) else {
+        em_u8(em, 104)
+        em_u32(em, n)
+    }
+  | I{'push, [m]} -> {
+        em_u8(em, 255)
+        em_modrm(em, 6, m)
+    }
+  | I{'pop, [D{r}]} -> em_u8(em, 88 + r)
+  | I{'call, [S{name, _}]} -> {
+        em_u8(em, 232)
+        em_sym(em, 'Pc32, name, 0)
+    }
+  | I{'call, [U{r}]} -> {
+        em_u8(em, 255)
+        em_modrm(em, 2, r)
+    }
+  | I{'ret, []} -> em_u8(em, 195)
+  | I{'jmp, [L{l}]} -> {
+        em_u8(em, 233)
+        em_rel32(em, l)
+    }
+  | I{'jcc, [Cc{c}, L{l}]} -> {
+        em_u8(em, 15)
+        em_u8(em, 128 + x86_cc_code(c))
+        em_rel32(em, l)
+    }
+  | I{'setcc, [Cc{c}, D{d}]} -> {
+        em_u8(em, 15)
+        em_u8(em, 144 + x86_cc_code(c))
+        em_modrm(em, 0, x86_byte_reg(d))
+    }
+  | I{'int, [K{n}]} -> em_bytes(em, [205, n])
+  | I{'ud2, []} -> em_bytes(em, [15, 11])
+  | I{op, [DU{d}, s]} if x86_alu_entry(op) != none -> x86_alu_op(em, op, d, s)
+  | I{'cmp, [U{a}, s]} -> x86_alu_op(em, 'cmp, a, s)
+  | _ -> panic(f"x86: cannot encode {ir_show(i)}")
+}
+
+x86_alu_entry(op) := find(e -> arg(e, 0) == op, x86_alu)
+
+# op d, s where s is a register or an integer
+x86_alu_op(em, op, d, s) := {
+    e := x86_alu_entry(op)
+    match s {
+        U{r} -> {
+            em_u8(em, e[1])
+            em_modrm(em, r, d)
+        }
+      | K{n} -> if (x86_fits8(n)) {
+            em_u8(em, 131)
+            em_modrm(em, e[2], d)
+            em_u8(em, n)
+        } else {
+            em_u8(em, 129)
+            em_modrm(em, e[2], d)
+            em_u32(em, n)
+        }
+      | _ -> panic("x86: the second operand of an arithmetic instruction is a register or an integer")
+    }
+}
+
+# the two-byte opcode 0F xx with the register r and the operand rm
+x86_two(em, op2, r, rm) := {
+    em_u8(em, 15)
+    em_u8(em, op2)
+    em_modrm(em, r, rm)
+}
+
+x86_f7(em, digit, r) := {
+    em_u8(em, 247)
+    em_modrm(em, digit, r)
+}
+
+# x86_emit_code(em, code) writes the instructions of a function; a jump to the label that follows is left out
+x86_emit_code(em, code) := {
+    xs := code
+    while (xs != []) {
+        i := xs[0]
+        rest := drop(xs, 1)
+        skip := match i {
+            I{'jmp, [L{l}]} -> match rest {
+                (I{'label, [L{m}]}) :: _ -> m == l
+              | _ -> false
+            }
+          | _ -> false
+        }
+        if (not skip) x86_emit(em, i)
+        xs = rest
+    }
+    em_finish(em)
+}

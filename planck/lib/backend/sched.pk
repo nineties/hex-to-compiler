@@ -1,0 +1,141 @@
+# sched: list scheduling of the instructions of a basic block
+# Copyright (C) 2026 nineties
+#
+# An instruction waits for the instructions that define the registers it uses (for the latency of the definition),
+# that use the registers it defines, and that touch memory before it. The instructions are placed one in each cycle:
+# of those that can start, the one with the longest chain of latencies behind it comes first, and the earlier one in the code when they tie.
+# A model is SchedModel{latency, effect}: latency(i) is the cycles an instruction takes to give its result, and
+# effect(i) is 'none, 'load, 'store (it also reads memory) or 'barrier (it reads, writes and may do anything else) for memory.
+
+use("base")
+use("list")
+use("table")
+use("vector")
+use("backend/ir")
+use("backend/cfg")
+
+sched_unit_model := SchedModel{i -> 1, i -> 'none}
+
+# the instructions of a block that are not placed: a label at the start and a terminator at the end
+sched_split(xs) := {
+    head_part := if (xs != [] and ir_op(xs[0]) == 'label) [xs[0]] else []
+    rest := drop(xs, length(head_part))
+    tail_part := if (rest != [] and ir_is_term(last(rest))) [last(rest)] else []
+    body := take(rest, length(rest) - length(tail_part))
+    Tuple{head_part, body, tail_part}
+}
+
+# sched_body(body, model) is the instructions of body (a list) in the new order
+sched_body(body, model) := {
+    n := length(body)
+    if (n < 2) body else {
+        lat := arg(model, 0)
+        eff := arg(model, 1)
+        ins := list_to_array(body)
+        succs := array(n)
+        npred := array(n)
+        k := 0
+        while (k < n) {
+            array_set(succs, k, [])
+            array_set(npred, k, 0)
+            k = k + 1
+        }
+        # an edge i -> j with the cycles j must wait after i is placed
+        edge := (i, j, w) -> {
+            array_set(succs, i, Tuple{j, w} :: array_get(succs, i))
+            array_set(npred, j, array_get(npred, j) + 1)
+        }
+        last_def := table()
+        uses_since := table()
+        last_store := -1
+        loads_since := []
+        j := 0
+        while (j < n) {
+            i := array_get(ins, j)
+            e := eff(i)
+            each(r -> {
+                d := table_get(last_def, r, -1)
+                if (d >= 0) edge(d, j, lat(array_get(ins, d)))
+                table_set(uses_since, r, j :: table_get(uses_since, r, []))
+            }, ir_uses(i))
+            each(r -> {
+                d := table_get(last_def, r, -1)
+                if (d >= 0 and d != j) edge(d, j, 1)
+                each(u -> if (u != j) edge(u, j, 0), table_get(uses_since, r, []))
+                table_set(uses_since, r, [])
+                table_set(last_def, r, j)
+            }, ir_defs(i))
+            if (e == 'load) {
+                if (last_store >= 0) edge(last_store, j, 1)
+                loads_since = j :: loads_since
+            } else if (e == 'store or e == 'barrier) {
+                if (last_store >= 0) edge(last_store, j, 1)
+                each(l -> edge(l, j, 0), loads_since)
+                last_store = j
+                loads_since = []
+            }
+            j = j + 1
+        }
+        # priority: the longest chain of waits from the instruction to the end of the block
+        prio := array(n)
+        k = n - 1
+        while (k >= 0) {
+            p := lat(array_get(ins, k))
+            each((Tuple{s, w}) -> {
+                q := w + array_get(prio, s)
+                if (q > p) p = q
+            }, array_get(succs, k))
+            array_set(prio, k, p)
+            k = k - 1
+        }
+        ready_at := array(n)
+        k = 0
+        while (k < n) {
+            array_set(ready_at, k, 0)
+            k = k + 1
+        }
+        avail := []
+        k = 0
+        while (k < n) {
+            if (array_get(npred, k) == 0) avail = k :: avail
+            k = k + 1
+        }
+        avail = reverse(avail)
+        out := []
+        cycle := 0
+        placed := 0
+        while (placed < n) {
+            # the best of the instructions that can start now
+            best := -1
+            each(c -> if (array_get(ready_at, c) <= cycle) {
+                if (best < 0 or array_get(prio, c) > array_get(prio, best) or (array_get(prio, c) == array_get(prio, best) and c < best)) best = c
+            }, avail)
+            if (best < 0) cycle = cycle + 1 else {
+                out = array_get(ins, best) :: out
+                placed = placed + 1
+                avail = filter(c -> c != best, avail)
+                each((Tuple{s, w}) -> {
+                    t := cycle + w
+                    if (t > array_get(ready_at, s)) array_set(ready_at, s, t)
+                    array_set(npred, s, array_get(npred, s) - 1)
+                    if (array_get(npred, s) == 0) avail = append(avail, [s])
+                }, array_get(succs, best))
+                cycle = cycle + 1
+            }
+        }
+        reverse(out)
+    }
+}
+
+# sched_code(code, model) schedules every block of code
+sched_code(code, model) := {
+    bs := cfg_blocks(code)
+    r := []
+    k := 0
+    while (k < array_len(bs)) {
+        t := sched_split(arg(array_get(bs, k), 0))
+        r = append(r, append(t[0], append(sched_body(t[1], model), t[2])))
+        k = k + 1
+    }
+    r
+}

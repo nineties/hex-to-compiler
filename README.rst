@@ -85,12 +85,12 @@ Stage3 starts with ``planck0``, an implementation of the Planck language written
 ``planck0`` treats a string as a sequence of bytes, so it handles ASCII characters only.
 The language is described in `planck/SPEC.rst <https://github.com/nineties/hex-to-compiler/blob/main/planck/SPEC.rst>`_.
 `planck/examples <https://github.com/nineties/hex-to-compiler/tree/main/planck/examples>`_ has sample programs,
-and ``make test-planck0`` runs ``planck/test.pk``, ``planck/test_syntax.pk``, ``planck/test_define.pk``, ``planck/test_builtins.pk``, ``planck/test_lib.pk``, ``planck/test_unparse.pk``, ``planck/test_unparse_pattern.pk``, ``planck/test_unparse_file.pk``, ``planck/test_highlight.pk``, the examples and ``tools/test_preprocess.sh``.
+and ``make test-planck0`` runs ``planck/tests/core.pk``, ``planck/tests/syntax.pk``, ``planck/tests/define.pk``, ``planck/tests/builtins.pk``, ``planck/tests/lib.pk``, ``planck/tests/unparse.pk``, ``planck/tests/unparse_pattern.pk``, ``planck/tests/unparse_file.pk``, ``planck/tests/highlight.pk``, the examples and ``tools/test_preprocess.sh``.
 
 ``planck0 planck/vasmc.pk prog.vasm prog`` compiles a vasm source file to a 32-bit x86 Linux executable, with no assembler or linker of another system.
-The stages are libraries in ``planck/lib``: ``ir``, ``wide``, ``sched``, ``regalloc``, ``x86``, ``x86enc``, ``os``, ``obj``, ``link`` and ``elf``, which do not depend on vasm, and ``vasm_ir``, ``vasm_rt`` and ``vasm_build``.
+The stages are libraries: ``ir``, ``wide``, ``sched``, ``regalloc``, ``x86``, ``x86enc``, ``os``, ``obj``, ``link`` and ``elf`` in ``planck/lib/backend``, which do not depend on vasm, and ``ir``, ``rt`` and ``build`` in ``planck/lib/vasm`` (``check`` is the vasm language itself).
 ``os`` is the one place that knows the system calls of the operating system.
-The programs are in ``planck/vasm`` and ``planck/backend``. ``make preprocess`` parses these libraries in advance (``planck/lib/*.pkm``), so that ``vasmc.pk`` does not parse them at each run (see `Preprocessed libraries <https://github.com/nineties/hex-to-compiler/blob/main/planck/SPEC.rst>`_).
+The programs are in ``planck/examples/vasm`` and ``planck/examples/backend``. ``make preprocess`` parses these libraries in advance (a ``.pkm`` file next to each library in ``planck/lib``), so that ``vasmc.pk`` does not parse them at each run (see `Preprocessed libraries <https://github.com/nineties/hex-to-compiler/blob/main/planck/SPEC.rst>`_).
 
 Hot to Run
 ----------
@@ -103,7 +103,7 @@ For x86 Linux
    $ git clone https://github.com/nineties/hex-to-compiler.git
    $ cd hex-to-compiler
    $ make
-   $ make test-planck0   # planck/test.pk, planck/test_syntax.pk, planck/test_define.pk, planck/test_builtins.pk, planck/test_lib.pk, planck/test_unparse.pk, planck/test_unparse_pattern.pk, planck/test_unparse_file.pk, planck/test_highlight.pk and planck/examples
+   $ make test-planck0   # planck/tests/core.pk, planck/tests/syntax.pk, planck/tests/define.pk, planck/tests/builtins.pk, planck/tests/lib.pk, planck/tests/unparse.pk, planck/tests/unparse_pattern.pk, planck/tests/unparse_file.pk, planck/tests/highlight.pk and planck/examples
 
 For Other Environments
 ~~~~~~~~~~~~~~~~~~~~~~
