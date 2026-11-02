@@ -20,7 +20,9 @@
 #   the drop functions __drop_<type> do nothing for 0
 #   a failed range check of an index or the size of alloc is trap
 # Services of the system:
-#   write and exit are the instruction os of ir.pk (see backend/os.pk); write gives the address and the length of the array to the system
+#   write, read, open, close and exit are the instruction os of ir.pk (see backend/os.pk); write and read give the address and the length of the array
+#   to the system, and open gives the name of the file as bytes followed by a byte 0 that __open makes. argc reads the number of arguments kept by _start,
+#   and argv calls __argv, which makes the array of the argument i (both are in vasm/rt.pk)
 
 use("base")
 use("list")
@@ -583,6 +585,57 @@ vi_call(f, args, expected) := {
             z := ir_vreg(vi_f, 32)
             ve(I{'trunc, [D{st}, U{sw}]})
             ve(I{'os, [N{'exit}, Us{[st]}, D{z}]})
+            []
+        }
+      | 'argc -> {
+            ap := ir_vreg(vi_f, 32)
+            base := ir_vreg(vi_f, 32)
+            n := ir_vreg(vi_f, 32)
+            d := ir_vreg(vi_f, 64)
+            ve(I{'la, [D{ap}, S{"__args", 0}]})
+            ve(I{'ld, [W{'w32}, D{base}, M{U{ap}, 0}]})
+            ve(I{'ld, [W{'w32}, D{n}, M{U{base}, 0}]})
+            ve(I{'zext64, [D{d}, U{n}]})
+            vi_val1(I64{}, U{d})
+        }
+      | 'argv -> {
+            iw := vi_ureg(vi_opnd(args[0], I64{}), I64{})
+            vi_check('gtu, iw, K{134217727})
+            i := ir_vreg(vi_f, 32)
+            p := ir_vreg(vi_f, 32)
+            ve(I{'trunc, [D{i}, U{iw}]})
+            vi_call_fn("__argv", [i], [p])
+            vi_val1(Ref{'shr, 'static, Arr{U8{}}}, U{p})
+        }
+      | 'open -> {
+            a := vi_array_ptr(args[0])
+            r := ir_vreg(vi_f, 32)
+            d := ir_vreg(vi_f, 64)
+            vi_call_fn("__open", [a], [r])
+            ve(I{'sext64, [D{d}, U{r}]})
+            vi_val1(I64{}, U{d})
+        }
+      | 'read -> {
+            fdw := vi_ureg(vi_opnd(args[0], I64{}), I64{})
+            a := vi_array_ptr(args[1])
+            fd := ir_vreg(vi_f, 32)
+            n := ir_vreg(vi_f, 32)
+            buf := ir_vreg(vi_f, 32)
+            r := ir_vreg(vi_f, 32)
+            d := ir_vreg(vi_f, 64)
+            ve(I{'trunc, [D{fd}, U{fdw}]})
+            ve(I{'ld, [W{'w32}, D{n}, M{U{a}, 0}]})
+            ve(I{'add, [D{buf}, U{a}, K{8}]})
+            ve(I{'os, [N{'read}, Us{[fd, buf, n]}, D{r}]})
+            ve(I{'sext64, [D{d}, U{r}]})
+            vi_val1(I64{}, U{d})
+        }
+      | 'close -> {
+            fdw := vi_ureg(vi_opnd(args[0], I64{}), I64{})
+            fd := ir_vreg(vi_f, 32)
+            z := ir_vreg(vi_f, 32)
+            ve(I{'trunc, [D{fd}, U{fdw}]})
+            ve(I{'os, [N{'close}, Us{[fd]}, D{z}]})
             []
         }
       | 'swap -> vi_swap(args)

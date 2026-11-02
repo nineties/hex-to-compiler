@@ -3,9 +3,14 @@
 #
 # Programs ask the system for a few services through the instruction I{'os, [N{name}, Us{args}, D{result}]} of ir.pk:
 #   write [fd, buf, n]   writes n bytes at the address buf to the file fd; the result is the number written, or negative for an error
+#   read [fd, buf, n]    reads up to n bytes from the file fd to the address buf; the result is the number read (0 at the end of the file), or negative for an error
+#   open [path]          opens the file whose name is the bytes from the address path to the first byte 0, for reading; the result is the file or negative for an error
+#   close [fd]           closes the file fd
 #   exit [status]        ends the program with the status; it does not return
 #   grow [addr]          moves the end of the data area of the program to addr and gives the new end; 0 gives the end as it is,
 #                        and a result other than addr means that the memory is not given
+#   args []              gives the address of the arguments of the program: a word that holds their number n, then n words that hold the
+#                        address of each, which is the bytes of the argument followed by a byte 0. It is used by the start of the program only.
 #   abort []             ends the program as failed (the status os_abort_status); it does not return
 # The names do not depend on the system. os_select(emit, name, args, d) turns one of them into the instructions of the 32-bit x86
 # on Linux: a system call is int 0x80 with the number in eax and the arguments in ebx, ecx, edx, esi and edi. This file is the only
@@ -15,26 +20,41 @@ use("base")
 use("list")
 use("backend/ir")
 
-os_services := ['write, 'exit, 'grow, 'abort]
+os_services := ['write, 'read, 'open, 'close, 'exit, 'grow, 'args, 'abort]
 
 # the status of a program that ends by abort
 os_abort_status := 134
 
-# the system calls of Linux: write, exit, brk and exit_group
+# the system calls of Linux: read, write, open, close, brk, exit and exit_group
+os_linux_read := 3
 os_linux_write := 4
+os_linux_open := 5
+os_linux_close := 6
 os_linux_exit := 1
 os_linux_brk := 45
 os_linux_exit_group := 252
+
+# open for reading
+os_linux_o_rdonly := 0
 
 # the physical registers of the 32-bit x86 that take the number and the arguments of a system call
 os_reg_number := 0
 os_reg_args := [3, 1, 2, 6, 7]
 
+# the frame pointer of the 32-bit x86, which the start of the program has set just under the arguments of the program
+os_reg_frame := 5
+
+# the register of the flags that an addition defines (the same as x86_flags_def of x86.pk)
+os_reg_flags := 8
+
+# an argument of a system call is a register, or K{n} for an integer
+os_arg(a) := if (typeof(a) == 'int) U{a} else a
+
 os_call(emit, number, args, d) := {
     emit(I{'mov, [D{os_reg_number}, K{number}]})
     k := 0
     each(a -> {
-        emit(I{'mov, [D{os_reg_args[k]}, U{a}]})
+        emit(I{'mov, [D{os_reg_args[k]}, os_arg(a)]})
         k = k + 1
     }, args)
     emit(I{'int, append([K{128}, IU{os_reg_number}, ID{os_reg_number}], map(r -> IU{r}, take(os_reg_args, length(args))))})
@@ -43,8 +63,15 @@ os_call(emit, number, args, d) := {
 
 os_select(emit, name, args, d) := match name {
     'write -> os_call(emit, os_linux_write, args, d)
+  | 'read -> os_call(emit, os_linux_read, args, d)
+  | 'open -> os_call(emit, os_linux_open, append(args, [K{os_linux_o_rdonly}]), d)
+  | 'close -> os_call(emit, os_linux_close, args, d)
   | 'exit -> os_call(emit, os_linux_exit, args, d)
   | 'grow -> os_call(emit, os_linux_brk, args, d)
+  | 'args -> {
+        emit(I{'mov, [D{d}, U{os_reg_frame}]})
+        emit(I{'add, [DU{d}, K{4}, ID{os_reg_flags}]})
+    }
   | 'abort -> {
         emit(I{'mov, [D{os_reg_number}, K{os_linux_exit_group}]})
         emit(I{'mov, [D{os_reg_args[0]}, K{os_abort_status}]})

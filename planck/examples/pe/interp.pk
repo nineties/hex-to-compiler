@@ -1,14 +1,29 @@
-# run of interp_prog.pk specialized for the code of prog.txt: x is dynamic
+# the interpreter of a bytecode specialized for the code of prog.txt: x is dynamic
 # planck0 planck/examples/pe/interp.pk <output>
-use("pe")
 use("vasm/build")
+use("pe")
+use("list")
+use("string")
 
-load("planck/examples/pe/interp_prog.pk")
+decode_line(["push", n]) := Push{str_to_int(n)}
+decode_line(["arg"]) := Arg{}
+decode_line(["add"]) := Add{}
+decode_line(["mul"]) := Mul{}
+decode(text) := map(l -> decode_line(split(l, " ")), filter(l -> l != "", split(text, "\n")))
+
+interp_tree := `({
+    exec(Nil{}, _, st) := nth(st, 0)
+    exec(Push{n} :: rest, x, st) := exec(rest, x, n :: st)
+    exec(Arg{} :: rest, x, st) := exec(rest, x, x :: st)
+    exec(Add{} :: rest, x, a :: b :: st) := exec(rest, x, a + b :: st)
+    exec(Mul{} :: rest, x, a :: b :: st) := exec(rest, x, a * b :: st)
+    run(code, x) := exec(code, x, [])
+})
+eval(interp_tree)
+
 code := decode(read_file("planck/examples/pe/prog.txt"))
 println(f"interpreted run(code, 5): {run(code, 5)}")
 
-defs := pe_load("planck/examples/pe/interp_prog.pk")
-m := specialize(defs, 'run, [code, Dyn{U64{}}], U64{})
+m := specialize(interp_tree, [code, Dyn{I32{}}], I32{})
 put(pe_vasm_text(m))
-write_file(_strcat(argv()[1], ".vasm"), pe_vasm_text(m))
 vasm_build(pe_with_main(m, [5]), argv()[1])

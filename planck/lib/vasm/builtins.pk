@@ -1,0 +1,123 @@
+# vasm/builtins: the functions of vasm that do what built-in functions of planck do
+# Copyright (C) 2026 nineties
+#
+# vasm_planck_builtins is Module{[...]} of these functions. A program that is translated to vasm calls them where the planck program calls
+# the built-in function of the same name, with a value that is known only when the program runs.
+#   strlen(s) is the number of bytes of the array s
+#   println_str(s) writes the bytes of s between two double quotes, and a new line, to the output (the form println gives a string,
+#       without escapes)
+#   println_int(n) writes the decimal digits of n and a new line to the output
+#   read_file(path) is the array of the bytes of the file whose name is path; a file that cannot be opened ends the program with the status 1
+# Strings are arrays of u8 (&r [u8] when borrowed, own [u8] when owned). The arguments of the program, which argv(i) of vasm gives,
+# are strings too.
+
+use("base")
+use("list")
+use("vasm/check")
+
+vasm_planck_builtins := vasm{|
+    fn strlen[r](s: &r [u8]) -> i32 {
+        var n: i64
+        var m: i32
+        n = len(s)
+        m = n as i32
+        return m
+    }
+    fn println_str[r](s: &r [u8]) {
+        var n: i64
+        n = write(1, "\"")
+        n = write(1, s)
+        n = write(1, "\"\n")
+    }
+    fn println_int(v: i64) {
+        var buf: own [u8]
+        var out: own [u8]
+        var i: i64
+        var j: i64
+        var k: i64
+        var n: i64
+        var x: i64
+        var d: i64
+        var c: u8
+        var neg: bool
+        buf = alloc(24, 0)
+        i = 23
+        buf[i] = 10
+        x = v
+        neg = x < 0
+        if (neg) { x = 0 - x }
+        if (x == 0) { i = i - 1; buf[i] = 48 }
+        while (x > 0) {
+            d = x % 10
+            c = d as u8
+            c = c + 48
+            i = i - 1
+            buf[i] = c
+            x = x / 10
+        }
+        if (neg) { i = i - 1; buf[i] = 45 }
+        n = 24 - i
+        out = alloc(n, 0)
+        j = 0
+        while (j < n) {
+            k = i + j
+            c = buf[k]
+            out[j] = c
+            j = j + 1
+        }
+        region r {
+            var b: &r [u8]
+            b = &r out
+            n = write(1, b)
+        }
+    }
+    fn read_file[r](path: &r [u8]) -> own [u8] {
+        var fd: i64
+        var acc: own [u8]
+        var chunk: own [u8]
+        var next: own [u8]
+        var n: i64
+        var got: i64
+        var total: i64
+        var i: i64
+        var k: i64
+        var c: u8
+        var more: bool
+        fd = open(path)
+        if (fd < 0) { exit(1) }
+        acc = alloc(0, 0)
+        chunk = alloc(4096, 0)
+        n = 0
+        more = true
+        while (more) {
+            region g {
+                var m: &mut g [u8]
+                m = &mut g chunk
+                got = read(fd, m)
+            }
+            if (got > 0) {
+                total = n + got
+                next = alloc(total, 0)
+                i = 0
+                while (i < n) {
+                    c = acc[i]
+                    next[i] = c
+                    i = i + 1
+                }
+                i = 0
+                while (i < got) {
+                    c = chunk[i]
+                    k = n + i
+                    next[k] = c
+                    i = i + 1
+                }
+                acc = next
+                n = total
+            } else {
+                more = false
+            }
+        }
+        close(fd)
+        return acc
+    }
+|}
