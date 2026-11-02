@@ -1,0 +1,69 @@
+# use(name) loads planck/lib/<name>.pk once.
+# Copyright (C) 2026 nineties
+#
+# When planck/lib/<name>.pkm exists and matches the library and the grammar (see "Preprocessed libraries" of planck/SPEC.rst),
+# the M-expressions in it are evaluated one by one instead of parsing the library.
+# planck/preprocess.pk makes the .pkm files.
+
+used_libs := table()
+
+# The grammar a library is parsed with is the rules declared so far.
+# grammar_state() is a text which is the same exactly when the same libraries have declared
+# the same number of rules since planck/syntax.pk was loaded, with the same texts of the files of the grammar.
+grammar_chain := f"{hash(read_file("planck/init.pk"))}.{hash(read_file("planck/peg.pk"))}.{hash(read_file("planck/syntax.pk"))}"
+grammar_state() := f"{grammar_chain}@{peg_version}"
+
+# preprocess_hook is none, or a function (name, path, state, text) that loads the library instead of the code below.
+preprocess_hook := none
+
+reverse_onto(Nil{}, acc) := acc
+reverse_onto(x :: xs, acc) := reverse_onto(xs, x :: acc)
+
+# The M-expressions that the preprocessed library is made of, as a list, or none when the file cannot be used.
+read_preprocessed(path, state, text) := {
+    s := try_read_file(path)
+    if (s == none) return none
+    r := parse_mexpr(s)
+    h := arg(r, 0)
+    if (typeof(h) != 'mexpr or head(h) != 'Preprocessed or arity(h) != 2) return none
+    if (arg(h, 0) != state or arg(h, 1) != text) return none
+    s = arg(r, 1)
+    acc := []
+    n := 0
+    go := true
+    while (go) {
+        r = parse_mexpr(s)
+        e := arg(r, 0)
+        if (e == Eof{}) go = false
+        else if (typeof(e) == 'mexpr and head(e) == 'SyntaxError) return none
+        else {
+            acc = e :: acc
+            n = n + 1
+            s = arg(r, 1)
+        }
+    }
+    if (acc == []) return none
+    last := arg(acc, 0)
+    if (typeof(last) != 'mexpr or head(last) != 'PreprocessEnd or arity(last) != 1 or arg(last, 0) != n - 1) return none
+    reverse_onto(arg(acc, 1), [])
+}
+
+use(name) := if (table_get(used_libs, name, false)) none else {
+    table_set(used_libs, name, true)
+    path := f"planck/lib/{name}.pk"
+    text := read_file(path)
+    state := grammar_state()
+    declared := peg_version
+    if (preprocess_hook != none) preprocess_hook(name, path, state, text)
+    else {
+        trees := read_preprocessed(f"planck/lib/{name}.pkm", state, text)
+        if (trees == none) load(path)
+        else {
+            prev := _set_file(path)
+            for (e in trees) eval(e)
+            _set_file(prev)
+        }
+    }
+    if (peg_version != declared) grammar_chain = f"{grammar_chain}:{name}={hash(text)}"
+    none
+}

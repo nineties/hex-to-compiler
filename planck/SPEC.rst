@@ -13,6 +13,7 @@ M-expressions
 -------------
 
 Symbols (``x``), integers (``42``, ``-1``), strings (``"abc"``) and ``Head{a, b, ...}``.
+A symbol is a letter, ``_`` or ``%`` followed by letters, digits and ``_``. A string is up to 65535 bytes and ``Head{...}`` has up to 64 arguments.
 A string used as a top-level expression has no effect, so it serves as a comment.
 
 Syntax
@@ -536,11 +537,13 @@ Builtin functions
    * - Bit operations
      - ``bit_and`` ``bit_or`` ``bit_xor`` ``bit_not`` ``bit_shl`` ``bit_shr`` ``bit_sar``
    * - Files
-     - ``read_file`` ``read_bytes`` ``write_file`` ``chmod``
+     - ``read_file`` ``try_read_file`` ``read_bytes`` ``write_file`` ``chmod``
    * - Language
      - ``parse`` ``eval`` ``exit`` ``argv`` ``_set_file``
    * - ``planck/init.pk``
-     - ``true`` ``false`` ``none`` ``_not`` ``load`` ``use`` ``table`` ``table_get`` ``table_set``
+     - ``true`` ``false`` ``none`` ``_not`` ``load`` ``table`` ``table_get`` ``table_set``
+   * - ``planck/use.pk``
+     - ``use`` ``used_libs``
    * - ``planck/peg.pk``
      - ``peg_parse`` ``_define_rule``
    * - ``planck/syntax.pk``
@@ -571,20 +574,40 @@ Builtin functions
 * ``bit_and(a, b)``, ``bit_or(a, b)``, ``bit_xor(a, b)``, ``bit_not(a)``: bit by bit on 31-bit two's complement integers.
   ``bit_shl(a, k)`` shifts left by ``k`` (0 to 31) bits and keeps 31 bits. ``bit_shr(a, k)`` is the logical shift of ``a`` as a 31-bit unsigned integer.
   ``bit_sar(a, k)`` is the arithmetic shift.
-* ``read_file(path)``: the contents of the file, including bytes 0. ``read_bytes(path)``: the same as a ``u8`` array.
+* ``read_file(path)``: the contents of the file, including bytes 0. ``try_read_file(path)``: the same, or ``none`` when the file cannot be read. ``read_bytes(path)``: the same as a ``u8`` array.
   ``write_file(path, x)``: write all bytes of the string or ``u8`` array ``x`` to the file, which is created or emptied. ``chmod(path, mode)``.
 * ``argv()``: the array of the command-line strings of the program, as ``argv`` of C ``main``: the first is the program file and the rest are its arguments.
 * ``load(path)``: parse and evaluate the file. Its top-level expressions are evaluated with ``path`` as the file being loaded,
   and the program file given as the first argument and ``planck/init.pk`` are the files being loaded while they run.
 * ``_set_file(path)``: make ``path`` the file being loaded and return the previous one (``none`` if there is none).
 * ``_define_rule(name, e)``: define the rule by a parsing expression (see ``planck/peg.pk``).
-* ``use(name)``: ``load("planck/lib/<name>.pk")`` once.
+* ``use(name)``: ``load("planck/lib/<name>.pk")`` once, or the same with the preprocessed library (see Libraries).
 
 Libraries
 ---------
 
 The files of ``planck/lib`` are written in the syntax above and are loaded by ``use("name")``.
 Each file uses the files it needs. Lists are ``Cons{x, xs}`` and ``Nil{}``, and the code of a character is the integer that ``ord`` returns.
+
+Preprocessed libraries
+~~~~~~~~~~~~~~~~~~~~~~
+
+Running the program ``planck/preprocess.pk`` with the names of libraries as arguments parses the chosen libraries into M-expressions in advance.
+It loads each named library as ``use("name")`` does, with the libraries it uses, and writes the M-expressions that each library is parsed into
+to ``planck/lib/<name>.pkm``, one M-expression on each line.
+Nothing is evaluated in advance: ``use`` reads the M-expressions of ``planck/lib/<name>.pkm`` and evaluates them one by one,
+so the program behaves as if ``use`` parsed ``planck/lib/<name>.pk``.
+Without a usable ``.pkm`` file, ``use`` parses the library.
+
+A ``.pkm`` file is used when the text of the library is the same as when the file was written and the grammar is the same as when the file was written.
+The grammar is the same when the files ``planck/init.pk``, ``planck/peg.pk`` and ``planck/syntax.pk``
+have the same text, the libraries that have declared rules are the same libraries with the same text in the same order,
+and no other rule has been declared (``peg_version`` is the same).
+Otherwise the file is not used and the library is parsed.
+A file that cannot be read as M-expressions, or that does not end with its last expression, is not used either.
+A program that replaces ``parse`` or a function that the actions of the rules call is not detected.
+Removing the ``.pkm`` files is always safe.
+A library with a value that has no text as an M-expression (a function, an array) in its parse result cannot be preprocessed.
 
 .. list-table::
    :header-rows: 1

@@ -44,8 +44,9 @@ planck0: planck0.sv plisp2 $(SASM_LIBS)
 VASM_EXAMPLES := $(wildcard planck/vasm/*.vasm)
 BACKEND_EXAMPLES := $(wildcard planck/backend/*.pk)
 
-.PHONY: clean test test-planck0
+.PHONY: clean test test-planck0 preprocess
 clean:
+	rm -f planck/lib/*.pkm
 	rm -f pforth
 	rm -f plisp2
 	rm -f planck0
@@ -54,6 +55,10 @@ clean:
 
 test: pforth plisp.fs $(shell find plisp -name "*.lisp")
 	./pforth < plisp.fs plisp/test.lisp
+
+# parse the libraries that planck/vasmc.pk uses in advance (planck/lib/*.pkm)
+preprocess: planck0
+	./planck0 planck/preprocess.pk vasm_build
 
 # run tests of planck0 and compare outputs of examples with *.out
 test-planck0: planck0
@@ -66,6 +71,8 @@ test-planck0: planck0
 	./planck0 planck/test_unparse_pattern.pk
 	./planck0 planck/test_unparse_file.pk
 	./planck0 planck/test_highlight.pk
+	$(MAKE) preprocess
+	tools/test_preprocess.sh
 	./planck0 planck/test_vasm.pk
 	./planck0 planck/test_vasm2.pk
 	@for f in $(PLANCK_EXAMPLES); do \

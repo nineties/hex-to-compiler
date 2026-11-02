@@ -690,7 +690,8 @@
     )
 
 (fun is_symbol_leading_char (c)
-    ; a-z, A-Z, _
+    ; a-z, A-Z, _, %
+    (if (== c (char "%")) (return 1))
     (if (== (getb "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxooooooooooooooooooooooooooxxxxoxooooooooooooooooooooooooooxxxxx" c) (char "o"))
         (return 1)
         (return 0)
@@ -758,13 +759,20 @@
     (not_reachable "parse_int")
     )
 
-(char[] 4096 parse_str_buf)
+(def PARSE_STR_MAX 65536)
+(long parse_str_buf)
 (fun parse_str (ret raw)
-    (var end parse_str_buf)
+    (var end 0)
     (var c 0)
+    (if (! parse_str_buf) (= parse_str_buf (allocate PARSE_STR_MAX)))
+    (= end parse_str_buf)
     (+= raw 1)  ; skip '"'
     (while (getb raw) (do
         (= c (getb raw))
+        (if (>= (- end parse_str_buf) (- PARSE_STR_MAX 1)) (do
+            (set ret (syntax_error "string literal is too long"))
+            (return raw)
+            ))
         (if (== c (char "\"")) (do
             (+= raw 1)
             (set ret (str (strndup parse_str_buf (- end parse_str_buf))))
@@ -796,9 +804,32 @@
     )
 
 
+; The arguments of the M-exprs being read are kept in parse_arena: a frame of
+; PARSE_FRAME bytes (a header, the head and MAX_ARITY arguments) for each nesting level.
+(def PARSE_FRAME 264)
+(def PARSE_DEPTH 4096)
+(long parse_arena)
+(long parse_sp)
+
 (fun parse_mexpr (ret head raw)
+    (var buf parse_sp)
+    (var r 0)
+    (if (! parse_arena) (do
+        (= parse_arena (allocate (* PARSE_FRAME PARSE_DEPTH)))
+        (= buf parse_arena)
+        ))
+    (if (u>= (+ buf PARSE_FRAME) (+ parse_arena (* PARSE_FRAME PARSE_DEPTH))) (do
+        (set ret (syntax_error "M-exprs are nested too deep"))
+        (return (+ raw 1))
+        ))
+    (= parse_sp (+ buf PARSE_FRAME))
+    (= r (parse_mexpr_in ret head raw buf))
+    (= parse_sp buf)
+    (return r)
+    )
+
+(fun parse_mexpr_in (ret head raw mexpr_buf)
     (char[] 4 tmp)
-    (char[] 72 mexpr_buf) ; buffer for m-expr with 16 arity at maximum
     (var arity 0)
     (+= raw 1)  ; skip {
 
@@ -821,7 +852,7 @@
 
     (while (== (getb raw) (char ",")) (do
         (+= raw 1) ; skip ,
-        (if (>= arity 16) (do
+        (if (>= arity MAX_ARITY) (do
             (set ret (syntax_error "too many arguments"))
             (return raw)
             ))
@@ -2313,6 +2344,28 @@
     (return (read_file (get path 1)))
     )
 
+; try_read_file(path): the contents of the file as a string, or none when it cannot be read
+(fun p_try_read_file (path)
+    (var fd 0)
+    (var size 0)
+    (var buf 0)
+    (var r 0)
+    (expect StringT path)
+    (= fd (open (get path 1) O_RDONLY))
+    (if (< fd 0) (return noneS))
+    (= size (fsize fd))
+    (if (< size 0) (do
+        (close fd)
+        (return noneS)
+        ))
+    (= buf (allocate (+ size 1))) ; +1 for \0
+    (= r (read fd buf size))
+    (close fd)
+    (if (< r size) (return noneS))
+    (setb buf size 0)
+    (return (str_n buf size))
+    )
+
 ; --- plain arrays: arrays of unboxed u8, u16 and i32 elements
 ; layout: | header (length, mutable, PlainT) | kind | elements |
 ; kind: 0 = u8, 1 = u16, 2 = i32. The elements are zero at first.
@@ -2631,6 +2684,7 @@
     (defprim "array_len" 1 p_array_len PRIM_NATIVE)
     (defprim "hash"    1 p_hash    PRIM_NATIVE)
     (defprim "read_file" 1 p_read_file PRIM_NATIVE)
+    (defprim "try_read_file" 1 p_try_read_file PRIM_NATIVE)
     (defprim "write_file" 2 p_write_file PRIM_NATIVE)
     (defprim "read_bytes" 1 p_read_bytes PRIM_NATIVE)
     (defprim "chmod"   2 p_chmod   PRIM_NATIVE)
