@@ -1300,6 +1300,35 @@ Apply{_define_rule, Tuple{Quote{block}, Quote{
 Def{parse_mexpr, parse}
 Set{parse, Lambda{Tuple{s}, Apply{peg_parse, Tuple{Quote{toplevel}, s}}}}
 
+" === The grammar of the grammar, declared with ::= === "
+" The rules above declare themselves again, in the form that they make. "
+" A rule declared again replaces the rule that read this text. "
+
+syntax_decl ::= n:ident "::=" e:g_choice { `Apply{_define_rule, Tuple{Quote{!n}, Quote{!e}}} }
+
+g_choice ::= es:delimited1(g_alt, "|") { peg_choice(es) }
+
+g_alt ::= "..." { 'Prev{} }
+        | items:g_item+ act:(same block)? { peg_alt(items, act) }
+
+g_item ::= same l:ident nospace(":") e:g_suffix { Tuple{l, e} }
+         | same e:g_suffix { Tuple{'_, e} }
+
+g_suffix ::= e:g_primary nospace("*") { `Many{!e} }
+           | e:g_primary nospace("+") { `Many1{!e} }
+           | e:g_primary nospace("?") { `Option{!e} }
+           | "&" e:g_primary { `And{!e} }
+           | "!" e:g_primary { `Not{!e} }
+           | g_primary
+
+g_primary ::= string
+            | keyword
+            | 'nospace nospace("(") s:string ")" { `Tight{!s} }
+            | 'delimited nospace("(") e:g_choice "," s:g_choice ")" { `Delimited{!e, !s} }
+            | 'delimited1 nospace("(") e:g_choice "," s:g_choice ")" { `Delimited1{!e, !s} }
+            | n:ident !("::=" | nospace(":")) { n }
+            | "(" e:g_choice ")" { e }
+
 " === The rules of planck === "
 " From the tightest binding to the loosest, so that each rule refers to rules already declared. "
 
