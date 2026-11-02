@@ -17,6 +17,7 @@
 <tr><td><code>&amp;r T</code></td><td>領域 <code>r</code> の中の共有の借用</td></tr>
 <tr><td><code>&amp;mut r T</code></td><td>領域 <code>r</code> の中の排他の借用</td></tr>
 <tr><td><code>own [T]</code> <code>&amp;r [T]</code> <code>&amp;mut r [T]</code></td><td>配列。<code>[T]</code> は <code>own</code> か借用の中にだけ書ける</td></tr>
+<tr><td><code>&amp;static T</code></td><td>プログラムの終わりまで続く共有の借用。文字列リテラルの型は <code>&amp;static [u8]</code></td></tr>
 </table>
 <p>構造体のフィールド・<code>own</code> の中身・配列の要素には <code>own</code> を入れられます。借用は入れられません。<code>own</code> を持つ型の値は、持ち主がいつも1人です。</p>
 
@@ -54,6 +55,7 @@
 <li>読み出せるのは初期化済みのレジスタだけです。<code>if</code> の後は両方の分岐で初期化したものだけ、<code>while</code> の後はループの前の状態です。</li>
 <li>整数の演算の両辺は同じ型です。幅や符号の違う整数は混ぜられず、<code>as</code> で合わせます。広げるときは元の符号で符号拡張かゼロ拡張、狭めるときは下位のビットを残します。</li>
 <li>整数のリテラルは代入先・引数・相手の項の型の範囲に入ることを検査します。リテラル1つで書けるのは -32768 から 32767 までです。大きな値は <code>m = 0x7F45</code>、<code>m = m &lt;&lt; 16</code>、<code>m = m | 0x4C46</code> のように組み立てます。</li>
+<li>文字列リテラル <code>"..."</code> は、読み取り専用のデータに置いた <code>u8</code> の配列です。エスケープは planck の文字列と同じで、バイトはソースのとおり、終端はありません。バイト数は <code>len</code> で分かります。型は <code>&amp;static [u8]</code> で、<code>write(1, "hello\n")</code>・<code>return "name"</code>・<code>s = "abc"</code> のように、項を取る所に書けます。同じリテラルは1つだけ置かれます。共有の借用なので、要素は書き換えられません。</li>
 <li>配列の添字は <code>i64</code> です。添字が範囲に入るかは実行時の検査に回り、検査器は型と所有だけを見ます。配列を <code>*p</code> で丸ごと読み書きすることはできません。</li>
 <li>構造体の値は、<code>own</code> を持たなければ整数と同じくコピーされ、<code>own</code> を持てば move されます。<code>s.f</code> は、<code>s</code> が構造体のレジスタならその値のフィールド、構造体を指すポインタなら指す先のフィールドです。</li>
 </ul>
@@ -83,6 +85,7 @@
 <li><code>&amp;mut</code> は <code>&amp;</code> の引数に渡せます（呼び出しの間だけ共有で借り直す）。</li>
 <li>外の領域 <code>q</code> の借用は、<code>q</code> の内側に開いた領域 <code>r</code> の借用の所に渡せます。代入・<code>return</code>・引数のどれでも同じです。関数の領域の引数どうしには内外の関係が無く、関数の領域は関数の中で開いた領域より外です。</li>
 <li>関数の領域の引数は、渡された借用の領域のうち一番内側のものに決まります（ほかが全部それより外であること）。</li>
+<li>領域 <code>static</code> は、ほかのどの領域より長く続きます。<code>static</code> の借用は、どの領域の借用を期待する所にも置け、領域の引数にも渡せます（ほかに渡す借用がなければ、その領域の引数は <code>static</code> になります）。ほかの領域の借用を <code>&amp;static</code> を期待する所に置くことはできません。<code>static</code> は領域や変数の名前にできず、その借用を作るのは文字列リテラルだけです。</li>
 <li>型 <code>&amp;r T</code> は <code>r</code> の中でしか書けません。<code>r</code> の外のレジスタに入れる、<code>r</code> の外へ返すのは誤りです。</li>
 </ul>
 
