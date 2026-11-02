@@ -905,15 +905,21 @@ Def{
 Apply{_define_rule, Tuple{Quote{toplevel}, Quote{
     Act{Seq{expr, Choice{";", Not{Same{}}, And{expr}}}, peg_first}}}}
 
+" the left side of x := e and x = e: a name, or !x which is replaced by the name inside a quasi-quote "
+Apply{_define_rule, Tuple{Quote{target}, Quote{Choice{
+    ident,
+    Act{Seq{"!", ident},
+        Lambda{Tuple{Tuple{_, x}}, Apply{mexpr, Tuple{Quote{UnQuote}, Tuple{x}}}}}}}}}
+
 Apply{_define_rule, Tuple{Quote{expr}, Quote{Choice{
     syntax_decl,
     Act{Seq{And{Seq{postfix, ":="}}, ident, Tight{"("}, Delimited{pattern, ","}, ")", ":=", expr},
         Lambda{Tuple{Tuple{_, f, _, ps, _, _, e}}, QuasiQuote{Do{Declare{UnQuote{f}}, Set{UnQuote{f}, Fusion{UnQuote{f}, UnQuote{Apply{peg_lambda, Tuple{ps, e}}}}}}}}},
-    Act{Seq{ident, ":=", expr},
+    Act{Seq{target, ":=", expr},
         Lambda{Tuple{Tuple{x, _, e}}, QuasiQuote{Def{UnQuote{x}, UnQuote{e}}}}},
     Act{Seq{And{Seq{postfix, "=", Not{Tight{"="}}}}, ident, Tight{"("}, Delimited{pattern, ","}, ")", "=", Not{Tight{"="}}, expr},
         Lambda{Tuple{Tuple{_, f, _, ps, _, _, _, e}}, QuasiQuote{Set{UnQuote{f}, Fusion{UnQuote{f}, UnQuote{Apply{peg_lambda, Tuple{ps, e}}}}}}}},
-    Act{Seq{ident, "=", Not{Tight{"="}}, expr},
+    Act{Seq{target, "=", Not{Tight{"="}}, expr},
         Lambda{Tuple{Tuple{x, _, _, e}}, QuasiQuote{Set{UnQuote{x}, UnQuote{e}}}}},
     Act{Seq{Key{"fun"}, ident, Not{Tight{"("}}},
         Lambda{Tuple{Tuple{_, f, _}}, QuasiQuote{Def{UnQuote{f}, none}}}},
@@ -1046,11 +1052,11 @@ Apply{_define_rule, Tuple{Quote{block}, Quote{
 Apply{_define_rule, Tuple{Quote{branch}, Quote{Choice{
     Act{Seq{And{Seq{postfix, ":="}}, ident, Tight{"("}, Delimited{pattern, ","}, ")", ":=", branch},
         Lambda{Tuple{Tuple{_, f, _, ps, _, _, e}}, QuasiQuote{Do{Declare{UnQuote{f}}, Set{UnQuote{f}, Fusion{UnQuote{f}, UnQuote{Apply{peg_lambda, Tuple{ps, e}}}}}}}}},
-    Act{Seq{ident, ":=", branch},
+    Act{Seq{target, ":=", branch},
         Lambda{Tuple{Tuple{x, _, e}}, QuasiQuote{Def{UnQuote{x}, UnQuote{e}}}}},
     Act{Seq{And{Seq{postfix, "=", Not{Tight{"="}}}}, ident, Tight{"("}, Delimited{pattern, ","}, ")", "=", Not{Tight{"="}}, branch},
         Lambda{Tuple{Tuple{_, f, _, ps, _, _, _, e}}, QuasiQuote{Set{UnQuote{f}, Fusion{UnQuote{f}, UnQuote{Apply{peg_lambda, Tuple{ps, e}}}}}}}},
-    Act{Seq{ident, "=", Not{Tight{"="}}, branch},
+    Act{Seq{target, "=", Not{Tight{"="}}, branch},
         Lambda{Tuple{Tuple{x, _, _, e}}, QuasiQuote{Set{UnQuote{x}, UnQuote{e}}}}},
     arrow}}}}
 
@@ -1090,6 +1096,7 @@ Apply{_define_rule, Tuple{Quote{primary}, Quote{Choice{
 " A pattern is written as an expression up to or, and matches the tree of that expression: "
 " a + b is Apply{'_add, Tuple{a, b}} and f(x) is Apply{'f, Tuple{x}}. "
 " The names of operators and functions are symbols, the other identifiers are variables. "
+" (f)(p, ...) is Apply{f, Tuple{p, ...}} with the variable f: a call of any function. "
 " p @ type is _TypeOf{p, type}, and the arguments of Head{p, ...} are patterns. "
 
 Apply{_define_rule, Tuple{Quote{pattern}, Quote{Choice{
@@ -1150,6 +1157,8 @@ Apply{_define_rule, Tuple{Quote{pat_primary}, Quote{Choice{
         Lambda{Tuple{Tuple{f, _, args, _}}, QuasiQuote{Apply{Quote{UnQuote{f}}, UnQuote{args}}}}},
     Act{Seq{ident, Tight{"{"}, Delimited{pattern, ","}, "}"},
         Lambda{Tuple{Tuple{h, _, args, _}}, Apply{mexpr, Tuple{h, args}}}},
+    Act{Seq{"(", ident, ")", Tight{"("}, Delimited{pattern, ","}, ")"},
+        Lambda{Tuple{Tuple{_, f, _, _, args, _}}, QuasiQuote{Apply{UnQuote{f}, UnQuote{args}}}}},
     ident,
     integer,
     string,

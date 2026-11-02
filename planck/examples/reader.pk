@@ -1,32 +1,32 @@
-" Replacing parse and eval from a program "
+# Replacing parse and eval from a program
 
-" parse: string -> Tuple{m-expr, rest of the string}. "
-" The loop uses the new definition from the next top-level expression. "
+# parse: string -> (m-expr, rest of the string).
+# The loop uses the new definition from the next top-level expression.
 
-" Add Unless{c, a, b} (= If{c, b, a}) by rewriting what the old parse returns. "
-" The rewriting is done at the top level and in the argument of Apply only. "
-Def{old_parse, parse}
-Def{expand, none}
-Set{expand, Fusion{
-    Lambda{Tuple{Unless{c, a, b}}, QuasiQuote{If{UnQuote{c}, UnQuote{b}, UnQuote{a}}}},
-    Fusion{
-        Lambda{Tuple{Apply{f, Tuple{x}}}, QuasiQuote{Apply{UnQuote{f}, Tuple{UnQuote{Apply{expand, Tuple{x}}}}}}},
-        Lambda{Tuple{x}, x}}}}
-Def{parse, Lambda{Tuple{s}, Do{
-    Def{r, Apply{old_parse, Tuple{s}}},
-    Tuple{Apply{expand, Tuple{Apply{arg, Tuple{r, 0}}}}, Apply{arg, Tuple{r, 1}}}}}}
+# Add Unless{c, a, b} (= c ? b : a) by rewriting what the old parse returns.
+# The rewriting is done at the top level and in the argument of a call only.
+old_parse := parse
+fun expand
+expand = Unless{c, a, b} -> `(!c ? !b : !a)
+       | (f)(x) -> `(!f)(!expand(x))
+       | x -> x
+parse = s -> {
+    r := old_parse(s)
+    (expand(arg(r, 0)), arg(r, 1))
+}
 
-Apply{println, Tuple{Unless{Apply{_lt, Tuple{1, 2}}, "no", "yes"}}}
-Apply{println, Tuple{Unless{Apply{_gt, Tuple{1, 2}}, "no", "yes"}}}
+println(Unless{1 < 2, "no", "yes"})
+println(Unless{1 > 2, "no", "yes"})
 
-" Echo the value of every top-level expression, like a REPL "
-Def{old_eval, eval}
-Def{eval, Lambda{Tuple{e}, Do{
-    Def{v, Apply{old_eval, Tuple{e}}},
-    Apply{put, Tuple{"=> "}},
-    Apply{println, Tuple{v}},
-    v}}}
+# Echo the value of every top-level expression, like a REPL
+old_eval := eval
+eval = e -> {
+    v := old_eval(e)
+    put("=> ")
+    println(v)
+    v
+}
 
-Apply{_add, Tuple{1, 2}}
-Apply{_mul, Tuple{6, 7}}
+1 + 2
+6 * 7
 Unless{false, "unless", "if"}

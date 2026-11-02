@@ -102,6 +102,10 @@ The rows are ordered from the loosest binding to the tightest.
 and comparisons do not group. ``::`` binds tighter than comparisons and looser than ``+ -``,
 so ``a + 1 :: b == c`` is ``Cons{a + 1, b} == c``. ``()`` groups an expression.
 
+The ``x`` of ``x := e`` and ``x = e`` may be ``!x``, which is ``Def{!x, e}`` and ``Set{!x, e}``.
+Inside a quasi-quote, ``!x`` is replaced by the symbol that ``x`` holds:
+with ``x`` holding ``'i``, :literal:`\`{ !x := 0; !x = !x + 1 }` is ``Do{Def{i, 0}, Set{i, Apply{_add, Tuple{i, 1}}}}``.
+
 The condition of ``if`` and ``while`` is in parentheses. The body ``e`` of ``while`` is any expression,
 and the branches ``a`` and ``b`` of ``if`` are expressions without ``|`` outside of brackets,
 so ``if (c) a else b | g`` is ``(if (c) a else b) | g``. A block ``{ ... }`` is the usual body of several expressions.
@@ -221,9 +225,11 @@ and are the M-expressions of the table above, which are matched as in Patterns b
   ``a and b`` and ``a or b`` are ``If{a, b, Quote{false}}`` and ``If{a, Quote{true}, b}``.
 * the other identifiers are variables. The arguments of ``Head{p, ...}`` are patterns,
   so ``Apply{f, Tuple{x}}`` matches a call of any function with one argument and binds ``f``.
+* ``(f)(p, ...)`` is ``Apply{f, Tuple{p, ...}}``: the name in parentheses is a variable, not a symbol,
+  so ``(f)(x)`` matches a call of any function with one argument and binds ``f``.
 * ``'e`` is ``Quote{e}`` for the expression ``e``.
 * the forms are the operators ``or and not == != <= >= < > :: + - * / %``, the unary ``-`` and ``'``, ``f(p, ...)``,
-  ``p @ type``, ``Head{p, ...}``, identifiers, integers, strings, ``()``, ``(p)``, ``(p, q, ...)`` and ``[p, ...]``,
+  ``p @ type``, ``Head{p, ...}``, ``(f)(p, ...)``, identifiers, integers, strings, ``()``, ``(p)``, ``(p, q, ...)`` and ``[p, ...]``,
   with the same binding as in expressions: ``a @ int + b @ int`` is ``(a @ int) + (b @ int)``.
 
 .. code-block::
