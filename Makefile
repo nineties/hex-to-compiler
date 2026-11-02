@@ -58,7 +58,7 @@ test: pforth plisp.fs $(shell find plisp -name "*.lisp")
 
 # parse the libraries that planck/vasmc.pk uses in advance (planck/lib/*/*.pkm)
 preprocess: planck0
-	./planck0 planck/preprocess.pk vasm/build
+	./planck0 tools/preprocess.pk vasm/build
 
 # run tests of planck0 and compare outputs of examples with *.out
 test-planck0: planck0

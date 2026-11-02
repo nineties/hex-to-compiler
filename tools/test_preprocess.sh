@@ -1,12 +1,13 @@
 #!/bin/sh
-# tests of the preprocessed libraries (planck/preprocess.pk, use)
+# tests of the preprocessed libraries (tools/preprocess.pk, use)
 # usage: tools/test_preprocess.sh   (run in the top directory, after make planck0)
 set -e
 ROOT=$(pwd)
 T=$(mktemp -d)
 trap 'rm -rf "$T"' EXIT
 mkdir -p "$T/planck/lib"
-for f in init peg syntax use preprocess; do ln -s "$ROOT/planck/$f.pk" "$T/planck/$f.pk"; done
+for f in init peg syntax; do ln -s "$ROOT/planck/$f.pk" "$T/planck/$f.pk"; done
+ln -s "$ROOT/planck/lib/use.pk" "$T/planck/lib/use.pk"
 
 fail() { echo "test_preprocess: $1"; exit 1; }
 run() { (cd "$T" && "$ROOT/planck0" "$@"); }
@@ -31,7 +32,7 @@ println(v)
 EOT
 
 expect "without a preprocessed file" 10 p1.pk
-run planck/preprocess.pk glib
+run "$ROOT/tools/preprocess.pk" glib
 [ -f "$T/planck/lib/glib.pkm" ] || fail "preprocess did not make glib.pkm"
 expect "with a preprocessed file" 10 p1.pk
 
@@ -69,7 +70,7 @@ use("glib2")
 println(w)
 EOT
 expect "libraries which use each other" 30 p3.pk
-run planck/preprocess.pk glib2
+run "$ROOT/tools/preprocess.pk" glib2
 [ -f "$T/planck/lib/glib2.pkm" ] || fail "preprocess did not make glib2.pkm"
 expect "libraries preprocessed" 30 p3.pk
 
