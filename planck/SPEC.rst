@@ -225,9 +225,11 @@ and are the M-expressions of the table above, which are matched as in Patterns b
   ``a and b`` and ``a or b`` are ``If{a, b, Quote{false}}`` and ``If{a, Quote{true}, b}``.
 * the other identifiers are variables. The arguments of ``Head{p, ...}`` are patterns,
   so ``Apply{f, Tuple{x}}`` matches a call of any function with one argument and binds ``f``.
+* ``(f)(p, ...)`` is ``Apply{f, Tuple{p, ...}}``: the name in parentheses is a variable, not a symbol,
+  so ``(f)(x)`` matches a call of any function with one argument and binds ``f``.
 * ``'e`` is ``Quote{e}`` for the expression ``e``.
 * the forms are the operators ``or and not == != <= >= < > :: + - * / %``, the unary ``-`` and ``'``, ``f(p, ...)``,
-  ``p @ type``, ``Head{p, ...}``, identifiers, integers, strings, ``()``, ``(p)``, ``(p, q, ...)`` and ``[p, ...]``,
+  ``p @ type``, ``Head{p, ...}``, ``(f)(p, ...)``, identifiers, integers, strings, ``()``, ``(p)``, ``(p, q, ...)`` and ``[p, ...]``,
   with the same binding as in expressions: ``a @ int + b @ int`` is ``(a @ int) + (b @ int)``.
 
 .. code-block::
