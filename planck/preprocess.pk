@@ -1,0 +1,104 @@
+# preprocess: parses libraries of planck/lib into M-expressions and saves them in planck/lib/<name>.pkm
+# Copyright (C) 2026 nineties
+#
+# planck0 planck/preprocess.pk <library> ...
+#
+# Each library is loaded as use("<library>") does, with the libraries it uses, in the order they are loaded,
+# and a .pkm file is made for each of them. The libraries are loaded by parsing, so this program uses no library itself.
+
+escape_of(10) := "\\n"
+escape_of(9) := "\\t"
+escape_of(13) := "\\r"
+escape_of(34) := "\\\""
+escape_of(92) := "\\\\"
+escape_of(c) := if (c < 32) "\\?" else none
+
+string_text(s) := {
+    n := strlen(s)
+    out := "\""
+    start := 0
+    i := 0
+    while (i < n) {
+        esc := escape_of(ord(s, i))
+        if (esc != none) {
+            out = _strcat(_strcat(out, substr(s, start, i)), esc)
+            start = i + 1
+        }
+        i = i + 1
+    }
+    _strcat(_strcat(out, substr(s, start, n)), "\"")
+}
+
+# The text of the M-expression e. The text of a value which is not an M-expression, a symbol, a string or an integer is "?".
+tree_text(e) := {
+    t := typeof(e)
+    if (t == 'int) f"{e}"
+    else if (t == 'string) string_text(e)
+    else if (t == 'symbol) symname(e)
+    else if (t == 'mexpr) {
+        out := _strcat(tree_text(head(e)), "{")
+        n := arity(e)
+        i := 0
+        while (i < n) {
+            if (i > 0) out = _strcat(out, ", ")
+            out = _strcat(out, tree_text(arg(e, i)))
+            i = i + 1
+        }
+        _strcat(out, "}")
+    } else "?"
+}
+
+# The text of e, a line. It stops the program when parse_mexpr does not read the text as e.
+line_of(name, e) := {
+    t := tree_text(e)
+    r := parse_mexpr(t)
+    if (arg(r, 0) != e or arg(r, 1) != "") {
+        put(f"preprocess: {name}: cannot be written as an M-expression: {substr(t, 0, 200)}\n")
+        exit(1)
+    }
+    _strcat(t, "\n")
+}
+
+pairs(a :: b :: rest) := _strcat(a, b) :: pairs(rest)
+pairs(xs) := xs
+
+join(x :: Nil{}) := x
+join(xs) := join(pairs(xs))
+
+write_preprocessed(name, path, state, text) := {
+    prev := _set_file(path)
+    lines := [line_of(name, Preprocessed{state, text})]
+    n := 0
+    s := text
+    go := true
+    while (go) {
+        r := parse(s)
+        e := arg(r, 0)
+        if (e == Eof{}) go = false
+        else if (typeof(e) == 'mexpr and head(e) == 'SyntaxError) {
+            put(f"{path}: syntax error: {arg(e, 0)}\n")
+            exit(1)
+        } else {
+            lines = line_of(name, e) :: lines
+            n = n + 1
+            eval(e)
+            s = arg(r, 1)
+        }
+    }
+    _set_file(prev)
+    lines = line_of(name, PreprocessEnd{n}) :: lines
+    write_file(f"planck/lib/{name}.pkm", join(reverse_onto(lines, [])))
+    none
+}
+
+args := argv()
+if (array_len(args) < 2) {
+    put("usage: planck0 planck/preprocess.pk <library> ...\n")
+    exit(2)
+}
+preprocess_hook = write_preprocessed
+i := 1
+while (i < array_len(args)) {
+    use(array_get(args, i))
+    i = i + 1
+}
