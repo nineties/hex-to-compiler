@@ -1,0 +1,92 @@
+# cfg: basic blocks and live registers of the instructions of ir.pk
+# Copyright (C) 2026 nineties
+
+use("base")
+use("list")
+use("table")
+use("vector")
+use("bitset")
+use("ir")
+
+# A block is Blk{instrs, succs}: its instructions and the numbers of the blocks that may run next.
+# A block starts at a label and at the instruction after a terminator, and ends at a terminator.
+# cfg_blocks(code) is an array of blocks, numbered from 0 in the order of the code.
+cfg_blocks(code) := {
+    groups := vec_new()
+    cur := []
+    labels := table()
+    flush := () -> if (cur != []) {
+        vec_push(groups, reverse(cur))
+        cur = []
+    }
+    each(i -> {
+        if (ir_op(i) == 'label) {
+            flush()
+            table_set(labels, ir_label_id(i), vec_len(groups))
+        }
+        cur = i :: cur
+        if (ir_is_term(i)) flush()
+    }, code)
+    flush()
+    n := vec_len(groups)
+    bs := array(n)
+    k := 0
+    while (k < n) {
+        xs := vec_get(groups, k)
+        last := last(xs)
+        ts := map(l -> table_get(labels, l, -1), ir_targets(last))
+        if (member(-1, ts)) panic("cfg_blocks: a jump to a label that is not in the code")
+        next := if (ir_falls(last) and k + 1 < n) [k + 1] else []
+        array_set(bs, k, Blk{xs, append(ts, next)})
+        k = k + 1
+    }
+    bs
+}
+
+cfg_flatten(bs) := {
+    r := []
+    i := array_len(bs) - 1
+    while (i >= 0) {
+        r = append(arg(array_get(bs, i), 0), r)
+        i = i - 1
+    }
+    r
+}
+
+# cfg_live(bs, nregs) is Tuple{live_in, live_out}: arrays with the set of registers (0 to nregs - 1) live at the start and at the end of each block
+cfg_live(bs, nregs) := {
+    n := array_len(bs)
+    gen := array(n)
+    kill := array(n)
+    lin := array(n)
+    lout := array(n)
+    k := 0
+    while (k < n) {
+        g := bits_new(nregs)
+        d := bits_new(nregs)
+        each(i -> {
+            each(u -> if (not bits_has(d, u)) bits_add(g, u), ir_uses(i))
+            each(x -> bits_add(d, x), ir_defs(i))
+        }, arg(array_get(bs, k), 0))
+        array_set(gen, k, g)
+        array_set(kill, k, d)
+        array_set(lin, k, bits_copy(g))
+        array_set(lout, k, bits_new(nregs))
+        k = k + 1
+    }
+    changed := true
+    while (changed) {
+        changed = false
+        k = n - 1
+        while (k >= 0) {
+            o := array_get(lout, k)
+            each(s -> if (bits_union(o, array_get(lin, s))) changed = true, arg(array_get(bs, k), 1))
+            # in = gen | (out - kill)
+            t := bits_copy(o)
+            bits_minus(t, array_get(kill, k))
+            if (bits_union(array_get(lin, k), t)) changed = true
+            k = k - 1
+        }
+    }
+    Tuple{lin, lout}
+}

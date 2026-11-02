@@ -1,0 +1,41 @@
+# obj: relocatable objects, which hold named sections, symbols and relocations
+# Copyright (C) 2026 nineties
+#
+# An object is Obj{name, secs, order, syms, rels}: secs is a table from the name of a section to Sec{name, kind, align, buf},
+# order the names in the order they were made, syms a vector of Sym{name, sec, off, global}, and rels a vector of Rel{sec, off, kind, sym, addend}.
+# kind of a section is 'code, 'data or 'bss. buf is a buffer of bytes.pk; a 'bss section holds zeros that the linker does not copy.
+# A relocation writes a 32-bit value at off of the section: for 'Abs32 the address of sym plus addend,
+# and for 'Pc32 the address of sym plus addend minus the address of the place that is written.
+# A symbol that has a relocation and no definition in any object is left to the linker.
+
+use("base")
+use("list")
+use("table")
+use("vector")
+use("bytes")
+
+obj_new(name) := Obj{name, table(), vec_new(), vec_new(), vec_new()}
+
+obj_name(Obj{n, _, _, _, _}) := n
+
+# obj_sec(o, name, kind, align) is the section name of o, which is made when o has none
+obj_sec(Obj{_, secs, order, _, _}, name, kind, align) := {
+    s := table_get(secs, name, none)
+    if (s == none) {
+        s = Sec{name, kind, align, bb_new()}
+        table_set(secs, name, s)
+        vec_push(order, name)
+    }
+    s
+}
+
+obj_buf(Sec{_, _, _, b}) := b
+
+obj_sections(Obj{_, secs, order, _, _}) := map(n -> table_get(secs, n, none), vec_to_list(order))
+
+obj_define(Obj{_, _, _, syms, _}, name, sec, off, global) := vec_push(syms, Sym{name, sec, off, global})
+
+obj_reloc(Obj{_, _, _, _, rels}, sec, off, kind, sym, addend) := vec_push(rels, Rel{sec, off, kind, sym, addend})
+
+obj_symbols(Obj{_, _, _, syms, _}) := vec_to_list(syms)
+obj_relocs(Obj{_, _, _, _, rels}) := vec_to_list(rels)

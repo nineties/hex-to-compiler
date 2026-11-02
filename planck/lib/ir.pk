@@ -1,0 +1,160 @@
+# ir: instructions of a register machine, shared by the stages of a code generator
+# Copyright (C) 2026 nineties
+#
+# An instruction is I{op, ops}. op is a symbol and ops are operands:
+#   D{r} defines the register r, U{r} uses it, DU{r} uses it and defines it again (a two-address instruction),
+#   ID{r} and IU{r} define and use the physical register r without naming it in the instruction text,
+#   Ds{[r, ...]} and Us{[r, ...]} define and use several registers,
+#   K{n} an integer, S{name, off} the address of a symbol, L{l} a label, Cc{cc} a condition, W{w} a width,
+#   M{base, disp}, MX{base, index, scale, disp}, MG{name, disp} and MF{kind, n, disp} memory operands.
+#   base and index are U{r} or none. MF is a stack slot ('slot, n) or an incoming argument ('arg, n).
+# Registers are integers. 0 to 31 are the physical registers of a target, and 32 and above are virtual registers.
+# A function is IRFn{name, code, meta}: code is a vector of instructions and meta a table.
+
+use("base")
+use("list")
+use("table")
+use("vector")
+use("string")
+
+ir_vbase := 32
+
+ir_is_vreg(r) := r >= ir_vbase
+
+# === Functions ===
+ir_fn(name) := {
+    meta := table()
+    table_set(meta, 'nv, ir_vbase)
+    table_set(meta, 'nl, 0)
+    table_set(meta, 'slots, vec_new())
+    table_set(meta, 'width, table())
+    table_set(meta, 'class, table())
+    table_set(meta, 'export, true)
+    IRFn{name, vec_new(), meta}
+}
+
+ir_name(IRFn{n, _, _}) := n
+ir_meta(IRFn{_, _, m}) := m
+ir_emit(IRFn{_, c, _}, i) := vec_push(c, i)
+ir_code(IRFn{_, c, _}) := vec_to_list(c)
+ir_set_code(IRFn{n, _, m}, xs) := IRFn{n, vec_from_list(xs), m}
+
+# ir_vreg(f, w) is a new virtual register that holds a w-bit value
+ir_vreg(f, w) := {
+    m := ir_meta(f)
+    r := table_get(m, 'nv, 0)
+    table_set(m, 'nv, r + 1)
+    if (w != 32) table_set(table_get(m, 'width, none), r, w)
+    r
+}
+
+ir_nregs(f) := table_get(ir_meta(f), 'nv, 0)
+ir_width(f, r) := table_get(table_get(ir_meta(f), 'width, none), r, 32)
+
+# the class of a register limits the physical registers it may take; a register without a class takes any
+ir_set_class(f, r, c) := table_set(table_get(ir_meta(f), 'class, none), r, c)
+ir_class(f, r) := table_get(table_get(ir_meta(f), 'class, none), r, 'any)
+
+ir_label(f) := {
+    m := ir_meta(f)
+    l := table_get(m, 'nl, 0)
+    table_set(m, 'nl, l + 1)
+    l
+}
+
+# ir_slot(f, size, align) is the number of a new stack slot
+ir_slot(f, size, align) := {
+    v := table_get(ir_meta(f), 'slots, none)
+    vec_push(v, Tuple{size, align})
+    vec_len(v) - 1
+}
+
+# === Instructions ===
+ir_op_regs(o, role) := match o {
+    D{r} -> if (role == 'def) [r] else []
+  | ID{r} -> if (role == 'def) [r] else []
+  | U{r} -> if (role == 'use) [r] else []
+  | IU{r} -> if (role == 'use) [r] else []
+  | DU{r} -> [r]
+  | Ds{rs} -> if (role == 'def) rs else []
+  | Us{rs} -> if (role == 'use) rs else []
+  | M{b, _} -> ir_op_regs(b, role)
+  | MX{b, x, _, _} -> append(ir_op_regs(b, role), ir_op_regs(x, role))
+  | _ -> []
+}
+
+ir_defs(I{_, ops}) := concat_map(o -> ir_op_regs(o, 'def), ops)
+ir_uses(I{_, ops}) := concat_map(o -> ir_op_regs(o, 'use), ops)
+
+# ir_map_op(f, o) renames every register of the operand o with f
+ir_map_op(f, o) := match o {
+    D{r} -> D{f(r)}
+  | U{r} -> U{f(r)}
+  | DU{r} -> DU{f(r)}
+  | ID{r} -> ID{f(r)}
+  | IU{r} -> IU{f(r)}
+  | Ds{rs} -> Ds{map(f, rs)}
+  | Us{rs} -> Us{map(f, rs)}
+  | M{b, d} -> M{ir_map_op(f, b), d}
+  | MX{b, x, s, d} -> MX{ir_map_op(f, b), ir_map_op(f, x), s, d}
+  | _ -> o
+}
+
+ir_map_regs(f, I{op, ops}) := I{op, map(o -> ir_map_op(f, o), ops)}
+
+# the operands the instruction names, without the implicit registers
+ir_explicit(I{_, ops}) := filter(o -> head(o) != 'ID and head(o) != 'IU, ops)
+
+ir_op(I{op, _}) := op
+ir_ops(I{_, ops}) := ops
+
+# the instructions that end a basic block
+ir_terminators := ['jmp, 'jcc, 'br, 'ret, 'trap, 'ud2]
+ir_is_term(i) := member(ir_op(i), ir_terminators)
+
+# the labels an instruction jumps to
+ir_targets(I{op, ops}) := concat_map(o -> match o {
+    L{l} -> [l]
+  | _ -> []
+}, if (op == 'label) [] else ops)
+
+# a conditional jump falls through to the next instruction
+ir_falls(i) := not member(ir_op(i), ['jmp, 'br, 'ret, 'trap, 'ud2])
+
+ir_move_pair(i) := match i {
+    I{'mov, [D{a}, U{b}]} -> Tuple{a, b}
+  | _ -> none
+}
+
+# === Text ===
+ir_show_regs(rs) := join(" ", map(r -> int_to_str(r), rs))
+
+ir_show_op(o) := match o {
+    D{r} -> f"d{r}"
+  | U{r} -> f"u{r}"
+  | DU{r} -> f"du{r}"
+  | ID{r} -> f"id{r}"
+  | IU{r} -> f"iu{r}"
+  | Ds{rs} -> f"d[{ir_show_regs(rs)}]"
+  | Us{rs} -> f"u[{ir_show_regs(rs)}]"
+  | K{n} -> int_to_str(n)
+  | S{n, off} -> if (off == 0) n else f"{n}+{off}"
+  | L{l} -> f"L{l}"
+  | Cc{c} -> symname(c)
+  | W{w} -> f"w{w}"
+  | M{b, d} -> f"[{ir_show_op(b)} {d}]"
+  | MX{b, x, s, d} -> f"[{ir_show_op(b)} {ir_show_op(x)}*{s} {d}]"
+  | MG{n, d} -> f"[{n} {d}]"
+  | MF{k, n, d} -> f"[{symname(k)}{n} {d}]"
+  | 'none -> "-"
+  | _ -> "?"
+}
+
+ir_show_ops(ops) := join(", ", map(ir_show_op, ops))
+
+ir_show(I{op, ops}) := if (op == 'label) f"{ir_show_op(ops[0])}:" else f"  {symname(op)} {ir_show_ops(ops)}"
+
+ir_show_fn(f) := _strcat(_strcat(ir_name(f), ":\n"), join("\n", map(ir_show, ir_code(f))))
+
+# the number of the label that a label instruction defines
+ir_label_id(I{'label, [L{l}]}) := l
