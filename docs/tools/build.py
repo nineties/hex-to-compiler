@@ -6,7 +6,8 @@
   <!--out NAME-->    examples/NAME.out だけを入れる
   <!--diagram-->     ステージの図（インライン SVG、幅の広い版と狭い版）を入れる
 1行目は <!--title タイトル--> にする。
-src/ja/ が日本語、src/en/ が英語。日本語は docs/ に、英語は docs/en/ に書く。
+src/ja/ が日本語、src/en/ が英語。日本語は docs/ja/ に、英語は docs/en/ に書く。
+docs/index.html は言語を選ぶ入口、docs/tutorial/ などの URL には docs/ja/ への移動だけの頁を書く。
 """
 import html, re, sys
 from pathlib import Path
@@ -294,9 +295,8 @@ def nav(cur_sec):
 def other_lang_href(cur_sec, cur_page):
     """今の頁の、もう一方の言語の頁への相対パス"""
     path = f"{cur_sec}/{cur_page}.html" if cur_sec else "index.html"
-    if LANG == "ja":
-        return ("../" if cur_sec else "") + "en/" + path
-    return ("../../" if cur_sec else "../") + path
+    other_code = "en" if LANG == "ja" else "ja"
+    return ("../" if cur_sec else "") + f"../{other_code}/" + path
 
 
 def page(cur_sec, cur_page, title, body, toc_pages, sec_label):
@@ -319,7 +319,7 @@ def page(cur_sec, cur_page, title, body, toc_pages, sec_label):
         a = f'<a class="prev" href="{prev[0]}.html"><small>{u["prev"]}</small>{prev[1]}</a>' if prev else ""
         b = f'<a class="next" href="{nxt[0]}.html"><small>{u["next"]}</small>{nxt[1]}</a>' if nxt else ""
         pager = f'<nav class="pager">{a}{b}</nav>'
-    depth = (1 if cur_sec else 0) + (1 if LANG == "en" else 0)
+    depth = 1 + (1 if cur_sec else 0)
     up = "../" * depth
     other = other_lang_href(cur_sec, cur_page)
     other_code = "en" if LANG == "ja" else "ja"
@@ -369,7 +369,7 @@ def build_lang(lang):
     global LANG
     LANG = lang
     src = SRC / lang
-    out = OUT if lang == "ja" else OUT / "en"
+    out = OUT / lang
     n = 0
     title, body = read_src(src / "index.html")
     out.mkdir(parents=True, exist_ok=True)
@@ -384,7 +384,61 @@ def build_lang(lang):
     return n
 
 
+def entrance():
+    """docs/index.html: 言語を選ぶ入口"""
+    return f'''<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{SITE}</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="layout single">
+<main>
+<h1>{SITE}</h1>
+<p><a href="ja/index.html">日本語</a></p>
+<p><a href="en/index.html">English</a></p>
+</main>
+</div>
+</body>
+</html>
+'''
+
+
+def moved(to):
+    """移動先を示す頁"""
+    return f'''<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{SITE}</title>
+<meta http-equiv="refresh" content="0; url={to}">
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="layout single">
+<main>
+<p><a href="{to}">{to}</a></p>
+</main>
+</div>
+</body>
+</html>
+'''
+
+
+def build_entrance():
+    (OUT / "index.html").write_text(entrance(), encoding="utf-8")
+    for sec, _, pages in SECTIONS["ja"]:
+        (OUT / sec).mkdir(parents=True, exist_ok=True)
+        for p, _ in pages:
+            (OUT / sec / f"{p}.html").write_text(moved(f"../ja/{sec}/{p}.html"), encoding="utf-8")
+
+
 def main():
+    build_entrance()
     counts = {lang: build_lang(lang) for lang in ("ja", "en") if (SRC / lang).exists()}
     unused = sorted(p.stem for p in EX.glob("*.pk") if p.stem not in used)
     print("built pages:", counts, "examples used:", len(used), "unused:", unused)
