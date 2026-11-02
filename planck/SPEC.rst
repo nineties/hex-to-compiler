@@ -102,6 +102,10 @@ The rows are ordered from the loosest binding to the tightest.
 and comparisons do not group. ``::`` binds tighter than comparisons and looser than ``+ -``,
 so ``a + 1 :: b == c`` is ``Cons{a + 1, b} == c``. ``()`` groups an expression.
 
+The ``x`` of ``x := e`` and ``x = e`` may be ``!x``, which is ``Def{!x, e}`` and ``Set{!x, e}``.
+Inside a quasi-quote, ``!x`` is replaced by the symbol that ``x`` holds:
+with ``x`` holding ``'i``, :literal:`\`{ !x := 0; !x = !x + 1 }` is ``Do{Def{i, 0}, Set{i, Apply{_add, Tuple{i, 1}}}}``.
+
 The condition of ``if`` and ``while`` is in parentheses. The body ``e`` of ``while`` is any expression,
 and the branches ``a`` and ``b`` of ``if`` are expressions without ``|`` outside of brackets,
 so ``if (c) a else b | g`` is ``(if (c) a else b) | g``. A block ``{ ... }`` is the usual body of several expressions.
