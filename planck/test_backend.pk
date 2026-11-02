@@ -12,7 +12,6 @@ check(actual, expected) := if (actual == expected) {
     put(" but got "); println(actual)
 }
 
-load("planck/mx.pk")
 use("x86")
 use("link")
 use("elf")
@@ -141,6 +140,22 @@ ir_emit(g, I{'ret, []})
 gcode := ra_allocate(g, x86_ra)
 used := map(i -> arg(ir_ops(i)[0], 0), filter(i -> ir_op(i) == 'mov and head(ir_ops(i)[0]) == 'D, gcode))
 check(sort((a, b) -> a < b, used), [0, 1, 2, 3])
+
+# === os: the services of the system become system calls ===
+os_out := []
+os_emit := i -> { os_out = i :: os_out }
+os_select(os_emit, 'write, [40, 41, 42], 43)
+check(map(ir_show, reverse(os_out)), ["  mov d0, 4", "  mov d3, u40", "  mov d1, u41", "  mov d2, u42", "  int 128, iu0, id0, iu3, iu1, iu2", "  mov d43, u0"])
+os_out = []
+os_select(os_emit, 'exit, [40], 41)
+check(map(ir_show, reverse(os_out)), ["  mov d0, 1", "  mov d3, u40", "  int 128, iu0, id0, iu3", "  mov d41, u0"])
+os_out = []
+os_select(os_emit, 'grow, [40], 41)
+check(map(ir_op, reverse(os_out)), ['mov, 'mov, 'int, 'mov])
+os_out = []
+os_select(os_emit, 'abort, [], none)
+check(map(ir_show, reverse(os_out)), ["  mov d0, 252", "  mov d3, 134", "  int 128, iu0, iu3", "  ud2 "])
+check(ir_show(I{'os, [N{'write}, Us{[1, 2, 3]}, D{4}]}), "  os write, u[1 2 3], d4")
 
 # === x86enc ===
 enc(xs) := {

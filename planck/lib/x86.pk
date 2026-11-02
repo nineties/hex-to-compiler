@@ -10,13 +10,13 @@
 #   ld                       [W{u8 s8 u16 s16 w32}, D, memory]
 #   st                       [W{w8 w16 w32}, memory, U or K]
 #   call                     [S name or U, Us args, Ds results]     (up to two results: eax and edx)
-#   sys                      [K number, Us args (up to 5), D result]
+#   os                       [N service, Us args, D result]: a service of the system (os.pk)
 #   getarg                   [D, K i]: the i-th word of the arguments
 #   ret [Us values], jmp [L], br [Cc, U a, U or K b, L yes, L no], trap, label [L]
 # Memory operands are M{U base, disp}, MG{name, disp} and MF{'slot, n, disp}.
 # The calling convention is that of the System V i386 ABI: the arguments are pushed from the last to the first and removed by the caller,
 # the results are in eax and edx, ebx, esi, edi and ebp are kept by the callee.
-# A system call is int 0x80 with the number in eax and the arguments in ebx, ecx, edx, esi and edi.
+# The services of the system and trap are selected by os_select of os.pk.
 
 use("base")
 use("list")
@@ -29,11 +29,10 @@ use("sched")
 use("regalloc")
 use("obj")
 use("x86enc")
+use("os")
 
 x86_commutative := ['add, 'mul, 'band, 'bor, 'bxor]
 x86_alu_ops := ['add, 'sub, 'band, 'bor, 'bxor]
-x86_sys_regs := [3, 1, 2, 6, 7]
-x86_trap_status := 134
 
 fun x86_select_one
 
@@ -155,16 +154,7 @@ x86_select_one(f, emit, i) := {
             if (rets != []) emit(I{'mov, [D{rets[0]}, U{0}]})
             if (length(rets) > 1) emit(I{'mov, [D{rets[1]}, U{2}]})
         }
-      | I{'sys, [K{n}, Us{args}, D{d}]} -> {
-            emit(I{'mov, [D{0}, K{n}]})
-            k := 0
-            each(a -> {
-                emit(I{'mov, [D{x86_sys_regs[k]}, U{a}]})
-                k = k + 1
-            }, args)
-            emit(I{'int, append([K{128}, IU{0}, ID{0}], map(r -> IU{r}, take(x86_sys_regs, length(args))))})
-            emit(I{'mov, [D{d}, U{0}]})
-        }
+      | I{'os, [N{name}, Us{args}, D{d}]} -> os_select(emit, name, args, d)
       | I{'ret, [Us{vals}]} -> {
             if (vals != []) emit(I{'mov, [D{0}, U{vals[0]}]})
             if (length(vals) > 1) emit(I{'mov, [D{2}, U{vals[1]}]})
@@ -176,12 +166,7 @@ x86_select_one(f, emit, i) := {
             emit(I{'jcc, [Cc{c}, L{t}, IU{8}]})
             emit(I{'jmp, [L{e}]})
         }
-      | I{'trap, []} -> {
-            emit(I{'mov, [D{0}, K{252}]})
-            emit(I{'mov, [D{3}, K{x86_trap_status}]})
-            emit(I{'int, [K{128}, IU{0}, IU{3}]})
-            emit(I{'ud2, []})
-        }
+      | I{'trap, []} -> os_select(emit, 'abort, [], none)
       | _ -> panic(f"x86_select: cannot select {ir_show(i)}")
     }
 }

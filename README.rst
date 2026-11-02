@@ -86,8 +86,9 @@ The language is described in `planck/SPEC.rst <https://github.com/nineties/hex-t
 and ``make test-planck0`` runs ``planck/test.pk``, ``planck/test_syntax.pk``, ``planck/test_define.pk``, ``planck/test_builtins.pk``, ``planck/test_lib.pk``, ``planck/test_unparse.pk``, ``planck/test_unparse_pattern.pk``, ``planck/test_unparse_file.pk`` and the examples.
 
 ``planck0 planck/vasmc.pk prog.vasm prog`` compiles a vasm source file to a 32-bit x86 Linux executable, with no assembler or linker of another system.
-The stages are libraries in ``planck/lib``: ``ir``, ``wide``, ``sched``, ``regalloc``, ``x86``, ``x86enc``, ``obj``, ``link`` and ``elf``, which do not depend on vasm, and ``vasm_ir``, ``vasm_rt`` and ``vasm_build``.
-The programs are in ``planck/vasm`` and ``planck/backend``. ``make mx`` writes the libraries as M-expressions for ``planck/mx.pk``, because planck0 does not collect memory.
+The stages are libraries in ``planck/lib``: ``ir``, ``wide``, ``sched``, ``regalloc``, ``x86``, ``x86enc``, ``os``, ``obj``, ``link`` and ``elf``, which do not depend on vasm, and ``vasm_ir``, ``vasm_rt`` and ``vasm_build``.
+``os`` is the one place that knows the system calls of the operating system.
+The programs are in ``planck/vasm`` and ``planck/backend``.
 
 Hot to Run
 ----------

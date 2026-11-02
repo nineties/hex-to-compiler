@@ -17,6 +17,8 @@
 #   a register that holds an own value is 0 when the value is moved or freed, so that the end of a block can drop what is left:
 #   the drop functions __drop_<type> do nothing for 0
 #   a failed range check of an index or the size of alloc is trap
+# Services of the system:
+#   write and exit are the instruction os of ir.pk (see os.pk); write gives the address and the length of the array to the system
 
 use("base")
 use("list")
@@ -520,6 +522,29 @@ vi_call(f, args, expected) := {
             ve(I{'ld, [W{'w32}, D{n}, M{U{vi_ptr(x)}, 0}]})
             ve(I{'zext64, [D{d}, U{n}]})
             vi_val1(I64{}, U{d})
+        }
+      | 'write -> {
+            x := arg(args[1], 1)
+            fdw := vi_ureg(vi_opnd(args[0], I64{}), I64{})
+            fd := ir_vreg(vi_f, 32)
+            n := ir_vreg(vi_f, 32)
+            buf := ir_vreg(vi_f, 32)
+            r := ir_vreg(vi_f, 32)
+            d := ir_vreg(vi_f, 64)
+            ve(I{'trunc, [D{fd}, U{fdw}]})
+            ve(I{'ld, [W{'w32}, D{n}, M{U{vi_ptr(x)}, 0}]})
+            ve(I{'add, [D{buf}, U{vi_ptr(x)}, K{8}]})
+            ve(I{'os, [N{'write}, Us{[fd, buf, n]}, D{r}]})
+            ve(I{'sext64, [D{d}, U{r}]})
+            vi_val1(I64{}, U{d})
+        }
+      | 'exit -> {
+            sw := vi_ureg(vi_opnd(args[0], I64{}), I64{})
+            st := ir_vreg(vi_f, 32)
+            z := ir_vreg(vi_f, 32)
+            ve(I{'trunc, [D{st}, U{sw}]})
+            ve(I{'os, [N{'exit}, Us{[st]}, D{z}]})
+            []
         }
       | 'swap -> vi_swap(args)
     }
