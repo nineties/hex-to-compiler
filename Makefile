@@ -75,6 +75,7 @@ test-planck0: planck0
 	tools/test_preprocess.sh
 	./planck0 planck/tests/vasm.pk
 	./planck0 planck/tests/vasm2.pk
+	./planck0 planck/tests/pe.pk
 	@for f in $(PLANCK_EXAMPLES); do \
 		./planck0 $$f > tmp-example.out || exit 1; \
 		diff -u $${f%.pk}.out tmp-example.out || exit 1; \

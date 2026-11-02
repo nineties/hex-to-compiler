@@ -1,0 +1,259 @@
+# pe: a partial evaluator from a program of planck to a vasm function
+# Copyright (C) 2026 nineties
+#
+# pe_load(path) reads the definitions of a program file.
+# specialize(defs, name, args, rty) calls the function name of defs with the arguments args and is Module{[Fn{...}]}.
+# An argument Dyn{t} is an input that is known only when the result runs; it is a parameter of type t of the function.
+# Any other argument is a static value. Everything that depends on static values only is computed when specialize runs,
+# so what is left in the function is the operations on the parameters.
+#
+# The program is read as trees (no function value is used), and a call is unfolded where it is written.
+# The operations left are + - * / % on a dynamic value and an integer or another dynamic value.
+# A condition or a pattern that needs a dynamic value stops with a message.
+# A function that is not defined by the program, such as nth of list, is called with the values; a dynamic value
+# may be inside the value of an argument (an element of a list) but not the argument itself.
+
+use("base")
+use("list")
+use("table")
+use("string")
+use("vasm/check")
+
+fun pe_eval
+
+pe_defs := table()
+pe_decls := []
+pe_stmts := []
+pe_count := 0
+pe_at := Pos{0}
+
+# === The program ===
+
+# the clauses of the function f defined in e = Do{Declare{f}, Set{f, Fusion{f, Lambda{...}}}}
+pe_add_clause(defs, e) := match e {
+    Do{Declare{f}, Set{_, Fusion{_, l}}} -> table_set(defs, f, append(table_get(defs, f, []), [l]))
+  | _ -> none
+}
+
+# the table from the name of a function to the list of its clauses Lambda{Tuple{p, ...}, body}
+pe_load(path) := {
+    defs := table()
+    text := read_file(path)
+    while (true) {
+        r := parse(text)
+        e := arg(r, 0)
+        if (head(e) == 'Eof) break
+        pe_add_clause(defs, e)
+        text = arg(r, 1)
+    }
+    defs
+}
+
+# === Values ===
+# a static value is a value of planck. A dynamic value is Dy{name, type}, the variable of the function.
+
+pe_dyn(v) := typeof(v) == 'mexpr and head(v) == 'Dy
+
+pe_fresh(t) := {
+    pe_count = pe_count + 1
+    x := intern(f"t{pe_count}")
+    pe_decls = Decl{pe_at, x, t} :: pe_decls
+    x
+}
+
+pe_operand(v) := {
+    if (pe_dyn(v)) Reg{pe_at, arg(v, 0)}
+    else if (typeof(v) == 'int and v >= -32768 and v <= 32767) Imm{pe_at, v}
+    else panic(f"pe: {v} cannot be an operand of vasm")
+}
+
+pe_ops := [Tuple{'_add, 'add}, Tuple{'_sub, 'sub}, Tuple{'_mul, 'mul}, Tuple{'_div, 'div}, Tuple{'_mod, 'rem}]
+
+# the operation f on the values a and b, one of which is dynamic
+pe_dyn_op(f, a, b) := {
+    o := find(p -> arg(p, 0) == f, pe_ops)
+    if (o == none) panic(f"pe: {symname(f)} on a dynamic value is not supported")
+    t := if (pe_dyn(a)) arg(a, 1) else arg(b, 1)
+    x := pe_fresh(t)
+    pe_stmts = Assign{pe_at, x, Bin{arg(o, 1), pe_operand(a), pe_operand(b)}} :: pe_stmts
+    Dy{x, t}
+}
+
+# === Evaluation ===
+
+# match the pattern p with the value v and bind the variables in env
+pe_match(env, p, v) := {
+    t := typeof(p)
+    if (t == 'symbol) {
+        if (p != '_) table_set(env, p, v)
+        true
+    } else if (t == 'int or t == 'string) {
+        if (pe_dyn(v)) panic("pe: a dynamic value is matched with a constant")
+        p == v
+    } else if (head(p) == 'Quote) {
+        if (pe_dyn(v)) panic("pe: a dynamic value is matched with a constant")
+        arg(p, 0) == v
+    } else if (typeof(v) != 'mexpr or head(p) != head(v) or arity(p) != arity(v)) {
+        if (pe_dyn(v)) panic("pe: a dynamic value is matched with a pattern of a constructor")
+        false
+    } else {
+        i := 0
+        ok := true
+        while (ok and i < arity(p)) {
+            ok = pe_match(env, arg(p, i), arg(v, i))
+            i = i + 1
+        }
+        ok
+    }
+}
+
+pe_values(env, es) := {
+    n := arity(es)
+    out := []
+    i := n - 1
+    while (i >= 0) {
+        out = pe_eval(env, arg(es, i)) :: out
+        i = i - 1
+    }
+    out
+}
+
+# the value of the function f called with the values vs: unfold the first clause that matches
+pe_call(f, vs) := {
+    clauses := table_get(pe_defs, f, none)
+    if (clauses == none) panic(f"pe: {symname(f)} is not defined")
+    r := none
+    found := false
+    for (c in clauses) {
+        if (not found and arity(arg(c, 0)) == length(vs)) {
+            env := table()
+            ok := true
+            i := 0
+            for (v in vs) {
+                if (ok) ok = pe_match(env, arg(arg(c, 0), i), v)
+                i = i + 1
+            }
+            if (ok) {
+                found = true
+                r = pe_eval(env, arg(c, 1))
+            }
+        }
+    }
+    if (not found) panic(f"pe: no clause of {symname(f)} matches")
+    r
+}
+
+# the function f of the host called with the values vs
+pe_host(f, vs) := {
+    for (v in vs) if (pe_dyn(v)) panic(f"pe: a dynamic value is an argument of {symname(f)}")
+    q := map(v -> mexpr('Quote, Tuple{v}), vs)
+    eval(mexpr('Apply, Tuple{f, foldl((t, x) -> push(t, x), Tuple{}, q)}))
+}
+
+pe_apply(env, f, vs) := {
+    if (table_get(pe_defs, f, none) != none) pe_call(f, vs)
+    else if (find(p -> arg(p, 0) == f, pe_ops) != none and length(vs) == 2 and (pe_dyn(vs[0]) or pe_dyn(vs[1]))) pe_dyn_op(f, vs[0], vs[1])
+    else pe_host(f, vs)
+}
+
+pe_eval(env, e) := {
+    t := typeof(e)
+    if (t == 'int or t == 'string) e
+    else if (t == 'symbol) {
+        val := table_get(env, e, Unbound{})
+        if (val == Unbound{}) panic(f"pe: {symname(e)} is not a variable of the function")
+        val
+    } else if (head(e) == 'Quote) arg(e, 0)
+    else match e {
+        If{c, a, b} -> {
+            cv := pe_eval(env, c)
+            if (pe_dyn(cv)) panic("pe: the condition of if is dynamic")
+            if (cv) pe_eval(env, a) else pe_eval(env, b)
+        }
+      | Apply{f, args} -> pe_apply(env, f, pe_values(env, args))
+      | _ -> {
+            if (member(head(e), ['Do, 'Def, 'Set, 'Lambda, 'While, 'Handle, 'Perform])) panic(f"pe: {symname(head(e))} is not supported")
+            foldl((t, x) -> push(t, x), mexpr(head(e), Tuple{}), pe_values(env, e))
+        }
+    }
+}
+
+# === The result ===
+
+# Dyn{t} is a parameter of type t, and the other arguments are static values
+pe_params(args) := {
+    ps := []
+    vs := []
+    i := 0
+    for (a in args) {
+        if (typeof(a) == 'mexpr and head(a) == 'Dyn) {
+            x := intern(f"a{i}")
+            ps = Param{pe_at, x, arg(a, 0)} :: ps
+            vs = Dy{x, arg(a, 0)} :: vs
+        } else vs = a :: vs
+        i = i + 1
+    }
+    Tuple{reverse(ps), reverse(vs)}
+}
+
+# the function name_spec of vasm, for the function name of defs called with args; its result has the type rty
+specialize(defs, name, args, rty) := {
+    pe_defs = defs
+    pe_decls = []
+    pe_stmts = []
+    pe_count = 0
+    pv := pe_params(args)
+    r := pe_call(name, arg(pv, 1))
+    body := append(append(reverse(pe_decls), reverse(pe_stmts)), [Ret{pe_at, pe_operand(r)}])
+    Module{[Fn{pe_at, intern(f"{symname(name)}_spec"), [], arg(pv, 0), rty, body}]}
+}
+
+# the module m of specialize with the function main that calls its function with the integers ns
+pe_with_main(m, ns) := {
+    f := arg(arg(m, 0)[0], 1)
+    ps := arg(arg(m, 0)[0], 3)
+    rty := arg(arg(m, 0)[0], 4)
+    decls := []
+    sets := []
+    regs := []
+    i := 0
+    for (p in ps) {
+        x := intern(f"v{i}")
+        decls = Decl{pe_at, x, arg(p, 2)} :: decls
+        sets = Assign{pe_at, x, Mov{Imm{pe_at, ns[i]}}} :: sets
+        regs = Reg{pe_at, x} :: regs
+        i = i + 1
+    }
+    body := append(append(reverse(decls), reverse(sets)), [Decl{pe_at, 'r, rty}, Assign{pe_at, 'r, Call{pe_at, f, reverse(regs)}}, Ret{pe_at, Reg{pe_at, 'r}}])
+    Module{append(arg(m, 0), [Fn{pe_at, 'main, [], [], rty, body}])}
+}
+
+# === The text of vasm ===
+
+pe_op_text := [Tuple{'add, "+"}, Tuple{'sub, "-"}, Tuple{'mul, "*"}, Tuple{'div, "/"}, Tuple{'rem, "%"}]
+
+pe_operand_text(o) := match o {
+    Imm{_, n} -> f"{n}"
+  | Reg{_, x} -> symname(x)
+}
+
+pe_rhs_text(r) := match r {
+    Mov{a} -> pe_operand_text(a)
+  | Bin{op, a, b} -> f"{pe_operand_text(a)} {arg(find(p -> arg(p, 0) == op, pe_op_text), 1)} {pe_operand_text(b)}"
+}
+
+pe_stmt_text(s) := match s {
+    Decl{_, x, t} -> f"var {symname(x)}: {vasm_show_type(t)}"
+  | Assign{_, x, r} -> f"{symname(x)} = {pe_rhs_text(r)}"
+  | Ret{_, a} -> f"return {pe_operand_text(a)}"
+}
+
+pe_param_text(p) := f"{symname(arg(p, 1))}: {vasm_show_type(arg(p, 2))}"
+
+pe_fn_text(d) := {
+    lines := map(s -> f"    {pe_stmt_text(s)}\n", arg(d, 5))
+    f"fn {symname(arg(d, 1))}({join(", ", map(pe_param_text, arg(d, 3)))}) -> {vasm_show_type(arg(d, 4))} {{\n{join("", lines)}}}\n"
+}
+
+# the module m as the text of vasm; the function main of pe_with_main is not in it
+pe_vasm_text(m) := join("\n", map(pe_fn_text, filter(d -> arg(d, 1) != 'main, arg(m, 0))))
