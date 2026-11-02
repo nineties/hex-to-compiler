@@ -5,9 +5,10 @@
 ; acting as an interim implementation for bootstrapping.
 ;
 ; Expressions (M-exprs) are compiled to bytecode and executed by a small
-; virtual machine. Frames of the VM live in the heap, not on the machine
-; stack, so that continuations for algebraic effects are just pointers
-; to a chain of frames. See "Bytecode VM" below for details.
+; virtual machine. Frames of the VM live on a frame stack separate from the
+; machine stack and the heap, and are dropped when the function returns.
+; A continuation for algebraic effects is a copy of the frames in the heap.
+; See "Bytecode VM" below for details.
 
 (include "std.sv")
 
@@ -37,16 +38,12 @@
 (long heap_end)
 (long heap_pos)
 (fun init_heap ()
-    (var mb 3800)  ; the largest region mmap2 gives: from 3800MB down by 256MB to 1GB (3824MB on x86_64)
-    (var addr 0xfffff001)
-    (while (u>= addr 0xfffff001) (do
-        (if (< mb 1024) (do
-            (eputs "mmap2 failed\n")
-            (exit 1)
-            ))
-        (= addr (mmap2 0 (* mb 1048576)
-            (| PROT_READ PROT_WRITE) (| MAP_PRIVATE MAP_ANONYMOUS) -1 0))
-        (if (u>= addr 0xfffff001) (-= mb 256))
+    (var mb 1024)  ; 1GB
+    (var addr (mmap2 0 (* mb 1048576)
+        (| PROT_READ PROT_WRITE) (| MAP_PRIVATE MAP_ANONYMOUS) -1 0))
+    (if (u>= addr 0xfffff001) (do
+        (eputs "mmap2 failed\n")
+        (exit 1)
         ))
     (= heap_root addr)
     (= heap_pos (align addr))
@@ -922,13 +919,19 @@
 ;   environment (the function, or the top-level code in a block). Then it does
 ;   nothing and its value is none.
 ;
-; frame (internal, allocated in the heap):
+; frame (internal, placed on the frame stack):
 ;   | caller | code | pc | env | sp | handler | size | operand stack ... |
 ;   caller:  the frame which receives the return value (0 for top-level)
 ;   pc:      address of the next instruction (saved when not running)
 ;   sp:      byte offset of the stack top from the frame (saved)
 ;   handler: effect handler if this frame is the boundary of Handle, or 0
 ;   size:    size of the frame in words
+;
+; The frame stack is a 1GB area of its own. A frame is placed just above its
+; caller, so the free area starts at the end of the current frame, and a
+; frame is dropped by returning to its caller. TCALL places the callee where
+; the dropped caller was. When the frame stack is full, the VM stops with
+; "stack overflow".
 ;
 ; Since frames are not on the machine stack, the VM never calls itself
 ; recursively and the control state of a computation is just the chain
@@ -966,13 +969,14 @@
 ;   Perform{v} searches the nearest boundary frame B from the current frame
 ;   and calls handler(v, k) whose result is returned to the caller of B,
 ;   i.e. it becomes the value of the Handle expression.
-;   k is a continuation object (ContT) holding the current frame and B.
+;   k is a continuation object (ContT) holding a copy in the heap of the
+;   frames from the current frame to B.
 ;   If the arguments do not match the handler, the next outer handler is
 ;   tried (effect forwarding).
-;   Calling k with a value x copies the frames from the current frame to B
+;   Calling k with a value x copies the frames of k onto the frame stack
 ;   (B keeps its handler), links the copy of B to the caller of k, pushes x
-;   as the result of Perform and runs the copied frames. Since captured
-;   frames are never executed themselves, k can be resumed multiple times.
+;   as the result of Perform and runs the copied frames. Since the frames of
+;   k are never executed themselves, k can be resumed multiple times.
 ;   When the resumed body finishes, its value is returned to the caller of k.
 
 (def C_ARITY    1)
@@ -1581,9 +1585,42 @@
     (= vm_sp (+ f (get f F_SP)))
     )
 
+(long frame_base)   ; bottom of the frame stack
+(long frame_end)    ; end of the frame stack
+
+(fun init_frame_stack ()
+    (var stack_size 1024)  ; 1GB
+    (*= stack_size 1024)
+    (*= stack_size 1024)
+    (var addr (mmap2 0 stack_size
+        (| PROT_READ PROT_WRITE)
+        (| MAP_PRIVATE MAP_ANONYMOUS)
+        -1 0))
+    (if (u>= addr 0xfffff001) (do
+        (eputs "mmap2 failed\n")
+        (exit 1)
+        ))
+    (= frame_base (align addr))
+    (= frame_end (+ addr stack_size))
+    )
+
+; address just above the frame f, where the frame called by f is placed
+(fun frame_top (f)
+    (if (! f) (return frame_base))
+    (return (+ f (* 4 (get f F_SIZE))))
+    )
+
+(fun check_frame_stack (top)
+    (if (u>= top frame_end) (do
+        (eputs "stack overflow\n")
+        (exit 1)
+        ))
+    )
+
 (fun new_frame (code env caller handler)
     (var size (+ F_STACK (+ (get code C_MAXSTACK) 2)))
-    (var f (allocate (* 4 size)))
+    (var f (frame_top caller))
+    (check_frame_stack (+ f (* 4 size)))
     (set f F_CALLER caller)
     (set f F_CODE code)
     (set f F_PC (+ code (* 4 C_CODE)))
@@ -1707,18 +1744,29 @@
     )
 
 ; resume the continuation k with x. the result goes to caller.
+; The frames of k are copied onto the frame stack just above caller.
 (fun resume (k x caller)
     (var top (get k 1))
     (var b (get k 2))
     (var f top)
-    (var first (copy_frame top))
-    (var last first)
-    (var c 0)
+    (var total (get top F_SIZE))
     (while (!= f b) (do
         (= f (get f F_CALLER))
-        (= c (copy_frame f))
-        (set last F_CALLER c)
-        (= last c)
+        (+= total (get f F_SIZE))
+        ))
+    (var dst (+ (frame_top caller) (* 4 total)))
+    (check_frame_stack dst)
+    (= f top)
+    (-= dst (* 4 (get f F_SIZE)))
+    (memcpy dst f (* 4 (get f F_SIZE)))
+    (var first dst)
+    (var last dst)
+    (while (!= f b) (do
+        (= f (get f F_CALLER))
+        (-= dst (* 4 (get f F_SIZE)))
+        (memcpy dst f (* 4 (get f F_SIZE)))
+        (set last F_CALLER dst)
+        (= last dst)
         ))
     (set last F_CALLER caller)
     (load_regs first)
@@ -1893,11 +1941,24 @@
     (enter code (new_env code (get body 2)) vm_frame handler)
     )
 
+; copy the frames from top to the boundary b into the heap and make a
+; continuation object of the copy.
 (fun make_cont (top b)
     (var k (allocate 12))
+    (var f top)
+    (var first (copy_frame top))
+    (var last first)
+    (var c 0)
+    (while (!= f b) (do
+        (= f (get f F_CALLER))
+        (= c (copy_frame f))
+        (set last F_CALLER c)
+        (= last c)
+        ))
+    (set last F_CALLER 0)
     (set k 0 (make_header ContT 0 0))
-    (set k 1 top)
-    (set k 2 b)
+    (set k 1 first)
+    (set k 2 last)
     (return k)
     )
 
@@ -2669,7 +2730,9 @@
     (= cur_file saved_file)
     )
 
+; The frame stack and the heap are each a fixed 1GB area obtained by mmap2.
 (fun main (argc argv)
+    (init_frame_stack)
     (init_heap)
     (init_tables)
     (init_symbols)
