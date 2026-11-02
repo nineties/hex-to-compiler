@@ -75,13 +75,24 @@ check("recursion under a dynamic condition", fn_text(count_m, 0), "fn count_to_s
 check("recursion, one function", names(count_m), ["count_to_spec"])
 check("recursion module is well-typed", vasm_check(pe_with_main(count_m, [0])), [])
 
-# the static argument changes at each call: a function for each, named by numbers
+# the static argument changes at each call: it is a parameter of the function that is made for the changed call, and the functions do not grow
 down_tree := `(down(x, n) := if (n == 0) x else if (x == 7) 0 else down(x + 1, n - 1))
 down_m := specialize(down_tree, [Dyn{I32{}}, 2], I32{})
-check("recursion, static argument changes", names(down_m), ["down_spec", "down_spec_1", "down_spec_2"])
-check("recursion, static argument changes, the last", fn_text(down_m, 2), "fn down_spec_2(a0: i32) -> i32 {\n    return a0\n}\n")
+check("recursion, static argument changes", names(down_m), ["down_spec", "down_spec_1"])
+check("recursion, static argument changes, the first", fn_text(down_m, 0), "fn down_spec(a0: i32) -> i32 {\n    var t1: bool\n    var t2: i32\n    var t3: i32\n    var t4: i32\n    t1 = a0 == 7\n    if (t1) {\n        t4 = 0\n    } else {\n        t2 = a0 + 1\n        t3 = down_spec_1(t2, 1)\n        t4 = t3\n    }\n    return t4\n}\n")
+check("recursion, static argument changes, the one that calls itself", fn_text(down_m, 1), "fn down_spec_1(a0: i32, a1: i32) -> i32 {\n    var t1: bool\n    var t2: bool\n    var t3: i32\n    var t4: i32\n    var t5: i32\n    var t6: i32\n    var t7: i32\n    t1 = a1 == 0\n    if (t1) {\n        t7 = a0\n    } else {\n        t2 = a0 == 7\n        if (t2) {\n            t6 = 0\n        } else {\n            t3 = a0 + 1\n            t4 = a1 - 1\n            t5 = down_spec_1(t3, t4)\n            t6 = t5\n        }\n        t7 = t6\n    }\n    return t7\n}\n")
 check("recursion, static argument changes is well-typed", vasm_check(pe_with_main(down_m, [0])), [])
+check("recursion, the same static argument for any n", names(specialize(down_tree, [Dyn{I32{}}, 100], I32{})), ["down_spec", "down_spec_1"])
 
+# a static argument that never gets back to a value is a parameter
+grow_m := specialize(`(grow(x, n) := if (x == 0) n else grow(x - 1, n + 1)), [Dyn{I32{}}, 0], I32{})
+check("recursion, static argument grows", names(grow_m), ["grow_spec", "grow_spec_1"])
+check("recursion, static argument grows is well-typed", vasm_check(pe_with_main(grow_m, [4])), [])
+
+# a bool that changes is a parameter of the type bool, though it takes two values only
+flip_m := specialize(`(flip(x, b) := if (x == 0) b else flip(x - 1, not b)), [Dyn{I32{}}, true], Bool{})
+check("recursion, bool changes", fn_text(flip_m, 1), "fn flip_spec_1(a0: i32, a1: bool) -> bool {\n    var t1: bool\n    var t2: i32\n    var t3: bool\n    var t4: bool\n    var t5: bool\n    t1 = a0 == 0\n    if (t1) {\n        t5 = a1\n    } else {\n        t2 = a0 - 1\n        t3 = a1 == false\n        t4 = flip_spec_1(t2, t3)\n        t5 = t4\n    }\n    return t5\n}\n")
+check("recursion, bool changes is well-typed", vasm_check(pe_with_main(flip_m, [3])), [])
 # printing and reading stay in the result, in the order of the program
 show_tree := `(show(x) := {
     println("start")
@@ -116,7 +127,19 @@ unit_m := specialize(`(say(a) := println(a)), [Dyn{I32{}}], Unit{})
 check("no result", fn_text(unit_m, 0), "fn say_spec(a0: i32) {\n    var t1: i64\n    t1 = a0 as i64\n    println_int(t1)\n    return\n}\n")
 
 # the text of a module is read back as the same functions
-check("text is read back", names(arg(peg_parse('vasm, pe_vasm_text(down_m)), 0)), ["down_spec", "down_spec_1", "down_spec_2"])
+check("text is read back", names(arg(peg_parse('vasm, pe_vasm_text(down_m)), 0)), ["down_spec", "down_spec_1"])
+
+# the writes to an array stay in the result, in the order of the program
+fill_tree := `(fill(x) := {
+    a := i32_array(2)
+    a[0] = x
+    a[1] = a[0] + 1
+    a[1]
+})
+fill_m := specialize(fill_tree, [Dyn{I32{}}], I32{})
+check("array", fn_text(fill_m, 0), "fn fill_spec(a0: i32) -> i32 {\n    var t1: own [i32]\n    var t2: i32\n    var t3: i32\n    var t4: i32\n    t1 = alloc(2, 0)\n    t1[0] = a0\n    t2 = t1[0]\n    t3 = t2 + 1\n    t1[1] = t3\n    t4 = t1[1]\n    return t4\n}\n")
+check("array module is well-typed", vasm_check(pe_with_main(fill_m, [5])), [])
+check("array, static index and value", fn_text(specialize(`(sset(x) := { a := i32_array(2); a[1] = 7; a[1] + x }), [Dyn{I32{}}], I32{}), 0), "fn sset_spec(a0: i32) -> i32 {\n    var t1: own [i32]\n    var t2: i32\n    var t3: i32\n    t1 = alloc(2, 0)\n    t1[1] = 7\n    t2 = t1[1]\n    t3 = t2 + a0\n    return t3\n}\n")
 
 if (failed > 0) {
     println(f"{failed} failed")

@@ -22,16 +22,24 @@
 #   read_file(path)  is always left; its result is a dynamic string (own [u8])
 #   argv()[i]        is always left (argv of vasm: the program name is argv()[0]), and array_len(argv()) is argc of vasm
 # Printing and reading happen when the result runs, in the order a planck program does them. The other built-in functions that read or
-# write outside (put, print, write_file, try_read_file, read_bytes, the write to an array, exit) stop with a message. Any built-in function
+# write outside (put, print, write_file, try_read_file, read_bytes, exit) stop with a message. Any built-in function
 # that is not named here is called when specialize runs, and takes static values only.
 #
 # A call is unfolded where it is written. A call to a function that is being unfolded, from inside a branch of an if whose condition is dynamic,
 # is not unfolded: a function is made for the static arguments of the call (and made once for the same static arguments), and the call
 # is a call of it. So pow with n = 3 is one function, and f(x, k) := if (x == k) x else f(x + 1, k) with k = 3 is a function that calls itself.
 # The functions are named name_spec for the first and name_spec_1, name_spec_2, ... for the others, in the order they are made.
-# More than pe_max_fns of them stop with a message (the static arguments change at each call, as in f(n + 1, x - 1)).
+# When the call is made while a function is being made for the same function with other static arguments (the static arguments change at
+# each call, as in f(n + 1, x - 1)), the arguments that differ are not static in the function that is made: they are parameters of the
+# type I32{} (an integer), Bool{} (a bool) or &static [u8] (a string), so the functions do not grow. A value of another kind (a list, a
+# constructor, a function) that differs stops with a message, since it cannot be a value of vasm.
 # The result of every function that is made has the type rty. A condition that is not a comparison of dynamic values or a dynamic bool,
 # a pattern that needs a dynamic value, an assignment under a dynamic condition, and a loop stop with a message.
+#
+# The plain arrays u8_array(n), u16_array(n) and i32_array(n) are arrays of vasm (own [u8], own [u16], own [i32]) that are made when the
+# result runs, and a[i], a[i] = v, plain_get and plain_set on them are left in the result, in the order a planck program does them,
+# whether the index and the value are static or dynamic. The array is a value that is passed to the functions that are unfolded; it is
+# not an argument of a function that is made. A write to an array that is not one of these stops with a message.
 
 use("base")
 use("list")
@@ -69,7 +77,8 @@ pe_fns := []
 pe_memo := []
 pe_impls := []
 pe_nres := 0
-pe_max_fns := 32
+# the functions being made: Tuple{Fv{name}, template}, the last first
+pe_making := []
 pe_at := Pos{0}
 
 # === Values ===
@@ -189,7 +198,44 @@ pe_dyn_not(v) := {
 
 # === The built-in functions ===
 # the functions that read or write something outside, which are not made yet
-pe_unsupported := ['put, 'print, 'write_file, 'try_read_file, 'read_bytes, '_index_set, 'exit]
+pe_unsupported := ['put, 'print, 'write_file, 'try_read_file, 'read_bytes, 'exit]
+
+# the arrays of vasm: u8_array(n), u16_array(n) and i32_array(n) make own [u8], own [u16] and own [i32]
+pe_array_types := [Tuple{'u8_array, U8{}}, Tuple{'u16_array, U16{}}, Tuple{'i32_array, I32{}}]
+pe_is_array(v) := pe_dyn(v) and head(arg(v, 1)) == 'Own and head(arg(arg(v, 1), 0)) == 'Arr
+pe_elem(v) := arg(arg(arg(v, 1), 0), 0)
+
+pe_array_new(f, vs) := {
+    if (length(vs) != 1) panic(f"pe: {symname(f)} takes one value")
+    n := vs[0]
+    if (not (typeof(n) == 'int or (pe_dyn(n) and vasm_int(arg(n, 1))))) panic(f"pe: the size of {symname(f)} is not an integer")
+    t := arg(find(p -> arg(p, 0) == f, pe_array_types), 1)
+    x := pe_fresh(Own{Arr{t}})
+    pe_emit(Assign{pe_at, x, Call{pe_at, 'alloc, [pe_operand(pe_to(n, I64{})), Imm{pe_at, 0}]}})
+    Dy{x, Own{Arr{t}}}
+}
+
+pe_array_get(vs) := {
+    if (length(vs) != 2) panic("pe: reading an array takes the array and an index")
+    i := vs[1]
+    if (not (typeof(i) == 'int or (pe_dyn(i) and vasm_int(arg(i, 1))))) panic("pe: the index of an array is not an integer")
+    t := pe_elem(vs[0])
+    x := pe_fresh(t)
+    pe_emit(Assign{pe_at, x, Index{pe_at, arg(vs[0], 0), pe_operand(pe_to(i, I64{}))}})
+    Dy{x, t}
+}
+
+# a[i] = v is left in the result; the value of it is v
+pe_array_set(vs) := {
+    if (length(vs) != 3) panic("pe: writing an array takes the array, an index and a value")
+    if (not pe_is_array(vs[0])) panic("pe: a write to an array that is not made by u8_array, u16_array or i32_array is not supported")
+    i := vs[1]
+    v := vs[2]
+    if (not (typeof(i) == 'int or (pe_dyn(i) and vasm_int(arg(i, 1))))) panic("pe: the index of an array is not an integer")
+    if (not (typeof(v) == 'int or (pe_dyn(v) and vasm_int(arg(v, 1))))) panic("pe: the value written to an array is not an integer")
+    pe_emit(IStore{pe_at, arg(vs[0], 0), pe_operand(pe_to(i, I64{})), pe_operand(pe_to(v, pe_elem(vs[0])))})
+    v
+}
 
 pe_println(vs) := {
     if (length(vs) != 1) panic("pe: println takes one value")
@@ -236,6 +282,9 @@ pe_primitive(f, vs) := {
     else if (f == 'read_file) pe_read_file(vs)
     else if (f == 'strlen and length(vs) == 1 and pe_dyn(vs[0])) pe_impl_call('strlen, [pe_bytes_operand(vs[0])], I32{})
     else if (f == 'argv) panic("pe: argv() is used as argv()[i] or array_len(argv())")
+    else if (find(p -> arg(p, 0) == f, pe_array_types) != none) pe_array_new(f, vs)
+    else if ((f == '_index_get or f == 'plain_get) and length(vs) > 0 and pe_is_array(vs[0])) pe_array_get(vs)
+    else if (f == '_index_set or f == 'plain_set or f == 'array_set) pe_array_set(vs)
     else if (member(f, pe_unsupported)) panic(f"pe: {symname(f)} is not supported")
     else if (f == '_not and length(vs) == 1 and pe_dyn(vs[0])) pe_dyn_not(vs[0])
     else if (find(p -> arg(p, 0) == f, pe_ops) != none and length(vs) == 2 and (pe_dyn(vs[0]) or pe_dyn(vs[1]))) pe_dyn_op(f, vs[0], vs[1])
@@ -424,22 +473,60 @@ pe_eval(env, e) := {
 # === The functions that are made ===
 
 # the key of a call: the function and its arguments, each a static value or Dyn{type}
-pe_template(vs) := map(v -> if (pe_dyn(v)) Dyn{arg(v, 1)} else {
+pe_template(vs) := map(v -> if (pe_dyn(v)) {
+    if (head(arg(v, 1)) == 'Own) panic("pe: an array is an argument of a function that is called, not unfolded")
+    Dyn{arg(v, 1)}
+} else {
     if (pe_has_dy(v)) panic("pe: a value with a dynamic part is an argument of a function that is called, not unfolded")
     v
 }, vs)
 
+# what v is, for a message: the name of the constructor, or the name of the type
+pe_kind(v) := if (typeof(v) == 'mexpr) symname(head(v)) else symname(typeof(v))
+
+# the element i of a template, the static value v of the call, as a parameter: the type of the parameter of the function that is being made if
+# it has one, and else a type of vasm for an integer, a bool or a string
+pe_dynamize(f, i, v, old) := if (pe_marker(v)) v
+    else if (pe_marker(old)) old
+    else if (typeof(v) == 'int) Dyn{I32{}}
+    else if (v == true or v == false) Dyn{Bool{}}
+    else if (typeof(v) == 'string) Dyn{Ref{'shr, 'static, Arr{U8{}}}}
+    else panic(f"pe: the argument {i + 1} of {symname(f)} changes at each call under a dynamic condition, and a value of {pe_kind(v)} cannot be a dynamic value (an integer, a bool or a string)")
+
+# the template of a call whose static values differ from those of the function that is being made for the same function: the elements that
+# differ are parameters
+pe_generalize(f, tmpl, old) := {
+    out := []
+    i := 0
+    for (v in tmpl) {
+        out = (if (v == old[i]) v else pe_dynamize(f, i, v, old[i])) :: out
+        i = i + 1
+    }
+    reverse(out)
+}
+
 # the call of the function f made for the static values of vs; the dynamic values of vs are its arguments
 pe_residual_call(f, vs) := {
     tmpl := pe_template(vs)
-    key := Tuple{Fv{f}, tmpl}
-    hit := find(m -> arg(m, 0) == key, pe_memo)
+    hit := find(m -> arg(m, 0) == Tuple{Fv{f}, tmpl}, pe_memo)
+    if (hit == none) {
+        outer := find(m -> arg(m, 0) == Fv{f} and length(arg(m, 1)) == length(tmpl), pe_making)
+        if (outer != none) {
+            tmpl = pe_generalize(f, tmpl, arg(outer, 1))
+            hit = find(m -> arg(m, 0) == Tuple{Fv{f}, tmpl}, pe_memo)
+        }
+    }
     name := if (hit != none) arg(hit, 1) else {
-        if (pe_nres >= pe_max_fns) panic(f"pe: more than {pe_max_fns} functions are made: the static arguments of {symname(f)} change at each call under a dynamic condition")
         pe_nres = pe_nres + 1
         pe_make_fn(intern(f"{pe_entry}_spec_{pe_nres}"), Fv{f}, tmpl)
     }
-    args := map(pe_operand, filter(pe_dyn, vs))
+    args := []
+    i := 0
+    for (a in tmpl) {
+        if (pe_marker(a)) args = pe_operand(pe_to(vs[i], arg(a, 0))) :: args
+        i = i + 1
+    }
+    args = reverse(args)
     if (pe_rty == Unit{}) {
         pe_emit(CallS{pe_at, name, args})
         none
@@ -464,6 +551,7 @@ pe_body(r) := {
 # the function name of vasm for the function fv called with tmpl, whose elements are static values or Dyn{type}
 pe_make_fn(name, fv, tmpl) := {
     pe_memo = Tuple{Tuple{fv, tmpl}, name} :: pe_memo
+    pe_making = Tuple{fv, tmpl} :: pe_making
     sd := pe_decls
     ss := pe_stmts
     sc := pe_count
@@ -499,6 +587,7 @@ pe_make_fn(name, fv, tmpl) := {
     pe_region = sr
     pe_depth = sdp
     pe_stack = sst
+    pe_making = drop(pe_making, 1)
     pe_fns = d :: pe_fns
     name
 }
@@ -517,6 +606,7 @@ specialize(tree, args, rty) := {
     pe_memo = []
     pe_impls = []
     pe_nres = 0
+    pe_making = []
     if (not pe_is_fun_tree(tree)) panic("pe: the first argument of specialize is the tree of a function")
     fv := pe_fun_value(tree)
     pe_entry = match fv {
