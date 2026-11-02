@@ -5,9 +5,11 @@ Planck is a language for symbolic and language processing.
 ``planck/init.pk`` is loaded first, then the program file given as the first argument is run.
 Each top-level expression is parsed and evaluated one by one.
 
-``planck/init.pk``, ``planck/peg.pk`` and ``planck/syntax.pk`` are written in M-expressions.
-``planck/syntax.pk`` defines the syntax below with the packrat parser of ``planck/peg.pk``
-and replaces ``parse``, so the given files are read by the syntax below.
+``planck/init.pk`` and ``planck/peg.pk`` are written in M-expressions.
+``planck/syntax.pk`` defines the syntax below with the packrat parser of ``planck/peg.pk``.
+It is written in M-expressions up to the grammar of ``::=`` and the smallest syntax for actions,
+replaces ``parse`` there, and declares the rest of the syntax with ``::=``,
+so the given files are read by the syntax below.
 
 M-expressions
 -------------
