@@ -74,13 +74,17 @@ run planck/preprocess.pk glib2
 expect "libraries preprocessed" 30 p3.pk
 
 # the executable made with the preprocessed libraries is the same as without them
-if [ -f "$ROOT/planck/lib/vasm_build.pkm" ]; then
+if [ -f "$ROOT/planck/lib/vasm/build.pkm" ]; then
     for ex in hello fib; do
-        "$ROOT/planck0" planck/vasmc.pk "planck/vasm/$ex.vasm" "$T/$ex.pre" || fail "$ex: vasmc with preprocessed libraries"
-        mkdir -p "$T/off"
-        mv planck/lib/*.pkm "$T/off/"
-        "$ROOT/planck0" planck/vasmc.pk "planck/vasm/$ex.vasm" "$T/$ex.plain" || fail "$ex: vasmc without preprocessed libraries"
-        mv "$T"/off/*.pkm planck/lib/
+        "$ROOT/planck0" planck/vasmc.pk "planck/examples/vasm/$ex.vasm" "$T/$ex.pre" || fail "$ex: vasmc with preprocessed libraries"
+        for d in . backend vasm; do
+            mkdir -p "$T/off/$d"
+            mv planck/lib/$d/*.pkm "$T/off/$d/"
+        done
+        "$ROOT/planck0" planck/vasmc.pk "planck/examples/vasm/$ex.vasm" "$T/$ex.plain" || fail "$ex: vasmc without preprocessed libraries"
+        for d in . backend vasm; do
+            mv "$T"/off/$d/*.pkm planck/lib/$d/
+        done
         cmp "$T/$ex.pre" "$T/$ex.plain" || fail "$ex: the executables differ"
         echo "$ex: same executable"
     done

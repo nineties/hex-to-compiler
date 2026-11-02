@@ -41,12 +41,12 @@ planck0: planck0.sv plisp2 $(SASM_LIBS)
 	-chmod +x $@
 
 
-VASM_EXAMPLES := $(wildcard planck/vasm/*.vasm)
-BACKEND_EXAMPLES := $(wildcard planck/backend/*.pk)
+VASM_EXAMPLES := $(wildcard planck/examples/vasm/*.vasm)
+BACKEND_EXAMPLES := $(wildcard planck/examples/backend/*.pk)
 
 .PHONY: clean test test-planck0 preprocess
 clean:
-	rm -f planck/lib/*.pkm
+	rm -f planck/lib/*.pkm planck/lib/*/*.pkm
 	rm -f pforth
 	rm -f plisp2
 	rm -f planck0
@@ -56,37 +56,37 @@ clean:
 test: pforth plisp.fs $(shell find plisp -name "*.lisp")
 	./pforth < plisp.fs plisp/test.lisp
 
-# parse the libraries that planck/vasmc.pk uses in advance (planck/lib/*.pkm)
+# parse the libraries that planck/vasmc.pk uses in advance (planck/lib/*/*.pkm)
 preprocess: planck0
-	./planck0 planck/preprocess.pk vasm_build
+	./planck0 planck/preprocess.pk vasm/build
 
 # run tests of planck0 and compare outputs of examples with *.out
 test-planck0: planck0
-	./planck0 planck/test.pk
-	./planck0 planck/test_syntax.pk
-	./planck0 planck/test_define.pk
-	./planck0 planck/test_builtins.pk one "two words"
-	./planck0 planck/test_lib.pk
-	./planck0 planck/test_unparse.pk
-	./planck0 planck/test_unparse_pattern.pk
-	./planck0 planck/test_unparse_file.pk
-	./planck0 planck/test_highlight.pk
+	./planck0 planck/tests/core.pk
+	./planck0 planck/tests/syntax.pk
+	./planck0 planck/tests/define.pk
+	./planck0 planck/tests/builtins.pk one "two words"
+	./planck0 planck/tests/lib.pk
+	./planck0 planck/tests/unparse.pk
+	./planck0 planck/tests/unparse_pattern.pk
+	./planck0 planck/tests/unparse_file.pk
+	./planck0 planck/tests/highlight.pk
 	$(MAKE) preprocess
 	tools/test_preprocess.sh
-	./planck0 planck/test_vasm.pk
-	./planck0 planck/test_vasm2.pk
+	./planck0 planck/tests/vasm.pk
+	./planck0 planck/tests/vasm2.pk
 	@for f in $(PLANCK_EXAMPLES); do \
 		./planck0 $$f > tmp-example.out || exit 1; \
 		diff -u $${f%.pk}.out tmp-example.out || exit 1; \
 		echo "$$f: ok"; \
 	done; rm -f tmp-example.out
-	@for f in planck/errors/*.pk; do \
+	@for f in planck/tests/errors/*.pk; do \
 		./planck0 $$f > tmp-error.out 2> tmp-error.err && { echo "$$f: should stop"; exit 1; }; \
 		diff -u $${f%.pk}.out tmp-error.out || exit 1; \
 		diff -u $${f%.pk}.err tmp-error.err || exit 1; \
 		echo "$$f: stops"; \
 	done; rm -f tmp-error.out tmp-error.err
-	./planck0 planck/test_backend.pk
+	./planck0 planck/tests/backend.pk
 	@for f in $(BACKEND_EXAMPLES); do \
 		./planck0 $$f tmp-backend || exit 1; \
 		./tmp-backend > tmp-backend.out || exit 1; \
