@@ -39,47 +39,72 @@
 <p class="lead">planckvm は planck の全機能を実行するバイトコードです。planck で書いた評価器が式を planckvm の命令に変換し、命令ループで実行します。この頁と<a href="planckvm-isa.html">planckvm の命令</a>が外部仕様で、VM の利用者や planck からコードを生成する側が頼ってよい約束を書きます。この頁では機械、値、数を説明します。実装の中の設計は<a href="planckvm-internals.html">planckvm の内部仕様</a>に書きます。</p>
 
 <h2>実行モデル</h2>
-<p>機械はスタック機械です。式の評価途中の値は、フレームごとのオペランドスタックに積みます。</p>
+<p>機械はレジスタマシンです。命令はすべて、現在のフレームのレジスタを読み書きします。</p>
 <table>
 <tr><th>名前</th><th>中身</th></tr>
-<tr><td>コード（code）</td><td>1つの Lambda または1つのトップレベルの式の命令列。不変。形は<a href="planckvm-isa.html#format">バイトコードのフォーマット</a>のとおり</td></tr>
-<tr><td>フレーム</td><td>1回の呼び出しの状態。フレームスタックに積む</td></tr>
-<tr><td>環境（env）</td><td>1回の呼び出しの変数を置く領域。呼び出しごとに作る</td></tr>
+<tr><td>コード（code）</td><td>1つの Lambda または1つのトップレベルの式の命令列と定数表。不変。形は<a href="planckvm-isa.html#format">バイトコードのフォーマット</a>のとおり</td></tr>
+<tr><td>レジスタ</td><td>フレームごとの <code>R[0]</code> から <code>R[nregs-1]</code>。<code>nregs</code> はコードの欄。値を1つずつ持つ</td></tr>
+<tr><td>フレーム</td><td>1回の呼び出しの状態</td></tr>
+<tr><td>環境（env）</td><td>捕捉される変数を置くヒープ上の領域。呼び出しごとに作り、親の環境を持つ</td></tr>
 <tr><td>セル</td><td>大域変数1つを表すオブジェクト。値と名前を持つ</td></tr>
 </table>
 
-<h3>フレーム</h3>
-<p>フレームは1回の呼び出しの状態で、フレームスタックに積みます。フレームスタックが満杯になると <code>stack overflow</code> で止まります。</p>
-
-<h3>環境と変数</h3>
+<h3>レジスタの窓</h3>
 <ul>
-<li>環境は1回の呼び出しにつき1つ作り、スロットの初期値は none です。</li>
-<li>変数の指す先は書かれた位置で決まり、コンパイル時に（深さ d, スロット i）へ解決されます。d は親をたどる回数です。名前の解決はコンパイル時に終わるので、実行時に未定義の変数は生じません。</li>
-<li>Lambda は作られた場所の環境を保持します。環境は共有されるので、Lambda の作成後に行った代入もその関数から見えます。</li>
-<li>継続を再開しても環境は複製しません。再開した複数のコピーは同じ変数を共有します。</li>
+<li>すべてのフレームのレジスタは1本のレジスタスタックの上に載ります。フレームのレジスタの範囲を窓と呼びます。</li>
+<li><code>CALL A B C</code> で呼ばれた Lambda の窓は、呼び出し元の <code>R[B+1]</code> から始まります。引数は呼び出し元が <code>R[B+1]</code> から <code>R[B+C]</code> に置くので、コピーせずに呼ばれた側の <code>R[0]</code> から <code>R[C-1]</code> になります。</li>
+<li>呼び出しの間、呼び出し元の <code>R[B]</code> は呼ばれた関数を持ち続けます。<code>R[B]</code> より上のレジスタの値は呼び出しで失われます。呼び出しをまたいで使う値は <code>R[B]</code> より下に置きます。</li>
+<li>引数以外のレジスタの初期値は決まっていません。読む前に書きます。</li>
+<li>窓がレジスタスタックに収まらなければ <code>stack overflow</code> で止まります。</li>
+</ul>
+
+<h3>変数の置き場所</h3>
+<p>変数の指す先は書かれた位置で決まり、コンパイル時に次の3つのいずれかへ解決されます。名前の解決はコンパイル時に終わるので、実行時に未定義の変数は生じません。</p>
+<table>
+<tr><th>置き場所</th><th>変数</th><th>読み書き</th></tr>
+<tr><td>セル</td><td>大域変数</td><td><code>GETGLOBAL</code> <code>SETGLOBAL</code></td></tr>
+<tr><td>環境</td><td>関数の変数のうち、(1) 内側の Lambda か <code>Handle</code> の本体から参照されるもの、(2) 代入され、かつ同じコードに <code>CALL</code> <code>TCALL</code> <code>HANDLE</code> <code>PERFORM</code> のどれかがあるもの</td><td><code>ENVGET</code> <code>ENVSET</code></td></tr>
+<tr><td>レジスタ</td><td>それ以外の関数の変数</td><td>命令のオペランドに直接書く</td></tr>
+</table>
+<ul>
+<li>「代入される」とは、<code>Set</code> の対象になることです。</li>
+<li>環境は1回の呼び出しにつき最大1つで、環境に置く変数があるコードだけが <code>NEWENV</code> で作ります。スロットの初期値は none です。<code>NEWENV</code> を実行しないコードの現在の環境は、Lambda が保持する環境です。</li>
+<li>環境の変数はコンパイル時に（深さ d, スロット i）へ解決されます。d は現在の環境から親をたどる回数です。</li>
+<li>Lambda は作られた場所の現在の環境を保持します。環境は共有されるので、Lambda の作成後に行った代入もその関数から見えます。</li>
+<li>レジスタの変数に、定義を通らずに届く経路があるときは、コードの入口で <code>LOADNONE</code> により none にします。</li>
 <li>大域変数はセルで表し、初期値は none です。<code>Def</code> は新しいセルを作り、それ以降にコンパイルした式は新しいセルを指します。それ以前にコンパイルした式は古いセルを指したままです。<code>Set</code> は同じセルに書き込みます。</li>
+<li><code>true</code> <code>false</code> <code>none</code> の変数は <code>planck/init.pk</code> のセルに解決されるとき定数としてコンパイルします。これらのセルへの <code>Set</code> はコンパイルエラーです。</li>
 </ul>
 
 <h3>呼び出し</h3>
-<p><code>CALL n</code> はスタックから <code>f a1 ... an</code> を取り出します。関数は <code>f</code> の種類に応じて次のように選びます。</p>
+<p><code>CALL A B C</code> は <code>f = R[B]</code> と C 個の引数 <code>R[B+1]</code> 〜 <code>R[B+C]</code> で呼び出します。動作は <code>f</code> の種類で決まります。</p>
 <table>
-<tr><th><code>f</code></th><th>選ぶ条件</th></tr>
-<tr><td>Lambda</td><td>コードの arity が n に等しいとき</td></tr>
-<tr><td>Fusion <code>a | b</code></td><td>a を先に試し、尽きたら b を試す</td></tr>
-<tr><td>組み込み</td><td>引数の個数が合うとき。フレームは作らず、結果をその場で返す（<code>eval</code> だけはフレームを作る）</td></tr>
-<tr><td>継続</td><td>n が 1 のとき再開する</td></tr>
-<tr><td>その他</td><td><code>not a function</code> で止まる</td></tr>
+<tr><th><code>f</code></th><th>選ぶ条件</th><th>動作</th></tr>
+<tr><td>Lambda</td><td>コードの arity が C に等しいとき</td><td>新しいフレームを作り、コードの先頭から実行する</td></tr>
+<tr><td>Fusion <code>a | b</code></td><td>a を先に試し、尽きたら b を試す</td><td>選んだ関数の動作をする</td></tr>
+<tr><td>組み込み</td><td>引数の個数が合うとき</td><td>フレームを作らず、結果をその場で受け取る。<code>eval</code> だけは arity 0 のコードを作り、Lambda と同じくフレームで実行する</td></tr>
+<tr><td>継続</td><td>C が 1 のとき</td><td>再開する</td></tr>
+<tr><td>その他</td><td></td><td><code>not a function</code> で止まる</td></tr>
 </table>
-<p>Lambda を選んだら、フレームと環境を作り、引数をフレームに置いて、コードの先頭から実行します。入口の命令列がパターンを照合し、一致しなければ <code>NEXT</code> が同じ引数で次の選択肢を試します。選択肢が尽きると <code>matching failed</code> で止まります。</p>
+<p>コードの入口の命令列がパターンを照合します。一致しなければ <code>NEXT</code> が同じ引数で次の選択肢を試します。入口の命令列は引数のレジスタを書き換えません。選択肢が尽きると <code>matching failed</code> で止まります。</p>
+<p>呼ばれた側の <code>RET</code> の値は、呼び出した命令に応じて受け取ります。</p>
+<table>
+<tr><th>呼び出した命令</th><th>受け取り方</th></tr>
+<tr><td>条件の命令（<code>T</code> で始まる命令）</td><td>値が <code>false</code> 以外なら条件が真として、条件の命令の規則に従う</td></tr>
+<tr><td><code>ASET</code> <code>PLAINSET</code></td><td>捨てる</td></tr>
+<tr><td>それ以外</td><td><code>R[A]</code> に入れる</td></tr>
+</table>
+<p>命令の表の「組み込み」の欄に名前のある命令は、その名前の組み込みのセルが組み込みのままのときだけ表の動作をします。セルに別の値が代入されていれば、窓の上に呼び出しを置いてその値を同じ引数で呼び、結果を上の表のとおりに受け取ります。即値は整数の引数として渡します。</p>
 
 <h3>継続とハンドラ</h3>
 <ul>
 <li><code>HANDLE</code> は本体を境界フレームで実行します。本体が正常に終わると、その値が <code>Handle</code> の値になります。</li>
-<li><code>PERFORM v</code> は呼び出し元をたどって最も内側の境界を探し、そこまでのフレームを複製して継続 <code>k</code> を作ります。次に境界のハンドラを引数 <code>(v, k)</code> で呼び、結果を境界の呼び出し元に返します。</li>
+<li><code>PERFORM A B</code> は呼び出し元をたどって最も内側の境界を探し、そこまでのフレームとレジスタを複製して継続 <code>k</code> を作ります。次に、境界より上を捨て、境界のハンドラを引数 <code>(R[B], k)</code> で呼びます。結果は <code>Handle</code> の値になります。</li>
 <li>ハンドラのどの選択肢にも一致しなければ、次に外側の境界へ進みます。このとき <code>k</code> は外側の境界までの複製として作り直します。内側の境界もこの複製に含まれます。</li>
 <li>境界が見つからなければ <code>unhandled effect: v</code> で止まります。</li>
-<li><code>k</code> を呼ぶと、複製してあるフレームを呼び出し元の上に再び複製します。境界のハンドラは残ります（deep）。最も内側のフレームでは、<code>k</code> の引数を <code>PERFORM</code> の値として積んで実行を続けます。本体が終わると、その値は <code>k</code> を呼んだ側に返ります。</li>
+<li><code>k</code> を呼ぶと、複製してあるフレームとレジスタを呼び出した窓の上に再び複製します。境界のハンドラは残ります（deep）。<code>PERFORM</code> の <code>R[A]</code> に <code>k</code> の引数を入れて実行を続けます。本体が終わると、その値は <code>k</code> を呼んだ側に返ります。</li>
 <li><code>k</code> は何度でも呼べます。</li>
+<li>再開しても環境とセルは複製しないので、環境とセルの変数は再開した複数のコピーで共有されます。レジスタの変数は値を複製します。レジスタの変数は捕捉の後で書き換わらないので、捕捉の時点で定義済みの変数はどのコピーからも同じ値に見えます。再開の後で実行した <code>x := e</code> は、レジスタの変数ならコピーごとに別の変数を定義します。</li>
 </ul>
 
 <h3>実行時エラー</h3>
@@ -87,9 +112,10 @@
 
 <h3>トップレベル</h3>
 <ul>
-<li>トップレベルの式1つが arity 0 のコード1つになります。ブロック内の局所変数はこのコードの環境に置きます。</li>
-<li>式を読んで実行するループは評価器の入口にあり、命令ではありません。式ごとに大域変数 <code>parse</code> と <code>eval</code> のセルを読んで呼び出します。</li>
-<li><code>eval(e)</code> も同じ形のコードを作って実行します。</li>
+<li>トップレベルの式1つが arity 0 のコード1つになります。ブロック内の局所変数は関数の変数と同じ規則で、このコードのレジスタか環境に置きます。</li>
+<li>式を読んで実行するループは評価器の入口にあり、命令ではありません。式ごとに大域変数 <code>parse</code> と <code>eval</code> のセルを読み、次の入口のコードで呼び出します。</li>
+<li>入口のコードは <code>CALL R0 R0 n</code> と <code>HALT R0</code> の2語です。評価器が <code>R[0]</code> に関数、<code>R[1]</code> から引数を置いてレジスタスタックの底で実行します。</li>
+<li><code>eval(e)</code> は e をコンパイルしたコードを呼び出したのと同じように実行します。</li>
 </ul>
 
 <h2>値</h2>
