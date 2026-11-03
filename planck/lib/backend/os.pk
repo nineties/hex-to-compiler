@@ -5,6 +5,7 @@
 #   write [fd, buf, n]   writes n bytes at the address buf to the file fd; the result is the number written, or negative for an error
 #   read [fd, buf, n]    reads up to n bytes from the file fd to the address buf; the result is the number read (0 at the end of the file), or negative for an error
 #   open [path]          opens the file whose name is the bytes from the address path to the first byte 0, for reading; the result is the file or negative for an error
+#   create [path]        the same, for writing: the file is emptied or made new
 #   close [fd]           closes the file fd
 #   exit [status]        ends the program with the status; it does not return
 #   grow [addr]          moves the end of the data area of the program to addr and gives the new end; 0 gives the end as it is,
@@ -20,7 +21,7 @@ use("base")
 use("list")
 use("backend/ir")
 
-os_services := ['write, 'read, 'open, 'close, 'exit, 'grow, 'args, 'abort]
+os_services := ['write, 'read, 'open, 'create, 'close, 'exit, 'grow, 'args, 'abort]
 
 # the status of a program that ends by abort
 os_abort_status := 134
@@ -36,6 +37,9 @@ os_linux_exit_group := 252
 
 # open for reading
 os_linux_o_rdonly := 0
+# open for writing, made new when it is not there, and emptied (O_WRONLY | O_CREAT | O_TRUNC), with the mode rw-r--r--
+os_linux_o_create := 577
+os_linux_mode := 420
 
 # the physical registers of the 32-bit x86 that take the number and the arguments of a system call
 os_reg_number := 0
@@ -65,6 +69,7 @@ os_select(emit, name, args, d) := match name {
     'write -> os_call(emit, os_linux_write, args, d)
   | 'read -> os_call(emit, os_linux_read, args, d)
   | 'open -> os_call(emit, os_linux_open, append(args, [K{os_linux_o_rdonly}]), d)
+  | 'create -> os_call(emit, os_linux_open, append(args, [K{os_linux_o_create}, K{os_linux_mode}]), d)
   | 'close -> os_call(emit, os_linux_close, args, d)
   | 'exit -> os_call(emit, os_linux_exit, args, d)
   | 'grow -> os_call(emit, os_linux_brk, args, d)

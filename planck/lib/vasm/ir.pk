@@ -19,6 +19,10 @@
 #   a register that holds an own value is 0 when the value is moved or freed, so that the end of a block can drop what is left:
 #   the drop functions __drop_<type> do nothing for 0
 #   a failed range check of an index or the size of alloc is trap
+# Values of val:
+#   a val is the address of a block of vasm/rt.pk that counts its holders. A register, a field or an element that holds a val is one holder; the code that
+#   copies a val to another place counts one more with __val_inc, and __val_drop is called where own is dropped. A symbol in the program is a block in .rodata
+#   that is never released. x = fn f(a, ...) keeps the address of a function __clo_f_n that takes the value itself and the other arguments, and calls f.
 # Services of the system:
 #   write, read, open, close and exit are the instruction os of ir.pk (see backend/os.pk); write and read give the address and the length of the array
 #   to the system, and open gives the name of the file as bytes followed by a byte 0 that __open makes. argc reads the number of arguments kept by _start,
@@ -31,6 +35,7 @@ use("vector")
 use("string")
 use("bytes")
 use("backend/ir")
+use("vasm/rt")
 
 # === State ===
 vi_structs := table()
@@ -46,6 +51,9 @@ vi_extra := vec_new()
 vi_made := table()
 vi_strings := table()
 vi_string_list := vec_new()
+vi_symbols := table()
+vi_symbol_list := vec_new()
+vi_wrappers := vec_new()
 
 fun vi_drop_name
 fun vi_string_name
@@ -59,6 +67,13 @@ fun vi_user_call
 fun vi_swap
 fun vi_sub_leaves
 fun vi_sinfo
+fun vi_symbol_reg
+fun vi_peek
+fun vi_val_eq
+fun vi_to_val
+fun vi_from_val
+fun vi_wrapper_name
+fun vi_call_system
 
 table_get_pair(ps, k) := arg(find((Tuple{f, _}) -> f == k, ps), 1)
 
@@ -78,6 +93,7 @@ vi_align_up(n, a) := (n + a - 1) / a * a
 vi_size(t) := match t {
     Named{s} -> vi_sinfo(s)[1]
   | Own{_} -> 4
+  | Val{} -> 4
   | Ref{_, _, _} -> 4
   | _ -> vi_bits(t) / 8
 }
@@ -118,6 +134,7 @@ vi_leaves(t, base) := match t {
 
 vi_owning(t) := match t {
     Own{_} -> true
+  | Val{} -> true
   | Arr{u} -> vi_owning(u)
   | Named{s} -> any((Field{_, _, ft}) -> vi_owning(ft), table_get(vi_structs, s, []))
   | _ -> false
@@ -126,8 +143,12 @@ vi_owning(t) := match t {
 # an own or &mut value is moved by a use; only an own value (or a struct that owns) is cleared
 vi_linear(t) := head(t) == 'Own or (head(t) == 'Named and vi_owning(t))
 
+# a leaf of a value that is released when its holder is gone
+vi_holds(t) := head(t) == 'Own or t == Val{}
+
 vi_key(t) := match t {
     Own{u} -> f"own({vi_key(u)})"
+  | Val{} -> "val"
   | Arr{u} -> f"arr({vi_key(u)})"
   | Named{s} -> f"S.{symname(s)}"
   | _ -> if (vi_is_int(t)) f"i{vi_bits(t)}" else "bool"
@@ -178,7 +199,7 @@ vi_declare(x, t) := {
     leaves := map((Tuple{o, lt}) -> Tuple{o, lt, vi_reg(lt)}, vi_leaves(t, 0))
     table_set(vi_vars, x, Var{t, leaves})
     # an own value that is not set yet is 0, so that it is not dropped
-    each((Tuple{_, lt, r}) -> if (head(lt) == 'Own) ve(I{'li, [D{r}, K{0}]}), leaves)
+    each((Tuple{_, lt, r}) -> if (vi_holds(lt)) ve(I{'li, [D{r}, K{0}]}), leaves)
     if (vi_scopes != []) vi_scopes = (x :: vi_scopes[0]) :: drop(vi_scopes, 1)
 }
 
@@ -197,7 +218,7 @@ vi_set_var(x, v) := each((Tuple{Tuple{_, _, r}, Tuple{_, _, a}}) -> {
 # the registers of x with the owning leaves cleared (a move of the own values of x): the copy of the value
 vi_take(x) := {
     v := vi_copy(vi_var_val(x))
-    each((Tuple{_, lt, r}) -> if (head(lt) == 'Own) ve(I{'li, [D{r}, K{0}]}), arg(vi_var(x), 1))
+    each((Tuple{_, lt, r}) -> if (vi_holds(lt)) ve(I{'li, [D{r}, K{0}]}), arg(vi_var(x), 1))
     v
 }
 
@@ -214,7 +235,7 @@ vi_load(base, off, t) := map((Tuple{o, lt}) -> {
 vi_store(base, off, v) := each((Tuple{o, t, a}) -> ve(I{'st, [W{vi_stw(t)}, M{U{base}, off + o}, a]}), v)
 
 # the own values in the value of type t at base + off are moved out: their places are cleared
-vi_clear(base, off, t) := each((Tuple{o, lt}) -> if (head(lt) == 'Own) ve(I{'st, [W{'w32}, M{U{base}, off + o}, K{0}]}), vi_leaves(t, 0))
+vi_clear(base, off, t) := each((Tuple{o, lt}) -> if (vi_holds(lt)) ve(I{'st, [W{'w32}, M{U{base}, off + o}, K{0}]}), vi_leaves(t, 0))
 
 # === Dropping ===
 vi_call_fn(name, args, rets) := ve(I{'call, [S{name, 0}, Us{args}, Ds{rets}]})
@@ -222,25 +243,23 @@ vi_call_fn(name, args, rets) := ve(I{'call, [S{name, 0}, Us{args}, Ds{rets}]})
 # drop what the register p holds, which is an own value with contents of type u
 vi_drop_ptr(p, u) := vi_call_fn(vi_drop_name(u), [p], [])
 
-# the leaves that own in the value at base + off of type t are dropped
-vi_drop_at(base, off, t) := each((Tuple{o, lt}) -> match lt {
-    Own{u} -> {
-        r := ir_vreg(vi_f, 32)
-        ve(I{'ld, [W{'w32}, D{r}, M{U{base}, off + o}]})
-        vi_drop_ptr(r, u)
-    }
+# the holder that is the register r, a leaf of type t, is gone
+vi_drop_leaf(r, t) := match t {
+    Own{u} -> vi_drop_ptr(r, u)
+  | Val{} -> vi_call_fn("__val_drop", [r], [])
   | _ -> none
+}
+
+# the leaves that own in the value at base + off of type t are dropped
+vi_drop_at(base, off, t) := each((Tuple{o, lt}) -> if (vi_holds(lt)) {
+    r := ir_vreg(vi_f, 32)
+    ve(I{'ld, [W{'w32}, D{r}, M{U{base}, off + o}]})
+    vi_drop_leaf(r, lt)
 }, vi_leaves(t, 0))
 
-vi_drop_var(x) := if (vi_var(x) != none) each((Tuple{_, lt, r}) -> match lt {
-    Own{u} -> vi_drop_ptr(r, u)
-  | _ -> none
-}, arg(vi_var(x), 1))
+vi_drop_var(x) := if (vi_var(x) != none) each((Tuple{_, lt, r}) -> vi_drop_leaf(r, lt), arg(vi_var(x), 1))
 
-vi_drop_value(v) := each((Tuple{_, lt, a}) -> match lt {
-    Own{u} -> vi_drop_ptr(vi_ureg(a, lt), u)
-  | _ -> none
-}, v)
+vi_drop_value(v) := each((Tuple{_, lt, a}) -> if (vi_holds(lt)) vi_drop_leaf(vi_ureg(a, lt), lt), v)
 
 # the name of the function that drops an own value with contents of type u; it is made when it is first asked for
 vi_drop_name(u) := {
@@ -296,6 +315,7 @@ vi_make_drop(name, u) := {
 # === Operands ===
 vi_otype(o) := match o {
     Reg{_, x} -> vi_var_type(x)
+  | Sym{_, _} -> Val{}
   | _ -> none
 }
 
@@ -309,12 +329,37 @@ vi_pair_type(a, b, expected) := {
 # the value of the operand o of type t (the expected type for a literal); an own value is moved
 vi_use(o, t) := match o {
     Imm{_, n} -> vi_val1(if (t == none) I64{} else t, K{if (n == true) 1 else if (n == false) 0 else n})
-  | Reg{_, x} -> if (vi_linear(vi_var_type(x))) vi_take(x) else vi_var_val(x)
+  | Reg{_, x} -> if (vi_var_type(x) == Val{}) {
+        r := ir_vreg(vi_f, 32)
+        ve(I{'mov, [D{r}, U{vi_ptr(x)}]})
+        vi_call_fn("__val_inc", [r], [])
+        vi_val1(Val{}, U{r})
+    } else if (vi_linear(vi_var_type(x))) vi_take(x) else vi_var_val(x)
   | Str{_, s} -> {
         r := ir_vreg(vi_f, 32)
         ve(I{'la, [D{r}, S{vi_string_name(s), 0}]})
         vi_val1(Ref{'shr, 'static, Arr{U8{}}}, U{r})
     }
+  | Sym{_, s} -> vi_val1(Val{}, U{vi_symbol_reg(s)})
+}
+
+# a register that holds the address of the symbol s, which is made when it is first asked for
+vi_symbol_reg(s) := {
+    n := table_get(vi_symbols, s, none)
+    if (n == none) {
+        n = f"__sym{vec_len(vi_symbol_list)}"
+        table_set(vi_symbols, s, n)
+        vec_push(vi_symbol_list, s)
+    }
+    r := ir_vreg(vi_f, 32)
+    ve(I{'la, [D{r}, S{n, 0}]})
+    r
+}
+
+# the register of the val operand o, without a new holder: the register that holds it, or a symbol
+vi_peek(o) := match o {
+    Reg{_, x} -> vi_ptr(x)
+  | Sym{_, s} -> vi_symbol_reg(s)
 }
 
 # the name of the data of the string literal s, which is made when it is first asked for
@@ -336,6 +381,9 @@ vasm_strings() := map(s -> {
     bb_str(b, s)
     IRData{table_get(vi_strings, s, none), ".rodata", 4, b, false}
 }, vec_to_list(vi_string_list))
+
+# the data of the symbols of the module lowered last, in the layout of a block of vasm/rt.pk
+vasm_symbols() := map(s -> IRData{table_get(vi_symbols, s, none), ".rodata", 4, rt_symbol_bytes(symname(s)), false}, vec_to_list(vi_symbol_list))
 
 # the address register of the array operand o, which is a register or a string literal
 vi_array_ptr(o) := match o {
@@ -455,8 +503,56 @@ vi_rhs(r, t, into) := match r {
         ty := vi_pair_type(a, b, t)
         rt := if (vi_is_cmp(op)) Bool{} else ty
         d := vi_dst(into, rt)
-        vi_arith(op, a, b, ty, d)
+        if (ty == Val{}) vi_val_eq(op, a, b, d) else vi_arith(op, a, b, ty, d)
         vi_val1(rt, U{d})
+    }
+  | Index{_, p, i} if vi_var_type(p) == Val{} -> {
+        d := ir_vreg(vi_f, 32)
+        vi_call_fn("__val_get", [vi_ptr(p), vi_ureg(vi_opnd(i, I64{}), I64{})], [d])
+        vi_val1(Val{}, U{d})
+    }
+  | Conv{_, a, Val{}} -> vi_to_val(a)
+  | Conv{_, a, ty} if vi_otype(a) == Val{} -> vi_from_val(a, ty, into)
+  | Con{_, h, args} -> {
+        vals := map(a -> vi_scalar(vi_use(a, Val{})), args)
+        n := length(args)
+        sz := ir_vreg(vi_f, 32)
+        p := ir_vreg(vi_f, 32)
+        ve(I{'li, [D{sz}, K{16 + 4 * n}]})
+        vi_call_fn("__alloc", [sz], [p])
+        ve(I{'st, [W{'w32}, M{U{p}, 0}, K{1}]})
+        ve(I{'st, [W{'w32}, M{U{p}, 4}, K{rt_kind_con}]})
+        ve(I{'st, [W{'w32}, M{U{p}, 8}, U{vi_symbol_reg(h)}]})
+        ve(I{'st, [W{'w32}, M{U{p}, 12}, K{n}]})
+        off := 16
+        for (v in vals) {
+            ve(I{'st, [W{'w32}, M{U{p}, off}, v]})
+            off = off + 4
+        }
+        vi_val1(Val{}, U{p})
+    }
+  | Clo{_, f, args} -> {
+        vals := map(a -> vi_scalar(vi_use(a, Val{})), args)
+        n := length(args)
+        np := length(arg(table_get(vi_sigs, f, none), 3))
+        name := vi_wrapper_name(f, n)
+        sz := ir_vreg(vi_f, 32)
+        p := ir_vreg(vi_f, 32)
+        c := ir_vreg(vi_f, 32)
+        ve(I{'li, [D{sz}, K{20 + 4 * n}]})
+        vi_call_fn("__alloc", [sz], [p])
+        ve(I{'la, [D{c}, S{name, 0}]})
+        ve(I{'st, [W{'w32}, M{U{p}, 0}, K{1}]})
+        ve(I{'st, [W{'w32}, M{U{p}, 4}, K{rt_kind_fun}]})
+        ve(I{'st, [W{'w32}, M{U{p}, 8}, U{c}]})
+        ve(I{'st, [W{'w32}, M{U{p}, 12}, K{n}]})
+        ve(I{'st, [W{'w32}, M{U{p}, 16}, K{np - n}]})
+        off := 20
+        for (v in vals) {
+            ve(I{'st, [W{'w32}, M{U{p}, off}, v]})
+            off = off + 4
+        }
+        vi_val1(Val{}, U{p})
     }
   | Load{_, p} -> {
         u := vi_contents(p)
@@ -477,7 +573,7 @@ vi_rhs(r, t, into) := match r {
             v := vi_sub(vi_var_val(p), off, vi_size(ft))
             if (vi_owning(ft)) {
                 c := vi_copy(v)
-                each((Tuple{o, lt, a}) -> if (head(lt) == 'Own) ve(I{'li, [D{arg(a, 0)}, K{0}]}), v)
+                each((Tuple{o, lt, a}) -> if (vi_holds(lt)) ve(I{'li, [D{arg(a, 0)}, K{0}]}), v)
                 c
             } else v
         } else {
@@ -502,11 +598,169 @@ vi_rhs(r, t, into) := match r {
   | Call{_, f, args} -> vi_call(f, args, t)
 }
 
+# === Values of val ===
+# d = a == b or d = a != b
+vi_val_eq(op, a, b, d) := {
+    vi_call_fn("__val_eq", [vi_peek(a), vi_peek(b)], [d])
+    if (op == 'ne) ve(I{'bxor, [D{d}, U{d}, K{1}]})
+}
+
+# a as val, which is a new holder
+vi_to_val(a) := {
+    t := match a {
+        Str{_, _} -> Ref{'shr, 'static, Arr{U8{}}}
+      | Imm{_, n} -> if (typeof(n) == 'int) I64{} else Bool{}
+      | _ -> vi_otype(a)
+    }
+    d := ir_vreg(vi_f, 32)
+    if (t == Val{}) vi_use(a, Val{})
+    else {
+        if (t == Bool{}) vi_call_fn("__val_bool", [vi_ureg(vi_opnd(a, Bool{}), Bool{})], [d])
+        else if (head(t) == 'Ref) {
+            k := ir_vreg(vi_f, 32)
+            ve(I{'li, [D{k}, K{rt_kind_str}]})
+            vi_call_fn("__val_str", [vi_array_ptr(a), k], [d])
+        } else {
+            w := ir_vreg(vi_f, 64)
+            vi_conv(a, t, I64{}, w)
+            vi_call_fn("__val_int", [w], [d])
+        }
+        vi_val1(Val{}, U{d})
+    }
+}
+
+# a as t for a val a: the kind of a is checked by the functions of vasm/rt.pk
+vi_from_val(a, t, into) := {
+    p := vi_peek(a)
+    if (t == Bool{}) {
+        d := vi_dst(into, t)
+        vi_call_fn("__val_unbool", [p], [d])
+        vi_val1(t, U{d})
+    } else if (head(t) == 'Own) {
+        d := ir_vreg(vi_f, 32)
+        vi_call_fn("__val_bytes", [p], [d])
+        vi_val1(t, U{d})
+    } else {
+        w := ir_vreg(vi_f, 64)
+        vi_call_fn("__val_unint", [p], [w])
+        if (vi_wide(t)) vi_val1(t, U{w}) else {
+            d := vi_dst(into, t)
+            ve(I{'trunc, [D{d}, U{w}]})
+            vi_normalize(d, t)
+            vi_val1(t, U{d})
+        }
+    }
+}
+
+# the name of the function that a value made by fn f(a, ...) with n arguments calls, which is made when it is first asked for
+vi_wrapper_name(f, n) := {
+    name := f"__clo_{symname(f)}_{n}"
+    if (not table_has(vi_made, name)) {
+        table_set(vi_made, name, true)
+        vec_push(vi_wrappers, Tuple{name, f, n})
+    }
+    name
+}
+
+# the function that takes the value itself and the other arguments: it gives the arguments kept in the value and the others to f
+vi_make_wrapper(name, f, n) := {
+    saved := vi_f
+    w := ir_fn(name)
+    vi_f = w
+    np := length(arg(table_get(vi_sigs, f, none), 3))
+    self := ir_vreg(w, 32)
+    ve(I{'getarg, [D{self}, K{0}]})
+    words := []
+    i := 0
+    while (i < n) {
+        r := ir_vreg(w, 32)
+        ve(I{'ld, [W{'w32}, D{r}, M{U{self}, 20 + 4 * i}]})
+        vi_call_fn("__val_inc", [r], [])
+        words = r :: words
+        i = i + 1
+    }
+    i = 0
+    while (i < np - n) {
+        r := ir_vreg(w, 32)
+        ve(I{'getarg, [D{r}, K{i + 1}]})
+        words = r :: words
+        i = i + 1
+    }
+    d := ir_vreg(w, 32)
+    vi_call_fn(symname(f), reverse(words), [d])
+    ve(I{'ret, [Us{[d]}]})
+    vi_f = saved
+    w
+}
+
+# v(a, ...) for a register v of val
+vi_val_call(v, args) := {
+    self := vi_ptr(v)
+    n := ir_vreg(vi_f, 32)
+    c := ir_vreg(vi_f, 32)
+    d := ir_vreg(vi_f, 32)
+    ve(I{'li, [D{n}, K{length(args)}]})
+    vi_call_fn("__val_code", [self, n], [c])
+    words := map(a -> vi_ureg(vi_scalar(vi_use(a, Val{})), Val{}), args)
+    ve(I{'call, [U{c}, Us{self :: words}, Ds{[d]}]})
+    vi_val1(Val{}, U{d})
+}
+
+# a function of vasm/rt.pk on values of val, with the arguments as words: its result is a val, or the integer of the type t, or nothing for t = none
+vi_val_fn(name, words) := {
+    d := ir_vreg(vi_f, 32)
+    vi_call_fn(name, words, [d])
+    vi_val1(Val{}, U{d})
+}
+
 # === Calls ===
 vi_call(f, args, expected) := {
     sig := table_get(vi_sigs, f, none)
-    if (sig != none) vi_user_call(sig, args)
+    if (vi_var(f) != none and vi_var_type(f) == Val{}) vi_val_call(f, args)
+    else if (sig != none) vi_user_call(sig, args)
     else match f {
+        'is -> {
+            n := ir_vreg(vi_f, 32)
+            d := ir_vreg(vi_f, 32)
+            ve(I{'trunc, [D{n}, U{vi_ureg(vi_opnd(args[2], I64{}), I64{})}]})
+            vi_call_fn("__val_is", [vi_peek(args[0]), vi_peek(args[1]), n], [d])
+            vi_val1(Bool{}, U{d})
+        }
+      | 'typeof -> vi_val_fn("__val_typeof", [vi_peek(args[0])])
+      | 'head -> vi_val_fn("__val_head", [vi_peek(args[0])])
+      | 'arity -> {
+            n := ir_vreg(vi_f, 32)
+            d := ir_vreg(vi_f, 64)
+            vi_call_fn("__val_arity", [vi_peek(args[0])], [n])
+            ve(I{'zext64, [D{d}, U{n}]})
+            vi_val1(I64{}, U{d})
+        }
+      | 'array -> vi_val_fn("__val_array", [vi_ureg(vi_opnd(args[0], I64{}), I64{}), vi_peek(args[1])])
+      | 'mexpr -> vi_val_fn("__val_mexpr", [vi_peek(args[0]), vi_peek(args[1])])
+      | 'intern -> {
+            k := ir_vreg(vi_f, 32)
+            ve(I{'li, [D{k}, K{rt_kind_sym}]})
+            vi_val_fn("__val_retag", [vi_peek(args[0]), k])
+        }
+      | 'symname -> {
+            k := ir_vreg(vi_f, 32)
+            ve(I{'li, [D{k}, K{rt_kind_str}]})
+            vi_val_fn("__val_retag", [vi_peek(args[0]), k])
+        }
+      | 'create -> {
+            a := vi_array_ptr(args[0])
+            r := ir_vreg(vi_f, 32)
+            d := ir_vreg(vi_f, 64)
+            vi_call_fn("__create", [a], [r])
+            ve(I{'sext64, [D{d}, U{r}]})
+            vi_val1(I64{}, U{d})
+        }
+      | _ -> vi_call_system(f, args, expected)
+    }
+}
+
+vi_call_system(f, args, expected) := {
+    match f {
         'box -> {
             t := if (expected != none and head(expected) == 'Own) arg(expected, 0) else vi_pair_type(args[0], args[0], I64{})
             v := vi_use(args[0], t)
@@ -719,7 +973,11 @@ vi_user_call(sig, args) := {
 # === Statements ===
 # the code jumps to lt when the condition c holds and to lf otherwise
 vi_cond(c, lt, lf) := match c {
-    Bin{op, a, b} -> {
+    Bin{op, a, b} -> if (vi_pair_type(a, b, I64{}) == Val{}) {
+        r := ir_vreg(vi_f, 32)
+        vi_val_eq(op, a, b, r)
+        ve(I{'br, [Cc{'ne}, U{r}, K{0}, L{lt}, L{lf}]})
+    } else {
         t := vi_pair_type(a, b, I64{})
         ra := vi_ureg(vi_opnd(a, t), t)
         ve(I{'br, [Cc{vi_cc(op, t)}, U{ra}, vi_opnd(b, t), L{lt}, L{lf}]})
@@ -753,6 +1011,11 @@ vi_stmt(s) := match s {
         if (vi_owning(u)) vi_drop_at(vi_ptr(p), 0, u)
         vi_store(vi_ptr(p), 0, v)
     }
+  | IStore{_, p, i, a} if vi_var_type(p) == Val{} -> {
+        ix := vi_ureg(vi_opnd(i, I64{}), I64{})
+        v := vi_ureg(vi_scalar(vi_use(a, Val{})), Val{})
+        vi_call_fn("__val_set", [vi_ptr(p), ix, v], [])
+    }
   | IStore{_, p, i, a} -> {
         e := vi_elem(p, i)
         v := vi_use(a, e[2])
@@ -767,10 +1030,7 @@ vi_stmt(s) := match s {
             off := vi_field_off(sn, f)
             v := vi_use(a, ft)
             ls := vi_sub_leaves(p, off, vi_size(ft))
-            if (vi_owning(ft)) each((Tuple{_, lt, r}) -> match lt {
-                Own{u} -> vi_drop_ptr(r, u)
-              | _ -> none
-            }, ls)
+            if (vi_owning(ft)) each((Tuple{_, lt, r}) -> vi_drop_leaf(r, lt), ls)
             each((Tuple{Tuple{_, _, r}, Tuple{_, _, o}}) -> ve(I{if (head(o) == 'K) 'li else 'mov, [D{r}, o]}), zip(ls, v))
         } else {
             sn := arg(vi_contents(p), 0)
@@ -884,6 +1144,9 @@ vasm_lower_only(Module{items}, names) := {
     vi_made = table()
     vi_strings = table()
     vi_string_list = vec_new()
+    vi_symbols = table()
+    vi_symbol_list = vec_new()
+    vi_wrappers = vec_new()
     each(d -> match d {
         Struct{_, s, fs} -> if (table_get(vi_structs, s, none) == none) table_set(vi_structs, s, fs)
       | Fn{_, name, _, _, _, _} -> table_set(vi_sigs, name, d)
@@ -894,6 +1157,12 @@ vasm_lower_only(Module{items}, names) := {
     while (i < vec_len(vi_extra)) {
         e := vec_get(vi_extra, i)
         drops = vi_make_drop(e[0], e[1]) :: drops
+        i = i + 1
+    }
+    i = 0
+    while (i < vec_len(vi_wrappers)) {
+        e := vec_get(vi_wrappers, i)
+        drops = vi_make_wrapper(e[0], e[1], e[2]) :: drops
         i = i + 1
     }
     append(fns, reverse(drops))

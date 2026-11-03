@@ -35,7 +35,7 @@ _define_rule('vasm_here, p -> {
 _define_rule('vasm_same, 'Same{})
 _define_rule('vasm_newline, 'Not{Same{}})
 
-vasm_kw ::= ('fn | 'struct | 'var | 'region | 'own | 'mut | 'i8 | 'i16 | 'i32 | 'i64 | 'u8 | 'u16 | 'u32 | 'u64 | 'bool | 'true | 'false | 'if | 'else | 'while | 'return | 'as | 'static)
+vasm_kw ::= ('fn | 'struct | 'var | 'region | 'own | 'mut | 'i8 | 'i16 | 'i32 | 'i64 | 'u8 | 'u16 | 'u32 | 'u64 | 'bool | 'val | 'true | 'false | 'if | 'else | 'while | 'return | 'as | 'static)
 vasm_name ::= !vasm_kw x:ident { x }
 
 # the value of the text s of an integer literal, or Big{s} if it is out of -32768 to 32767.
@@ -78,6 +78,7 @@ _define_rule('vasm_int_lit, p -> {
 vasm_type ::= 'i8 { I8{} } | 'i16 { I16{} } | 'i32 { I32{} } | 'i64 { I64{} }
     | 'u8 { U8{} } | 'u16 { U16{} } | 'u32 { U32{} } | 'u64 { U64{} }
     | 'bool { Bool{} }
+    | 'val { Val{} }
     | 'own t:vasm_type { Own{t} }
     | "&" 'static t:vasm_type { Ref{'shr, 'static, t} }
     | "&" 'mut r:vasm_name t:vasm_type { Ref{'mut, r, t} }
@@ -87,6 +88,7 @@ vasm_type ::= 'i8 { I8{} } | 'i16 { I16{} } | 'i32 { I32{} } | 'i64 { I64{} }
 
 vasm_operand ::= at:vasm_here n:vasm_int_lit { Imm{at, n} }
     | at:vasm_here s:string { Str{at, s} }
+    | at:vasm_here "'" s:ident { Sym{at, s} }
     | at:vasm_here 'true { Imm{at, true} }
     | at:vasm_here 'false { Imm{at, false} }
     | at:vasm_here x:vasm_name { Reg{at, x} }
@@ -112,6 +114,8 @@ vasm_inits ::= i:vasm_init r:vasm_more_init* { i :: vasm_tlist(r) }
 vasm_rhs ::= at:vasm_here "&" 'mut r:vasm_name y:vasm_name { Borrow{at, 'mut, r, y} }
     | at:vasm_here "&" r:vasm_name y:vasm_name { Borrow{at, 'shr, r, y} }
     | at:vasm_here "*" p:vasm_name { Load{at, p} }
+    | at:vasm_here 'val h:ident "(" args:vasm_args? ")" { Con{at, h, vasm_opt_list(args)} }
+    | at:vasm_here 'fn f:vasm_name "(" args:vasm_args? ")" { Clo{at, f, vasm_opt_list(args)} }
     | at:vasm_here f:vasm_name "(" args:vasm_args? ")" { Call{at, f, vasm_opt_list(args)} }
     | at:vasm_here s:vasm_name "{" is:vasm_inits? ","? "}" { Make{at, s, vasm_opt_list(is)} }
     | at:vasm_here a:vasm_name "[" i:vasm_operand "]" { Index{at, a, i} }
@@ -174,6 +178,7 @@ vasm_lit_hi(e) := if (arg(e, 2) != 8) 32767 else if (arg(e, 3)) 127 else 255
 
 vasm_show_type(t) := match t {
     Bool{} -> "bool"
+  | Val{} -> "val"
   | Unit{} -> "()"
   | Lit{_} -> "integer"
   | Own{u} -> _strcat("own ", vasm_show_type(u))
@@ -199,11 +204,13 @@ vasm_regions := []
 vasm_fn_regions := []
 vasm_ret_type := Unit{}
 
-# t owns a value: t is own, or a struct with a field that owns, or an array of them
+# t owns a value: t is own or val, or a struct with a field that owns, or an array of them.
+# A val in a register is copied (vasm_linear); a val in a struct, in a box or in an array of own is what own is there.
 fun vasm_owning_in
 vasm_owning(t) := vasm_owning_in(t, [])
 vasm_owning_in(t, seen) := match t {
     Own{_} -> true
+  | Val{} -> true
   | Arr{u} -> vasm_owning_in(u, seen)
   | Named{s} -> {
         sd := table_get(vasm_structs, s, none)
@@ -374,6 +381,7 @@ vasm_use(st, o) := match o {
     Imm{at, n} -> if (typeof(n) == 'int) Lit{n} else if (n == true or n == false) Bool{}
         else vasm_fail(at, 'type, f"{arg(n, 0)} is out of the range of a literal, -32768 to 32767; make it with << and |")
   | Str{_, _} -> Ref{'shr, 'static, Arr{U8{}}}
+  | Sym{_, _} -> Val{}
   | Reg{at, x} -> {
         t := vasm_type_of(at, x)
         vasm_need_init(at, st, x)
@@ -410,8 +418,11 @@ vasm_cell(at, st, p, write) := {
 }
 
 # the element type of the array p at the index operand i. The range of i is checked when the program runs.
+# For a val p the kind of the value is checked when the program runs too.
 vasm_elem(at, st, p, i, write) := {
-    u := vasm_ptr(at, st, p, write)
+    isval := vasm_type_of(at, p) == Val{}
+    if (isval) vasm_need_init(at, st, p)
+    u := if (isval) Arr{Val{}} else vasm_ptr(at, st, p, write)
     if (head(u) != 'Arr) vasm_fail(at, 'type, f"{symname(p)} points to {vasm_show_type(u)}, not an array")
     ti := vasm_use(st, i)
     if (not vasm_fits(arg(i, 0), I64{}, ti)) vasm_fail(arg(i, 0), 'type, f"the index is {vasm_show_type(ti)}, not i64")
@@ -469,7 +480,10 @@ vasm_get(at, st, p, f) := {
 # the type of the place a (*p, p[i] or p.f) of swap, which is read and written
 vasm_place(st, a) := match a {
     Load{at, p} -> vasm_cell(at, st, p, true)
-  | Index{at, p, i} -> vasm_elem(at, st, p, i, true)
+  | Index{at, p, i} -> {
+        if (vasm_type_of(at, p) == Val{}) vasm_fail(at, 'type, f"{symname(p)} is val; write {symname(p)}[i] = v")
+        vasm_elem(at, st, p, i, true)
+    }
   | Get{at, p, f} -> {
         t := vasm_type_of(at, p)
         if (head(t) == 'Named) {
@@ -519,7 +533,36 @@ vasm_mut_reg(a) := if (head(a) == 'Reg) {
 } else false
 vasm_reborrows(p, a, ret) := head(p) == 'Ref and not vasm_mentions(ret, arg(p, 1)) and vasm_mut_reg(a)
 
-vasm_call(at, st, f, args) := {
+vasm_val_operand(st, a) := {
+    if (vasm_is_place(a)) vasm_fail(arg(a, 0), 'type, "the value of a val is a register or a literal, not a place")
+    t := vasm_use(st, a)
+    if (t != Val{}) vasm_fail(arg(a, 0), 'type, f"the value is {vasm_show_type(t)}, not val")
+}
+
+# v(a, ...) for a register v of val: the arguments and the result are val. That v is a function that takes as many arguments is checked when the program runs.
+vasm_is_val_reg(f) := {
+    i := table_get(vasm_info, f, none)
+    i != none and arg(i, 0) == Val{}
+}
+
+# x = fn f(a, ...): the arguments are the first arguments of f, and all that f takes and gives is val
+vasm_closure(at, st, f, args) := {
+    sig := table_get(vasm_sigs, f, none)
+    if (sig == none) vasm_fail(at, 'undefined, f"function {symname(f)} is not defined")
+    if (arg(sig, 0) != [] or arg(sig, 2) != Val{} or any(p -> p != Val{}, arg(sig, 1))) vasm_fail(at, 'type, f"{symname(f)} is made a value of val, so all that it takes and gives is val")
+    if (length(args) > length(arg(sig, 1))) vasm_fail(at, 'type, f"{symname(f)} takes {length(arg(sig, 1))} arguments but {length(args)} are given")
+    each(a -> vasm_val_operand(st, a), args)
+    Val{}
+}
+
+fun vasm_call_named
+vasm_call(at, st, f, args) := if (vasm_is_val_reg(f)) {
+    vasm_need_init(at, st, f)
+    each(a -> vasm_val_operand(st, a), args)
+    Val{}
+} else vasm_call_named(at, st, f, args)
+
+vasm_call_named(at, st, f, args) = {
     user := table_get(vasm_sigs, f, none)
     sig := if (user == none) table_get(vasm_builtins, f, none) else user
     if (sig == none) vasm_fail(at, 'undefined, f"function {symname(f)} is not defined")
@@ -584,7 +627,7 @@ vasm_rhs(st, r) := match r {
             vasm_lit_range(arg(b, 0), arg(tb, 0), ta)
             tb = ta
         }
-        if ((op == 'eq or op == 'ne) and ta == Bool{} and tb == Bool{}) Bool{} else {
+        if ((op == 'eq or op == 'ne) and ((ta == Bool{} and tb == Bool{}) or (ta == Val{} and tb == Val{}))) Bool{} else {
             vasm_int_operand(a, ta)
             vasm_int_operand(b, tb)
             lits := head(ta) == 'Lit and head(tb) == 'Lit
@@ -595,16 +638,27 @@ vasm_rhs(st, r) := match r {
   | Load{at, p} -> vasm_load(at, st, p)
   | Index{at, p, i} -> {
         u := vasm_elem(at, st, p, i, false)
-        if (vasm_owning(u)) vasm_fail(at, 'owner, f"the elements of {symname(p)} own values and are not copied; use swap({symname(p)}[i], v)")
+        if (vasm_owning(u) and vasm_type_of(at, p) != Val{}) vasm_fail(at, 'owner, f"the elements of {symname(p)} own values and are not copied; use swap({symname(p)}[i], v)")
         u
     }
   | Get{at, p, f} -> vasm_get(at, st, p, f)
   | Conv{at, a, t} -> {
         ta := vasm_use(st, a)
-        if (not vasm_int(t)) vasm_fail(at, 'type, f"the value is converted to {vasm_show_type(t)}, not an integer type")
-        if (head(ta) == 'Lit) vasm_lit_range(at, arg(ta, 0), t) else vasm_int_operand(a, ta)
+        if (t == Val{}) {
+            if (not (vasm_int(ta) or head(ta) == 'Lit or ta == Bool{} or ta == Val{} or (head(ta) == 'Ref and arg(ta, 2) == Arr{U8{}}))) vasm_fail(at, 'type, f"{vasm_show_type(ta)} is not made a val")
+        } else if (ta == Val{}) {
+            if (not (vasm_int(t) or t == Bool{} or t == Own{Arr{U8{}}})) vasm_fail(at, 'type, f"a val is not converted to {vasm_show_type(t)}")
+        } else {
+            if (not vasm_int(t)) vasm_fail(at, 'type, f"the value is converted to {vasm_show_type(t)}, not an integer type")
+            if (head(ta) == 'Lit) vasm_lit_range(at, arg(ta, 0), t) else vasm_int_operand(a, ta)
+        }
         t
     }
+  | Con{at, _, args} -> {
+        each(a -> vasm_val_operand(st, a), args)
+        Val{}
+    }
+  | Clo{at, f, args} -> vasm_closure(at, st, f, args)
   | Make{at, s, inits} -> {
         sd := table_get(vasm_structs, s, none)
         if (sd == none) vasm_fail(at, 'undefined, f"struct {symname(s)} is not defined")
@@ -801,6 +855,23 @@ table_set(vasm_builtins, 'argv, Sig{[], [I64{}], Ref{'shr, 'static, Arr{U8{}}}})
 table_set(vasm_builtins, 'open, Sig{['r], [Ref{'shr, 'r, Arr{U8{}}}], I64{}})
 table_set(vasm_builtins, 'read, Sig{['r], [I64{}, Ref{'mut, 'r, Arr{U8{}}}], I64{}})
 table_set(vasm_builtins, 'close, Sig{[], [I64{}], Unit{}})
+
+# create(path) opens the file whose name is the bytes of the array path for writing, emptied or made new, and gives the file or a negative number.
+table_set(vasm_builtins, 'create, Sig{['r], [Ref{'shr, 'r, Arr{U8{}}}], I64{}})
+
+# The functions on values of val. A value that is not of the kind a function takes ends the program as failed, as an index out of range does.
+# is(v, h, n): v is a constructed value with the head h and n arguments. typeof(v): the same symbol as typeof of planck.
+# head(v): the head of a constructed value. arity(v): the number of the arguments, the elements or the bytes (a constructed value, an array, a string or symbol).
+# array(n, v): a new array of n elements v. mexpr(h, a): a constructed value with the head h, and the elements of the array a as its arguments.
+# intern(s): the symbol named by the string s. symname(s): the name of the symbol s as a string.
+table_set(vasm_builtins, 'is, Sig{[], [Val{}, Val{}, I64{}], Bool{}})
+table_set(vasm_builtins, 'typeof, Sig{[], [Val{}], Val{}})
+table_set(vasm_builtins, 'head, Sig{[], [Val{}], Val{}})
+table_set(vasm_builtins, 'arity, Sig{[], [Val{}], I64{}})
+table_set(vasm_builtins, 'array, Sig{[], [I64{}, Val{}], Val{}})
+table_set(vasm_builtins, 'mexpr, Sig{[], [Val{}, Val{}], Val{}})
+table_set(vasm_builtins, 'intern, Sig{[], [Val{}], Val{}})
+table_set(vasm_builtins, 'symname, Sig{[], [Val{}], Val{}})
 
 vasm_check_fn(d) := match d {
     Fn{at, f, rs, ps, ret, body} -> {

@@ -109,4 +109,4 @@ test-planck0: planck0
 		[ "$$s" = "$$(cat $${f%.pk}.status)" ] || { echo "$$f: exit status $$s"; exit 1; }; \
 		diff -u $${f%.pk}.run tmp-pe.run || exit 1; \
 		echo "$$f: ok"; \
-	done; rm -f tmp-pe tmp-pe.out tmp-pe.run
+	done; rm -f tmp-pe tmp-pe.out tmp-pe.run tmp-pe-file
