@@ -740,4 +740,4 @@ The evaluator in Planck:
   The syntax of the program, and the rules that it declares with ``::=``, are evaluated by the evaluator:
   the program has its own ``parse``, ``peg_*`` variables and ``_define_rule``.
   Until ``planck/syntax.pk`` is loaded, ``parse`` of the program reads M-expressions.
-  Starting the evaluator takes minutes and a few gigabytes of the memory of the program that uses it.
+  Starting the evaluator takes about a minute and about 400MB of the memory of the program that uses it.
