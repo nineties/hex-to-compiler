@@ -101,7 +101,7 @@
 ; enabling O(1) equality testing via pointer comparison.</pre>
 </div>
 <p>シンボルと M式は intern します。同じ構造の M式はメモリ上で1つなので、等価性はポインタの比較です（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L429-L438"><code>planck0.sv:429–438</code></a>）。</p>
-<p>ヒープは起動時に <code>mmap2</code> で確保する 1GB の領域です。ヘッダの1語を持つチャンクが並び、オブジェクトのチャンクの先頭をビットマップに記録します（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L37-L167"><code>planck0.sv:37–167</code></a>）。GC はオブジェクトを動かない mark-sweep で、全体を止めて、到達できないオブジェクトを解放します（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L2890-L3046"><code>planck0.sv:2890–3046</code></a>）。保守的で、根（大域変数・フレームスタック・機械のスタック）や印を付けたオブジェクトの語のうち、オブジェクトの中を指すものは、先頭でなくてもそのオブジェクトを残します。掃除では隣り合う空きチャンクをつなぎ、<code>allocate</code> はその中から first fit で取ります。前回の GC のあとに確保した量が前回の生きている量（最低 64MB）に達すると GC を始めます。環境変数 <code>PLANCK0_GC_STRESS=n</code> を付けると <code>n</code> バイト確保するごとに GC を始めます。</p>
+<p>ヒープは起動時に <code>mmap2</code> で確保する固定の領域です。ヘッダの1語を持つチャンクが並び、オブジェクトのチャンクの先頭をビットマップに記録します（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L37-L167"><code>planck0.sv:37–167</code></a>）。GC はオブジェクトを動かない mark-sweep で、全体を止めて、到達できないオブジェクトを解放します（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L2890-L3046"><code>planck0.sv:2890–3046</code></a>）。保守的で、根（大域変数・フレームスタック・機械のスタック）や印を付けたオブジェクトの語のうち、オブジェクトの中を指すものは、先頭でなくてもそのオブジェクトを残します。掃除では隣り合う空きチャンクをつなぎ、<code>allocate</code> はその中から first fit で取ります。前回の GC のあとに確保した量が前回の生きている量に達すると GC を始めます。環境変数 <code>PLANCK0_GC_STRESS=n</code> を付けると <code>n</code> バイト確保するごとに GC を始めます。</p>
 
 <h2>M式のリーダ</h2>
 <p>組み込みの <code>parse</code> が読むのは、シンボル・整数・文字列と、シンボルの直後に <code>{</code> が続く <code>Head{...}</code> の4種類です（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L917-L1023"><code>planck0.sv:917–1023</code></a>）。M式の引数は16個までです。</p>
@@ -160,7 +160,7 @@ Tuple{Eof{}, &quot;&quot;}</pre>
 <p><code>Def</code> は右辺をコンパイルしたあとに欄を作るので、右辺からは前の変数が見えます。関数が自分自身を参照できるのは、構文が <code>Declare{f}</code> で先に欄を作り、<code>Set</code> で関数を入れる形に読み替えるからです。埋める前に呼ぶと <code>none</code> を呼ぶことになって止まります。<code>Declare{f}</code> が <code>Def{f, none}</code> としてコンパイルされるのは、<code>f</code> がまだその場所の変数でないときだけです。トップレベルでは <code>global_table</code> を引いて、欄のファイルを読み込み中のファイル <code>cur_file</code> と比べます。<code>cur_file</code> は <code>interpret_file</code> と、<code>load</code> が呼ぶ <code>_set_file</code> が設定します。関数の中ではコンパイル時の環境からその関数の深さの項目を探します（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L1467-L1477"><code>planck0.sv:1467–1477</code></a>・<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L1517-L1522"><code>planck0.sv:1517–1522</code></a>）。</p>
 
 <h2>仮想機械</h2>
-<p>命令は18個です。設計はソース中の注釈にあります。</p>
+<p>仮想機械の設計はソース中の注釈にあります。</p>
 <div class="example">
 <p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L1024-L1114">planck0.sv:1024–1114</a></p>
 <pre>; === Bytecode VM
@@ -255,7 +255,7 @@ Tuple{Eof{}, &quot;&quot;}</pre>
 ;   k are never executed themselves, k can be resumed multiple times.
 ;   When the resumed body finishes, its value is returned to the caller of k.</pre>
 </div>
-<p>フレームは機械のスタックでなく、1GB の専用のフレームスタックに置きます。フレームは呼び出し元のすぐ上に置き、戻ると捨てます。仮想機械は自分自身を再帰呼び出ししません。計算の状態は現在のフレームからトップレベルまでのフレームの鎖だけで表せるので、継続はこの鎖の複製で済みます。</p>
+<p>フレームは機械のスタックでなく、専用のフレームスタックに置きます。フレームは呼び出し元のすぐ上に置き、戻ると捨てます。仮想機械は自分自身を再帰呼び出ししません。計算の状態は現在のフレームからトップレベルまでのフレームの鎖だけで表せるので、継続はこの鎖の複製で済みます。</p>
 
 <h2>呼び出しとパターン照合</h2>
 <p>呼び出しでは <code>select</code> が引数に合う関数を選びます（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv#L1851-L1879"><code>planck0.sv:1851–1879</code></a>）。<code>Fusion</code> は左、失敗すれば右を試します。<code>Lambda</code> は引数の数を比べてからパターンを順に照合します。</p>
