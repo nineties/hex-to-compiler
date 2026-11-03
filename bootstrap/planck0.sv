@@ -57,8 +57,6 @@
 (long gc_lists)      ; free chunks: word n (1..32) is the list of the chunks of 8 * n bytes, word 0 is the list of the larger chunks
 (long gc_since)      ; bytes allocated since the last collection
 (long gc_limit)      ; a collection starts when gc_since reaches this
-(long gc_min)
-(long gc_stress)     ; 1 if gc_limit is always gc_min
 (long gc_live)       ; bytes of the objects marked by the collection
 
 (fun map_zero (bytes)
@@ -81,8 +79,7 @@
     (= gc_sp gc_stack)
     (= gc_stack_end (+ gc_stack (* 4 GC_STACK_WORDS)))
     (= gc_lists (map_zero 4096))
-    (= gc_min GC_MIN_BYTES)
-    (= gc_limit gc_min)
+    (= gc_limit GC_MIN_BYTES)
     )
 
 (fun bm_set (a)
@@ -3016,33 +3013,7 @@
     (gc_sweep)
     (= gc_since 0)
     (= gc_limit gc_live)
-    (if (|| gc_stress (u< gc_limit gc_min)) (= gc_limit gc_min))
-    )
-
-; The environment variable PLANCK0_GC_STRESS=n makes a collection start every n bytes of allocation.
-(fun gc_read_env (envp)
-    (var s 0)
-    (var pre "PLANCK0_GC_STRESS=")
-    (var i 0)
-    (var n 0)
-    (while (get envp) (do
-        (= s (get envp))
-        (= i 0)
-        (while (&& (getb pre i) (== (getb s i) (getb pre i))) (+= i 1))
-        (if (! (getb pre i)) (do
-            (= n 0)
-            (while (&& (>= (getb s i) 48) (<= (getb s i) 57)) (do
-                (= n (+ (* n 10) (- (getb s i) 48)))
-                (+= i 1)
-                ))
-            (if (> n 0) (do
-                (= gc_stress 1)
-                (= gc_min n)
-                (= gc_limit n)
-                ))
-            ))
-        (+= envp 4)
-        ))
+    (if (u< gc_limit GC_MIN_BYTES) (= gc_limit GC_MIN_BYTES))
     )
 
 ; The frame stack and the heap are each a fixed 1GB area obtained by mmap2.
@@ -3050,7 +3021,6 @@
     (= stack_hi argv)
     (init_frame_stack)
     (init_heap)
-    (gc_read_env (+ argv (* 4 (+ argc 1))))
     (init_tables)
     (init_symbols)
     (init_compiler)
