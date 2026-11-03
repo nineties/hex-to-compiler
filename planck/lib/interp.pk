@@ -1,8 +1,8 @@
 # interp: an evaluator of Planck written in Planck
 # Copyright (C) 2026 nineties
 #
-# interp_run(args, native_syntax) runs planck/init.pk and then the program args[0] with the evaluator below.
-# interp_start(args, native_syntax) only makes the global environment of the program,
+# interp_run(args) runs planck/init.pk and then the program args[0] with the evaluator below.
+# interp_start(args) only makes the global environment of the program,
 # interp_eval(e) evaluates an M-expression as the builtin function eval does,
 # and interp_file(path) reads a file with the function parse of the program and evaluates its expressions one by one.
 #
@@ -14,12 +14,9 @@
 # The builtin functions of the program are those of the language that runs the evaluator, except for the ones
 # that print a function, give its type, or are the evaluator itself (print, println, typeof, argv, _set_file, eval).
 #
-# When native_syntax is true the evaluator does not load planck/peg.pk and planck/syntax.pk.
-# The program is read by the function parse of the language that runs the evaluator, and a rule declared by the program
-# is a rule of that grammar (the actions of the rule are evaluated by the evaluator and given to _define_rule as functions).
-# The definitions that the syntax makes for the program are taken from planck/syntax.pk and planck/peg.pk,
-# as listed in ip_syntax_names and ip_peg_names, and the others are the ones of the language that runs the evaluator.
-# When native_syntax is false the evaluator loads planck/peg.pk and planck/syntax.pk like any other file.
+# The evaluator loads planck/peg.pk and planck/syntax.pk like any other file, so the syntax of the program and the rules
+# that it declares are evaluated by the evaluator. Until planck/syntax.pk is loaded, the function parse of the program
+# is the reader of M-expressions of the language that runs the evaluator, which reads those two files.
 
 use("list")
 use("string")
@@ -37,8 +34,6 @@ fun ip_comp
 fun ip_simple
 fun ip_call
 fun ip_on_effect
-fun ip_install_peg
-fun ip_install_syntax
 fun interp_eval
 
 # the value of a global variable which has no value yet
@@ -57,9 +52,6 @@ ip_args := array(0)
 # the function selected by ip_select, and the environment it runs in
 ip_sel_body := none
 ip_sel_env := none
-
-# whether the syntax of the program is made by the language that runs the evaluator
-ip_native := true
 
 # ===== Errors =====
 
@@ -385,36 +377,15 @@ ip_mk_local(1, i) := (env) -> array_get(array_get(env, 0), i)
 ip_mk_local(2, i) := (env) -> array_get(array_get(array_get(env, 0), 0), i)
 ip_mk_local(d, i) := (env) -> array_get(ip_up(env, d), i)
 
-# A cell of a variable of the language that runs the evaluator has a fourth element Tuple{get, set}.
-ip_is_alias(cell) := array_len(cell) == 4
-
-ip_mk_alias_get(get) := (env) -> get()
-
-ip_mk_cell_get(cell) := (env) -> {
+ip_mk_global(cell) := (env) -> {
     v := array_get(cell, 0)
     if (v == ip_unset) ip_die_at("undefined variable: ", array_get(cell, 1)) else v
-}
-
-ip_mk_global(cell) := {
-    if (ip_is_alias(cell)) ip_mk_alias_get(arg(array_get(cell, 3), 0))
-    else ip_mk_cell_get(cell)
 }
 
 ip_mk_store(0, i, r) := (env) -> array_set(env, i, r(env))
 ip_mk_store(d, i, r) := (env) -> array_set(ip_up(env, d), i, r(env))
 
-ip_mk_alias_set(set, r) := (env) -> {
-    v := r(env)
-    set(v)
-    v
-}
-
-ip_mk_cell_set(cell, r) := (env) -> array_set(cell, 0, r(env))
-
-ip_mk_gset(cell, r) := {
-    if (ip_is_alias(cell)) ip_mk_alias_set(arg(array_get(cell, 3), 1), r)
-    else ip_mk_cell_set(cell, r)
-}
+ip_mk_gset(cell, r) := (env) -> array_set(cell, 0, r(env))
 
 ip_mk_do_n(init, last) := (env) -> {
     ip_run_all(init, env)
@@ -800,11 +771,6 @@ ip_call_global(name, args) := {
     if (v == ip_unset) ip_die_at("undefined variable: ", name) else ip_call(v, args)
 }
 
-ip_is_load_of(e, path) := match e {
-    Apply{'load, Tuple{p}} -> p == path
-  | _ -> false
-}
-
 # evaluate the expressions of a file one by one, read by the function parse of the program
 ip_run_file(path) := {
     text := read_file(path)
@@ -822,9 +788,7 @@ ip_run_file(path) := {
             if (typeof(e) == 'mexpr and head(e) == 'SyntaxError) {
                 ip_die(_strcat(_strcat(path, ": syntax error: "), ip_show(e)))
             }
-            if (ip_native and path == "planck/init.pk" and ip_is_load_of(e, "planck/peg.pk")) ip_install_peg()
-            else if (ip_native and path == "planck/init.pk" and ip_is_load_of(e, "planck/syntax.pk")) ip_install_syntax()
-            else ip_call_global('eval, Tuple{e})
+            ip_call_global('eval, Tuple{e})
             text = arg(r, 1)
         }
     }
@@ -834,113 +798,9 @@ ip_run_file(path) := {
 
 interp_file(path) := ip_run_file(path)
 
-# ===== The syntax of the language that runs the evaluator =====
-
-# The functions that the program takes from planck/syntax.pk and planck/peg.pk when native_syntax is true.
-ip_syntax_names := [
-    'peg_itoa, '_nomatch, 'peg_skip, 'peg_g, 'peg_ret_handler, 'peg_break_handler, 'peg_continue_handler,
-    'peg_catches, 'peg_scan, 'peg_guarded,
-    'show, '_to_text, 'record_fields, 'record_slots, '_record_declare, 'record_index,
-    '_record_get, 'peg_for, '_index_error, '_index_check, 'subst, '_list_get, '_index_get,
-    '_index_set_immutable, '_index_set
-]
-
-ip_peg_names := ['peg_inc, 'peg_is_head, 'peg_map_args]
-
-ip_def_name(e) := match e {
-    Def{x, _} -> x
-  | Set{x, _} -> x
-  | _ -> none
-}
-
-# evaluate the definitions of the names in a file that is read by the M-expression reader
-ip_take_defs(path, names) := {
-    text := read_file(path)
-    more := true
-    while (more) {
-        r := parse_mexpr(text)
-        e := arg(r, 0)
-        if (e == Eof{} or (typeof(e) == 'mexpr and head(e) == 'SyntaxError)) more = false
-        else {
-            if (member(ip_def_name(e), names)) interp_eval(e)
-            text = arg(r, 1)
-        }
-    }
-}
+# ===== Builtin functions =====
 
 ip_set_global(name, v) := array_set(ip_define_global(name), 0, v)
-
-# make the global variable name the variable of the language that runs the evaluator with the functions get and set
-ip_set_alias(name, get, set) := {
-    cell := array(4)
-    array_set(cell, 0, ip_unset)
-    array_set(cell, 1, name)
-    array_set(cell, 2, ip_file)
-    array_set(cell, 3, Tuple{get, set})
-    table_set(ip_globals, name, cell)
-}
-
-# a function of the language that runs the evaluator which calls the function f of the program
-ip_host_fn(f) := (x) -> ip_call(f, Tuple{x})
-
-# the function of the language that runs the evaluator for a value of the program that is assigned to one of its variables,
-# a function of n parameters
-ip_to_host(IpPrim{_, fn, _}, n) := fn
-ip_to_host(f, 2) := (x, y) -> ip_call(f, Tuple{x, y})
-ip_to_host(f, 1) := ip_host_fn(f)
-
-# _define_rule for the program: the actions are evaluated by the evaluator
-fun ip_adapt
-ip_adapt = (Act{e, f}) -> Act{ip_adapt(e), mexpr('Quote, Tuple{ip_host_fn(interp_eval(f))})}
-         | (f) if ip_is_fn(f) -> ip_host_fn(f)
-         | (e @ mexpr) -> {
-               r := mexpr(head(e), Tuple{})
-               i := 0
-               while (i < arity(e)) {
-                   r = push(r, ip_adapt(arg(e, i)))
-                   i = i + 1
-               }
-               r
-           }
-         | (e) -> e
-
-ip_define_rule(name, e) := {
-    old := table_get(peg_sources, name, Fail{})
-    r := _define_rule(name, ip_adapt(e))
-    table_set(peg_sources, name, peg_subst_prev(e, old))
-    array_set(ip_global_cell('peg_version), 0, peg_version)
-    r
-}
-
-ip_install_peg() = {
-    ip_set_global('peg_parse, IpPrim{2, peg_parse, 'peg_parse})
-    ip_set_global('peg_sources, peg_sources)
-    ip_set_global('peg_ids, peg_ids)
-    ip_set_global('peg_version, peg_version)
-    ip_set_alias('peg_src, () -> peg_src, (v) -> { peg_src = v })
-    ip_set_alias('peg_srclen, () -> peg_srclen, (v) -> { peg_srclen = v })
-    ip_set_alias('peg_pv, () -> peg_pv, (v) -> { peg_pv = v })
-    ip_set_alias('peg_far, () -> peg_far, (v) -> { peg_far = v })
-    ip_set_global('peg_rules, peg_rules)
-    ip_set_alias('peg_lit, () -> IpPrim{2, peg_lit, 'peg_lit}, (v) -> { peg_lit = ip_to_host(v, 2) })
-    ip_set_alias('peg_px_key, () -> IpPrim{2, peg_px_key, 'peg_px_key}, (v) -> { peg_px_key = ip_to_host(v, 2) })
-    ip_set_alias('peg_call_rule, () -> IpPrim{2, peg_call_rule, 'peg_call_rule}, (v) -> { peg_call_rule = ip_to_host(v, 2) })
-    ip_set_global('peg_skip_ws, IpPrim{1, peg_skip_ws, 'peg_skip_ws})
-    ip_set_global('peg_tok_int, IpPrim{1, peg_tok_int, 'peg_tok_int})
-    ip_set_global('peg_digit_value, IpPrim{1, peg_digit_value, 'peg_digit_value})
-    ip_set_global('peg_subst_prev, IpPrim{2, peg_subst_prev, 'peg_subst_prev})
-    ip_set_global('_define_rule, IpPrim{2, ip_define_rule, '_define_rule})
-    ip_take_defs("planck/peg.pk", ip_peg_names)
-}
-
-ip_install_syntax() = {
-    ip_set_global('parse, IpPrim{1, parse, 'parse})
-    ip_set_global('parse_mexpr, IpPrim{1, parse_mexpr, 'parse_mexpr})
-    ip_set_global('peg_reserved, peg_reserved)
-    ip_take_defs("planck/syntax.pk", ip_syntax_names)
-}
-
-# ===== Builtin functions =====
 
 ip_print(x) := {
     put(ip_show(x))
@@ -1021,23 +881,21 @@ ip_setup() := {
     ip_defprim("exit", 1, exit)
     ip_defprim("_set_file", 1, ip_set_file)
     ip_defprim("eval", 1, interp_eval)
-    ip_defprim("parse", 1, if (ip_native) parse else parse_mexpr)
-}
+    ip_defprim("parse", 1, parse_mexpr)}
 
 # ===== Entry points =====
 
-# interp_start(args, native_syntax) makes the global environment of the program: the builtin functions and planck/init.pk.
+# interp_start(args) makes the global environment of the program: the builtin functions and planck/init.pk.
 # args is the array of the strings of the command line for the program.
-interp_start(args, native_syntax) := {
+interp_start(args) := {
     ip_args = args
-    ip_native = native_syntax
     ip_setup()
     ip_run_file("planck/init.pk")
 }
 
-# interp_run(args, native_syntax) starts the evaluator and runs the program args[0]
-interp_run(args, native_syntax) := {
-    interp_start(args, native_syntax)
+# interp_run(args) starts the evaluator and runs the program args[0]
+interp_run(args) := {
+    interp_start(args)
     if (array_len(args) > 0) ip_run_file(array_get(args, 0))
     none
 }
