@@ -1,58 +1,89 @@
 <!--title planckvm instructions-->
 <h1>planckvm instructions</h1>
-<p class="lead">This page is part of the external specification of planckvm: the instructions, the builtin functions, and how each feature of planck is translated into instructions. The machine and the values are in <a href="planckvm.html">planckvm: execution model and values</a>. The design inside an implementation is in <a href="planckvm-internals.html">planckvm internals</a>.</p>
+<p class="lead">This page is part of the external specification of planckvm: the bytecode format, the instructions, the builtin functions, and how each feature of planck is translated into instructions. The machine and the values are in <a href="planckvm.html">planckvm: execution model and values</a>. The design inside an implementation is in <a href="planckvm-internals.html">planckvm internals</a>.</p>
 
-<p>Notation: the stack is written with the bottom at the left, and <code>a b -&gt; r</code> pops two values and pushes one. Operands: <code>k</code> an index of the constant table, <code>c</code> a cell (a <code>k</code>), <code>d i</code> a depth and an index of the environment, <code>L</code> an index of the instructions, <code>n</code> a count, <code>p</code> the value of a builtin instruction. Mark columns: <strong>S</strong> a safe point where an allocation may run the collector, <strong>W</strong> a write that is recorded, <strong>T</strong> the program stops unless the condition holds.</p>
+<p>Notation: the stack is written with the bottom at the left, and <code>a b -&gt; r</code> pops two values and pushes one. Operands: <code>k</code> an index of the constant table, <code>c</code> a cell (a <code>k</code>), <code>d i</code> a depth and an index of the environment, <code>L</code> an index of the instructions, <code>n</code> a count, <code>p</code> the opcode of a builtin instruction. Mark columns: <strong>S</strong> a safe point where an allocation may run the collector, <strong>W</strong> a write that is recorded, <strong>T</strong> the program stops unless the condition holds.</p>
+
+<h2 id="format">Bytecode format</h2>
+<p>The unit of bytecode is a code. One lambda or one top-level expression is one code. The code of a nested function is in the constant table of the code around it.</p>
+<table>
+<tr><th>Field</th><th>Meaning</th></tr>
+<tr><td><code>arity</code></td><td>The number of arguments</td></tr>
+<tr><td><code>nslots</code></td><td>The number of slots of the environment</td></tr>
+<tr><td><code>params</code></td><td>The tree of the parameter patterns. It is not used to run the code; it serves to print a function and to report a matching failure</td></tr>
+<tr><td><code>instrs</code></td><td>The instructions. They never change after the code is made</td></tr>
+<tr><td><code>consts</code></td><td>The constant table</td></tr>
+</table>
+
+<h3>Instruction sequence</h3>
+<ul>
+<li>The instructions are a sequence of integers. An instruction is the integer of its opcode followed by the integers of its operands.</li>
+<li>The number and the order of the operands are fixed by the opcode, as in the table of instructions.</li>
+<li>A jump target <code>L</code> and the pc are indices into the instruction sequence.</li>
+<li>When a code is made it is checked: the height of the operand stack is determined uniquely at every instruction, every jump target is the start of an instruction, and the stack never goes below zero. The maximum height is computed.</li>
+<li>The height at the failure target <code>L</code> of a <code>MATCH*</code> instruction is 0.</li>
+</ul>
+
+<h3>Constant table</h3>
+<p>The constant table is a sequence of values held by each code, and the operands <code>k</code> and <code>c</code> are indices into it.</p>
+<table>
+<tr><th>Element</th><th>Used by</th></tr>
+<tr><td>The literal of an integer, a float, a string or a symbol, and the content of a <code>Quote</code></td><td><code>CONST</code></td></tr>
+<tr><td>An integer, a string, the <code>v</code> of <code>Quote{v}</code></td><td><code>MATCHEQ</code></td></tr>
+<tr><td>A symbol</td><td><code>BUILD</code> <code>MATCHHEAD</code> <code>MATCHTYPE</code></td></tr>
+<tr><td>A cell</td><td><code>GLOAD</code> <code>GSET</code> <code>CALLP</code></td></tr>
+<tr><td>A nested code</td><td><code>CLOSURE</code></td></tr>
+</table>
 
 <h2>Instructions</h2>
 <table>
-<tr><th>Mnemonic</th><th>Value</th><th>Operands</th><th>Stack</th><th>Action</th><th>Builtin</th><th>S</th><th>W</th><th>T</th></tr>
-<tr><td><code>CONST</code></td><td>0</td><td>k</td><td>-&gt; v</td><td>Push a value of the constant table: the literal of an integer, a float, a string or a symbol, and the content of a <code>Quote</code>. M-expressions and strings are immutable and shared</td><td></td><td></td><td></td><td></td></tr>
-<tr><td><code>POP</code></td><td>1</td><td></td><td>v -&gt;</td><td>Discard</td><td></td><td></td><td></td><td></td></tr>
-<tr><td><code>DUP</code></td><td>2</td><td></td><td>v -&gt; v v</td><td>Duplicate</td><td></td><td></td><td></td><td></td></tr>
-<tr><td><code>LOAD</code></td><td>3</td><td>d i</td><td>-&gt; v</td><td>Push slot <code>i</code> of the environment <code>d</code> links up. No check</td><td></td><td></td><td></td><td></td></tr>
-<tr><td><code>STORE</code></td><td>4</td><td>d i</td><td>v -&gt; v</td><td>Write slot <code>i</code> and keep the value</td><td></td><td></td><td>○</td><td></td></tr>
-<tr><td><code>GLOAD</code></td><td>5</td><td>c</td><td>-&gt; v</td><td>Push the value of the cell. No check</td><td></td><td></td><td></td><td></td></tr>
-<tr><td><code>GSET</code></td><td>6</td><td>c</td><td>v -&gt; v</td><td>Write the cell and keep the value. Both the global of <code>Def</code> and that of <code>Set</code> use it</td><td></td><td></td><td>○</td><td></td></tr>
-<tr><td><code>JMP</code></td><td>7</td><td>L</td><td></td><td>Go to <code>L</code></td><td></td><td></td><td></td><td></td></tr>
-<tr><td><code>JF</code></td><td>8</td><td>L</td><td>c -&gt;</td><td>Go to <code>L</code> if <code>c</code> is the symbol <code>false</code>, otherwise go on</td><td></td><td></td><td></td><td></td></tr>
-<tr><td><code>CALL</code></td><td>9</td><td>n</td><td>f a1..an -&gt; r</td><td>Call by the rules of Calls in the execution model</td><td></td><td>○</td><td></td><td>○</td></tr>
-<tr><td><code>TCALL</code></td><td>10</td><td>n</td><td>f a1..an -&gt; r</td><td>Drop the current frame and call (a tail call). It is used in every place, also in the entry frame, where the <code>RET</code> of the called function returns the result to the evaluator. When the current frame is a boundary it is the same as <code>CALL</code></td><td></td><td>○</td><td></td><td>○</td></tr>
-<tr><td><code>RET</code></td><td>11</td><td></td><td>v -&gt;</td><td>Drop the frame and push <code>v</code> on the operand stack of the caller. In the entry frame it returns the result of the run to the evaluator</td><td></td><td></td><td></td><td></td></tr>
-<tr><td><code>CALLP</code></td><td>12</td><td>c p</td><td>a1..an -&gt; r</td><td>If the present value of the cell <code>c</code> is the builtin <code>p</code>, run that instruction here. Otherwise call the value of <code>c</code> with <code>CALL</code>. <code>n</code> is the number of arguments of <code>p</code></td><td></td><td>○</td><td></td><td>○</td></tr>
-<tr><td><code>CLOSURE</code></td><td>13</td><td>k</td><td>-&gt; f</td><td>Make a lambda of the code <code>k</code> and the present environment</td><td></td><td>○</td><td></td><td></td></tr>
-<tr><td><code>FUSION</code></td><td>14</td><td></td><td>f g -&gt; h</td><td>Make <code>f | g</code>. If <code>f</code> is <code>none</code> the result is <code>g</code>. It stops unless both are functions</td><td></td><td>○</td><td></td><td>○</td></tr>
-<tr><td><code>BUILD</code></td><td>15</td><td>k n</td><td>a1..an -&gt; m</td><td>Make an M-expression whose head is the symbol of constant <code>k</code>. <code>Tuple</code> and <code>Cons</code> use it too. It stops if <code>n</code> is above 64</td><td></td><td>○</td><td></td><td>○</td></tr>
-<tr><td><code>ARGI</code></td><td>16</td><td>i</td><td>m -&gt; a</td><td>Argument <code>i</code> of <code>m</code>. It stops if <code>m</code> is not an M-expression or <code>i</code> is out of range. It is used after a match</td><td></td><td></td><td></td><td>○</td></tr>
-<tr><td><code>PARAM</code></td><td>17</td><td>a</td><td>-&gt; v</td><td>Push argument <code>a</code> of the call</td><td></td><td></td><td></td><td></td></tr>
-<tr><td><code>MATCHEQ</code></td><td>18</td><td>k L</td><td>v -&gt;</td><td>Go on if <code>v</code> is <code>EQ</code> to the constant <code>k</code>, otherwise go to <code>L</code>. For the patterns of an integer, a string and <code>Quote{v}</code></td><td></td><td></td><td></td><td></td></tr>
-<tr><td><code>MATCHHEAD</code></td><td>19</td><td>k n L</td><td>v -&gt; v</td><td>Go on if <code>v</code> is an M-expression with the head symbol <code>k</code> and <code>n</code> arguments, otherwise go to <code>L</code></td><td></td><td></td><td></td><td></td></tr>
-<tr><td><code>MATCHTYPE</code></td><td>20</td><td>k L</td><td>v -&gt; v</td><td>Go on if the <code>typeof</code> of <code>v</code> is the symbol <code>k</code>, otherwise go to <code>L</code>. For the pattern <code>_TypeOf{p, type}</code></td><td></td><td></td><td></td><td></td></tr>
-<tr><td><code>NEXT</code></td><td>21</td><td></td><td></td><td>Drop the current frame and try the remaining alternatives with the same arguments. It stops when they run out (<code>matching failed</code>). In a frame that <code>PERFORM</code> called, it goes to the outer boundary</td><td></td><td></td><td></td><td>○</td></tr>
-<tr><td><code>HANDLE</code></td><td>22</td><td></td><td>body h -&gt; r</td><td>Run <code>body</code> (a lambda of arity 0) in a boundary frame. It stops unless <code>h</code> is a function</td><td></td><td>○</td><td></td><td>○</td></tr>
-<tr><td><code>PERFORM</code></td><td>23</td><td></td><td>v -&gt; r</td><td>The rules of Continuations and handlers in the execution model. The value becomes the argument of the resumption</td><td></td><td>○</td><td></td><td>○</td></tr>
-<tr><td><code>ADD</code></td><td>24</td><td></td><td>a b -&gt; r</td><td><code>a + b</code></td><td><code>_add</code></td><td>○</td><td></td><td>○</td></tr>
-<tr><td><code>SUB</code></td><td>25</td><td></td><td>a b -&gt; r</td><td><code>a - b</code></td><td><code>_sub</code></td><td>○</td><td></td><td>○</td></tr>
-<tr><td><code>MUL</code></td><td>26</td><td></td><td>a b -&gt; r</td><td><code>a * b</code></td><td><code>_mul</code></td><td>○</td><td></td><td>○</td></tr>
-<tr><td><code>DIV</code></td><td>27</td><td></td><td>a b -&gt; r</td><td>Two integers give the quotient truncated toward 0, and it stops if <code>b</code> is 0. Otherwise it is a division and does not stop at 0</td><td><code>_div</code></td><td>○</td><td></td><td>○</td></tr>
-<tr><td><code>MOD</code></td><td>28</td><td></td><td>a b -&gt; r</td><td>Two integers give <code>a - b * (a / b)</code> with the quotient of <code>DIV</code>, and it stops if <code>b</code> is 0</td><td><code>_mod</code></td><td>○</td><td></td><td>○</td></tr>
-<tr><td><code>LT</code></td><td>29</td><td></td><td>a b -&gt; r</td><td><code>a &lt; b</code> as <code>true</code> or <code>false</code>. It stops for a complex number</td><td><code>_lt</code></td><td></td><td></td><td>○</td></tr>
-<tr><td><code>GE</code></td><td>30</td><td></td><td>a b -&gt; r</td><td><code>a &gt;= b</code> as <code>true</code> or <code>false</code>. It stops for a complex number</td><td><code>_ge</code></td><td></td><td></td><td>○</td></tr>
-<tr><td><code>EQ</code></td><td>31</td><td></td><td>a b -&gt; r</td><td>Equality of Values in the execution model, for every value. <code>true</code> or <code>false</code></td><td><code>_eq</code></td><td></td><td></td><td></td></tr>
-<tr><td><code>NE</code></td><td>32</td><td></td><td>a b -&gt; r</td><td>The opposite of <code>EQ</code>, for every value. <code>true</code> or <code>false</code></td><td><code>_ne</code></td><td></td><td></td><td></td></tr>
-<tr><td><code>HEAD</code></td><td>33</td><td></td><td>m -&gt; sym</td><td>The head symbol</td><td><code>head</code></td><td></td><td></td><td>○</td></tr>
-<tr><td><code>ARITY</code></td><td>34</td><td></td><td>m -&gt; n</td><td>The number of arguments</td><td><code>arity</code></td><td></td><td></td><td>○</td></tr>
-<tr><td><code>ARG</code></td><td>35</td><td></td><td>m i -&gt; a</td><td>Argument <code>i</code>, from 0</td><td><code>arg</code></td><td></td><td></td><td>○</td></tr>
-<tr><td><code>PUSH</code></td><td>36</td><td></td><td>m x -&gt; m'</td><td>The M-expression with <code>x</code> added as the last argument. It stops above 64</td><td><code>push</code></td><td>○</td><td></td><td>○</td></tr>
-<tr><td><code>TYPEOF</code></td><td>37</td><td></td><td>v -&gt; sym</td><td>The name in the table of Values</td><td><code>typeof</code></td><td></td><td></td><td></td></tr>
-<tr><td><code>STRLEN</code></td><td>38</td><td></td><td>s -&gt; n</td><td>The number of bytes, 0 bytes included</td><td><code>strlen</code></td><td></td><td></td><td>○</td></tr>
-<tr><td><code>ORD</code></td><td>39</td><td></td><td>s i -&gt; n</td><td>Byte <code>i</code>, or -1 out of range</td><td><code>ord</code></td><td></td><td></td><td>○</td></tr>
-<tr><td><code>AGET</code></td><td>40</td><td></td><td>a i -&gt; v</td><td>An element</td><td><code>array_get</code></td><td></td><td></td><td>○</td></tr>
-<tr><td><code>ASET</code></td><td>41</td><td></td><td>a i v -&gt; v</td><td>Write an element and return <code>v</code></td><td><code>array_set</code></td><td></td><td>○</td><td>○</td></tr>
-<tr><td><code>ALEN</code></td><td>42</td><td></td><td>a -&gt; n</td><td>The length</td><td><code>array_len</code></td><td></td><td></td><td>○</td></tr>
-<tr><td><code>HASH</code></td><td>43</td><td></td><td>v -&gt; n</td><td>A non-negative integer, by the rule of Values</td><td><code>hash</code></td><td></td><td></td><td></td></tr>
-<tr><td><code>PLAINGET</code></td><td>44</td><td></td><td>a i -&gt; v</td><td>An element, as a value of the rule in Plain array types</td><td><code>plain_get</code></td><td></td><td></td><td>○</td></tr>
-<tr><td><code>PLAINSET</code></td><td>45</td><td></td><td>a i v -&gt; v</td><td>Write an element and return <code>v</code>. It stops if it does not fit the type. The conversions are in Writing to a plain array</td><td><code>plain_set</code></td><td></td><td></td><td>○</td></tr>
+<tr><th>Mnemonic</th><th>Opcode</th><th>Operands</th><th>Stack</th><th>Action</th><th>Builtin</th><th>S</th><th>W</th><th>T</th></tr>
+<tr><td><code>CONST</code></td><td>0x00</td><td>k</td><td>-&gt; v</td><td>Push a value of the constant table: the literal of an integer, a float, a string or a symbol, and the content of a <code>Quote</code>. M-expressions and strings are immutable and shared</td><td></td><td></td><td></td><td></td></tr>
+<tr><td><code>POP</code></td><td>0x01</td><td></td><td>v -&gt;</td><td>Discard</td><td></td><td></td><td></td><td></td></tr>
+<tr><td><code>DUP</code></td><td>0x02</td><td></td><td>v -&gt; v v</td><td>Duplicate</td><td></td><td></td><td></td><td></td></tr>
+<tr><td><code>LOAD</code></td><td>0x03</td><td>d i</td><td>-&gt; v</td><td>Push slot <code>i</code> of the environment <code>d</code> links up. No check</td><td></td><td></td><td></td><td></td></tr>
+<tr><td><code>STORE</code></td><td>0x04</td><td>d i</td><td>v -&gt; v</td><td>Write slot <code>i</code> and keep the value</td><td></td><td></td><td>○</td><td></td></tr>
+<tr><td><code>GLOAD</code></td><td>0x05</td><td>c</td><td>-&gt; v</td><td>Push the value of the cell. No check</td><td></td><td></td><td></td><td></td></tr>
+<tr><td><code>GSET</code></td><td>0x06</td><td>c</td><td>v -&gt; v</td><td>Write the cell and keep the value. Both the global of <code>Def</code> and that of <code>Set</code> use it</td><td></td><td></td><td>○</td><td></td></tr>
+<tr><td><code>JMP</code></td><td>0x07</td><td>L</td><td></td><td>Go to <code>L</code></td><td></td><td></td><td></td><td></td></tr>
+<tr><td><code>JF</code></td><td>0x08</td><td>L</td><td>c -&gt;</td><td>Go to <code>L</code> if <code>c</code> is the symbol <code>false</code>, otherwise go on</td><td></td><td></td><td></td><td></td></tr>
+<tr><td><code>CALL</code></td><td>0x09</td><td>n</td><td>f a1..an -&gt; r</td><td>Call by the rules of Calls in the execution model</td><td></td><td>○</td><td></td><td>○</td></tr>
+<tr><td><code>TCALL</code></td><td>0x0A</td><td>n</td><td>f a1..an -&gt; r</td><td>Drop the current frame and call (a tail call). It is used in every place, also in the entry frame, where the <code>RET</code> of the called function returns the result to the evaluator. When the current frame is a boundary it is the same as <code>CALL</code></td><td></td><td>○</td><td></td><td>○</td></tr>
+<tr><td><code>RET</code></td><td>0x0B</td><td></td><td>v -&gt;</td><td>Drop the frame and push <code>v</code> on the operand stack of the caller. In the entry frame it returns the result of the run to the evaluator</td><td></td><td></td><td></td><td></td></tr>
+<tr><td><code>CALLP</code></td><td>0x0C</td><td>c p</td><td>a1..an -&gt; r</td><td>If the present value of the cell <code>c</code> is the builtin <code>p</code>, run that instruction here. Otherwise call the value of <code>c</code> with <code>CALL</code>. <code>n</code> is the number of arguments of <code>p</code></td><td></td><td>○</td><td></td><td>○</td></tr>
+<tr><td><code>CLOSURE</code></td><td>0x0D</td><td>k</td><td>-&gt; f</td><td>Make a lambda of the code <code>k</code> and the present environment</td><td></td><td>○</td><td></td><td></td></tr>
+<tr><td><code>FUSION</code></td><td>0x0E</td><td></td><td>f g -&gt; h</td><td>Make <code>f | g</code>. If <code>f</code> is <code>none</code> the result is <code>g</code>. It stops unless both are functions</td><td></td><td>○</td><td></td><td>○</td></tr>
+<tr><td><code>BUILD</code></td><td>0x0F</td><td>k n</td><td>a1..an -&gt; m</td><td>Make an M-expression whose head is the symbol of constant <code>k</code>. <code>Tuple</code> and <code>Cons</code> use it too. It stops if <code>n</code> is above 64</td><td></td><td>○</td><td></td><td>○</td></tr>
+<tr><td><code>ARGI</code></td><td>0x10</td><td>i</td><td>m -&gt; a</td><td>Argument <code>i</code> of <code>m</code>. It stops if <code>m</code> is not an M-expression or <code>i</code> is out of range. It is used after a match</td><td></td><td></td><td></td><td>○</td></tr>
+<tr><td><code>PARAM</code></td><td>0x11</td><td>a</td><td>-&gt; v</td><td>Push argument <code>a</code> of the call</td><td></td><td></td><td></td><td></td></tr>
+<tr><td><code>MATCHEQ</code></td><td>0x12</td><td>k L</td><td>v -&gt;</td><td>Go on if <code>v</code> is <code>EQ</code> to the constant <code>k</code>, otherwise go to <code>L</code>. For the patterns of an integer, a string and <code>Quote{v}</code></td><td></td><td></td><td></td><td></td></tr>
+<tr><td><code>MATCHHEAD</code></td><td>0x13</td><td>k n L</td><td>v -&gt; v</td><td>Go on if <code>v</code> is an M-expression with the head symbol <code>k</code> and <code>n</code> arguments, otherwise go to <code>L</code></td><td></td><td></td><td></td><td></td></tr>
+<tr><td><code>MATCHTYPE</code></td><td>0x14</td><td>k L</td><td>v -&gt; v</td><td>Go on if the <code>typeof</code> of <code>v</code> is the symbol <code>k</code>, otherwise go to <code>L</code>. For the pattern <code>_TypeOf{p, type}</code></td><td></td><td></td><td></td><td></td></tr>
+<tr><td><code>NEXT</code></td><td>0x15</td><td></td><td></td><td>Drop the current frame and try the remaining alternatives with the same arguments. It stops when they run out (<code>matching failed</code>). In a frame that <code>PERFORM</code> called, it goes to the outer boundary</td><td></td><td></td><td></td><td>○</td></tr>
+<tr><td><code>HANDLE</code></td><td>0x16</td><td></td><td>body h -&gt; r</td><td>Run <code>body</code> (a lambda of arity 0) in a boundary frame. It stops unless <code>h</code> is a function</td><td></td><td>○</td><td></td><td>○</td></tr>
+<tr><td><code>PERFORM</code></td><td>0x17</td><td></td><td>v -&gt; r</td><td>The rules of Continuations and handlers in the execution model. The value becomes the argument of the resumption</td><td></td><td>○</td><td></td><td>○</td></tr>
+<tr><td><code>ADD</code></td><td>0x18</td><td></td><td>a b -&gt; r</td><td><code>a + b</code></td><td><code>_add</code></td><td>○</td><td></td><td>○</td></tr>
+<tr><td><code>SUB</code></td><td>0x19</td><td></td><td>a b -&gt; r</td><td><code>a - b</code></td><td><code>_sub</code></td><td>○</td><td></td><td>○</td></tr>
+<tr><td><code>MUL</code></td><td>0x1A</td><td></td><td>a b -&gt; r</td><td><code>a * b</code></td><td><code>_mul</code></td><td>○</td><td></td><td>○</td></tr>
+<tr><td><code>DIV</code></td><td>0x1B</td><td></td><td>a b -&gt; r</td><td>Two integers give the quotient truncated toward 0, and it stops if <code>b</code> is 0. Otherwise it is a division and does not stop at 0</td><td><code>_div</code></td><td>○</td><td></td><td>○</td></tr>
+<tr><td><code>MOD</code></td><td>0x1C</td><td></td><td>a b -&gt; r</td><td>Two integers give <code>a - b * (a / b)</code> with the quotient of <code>DIV</code>, and it stops if <code>b</code> is 0</td><td><code>_mod</code></td><td>○</td><td></td><td>○</td></tr>
+<tr><td><code>LT</code></td><td>0x1D</td><td></td><td>a b -&gt; r</td><td><code>a &lt; b</code> as <code>true</code> or <code>false</code>. It stops for a complex number</td><td><code>_lt</code></td><td></td><td></td><td>○</td></tr>
+<tr><td><code>GE</code></td><td>0x1E</td><td></td><td>a b -&gt; r</td><td><code>a &gt;= b</code> as <code>true</code> or <code>false</code>. It stops for a complex number</td><td><code>_ge</code></td><td></td><td></td><td>○</td></tr>
+<tr><td><code>EQ</code></td><td>0x1F</td><td></td><td>a b -&gt; r</td><td>Equality of Values in the execution model, for every value. <code>true</code> or <code>false</code></td><td><code>_eq</code></td><td></td><td></td><td></td></tr>
+<tr><td><code>NE</code></td><td>0x20</td><td></td><td>a b -&gt; r</td><td>The opposite of <code>EQ</code>, for every value. <code>true</code> or <code>false</code></td><td><code>_ne</code></td><td></td><td></td><td></td></tr>
+<tr><td><code>HEAD</code></td><td>0x21</td><td></td><td>m -&gt; sym</td><td>The head symbol</td><td><code>head</code></td><td></td><td></td><td>○</td></tr>
+<tr><td><code>ARITY</code></td><td>0x22</td><td></td><td>m -&gt; n</td><td>The number of arguments</td><td><code>arity</code></td><td></td><td></td><td>○</td></tr>
+<tr><td><code>ARG</code></td><td>0x23</td><td></td><td>m i -&gt; a</td><td>Argument <code>i</code>, from 0</td><td><code>arg</code></td><td></td><td></td><td>○</td></tr>
+<tr><td><code>PUSH</code></td><td>0x24</td><td></td><td>m x -&gt; m'</td><td>The M-expression with <code>x</code> added as the last argument. It stops above 64</td><td><code>push</code></td><td>○</td><td></td><td>○</td></tr>
+<tr><td><code>TYPEOF</code></td><td>0x25</td><td></td><td>v -&gt; sym</td><td>The name in the table of Values</td><td><code>typeof</code></td><td></td><td></td><td></td></tr>
+<tr><td><code>STRLEN</code></td><td>0x26</td><td></td><td>s -&gt; n</td><td>The number of bytes, 0 bytes included</td><td><code>strlen</code></td><td></td><td></td><td>○</td></tr>
+<tr><td><code>ORD</code></td><td>0x27</td><td></td><td>s i -&gt; n</td><td>Byte <code>i</code>, or -1 out of range</td><td><code>ord</code></td><td></td><td></td><td>○</td></tr>
+<tr><td><code>AGET</code></td><td>0x28</td><td></td><td>a i -&gt; v</td><td>An element</td><td><code>array_get</code></td><td></td><td></td><td>○</td></tr>
+<tr><td><code>ASET</code></td><td>0x29</td><td></td><td>a i v -&gt; v</td><td>Write an element and return <code>v</code></td><td><code>array_set</code></td><td></td><td>○</td><td>○</td></tr>
+<tr><td><code>ALEN</code></td><td>0x2A</td><td></td><td>a -&gt; n</td><td>The length</td><td><code>array_len</code></td><td></td><td></td><td>○</td></tr>
+<tr><td><code>HASH</code></td><td>0x2B</td><td></td><td>v -&gt; n</td><td>A non-negative integer, by the rule of Values</td><td><code>hash</code></td><td></td><td></td><td></td></tr>
+<tr><td><code>PLAINGET</code></td><td>0x2C</td><td></td><td>a i -&gt; v</td><td>An element, as a value of the rule in Plain array types</td><td><code>plain_get</code></td><td></td><td></td><td>○</td></tr>
+<tr><td><code>PLAINSET</code></td><td>0x2D</td><td></td><td>a i v -&gt; v</td><td>Write an element and return <code>v</code>. It stops if it does not fit the type. The conversions are in Writing to a plain array</td><td><code>plain_set</code></td><td></td><td></td><td>○</td></tr>
 </table>
 <p>The entry of a function has one instruction sequence for each pattern. When a match fails, the program goes to <code>L</code> and <strong>empties the operand stack</strong>. At <code>L</code> there is a <code>NEXT</code>. When an argument is bound to a variable of the pattern, <code>STORE 0 i</code> and <code>POP</code> write it into the environment.</p>
 <p><code>ADD</code>, <code>SUB</code>, <code>MUL</code>, <code>DIV</code>, <code>MOD</code>, <code>LT</code> and <code>GE</code> stop on an argument that is not a number. The mixing of types and the result type are in Numbers of the execution model. The instructions from <code>HEAD</code> to <code>PLAINSET</code> stop on an argument of a wrong type or out of range (except <code>ORD</code> out of range).</p>
