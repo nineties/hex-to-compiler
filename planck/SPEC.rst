@@ -18,6 +18,10 @@ Symbols (``x``), integers (``42``, ``-1``), floats (``1.5``), strings (``"abc"``
 A symbol is a letter, ``_`` or ``%`` followed by letters, digits and ``_``. A string is up to 65535 bytes and ``Head{...}`` has up to 64 arguments.
 A string used as a top-level expression has no effect, so it serves as a comment.
 
+``true``, ``false`` and ``none`` are literals. Each is the symbol of the same name, and its value is that symbol,
+so ``true`` and ``Quote{true}`` have the same value. They are not variables:
+``Def{true, e}``, ``Set{true, e}`` and ``Declare{true}`` stop the program with a message before the expression runs.
+
 Syntax
 ------
 
@@ -125,6 +129,11 @@ A ``.`` follows its left operand with no space. A value whose head is not declar
 so ``a`` followed by ``[1, 2]`` on the next line or after a space is two expressions.
 ``a`` is a postfix expression such as ``x``, ``f(x)``, ``t.f`` or ``b[j]``: ``a[i][j] = e`` is ``Apply{_index_set, Tuple{a[i], j, e}}``.
 
+``true``, ``false`` and ``none`` are literals, not identifiers, so they cannot name a variable:
+``true := e``, ``true = e``, ``fun true`` and ``true(p) := e`` are syntax errors.
+As a parameter, ``true`` is a pattern that matches the value ``true`` and binds nothing.
+``!x := e`` and ``!x = e`` stop the program as ``Def{true, e}`` and ``Set{true, e}`` do when ``x`` holds ``'true``.
+
 Variables have lexical scope, and the variable a name refers to is decided before the expression runs.
 A variable in the body of a function is a parameter of that function or of a function around it,
 or a variable defined before it in those functions, and otherwise a variable defined before it at the top level (a global variable).
@@ -225,14 +234,13 @@ and are the M-expressions of the table above, which are matched as in Patterns b
 * the name of an operator or of a called function is a symbol: ``a + b`` is ``Apply{Quote{_add}, Tuple{a, b}}``,
   ``-a`` is ``Apply{Quote{_sub}, Tuple{0, a}}`` and ``f(p, ...)`` is ``Apply{Quote{f}, Tuple{p, ...}}``,
   so they match the trees of ``x + 1``, ``-x`` and ``f(1)``.
-  ``a and b`` and ``a or b`` are ``If{a, b, Quote{false}}`` and ``If{a, Quote{true}, b}``.
 * the other identifiers are variables. The arguments of ``Head{p, ...}`` are patterns,
   so ``Apply{f, Tuple{x}}`` matches a call of any function with one argument and binds ``f``.
 * ``(f)(p, ...)`` is ``Apply{f, Tuple{p, ...}}``: the name in parentheses is a variable, not a symbol,
   so ``(f)(x)`` matches a call of any function with one argument and binds ``f``.
 * ``'e`` is ``Quote{e}`` for the expression ``e``.
 * the forms are the operators ``or and not == != <= >= < > :: + - * / %``, the unary ``-`` and ``'``, ``f(p, ...)``,
-  ``p @ type``, ``Head{p, ...}``, ``(f)(p, ...)``, identifiers, integers, strings, ``()``, ``(p)``, ``(p, q, ...)`` and ``[p, ...]``,
+  ``p @ type``, ``Head{p, ...}``, ``(f)(p, ...)``, identifiers, ``true``, ``false``, ``none``, integers, strings, ``()``, ``(p)``, ``(p, q, ...)`` and ``[p, ...]``,
   with the same binding as in expressions: ``a @ int + b @ int`` is ``(a @ int) + (b @ int)``.
 
 .. code-block::
@@ -251,7 +259,8 @@ and are the M-expressions of the table above, which are matched as in Patterns b
 Lexical rules:
 
 * identifiers are ``[A-Za-z_][A-Za-z0-9_]*`` except the reserved words
-  ``if else while and or handle with perform match record for in return break continue fun``.
+  ``if else while and or handle with perform match record for in return break continue fun``
+  and the literals ``true false none``.
 * integers are decimal (``10``, ``-3``), ``0x1f``, ``0o17`` or ``0b101``.
 * floats are decimal with a point, as ``1.5``.
 * strings are ``"..."`` in one line with the escapes ``\a \b \t \n \v \f \r \" \' \\``.
@@ -450,7 +459,7 @@ Values
    * - ``string``
      - String
    * - ``symbol``
-     - Symbol (``true``, ``false`` and ``none`` are symbols defined in ``planck/init.pk``, and those variables cannot be assigned)
+     - Symbol (``true``, ``false`` and ``none`` are literals of symbols)
    * - ``mexpr``
      - ``Head{a, ...}``
    * - ``function``
@@ -519,8 +528,8 @@ Patterns
 A parameter pattern of ``Lambda`` is one of:
 
 * a variable ``x``, or ``_`` (matches anything and binds nothing)
-* an integer or a string (matches an equal value)
-* ``Quote{v}`` (matches an equal value, e.g. ``Quote{false}``)
+* an integer, a string, ``true``, ``false`` or ``none`` (matches an equal value and binds nothing)
+* ``Quote{v}`` (matches an equal value, e.g. ``Quote{x}`` matches the symbol ``x``)
 * ``Head{p, ...}`` (matches an M-expression with the same head and arity)
 * ``_TypeOf{p, type}`` (``p`` matches and the value has the type shown by ``typeof``)
 
@@ -580,7 +589,7 @@ Builtin functions
    * - Language
      - ``parse`` ``eval`` ``exit`` ``argv`` ``_set_file``
    * - ``planck/init.pk``
-     - ``true`` ``false`` ``none`` ``_not`` ``load`` ``table`` ``table_get`` ``table_set``
+     - ``_not`` ``load`` ``table`` ``table_get`` ``table_set``
    * - ``planck/lib/use.pk``
      - ``use`` ``used_libs``
    * - ``planck/peg.pk``

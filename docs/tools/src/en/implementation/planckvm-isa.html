@@ -6,16 +6,14 @@
 <p>The basic unit is a 32-bit word. The unit of bytecode is a code: one lambda or one top-level expression is one code. The code of a nested function is in the constant table of the code around it. Bit 0 is the least significant bit.</p>
 
 <h3>Code</h3>
-<pre>
-       3 3 2 2 2 2 2 2 2 2 2 2 1 1 1 1 1 1 1 1 1 1 0 0 0 0 0 0 0 0 0 0
-       1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0
-word0 |            nregs (16)         |    arity (8)  |       0 (8)   |
-word1 |                          ninstrs (32)                         |
-word2 |                          nconsts (32)                         |
-word3 |                          params (32)                          |
-      |                   instructions (ninstrs words)                |
-      |                  constant table (nconsts words)               |
-</pre>
+<!--bits
+word0 | nregs (16)/16 | arity (8)/8 | 0 (8)/8
+word1 | ninstrs (32)/32
+word2 | nconsts (32)/32
+word3 | params (32)/32
+ | instructions (ninstrs words)/32
+ | constant table (nconsts words)/32
+-->
 <table>
 <tr><th>Field</th><th>Meaning</th></tr>
 <tr><td><code>nregs</code></td><td>The number of registers of the window. Every register number in the code is smaller than this</td></tr>
@@ -27,13 +25,11 @@ word3 |                          params (32)                          |
 
 <h3>Instruction formats</h3>
 <p>An instruction is one word (two with an <code>EXT</code> before it). The low 8 bits are the opcode, and the other 24 bits are divided in one of three formats.</p>
-<pre>
-     3 3 2 2 2 2 2 2 2 2 2 2 1 1 1 1 1 1 1 1 1 1 0 0 0 0 0 0 0 0 0 0
-     1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0
-ABC |       C (8)   |       B (8)   |       A (8)   |      op (8)   |
-AD  |              D (16)           |       A (8)   |      op (8)   |
-J   |                     sJ (24)                   |      op (8)   |
-</pre>
+<!--bits
+ABC | C (8)/8 | B (8)/8 | A (8)/8 | op (8)/8
+AD | D (16)/16 | A (8)/8 | op (8)/8
+J | sJ (24)/24 | op (8)/8
+-->
 <table>
 <tr><th>Operand</th><th>Field</th><th>Meaning</th></tr>
 <tr><td><code>A</code> <code>B</code> <code>C</code></td><td>A, B, C</td><td>Unsigned. A register number where the action in the table says <code>R[A]</code></td></tr>
@@ -48,12 +44,10 @@ J   |                     sJ (24)                   |      op (8)   |
 
 <h3 id="ext">Extending operands</h3>
 <p><code>EXT</code> widens the operands of the next instruction. Its X is divided as follows and added above the fields of the next instruction.</p>
-<pre>
-     3 3 2 2 2 2 2 2 2 2 2 2 1 1 1 1 1 1 1 1 1 1 0 0 0 0 0 0 0 0 0 0
-     1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0
-ABC |   high 8 of C |   high 8 of B |   high 8 of A |     EXT (8)   |
-AD  |        high 16 of D           |   high 8 of A |     EXT (8)   |
-</pre>
+<!--bits
+ABC | high 8 of C/8 | high 8 of B/8 | high 8 of A/8 | EXT (8)/8
+AD | high 16 of D/16 | high 8 of A/8 | EXT (8)/8
+-->
 <ul>
 <li>The widened A, B and C have 16 bits, and D has 32 bits. <code>sB</code> and <code>sC</code> become signed 16 bits, and <code>sD</code> signed 32 bits.</li>
 <li><code>EXT</code> is used when a register number is over 255 or an index in the constant table does not fit its field. The field of <code>k</code> is not widened.</li>
@@ -65,7 +59,7 @@ AD  |        high 16 of D           |   high 8 of A |     EXT (8)   |
 <p>The constant table is a sequence of values of each code, and <code>i</code> of the operand <code>K[i]</code> is its index. An element is one value word.</p>
 <table>
 <tr><th>Element</th><th>Instructions</th></tr>
-<tr><td>Literals of integers, floats, strings and symbols, the contents of <code>Quote</code>, and M-expressions made of constants only</td><td><code>LOADK</code></td></tr>
+<tr><td>Literals of integers, floats and strings, <code>true</code>, <code>false</code> and <code>none</code>, the contents of <code>Quote</code>, and M-expressions made of constants only</td><td><code>LOADK</code></td></tr>
 <tr><td>Integers, strings, symbols and M-expressions</td><td><code>TEQK</code> <code>TNEK</code> <code>MATCHEQ</code></td></tr>
 <tr><td>Symbols</td><td><code>MATCHHEAD</code> <code>MATCHTYPE</code></td></tr>
 <tr><td>Cells</td><td><code>GETGLOBAL</code> <code>SETGLOBAL</code></td></tr>
@@ -220,7 +214,7 @@ AD  |        high 16 of D           |   high 8 of A |     EXT (8)   |
 <table>
 <tr><th>Expression</th><th>Instructions</th></tr>
 <tr><td>Integer</td><td><code>LOADI d v</code> from -32768 to 32767, otherwise <code>LOADK d k</code></td></tr>
-<tr><td>Float (<code>1.5</code>), string, <code>'e</code></td><td><code>LOADK d k</code></td></tr>
+<tr><td>Float (<code>1.5</code>), string, <code>true</code>, <code>false</code>, <code>none</code>, <code>'e</code></td><td><code>LOADK d k</code></td></tr>
 <tr><td>M-expression of constants only</td><td><code>LOADK d k</code>. M-expressions and strings are immutable and are shared</td></tr>
 <tr><td>Quasi-quotation with <code>!e</code></td><td><code>LOADK</code> for a subtree with no splice. For a part with a splice, the children go from <code>R[t]</code> in order and then <code>TUPLE</code>, <code>CONS</code> or <code>BUILD</code>. The <code>e</code> of <code>!e</code> is evaluated as an expression</td></tr>
 <tr><td>Variable <code>x</code></td><td><code>MOVE d r</code> in a register (nothing when they are the same), <code>ENVGET d dep i</code> in an environment, <code>GETGLOBAL d k</code> for a global</td></tr>
@@ -279,7 +273,7 @@ AD  |        high 16 of D           |   high 8 of A |     EXT (8)   |
 <tr><th>Pattern</th><th>Instructions</th></tr>
 <tr><td><code>_</code></td><td>None</td></tr>
 <tr><td>Variable <code>x</code></td><td>None at the position of an argument. As an argument of an M-expression, the target of <code>FIELD</code> is the register of <code>x</code></td></tr>
-<tr><td>Integer, string, <code>Quote{v}</code></td><td><code>MATCHEQ r k</code> <code>NEXT</code></td></tr>
+<tr><td>Integer, string, <code>true</code>, <code>false</code>, <code>none</code>, <code>Quote{v}</code></td><td><code>MATCHEQ r k</code> <code>NEXT</code></td></tr>
 <tr><td><code>Head{p1, ..., pn}</code></td><td><code>MATCHHEAD r k n</code> <code>NEXT</code>, then for each <code>p_j</code> other than <code>_</code>, <code>FIELD s r j</code> and the instructions of <code>p_j</code> for <code>R[s]</code></td></tr>
 <tr><td><code>_TypeOf{p, type}</code></td><td><code>MATCHTYPE r k</code> <code>NEXT</code>, then the instructions of <code>p</code></td></tr>
 </table>

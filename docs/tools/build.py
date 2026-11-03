@@ -5,6 +5,7 @@
   <!--src NAME-->    examples/NAME.pk だけを入れる
   <!--out NAME-->    examples/NAME.out だけを入れる
   <!--text NAME-->   examples/NAME.txt を planck 以外のコードとして入れる
+  <!--bits ... -->   32 ビットの語のビット図（HTML の表）を入れる。中身は1行が1語で「ラベル | 欄の表示/幅 | ...」、幅の合計は 32 でなければ生成が失敗する
   <!--diagram-->     ステージの図（インライン SVG、幅の広い版と狭い版）を入れる
   <!--file F A-->    ソース F の抜粋を入れる。A は行頭の語句で、その行から始まる項目（行頭の行なら次の行頭の行の前の空行まで）。
                      <!--file F A .. B--> は A の行から B の行の直前まで、<!--file F A ..--> は A の行から終わりまで、<!--file F--> は全体
@@ -236,6 +237,30 @@ def diagram(lang):
     return '<div class="dg-wrap">\n' + _svg(lang, "wide") + "\n" + _svg(lang, "narrow") + "\n</div>"
 
 
+def bits(spec):
+    """ビット図。1行が1語。ラベルは語の上に、欄は幅に比例した colspan の表のセルに書く。"""
+    h = ['<table class="bits">', "<colgroup>" + "<col>" * 32 + "</colgroup>"]
+    h.append('<tr class="ruler">' + "".join(
+        f"<td>{n // 10 or ''}<br>{n % 10}</td>" for n in range(31, -1, -1)) + "</tr>")
+    for line in spec.strip().splitlines():
+        label, *fields = [x.strip() for x in line.split("|")]
+        total = 0
+        cells = []
+        for f in fields:
+            text, w = f.rsplit("/", 1)
+            w = int(w)
+            total += w
+            cls = ' class="v"' if w <= 2 and len(text) > 1 else ""
+            cells.append(f'<td colspan="{w}"{cls}>{html.escape(text)}</td>')
+        if total != 32:
+            sys.exit(f"bits: width {total} != 32: {line}")
+        if label:
+            h.append(f'<tr class="lab"><td colspan="32">{html.escape(label)}</td></tr>')
+        h.append('<tr class="fld">' + "".join(cells) + "</tr>")
+    h.append("</table>")
+    return "\n".join(h)
+
+
 used = set()
 used_hl = set()
 
@@ -275,6 +300,7 @@ def out_block(name):
 
 def expand(body):
     body = body.replace("<!--diagram-->", diagram(LANG))
+    body = re.sub(r"<!--bits\n(.*?)-->", lambda m: bits(m[1]), body, flags=re.S)
     body = re.sub(r"<!--ex (\w+)-->", lambda m: f'<div class="example">\n{code_block(m[1])}\n{out_block(m[1])}\n</div>', body)
     body = re.sub(r"<!--src (\w+)-->", lambda m: f'<div class="example">\n{code_block(m[1])}\n</div>', body)
     body = re.sub(r"<!--out (\w+)-->", lambda m: f'<div class="example">\n{out_block(m[1])}\n</div>', body)
