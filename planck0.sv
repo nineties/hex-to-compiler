@@ -38,7 +38,7 @@
 (long heap_end)
 (long heap_pos)
 (fun init_heap ()
-    (var mb 2688)  ; 2.625GB
+    (var mb 1536)  ; 1.5GB
     (var addr (mmap2 0 (* mb 1048576)
         (| PROT_READ PROT_WRITE) (| MAP_PRIVATE MAP_ANONYMOUS) -1 0))
     (if (u>= addr 0xfffff001) (do
@@ -2784,7 +2784,7 @@
     (= cur_file saved_file)
     )
 
-; The frame stack is a fixed 1GB area and the heap is a fixed 2.625GB area, each obtained by mmap2.
+; The frame stack is a fixed 1GB area and the heap is a fixed 1.5GB area, each obtained by mmap2.
 (fun main (argc argv)
     (init_frame_stack)
     (init_heap)
