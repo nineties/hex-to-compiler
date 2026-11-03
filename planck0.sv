@@ -40,26 +40,21 @@
 ; An object is the part of its chunk after the header, so a pointer to an
 ; object is 4 bytes after the beginning of its chunk. The beginnings of the
 ; chunks of the objects are recorded in a bitmap (one bit for 8 bytes).
-; The memory is taken from the free chunks and then from the end of the heap.
+; At first the heap is one free chunk. The free chunks are in a list.
 ; A collector (see "Garbage Collection") frees the objects which cannot be reached.
 (def GC_MARK 1)
 (def GC_FREE 2)
 (def GC_STACK_WORDS 16777216)
-(def GC_MIN_BYTES 67108864)
+(def GC_INTERVAL 67108864)   ; a collection starts after this many bytes are allocated
 
 (long heap_root)
 (long heap_end)
-(long heap_pos)
 (long gc_bitmap)     ; bit i is 1 if a chunk of an object begins at heap_root + 8 * i
 (long gc_stack)      ; stack of the objects which are marked and are not scanned yet
 (long gc_sp)
 (long gc_stack_end)
-(long gc_lists)      ; free chunks: word n (1..32) is the list of the chunks of 8 * n bytes, word 0 is the list of the larger chunks
+(long gc_free)       ; list of the free chunks (the second word of a chunk is the next one)
 (long gc_since)      ; bytes allocated since the last collection
-(long gc_limit)      ; a collection starts when gc_since reaches this
-(long gc_min)
-(long gc_stress)     ; 1 if gc_limit is always gc_min
-(long gc_live)       ; bytes of the objects marked by the collection
 
 (fun map_zero (bytes)
     (var addr (mmap2 0 bytes
@@ -74,15 +69,12 @@
 (fun init_heap ()
     (var mb 1024)  ; 1GB
     (= heap_root (map_zero (* mb 1048576)))
-    (= heap_pos (align heap_root))
     (= heap_end (+ heap_root (* mb 1048576)))
     (= gc_bitmap (map_zero (+ (>> (* mb 1048576) 6) 4096)))
     (= gc_stack (map_zero (* 4 GC_STACK_WORDS)))
     (= gc_sp gc_stack)
     (= gc_stack_end (+ gc_stack (* 4 GC_STACK_WORDS)))
-    (= gc_lists (map_zero 4096))
-    (= gc_min GC_MIN_BYTES)
-    (= gc_limit gc_min)
+    (free_chunk heap_root (- heap_end heap_root))
     )
 
 (fun bm_set (a)
@@ -97,45 +89,29 @@
     (setb gc_bitmap i (& (getb gc_bitmap i) (^ 255 (<< 1 (& g 7)))))
     )
 
-; put the free chunk c of n bytes (n >= 8) to its list
+; put the free chunk c of n bytes (n >= 8) to the list
 (fun free_chunk (c n)
-    (var idx (>> n 3))
-    (if (u> idx 32) (= idx 0))
     (set c (| n GC_FREE))
-    (set c 1 (get gc_lists idx))
-    (set gc_lists idx c)
+    (set c 1 gc_free)
+    (= gc_free c)
     )
 
-; take a chunk of n bytes from the free chunks or from the end of the heap (0 if there is none)
+; take a chunk of n bytes from the first free chunk that is large enough (0 if there is none)
 (fun take_chunk (n)
-    (var idx (>> n 3))
-    (var c 0)
+    (var c gc_free)
     (var prev 0)
-    (var size 0)
     (var rest 0)
-    (if (u<= idx 32) (do
-        (= c (get gc_lists idx))
-        (if c (do
-            (set gc_lists idx (get c 1))
-            (return c)
-            ))
-        ))
-    (= c (get gc_lists 0))
     (while c (do
-        (= size (& (get c) 0xfffffff8))
-        (if (u>= size n) (do
-            (if prev (set prev 1 (get c 1)) (set gc_lists 0 (get c 1)))
-            (= rest (- size n))
+        (= rest (- (& (get c) 0xfffffff8) n))
+        (if (>= rest 0) (do
+            (if prev (set prev 1 (get c 1)) (= gc_free (get c 1)))
             (if rest (free_chunk (+ c n) rest))
             (return c)
             ))
         (= prev c)
         (= c (get c 1))
         ))
-    (if (u> (+ heap_pos n) heap_end) (return 0))
-    (= c heap_pos)
-    (+= heap_pos n)
-    (return c)
+    (return 0)
     )
 
 ; Memory is allocated by a first fit on the free chunks. A new object is zero-filled.
@@ -144,7 +120,7 @@
     (var c 0)
     (var p 0)
     (var e 0)
-    (if (u>= (+ gc_since n) gc_limit) (gc_collect))
+    (if (u>= (+ gc_since n) GC_INTERVAL) (gc_collect))
     (+= gc_since n)
     (= c (take_chunk n))
     (if (! c) (do
@@ -2896,8 +2872,8 @@
 ; stack and the machine stack. The tables of symbols and m-expressions are
 ; roots, so the symbols and m-expressions are never freed.
 ; The sweep walks over all chunks, frees the unmarked objects and merges the
-; adjacent free chunks. A collection starts when the memory allocated since
-; the last one reaches the live memory of the last one (at least 64MB).
+; adjacent free chunks. A collection starts at each GC_INTERVAL bytes of
+; allocation, or when there is no free chunk that is large enough.
 
 (long stack_hi)     ; the highest address of the machine stack that is scanned
 
@@ -2925,7 +2901,7 @@
     (var h 0)
     (var n 0)
     (if (u< p (+ heap_root 4)) (return 0))
-    (if (u>= p heap_pos) (return 0))
+    (if (u>= p heap_end) (return 0))
     (= c (gc_find_chunk p))
     (if (! c) (return 0))
     (= h (get c))
@@ -2933,7 +2909,6 @@
     (= n (& h 0xfffffff8))
     (if (u>= p (+ c n)) (return 0))
     (set c (| h GC_MARK))
-    (+= gc_live n)
     (if (u>= gc_sp gc_stack_end) (do
         (eputs "gc: mark stack overflow\n")
         (exit 1)
@@ -2959,17 +2934,13 @@
     )
 
 (fun gc_sweep ()
-    (var i 0)
     (var c heap_root)
     (var h 0)
     (var n 0)
     (var run 0)
     (var run_size 0)
-    (while (<= i 32) (do
-        (set gc_lists i 0)
-        (+= i 1)
-        ))
-    (while (u< c heap_pos) (do
+    (= gc_free 0)
+    (while (u< c heap_end) (do
         (= h (get c))
         (= n (& h 0xfffffff8))
         (if (& h GC_MARK) (do
@@ -2983,17 +2954,12 @@
             ))
         (+= c n)
         ))
-    (if run_size (do
-        (if (== (+ run run_size) heap_pos)
-            (= heap_pos run)
-            (free_chunk run run_size))
-        ))
+    (if run_size (free_chunk run run_size))
     )
 
 (fun gc_collect ()
     (var p 0)
     (char[] 4 here)
-    (= gc_live 0)
     (= gc_sp gc_stack)
     (gc_mark symtable)
     (gc_mark mexprtable)
@@ -3015,34 +2981,6 @@
     (gc_drain)
     (gc_sweep)
     (= gc_since 0)
-    (= gc_limit gc_live)
-    (if (|| gc_stress (u< gc_limit gc_min)) (= gc_limit gc_min))
-    )
-
-; The environment variable PLANCK0_GC_STRESS=n makes a collection start every n bytes of allocation.
-(fun gc_read_env (envp)
-    (var s 0)
-    (var pre "PLANCK0_GC_STRESS=")
-    (var i 0)
-    (var n 0)
-    (while (get envp) (do
-        (= s (get envp))
-        (= i 0)
-        (while (&& (getb pre i) (== (getb s i) (getb pre i))) (+= i 1))
-        (if (! (getb pre i)) (do
-            (= n 0)
-            (while (&& (>= (getb s i) 48) (<= (getb s i) 57)) (do
-                (= n (+ (* n 10) (- (getb s i) 48)))
-                (+= i 1)
-                ))
-            (if (> n 0) (do
-                (= gc_stress 1)
-                (= gc_min n)
-                (= gc_limit n)
-                ))
-            ))
-        (+= envp 4)
-        ))
     )
 
 ; The frame stack and the heap are each a fixed 1GB area obtained by mmap2.
@@ -3050,7 +2988,6 @@
     (= stack_hi argv)
     (init_frame_stack)
     (init_heap)
-    (gc_read_env (+ argv (* 4 (+ argc 1))))
     (init_tables)
     (init_symbols)
     (init_compiler)
