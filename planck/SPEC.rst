@@ -5,9 +5,11 @@ Planck is a language for symbolic and language processing.
 ``planck/init.pk`` is loaded first, then the program file given as the first argument is run.
 Each top-level expression is parsed and evaluated one by one.
 
-``planck/init.pk``, ``planck/peg.pk`` and ``planck/syntax.pk`` are written in M-expressions.
-``planck/syntax.pk`` defines the syntax below with the packrat parser of ``planck/peg.pk``
-and replaces ``parse``, so the given files are read by the syntax below.
+``planck/init.pk`` and ``planck/peg.pk`` are written in M-expressions.
+``planck/syntax.pk`` defines the syntax below with the packrat parser of ``planck/peg.pk``.
+It is written in M-expressions up to the grammar of ``::=`` and the smallest syntax for actions,
+replaces ``parse`` there, and declares the rest of the syntax with ``::=``,
+so the given files are read by the syntax below.
 
 M-expressions
 -------------
@@ -379,12 +381,18 @@ The items and the action are on the same line as ``::=`` or ``|``.
      - the text, after blanks and comments
    * - ``'word``
      - the word, not followed by ``[A-Za-z0-9_]``
+   * - ``nospace("text")``
+     - the text, with no blanks or comments before it
+   * - ``same``
+     - nothing, when the next token is on the same line as the position
    * - ``name``
      - the rule
    * - ``(a | b ...)``
      - a choice
    * - ``e*``, ``e+``, ``e?``
      - zero or more, one or more, optional
+   * - ``delimited(e, sep)``, ``delimited1(e, sep)``
+     - ``e`` separated by ``sep``: zero or more, one or more. The value is ``Tuple{v, ...}``
    * - ``&e``, ``!e``
      - lookahead: ``e`` matches / does not match, without consuming
    * - ``label:e``
