@@ -6,6 +6,10 @@
   <!--out NAME-->    examples/NAME.out だけを入れる
   <!--text NAME-->   examples/NAME.txt を planck 以外のコードとして入れる
   <!--diagram-->     ステージの図（インライン SVG、幅の広い版と狭い版）を入れる
+  <!--file F A-->    ソース F の抜粋を入れる。A は行頭の語句で、その行から始まる項目（行頭の行なら次の行頭の行の前の空行まで）。
+                     <!--file F A .. B--> は A の行から B の行の直前まで、<!--file F A ..--> は A の行から終わりまで、<!--file F--> は全体
+  [[F A]]            ソース F の A の項目へのリンク（[[F A .. B]] も同じ）。A・B はちょうど1行に合わなければ生成が失敗する
+                     （(fun f の ( は書かない。fun f と書く）
 planck のコードは色付きの HTML にして入れる。色付きの HTML は planck の highlight(planck/lib/highlight.pk)が作り、
 hl/<コードの sha1 の先頭12桁>.html に置く(highlight.sh が GCP で作る)。build.py --texts DIR は、色付けが要るコードを DIR/<同じ名前>.pk に書き出す。
 1行目は <!--title タイトル--> にする。
@@ -269,35 +273,109 @@ def expand(body):
     body = re.sub(r"<!--src (\w+)-->", lambda m: f'<div class="example">\n{code_block(m[1])}\n</div>', body)
     body = re.sub(r"<!--out (\w+)-->", lambda m: f'<div class="example">\n{out_block(m[1])}\n</div>', body)
     body = re.sub(r"<!--text (\w+)-->", lambda m: f'<pre>{html.escape(ex_file(m[1], "txt").rstrip(chr(10)))}</pre>', body)
-    body = re.sub(r"<!--file ([\w./-]+) (\d+)-(\d+)-->", excerpt, body)
-    body = re.sub(r"\[\[([\w./-]+)#(\d+)(?:-(\d+))?\]\]", line_link, body)
+    body = re.sub(r"<!--file ([\w./-]+)((?:(?!-->).)*)-->", excerpt, body)
+    body = re.sub(r"\[\[([\w./-]+) ((?:(?!\]\]).)+)\]\]", line_link, body)
     body = body.replace("@REPO@", REPO)
     return body
 
 
-def excerpt(m):
-    f, a, b = m[1], int(m[2]), int(m[3])
+def _word(c):
+    return c.isalnum() or c == "_"
+
+
+def _find(ls, anchor, ref):
+    """anchor で始まる行(行頭の空白と、anchor が ( で始まらなければ行頭の ( を除く)の番号。ちょうど1行でなければ失敗する"""
+    hits = []
+    for i, l in enumerate(ls):
+        s = l.lstrip()
+        if not s.startswith(anchor) and s.startswith("(") and not anchor.startswith("("):
+            s = s[1:]
+        if s.startswith(anchor) and not (_word(anchor[-1]) and _word(s[len(anchor):len(anchor) + 1])):
+            hits.append(i)
+    if len(hits) != 1:
+        sys.exit(f"{ref}: the anchor matches {len(hits)} lines (it must match one)")
+    return hits[0]
+
+
+def _indent(l):
+    return len(l) - len(l.lstrip())
+
+
+def _trim(ls, end):
+    while end > 0 and not ls[end - 1].strip():
+        end -= 1
+    return end
+
+
+def _item_end(ls, i):
+    """行 i から始まる項目の最後の行の番号(1始まり)。行頭の行は、次の行頭の行の前の空行までを1項目とする。
+    字下げのある行は、同じ字下げの次の行の前まで(閉じの ) } ] だけの行は含める)"""
+    n, s = len(ls), _indent(ls[i])
+    j = i + 1
+    if s > 0:
+        while j < n and (not ls[j].strip() or _indent(ls[j]) > s):
+            j += 1
+        if j < n and ls[j].lstrip()[0] in ")}]":
+            j += 1
+        return _trim(ls, j)
+    while j < n:
+        if not ls[j].strip():
+            k = j
+            while k < n and not ls[k].strip():
+                k += 1
+            if k >= n or _indent(ls[k]) == 0:
+                break
+            j = k
+        else:
+            j += 1
+    return _trim(ls, j)
+
+
+def span(f, spec, ref):
+    """抜粋の範囲(行 a, 行 b)。spec は「A」(A の行から始まる項目)、「A .. B」(A の行から B の行の直前まで)、
+    「A ..」(A の行からファイルの終わりまで)、空(ファイル全体)"""
     ls = (W / f).read_text(encoding="utf-8").splitlines()
-    if b > len(ls):
-        sys.exit(f"excerpt out of range: {m[0]}")
+    spec = spec.strip()
+    if not spec:
+        return 1, _trim(ls, len(ls)), ls
+    a_s, dots, b_s = spec.partition(" ..")
+    i = _find(ls, a_s.strip(), ref)
+    if i > 0 and _indent(ls[i]) > 0 and ls[i - 1].strip() in ("Def{", "Set{"):
+        i -= 1  # 名前が次の行にある Def{ ... の定義は、Def{ の行から
+    if not dots:
+        return i + 1, _item_end(ls, i), ls
+    if not b_s.strip():
+        return i + 1, _trim(ls, len(ls)), ls
+    k = _find(ls, b_s.strip(), ref)
+    if k <= i:
+        sys.exit(f"{ref}: the end anchor is before the start anchor")
+    return i + 1, _trim(ls, k), ls
+
+
+def _label(f, spec):
+    name = spec.partition(" ..")[0].strip()
+    name = re.sub(r"^(?:[;#\\\"(]\s*|=+\s*)+|(?:\s*[\"=):])+$", "", name)
+    return html.escape(f"{f}: {name}" if name else f)
+
+
+def excerpt(m):
+    f, spec = m[1], m[2]
+    a, b, ls = span(f, spec, m[0])
     text = "\n".join(ls[a - 1:b])
     if f.endswith(".pk"):
         cls, body = ' class="pk"', highlighted(text)
     else:
         cls, body = "", html.escape(text)
-    return (f'<div class="example">\n<p class="file"><a href="{REPO}/blob/main/{f}#L{a}-L{b}">{f}:{a}–{b}</a></p>\n'
+    anchor = f"#L{a}-L{b}" if b > a else f"#L{a}"
+    return (f'<div class="example">\n<p class="file"><a href="{REPO}/blob/main/{f}{anchor}">{_label(f, spec)}</a></p>\n'
             f'<pre{cls}>{body}</pre>\n</div>')
 
 
 def line_link(m):
-    f, a, b = m[1], m[2], m[3]
-    src = W / f
-    n = len(src.read_text(encoding="utf-8").splitlines())
-    if int(b or a) > n:
-        sys.exit(f"line out of range: {m[0]} ({n} lines)")
-    anchor = f"#L{a}-L{b}" if b else f"#L{a}"
-    label = f"{f}:{a}–{b}" if b else f"{f}:{a}"
-    return f'<a href="{REPO}/blob/main/{f}{anchor}"><code>{label}</code></a>'
+    f, spec = m[1], m[2]
+    a, b, _ = span(f, spec, m[0])
+    anchor = f"#L{a}-L{b}" if b > a else f"#L{a}"
+    return f'<a href="{REPO}/blob/main/{f}{anchor}"><code>{_label(f, spec)}</code></a>'
 
 
 def href(frm_sec, to_sec, to_page):

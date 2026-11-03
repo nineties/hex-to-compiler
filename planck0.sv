@@ -45,7 +45,7 @@
 (def GC_MARK 1)
 (def GC_FREE 2)
 (def GC_STACK_WORDS 16777216)
-(def GC_INTERVAL 536870912)   ; a collection starts after this many bytes are allocated
+(def GC_INTERVAL 536870911)   ; a collection starts after this many bytes are allocated (512MB - 1, the largest constant)
 
 (long heap_root)
 (long heap_end)
