@@ -1,7 +1,7 @@
 ; Assember written in plancklisp
 ; Copyright (C) 2026 nineties
 
-(import "asm/core.lisp")
+(import "bootstrap/asm/core.lisp")
 
 (def args (commandline-args))
 (when (< (length args) 4) (do

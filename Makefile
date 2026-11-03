@@ -1,18 +1,18 @@
 # zero-to-compiler -
 # Copyright (C) 2025 nineties
 
-ASM_SOURCES := asm.lisp $(wildcard asm/*.lisp)
-ASM_EXAMPLE_SOURCES := $(wildcard asm/examples/*.s)
+ASM_SOURCES := bootstrap/asm.lisp $(wildcard bootstrap/asm/*.lisp)
+ASM_EXAMPLE_SOURCES := $(wildcard bootstrap/asm/examples/*.s)
 ASM_EXAMPLE_TARGETS := $(ASM_EXAMPLE_SOURCES:%.s=%)
 
-SASM_SOURCES := sasm.lisp $(wildcard sasm/*.lisp)
-SASM_LIBS	:= $(wildcard sasm/lib/*.sv)
-SASM_EXAMPLE_SOURCES := $(wildcard sasm/examples/*.sv)
+SASM_SOURCES := bootstrap/sasm.lisp $(wildcard bootstrap/sasm/*.lisp)
+SASM_LIBS	:= $(wildcard bootstrap/sasm/lib/*.sv)
+SASM_EXAMPLE_SOURCES := $(wildcard bootstrap/sasm/examples/*.sv)
 SASM_EXAMPLE_TARGETS := $(SASM_EXAMPLE_SOURCES:%.sv=%)
 
 PLANCK_EXAMPLES := $(wildcard planck/examples/*.pk)
 
-PLISP := $(shell if [ -f ./plisp2 ]; then echo "./plisp2"; else echo "./pforth < plisp.fs"; fi)
+PLISP := $(shell if [ -f ./plisp2 ]; then echo "./plisp2"; else echo "./pforth < bootstrap/plisp.fs"; fi)
 
 default:\
 	pforth\
@@ -23,20 +23,25 @@ example:\
 	$(ASM_EXAMPLE_TARGETS)\
 	$(SASM_EXAMPLE_TARGETS)
 
-pforth: pforth.xxd
+pforth: bootstrap/pforth.xxd
 	xxd -r -c 8 $< > pforth
 	chmod +x pforth
 
-planck0: planck0.sv plisp2 $(SASM_LIBS)
-	-time ./plisp2 sasm.lisp $< $@
+plisp2: bootstrap/plisp2.sv pforth bootstrap/plisp.fs $(SASM_SOURCES) $(ASM_SOURCES) $(SASM_LIBS)
+	-time $(PLISP) bootstrap/sasm.lisp $< tmp-$@
+	-mv tmp-$@ $@
 	-chmod +x $@
 
-%: %.s pforth plisp.fs $(ASM_SOURCES)
-	-time $(PLISP) asm.lisp $< $@
+planck0: bootstrap/planck0.sv plisp2 $(SASM_LIBS)
+	-time ./plisp2 bootstrap/sasm.lisp $< $@
 	-chmod +x $@
 
-%: %.sv pforth plisp.fs $(SASM_SOURCES) $(ASM_SOURCES) $(SASM_LIBS)
-	-time $(PLISP) sasm.lisp $< tmp-$@
+%: %.s pforth bootstrap/plisp.fs $(ASM_SOURCES)
+	-time $(PLISP) bootstrap/asm.lisp $< $@
+	-chmod +x $@
+
+%: %.sv pforth bootstrap/plisp.fs $(SASM_SOURCES) $(ASM_SOURCES) $(SASM_LIBS)
+	-time $(PLISP) bootstrap/sasm.lisp $< tmp-$@
 	-mv tmp-$@ $@
 	-chmod +x $@
 
@@ -54,8 +59,8 @@ clean:
 	rm -f $(ASM_EXAMPLE_TARGETS)
 	rm -f $(SASM_EXAMPLE_TARGETS)
 
-test: pforth plisp.fs $(shell find plisp -name "*.lisp")
-	./pforth < plisp.fs plisp/test.lisp
+test: pforth bootstrap/plisp.fs $(shell find bootstrap/plisp -name "*.lisp")
+	./pforth < bootstrap/plisp.fs bootstrap/plisp/test.lisp
 
 # parse the libraries that planck/vasmc.pk uses in advance (planck/lib/*/*.pkm)
 preprocess: planck0
