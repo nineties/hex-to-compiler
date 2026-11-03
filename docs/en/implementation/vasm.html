@@ -93,7 +93,7 @@
 <span class="tok-name">vasm_ret_type</span> <span class="tok-op">:=</span> <span class="tok-name">Unit</span><span class="tok-op">{</span><span class="tok-op">}</span></pre>
 </div>
 <p>For each function, the checker keeps the declarations of the variables in <code>vasm_info</code> (name to type) and the state of the variables in a table of <code>Vs{status, loans}</code>. The <code>status</code> is one of initialized, uninitialized, moved, freed, a box whose contents are moved out, and a struct whose fields are moved out. The <code>loans</code> are the borrows that currently borrow the variable. <code>if</code> and <code>while</code> copy the table, check each branch, and compare the results afterwards.</p>
-<p>Whether a value is moved or copied depends on its type. <code>own</code> and a struct that owns something are <em>linear</em>: a use moves them, and they must be moved or freed exactly once. Integers, <code>bool</code>, structs that own nothing and shared borrows are copied.</p>
+<p>Whether a value is moved or copied depends on its type. <code>own</code> and a struct that owns something are <em>linear</em>: a use moves them, and a move and a free together happen at most once. Integers, <code>bool</code>, structs that own nothing and shared borrows are copied.</p>
 <div class="example">
 <p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm/check.pk#L226-L231">planck/lib/vasm/check.pk: An integer literal is Lit{n} until</a></p>
 <pre class="pk"><span class="tok-com"># An integer literal is Lit{n} until it meets an integer type; Lit{none} is the result of an operation on literals.</span>
@@ -217,7 +217,7 @@ line 27: q is used after it is moved</pre>
 <p class="label">Output</p>
 <pre class="out">ok</pre>
 </div>
-<p>A value that owns something is released automatically where its owner goes away, so none of the functions above is an error. Those places are the end of a block or a function, an overwrite, the result of a call that is discarded as a statement, and what is left inside a value passed to <code>free</code>. The release is an action at run time, and the checker counts nothing. <code>vasm_leak_all</code>, which would examine what is left at the end of a block or a function, is an empty function kept to mark where the release happens (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm/check.pk#L711-L714"><code>planck/lib/vasm/check.pk: What an own value still owns</code></a>). An overwrite only sets the state back to initialized in <code>vasm_assign</code> (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm/check.pk#L699-L709"><code>planck/lib/vasm/check.pk: vasm_assign(at, st, x, t</code></a>). <code>free</code> is for releasing a value earlier.</p>
+<p>A value that owns something is released automatically where its owner goes away, so none of the functions above is an error. Those places are the end of a block or a function, an overwrite, the result of a call that is discarded as a statement, and what is left inside a value passed to <code>free</code>. The release is an action at run time, and the checker counts nothing. <code>vasm_leak_all</code>, which is called at <code>return</code> and at the end of a function, is an empty function that marks where the release happens (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm/check.pk#L711-L714"><code>planck/lib/vasm/check.pk: What an own value still owns</code></a>). An overwrite only sets the state back to initialized in <code>vasm_assign</code> (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm/check.pk#L699-L709"><code>planck/lib/vasm/check.pk: vasm_assign(at, st, x, t</code></a>). <code>free</code> is for releasing a value earlier.</p>
 
 <h2>Borrows and regions</h2>
 <div class="example">
@@ -317,7 +317,7 @@ line 44: p is borrowed and cannot be assigned</pre>
 <p class="label">Output</p>
 <pre class="out">line 18: a borrow of region inner is put in keep, which lives outside the region</pre>
 </div>
-<p><code>vasm_outlives(q, r)</code> decides which region is inside which. <code>q</code> outlives <code>r</code> if they are the same, or if <code>r</code> is a region opened in the function and <code>q</code> was opened before it. The region parameters of a function have no order among themselves.</p>
+<p><code>vasm_outlives(q, r)</code> decides which region is inside which. <code>q</code> outlives <code>r</code> if they are the same, if <code>q</code> is <code>static</code>, or if <code>r</code> is a region opened in the function and <code>q</code> was opened before it. The region parameters of a function have no order among themselves.</p>
 <div class="example">
 <p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm/check.pk#L334-L336">planck/lib/vasm/check.pk: q outlives r</a></p>
 <pre class="pk"><span class="tok-com"># q outlives r: q is r, or q is static (the region of the string literals, which lasts to the end of the program),</span>
