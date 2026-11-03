@@ -39,8 +39,8 @@ same() { # same <program> <arguments>
     fi
 }
 
-# the evaluator and the libraries it uses are read from their preprocessed files at each run
-./planck0 tools/preprocess.pk interp > /dev/null
+# the evaluator, the libraries it uses and the libraries that the programs use are read from their preprocessed files at each run
+./planck0 tools/preprocess.pk interp unparse highlight getopt u64 error symbol vasm/build vasm/check vasm/ir vasm/rt backend/link backend/elf backend/x86 > /dev/null
 ./planck0 planck/tests/interp.pk
 for p in $PROGRAMS; do same "$p"; done
 same planck/tests/builtins.pk one "two words"
