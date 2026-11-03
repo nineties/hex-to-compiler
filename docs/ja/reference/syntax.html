@@ -132,6 +132,9 @@ Apply{_record_declare, Tuple{Quote{T}, Quote{Tuple{a, b}}}}</pre>
 <li><code>()</code> で式をまとめます。</li>
 </ul>
 
+<h2>定義と代入の左辺の !x</h2>
+<p><code>x := e</code> と <code>x = e</code> の <code>x</code> は <code>!x</code> でもよく、それぞれ <code>Def{!x, e}</code> と <code>Set{!x, e}</code> です。準クオートの中の <code>!x</code> は、<code>x</code> が持つシンボルに置き換わります。<code>x</code> が <code>'i</code> を持つとき、<code>`{ !x := 0; !x = !x + 1 }</code> は <code>Do{Def{i, 0}, Set{i, Apply{_add, Tuple{i, 1}}}}</code> です。</p>
+
 <h2>if と while</h2>
 <p><code>if</code> と <code>while</code> の条件は括弧で囲みます。<code>while</code> の本体 <code>e</code> は任意の式です。<code>if</code> の枝 <code>a</code>・<code>b</code> は、括弧の外に <code>|</code> を含まない式なので、<code>if (c) a else b | g</code> は <code>(if (c) a else b) | g</code> です。複数の式はブロック <code>{ ... }</code> にします。</p>
 <p><code>else</code> は、<code>else</code> をまだ持たない一番近い <code>if</code> に付きます。<code>if (a) if (b) x else y</code> は <code>if (a) { if (b) x else y }</code> です。<code>else if (c) ...</code> は <code>else</code> のあとに <code>if</code> の式が続いたものです。<code>if</code> は式なので <code>y = if (c) 1 else 2</code> と書けます。</p>
@@ -193,7 +196,7 @@ undefined variable: later</pre>
 <pre class="out">1
 2</pre>
 </div>
-<p>変数の定義 <code>x := e</code>（<code>x := (p) -&gt; e</code> も）は書いた場所で定義され、それより前の式からは外側の <code>x</code> が見えます。右辺 <code>e</code> から見えるのも前の <code>x</code> です。新しい <code>x</code> は右辺を評価したあとに作るので、前の <code>x</code> がなければ右辺の <code>x</code> は未定義です。ブロックの変数は、ブロックを含む関数かプログラムの変数です。</p>
+<p>変数の定義 <code>x := e</code>（<code>x := (p) -&gt; e</code> も）は書いた場所で定義され、それより前の式からは外側の <code>x</code> が見えます。右辺 <code>e</code> から見えるのも前の <code>x</code> です。新しい <code>x</code> は右辺を評価したあとに作るので、前の <code>x</code> がなければ右辺の <code>x</code> は未定義です。<code>x := 1</code> のあとの <code>x := x + 1</code> で <code>x</code> は2になります。自分を呼ぶ関数は <code>f(p, ...) := e</code> と書きます。トップレベルでもブロックの中でも同じです。ブロックの変数は、ブロックを含む関数かプログラムの変数です。</p>
 
 <h3>関数に定義が加わるとき</h3>
 <p>関数の定義 <code>f(p, ...) := e</code> は、書いた場所の変数に <code>f</code> がすでにあれば <code>f(p, ...) = e</code> と同じで、なければ <code>fun f</code> と <code>f(p, ...) = e</code> を続けて書いたのと同じです。後者は書いた場所で新しい <code>f</code> を定義します。同じ場所に書いた <code>f</code> の定義は1つの関数になり、書いた順に試されます。</p>
@@ -351,14 +354,38 @@ none</pre>
 <ul>
 <li>演算子や呼ばれる関数の名前はシンボルです。<code>a + b</code> は <code>Apply{Quote{_add}, Tuple{a, b}}</code>、<code>-a</code> は <code>Apply{Quote{_sub}, Tuple{0, a}}</code>、<code>f(p, ...)</code> は <code>Apply{Quote{f}, Tuple{p, ...}}</code> なので、<code>x + 1</code>・<code>-x</code>・<code>f(1)</code> の木に合います。</li>
 <li>ほかの識別子は変数です。<code>Head{p, ...}</code> の引数はパターンなので、<code>Apply{f, Tuple{x}}</code> は引数1つの任意の関数の呼び出しに合い、<code>f</code> を束縛します。</li>
+<li><code>(f)(p, ...)</code> は <code>Apply{f, Tuple{p, ...}}</code> です。括弧の中の名前はシンボルでなく変数なので、<code>(f)(x)</code> は引数1つの任意の関数の呼び出しに合い、<code>f</code> を束縛します。</li>
 <li><code>'e</code> は式 <code>e</code> の <code>Quote{e}</code> です。</li>
-<li>書ける形は、演算子 <code>or and not == != &lt;= &gt;= &lt; &gt; :: + - * / %</code>、単項の <code>-</code> と <code>'</code>、<code>f(p, ...)</code>、<code>p @ type</code>、<code>Head{p, ...}</code>、識別子・<code>true</code>・<code>false</code>・<code>none</code>・整数・文字列、<code>()</code>・<code>(p)</code>・<code>(p, q, ...)</code>・<code>[p, ...]</code> です。結合は式と同じで、<code>a @ int + b @ int</code> は <code>(a @ int) + (b @ int)</code> です。</li>
+<li>書ける形は、演算子 <code>or and not == != &lt;= &gt;= &lt; &gt; :: + - * / %</code>、単項の <code>-</code> と <code>'</code>、<code>f(p, ...)</code>、<code>p @ type</code>、<code>Head{p, ...}</code>、<code>(f)(p, ...)</code>、識別子・<code>true</code>・<code>false</code>・<code>none</code>・整数・文字列、<code>()</code>・<code>(p)</code>・<code>(p, q, ...)</code>・<code>[p, ...]</code> です。結合は式と同じで、<code>a @ int + b @ int</code> は <code>(a @ int) + (b @ int)</code> です。</li>
 </ul>
+<div class="example">
+<p class="file">r_pattern.pk</p>
+<pre class="pk"><span class="tok-name">simp</span><span class="tok-op">(</span><span class="tok-name">e</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-kw">match</span> <span class="tok-name">e</span> <span class="tok-op">{</span>
+    <span class="tok-name">a</span> <span class="tok-op">@</span> <span class="tok-name">int</span> <span class="tok-op">+</span> <span class="tok-name">b</span> <span class="tok-op">@</span> <span class="tok-name">int</span> <span class="tok-op">-&gt;</span> <span class="tok-name">a</span> <span class="tok-op">+</span> <span class="tok-name">b</span>
+  <span class="tok-op">|</span> <span class="tok-name">a</span> <span class="tok-op">+</span> <span class="tok-num">0</span> <span class="tok-op">-&gt;</span> <span class="tok-name">a</span>
+  <span class="tok-op">|</span> <span class="tok-name">x</span> <span class="tok-op">*</span> <span class="tok-name">y</span> <span class="tok-kw">if</span> <span class="tok-name">x</span> <span class="tok-op">==</span> <span class="tok-name">y</span> <span class="tok-op">-&gt;</span> <span class="tok-op">`</span><span class="tok-name">sq</span><span class="tok-op">(</span><span class="tok-op">!</span><span class="tok-name">x</span><span class="tok-op">)</span>
+  <span class="tok-op">|</span> <span class="tok-name">_</span> <span class="tok-op">-&gt;</span> <span class="tok-name">e</span>
+<span class="tok-op">}</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">simp</span><span class="tok-op">(</span><span class="tok-op">'</span><span class="tok-op">(</span><span class="tok-num">1</span> <span class="tok-op">+</span> <span class="tok-num">2</span><span class="tok-op">)</span><span class="tok-op">)</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">simp</span><span class="tok-op">(</span><span class="tok-op">'</span><span class="tok-op">(</span><span class="tok-name">z</span> <span class="tok-op">+</span> <span class="tok-num">0</span><span class="tok-op">)</span><span class="tok-op">)</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">simp</span><span class="tok-op">(</span><span class="tok-op">'</span><span class="tok-op">(</span><span class="tok-name">z</span> <span class="tok-op">*</span> <span class="tok-name">z</span><span class="tok-op">)</span><span class="tok-op">)</span><span class="tok-op">)</span>
+<span class="tok-name">swap</span><span class="tok-op">(</span><span class="tok-name">a</span> <span class="tok-op">+</span> <span class="tok-name">b</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-op">`</span><span class="tok-op">(</span><span class="tok-op">!</span><span class="tok-name">b</span> <span class="tok-op">+</span> <span class="tok-op">!</span><span class="tok-name">a</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">swap</span><span class="tok-op">(</span><span class="tok-op">'</span><span class="tok-op">(</span><span class="tok-num">1</span> <span class="tok-op">+</span> <span class="tok-num">2</span><span class="tok-op">)</span><span class="tok-op">)</span><span class="tok-op">)</span>
+<span class="tok-name">callee</span><span class="tok-op">(</span><span class="tok-op">(</span><span class="tok-name">f</span><span class="tok-op">)</span><span class="tok-op">(</span><span class="tok-name">x</span><span class="tok-op">)</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-name">f</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">callee</span><span class="tok-op">(</span><span class="tok-op">'</span><span class="tok-name">g</span><span class="tok-op">(</span><span class="tok-num">1</span><span class="tok-op">)</span><span class="tok-op">)</span><span class="tok-op">)</span></pre>
+<p class="label">出力</p>
+<pre class="out">3
+z
+Apply{sq, Tuple{z}}
+Apply{_add, Tuple{2, 1}}
+g</pre>
+</div>
 
 <h2>字句</h2>
 <ul>
 <li>識別子は <code>[A-Za-z_][A-Za-z0-9_]*</code> です。ただし次の予約語は除きます。<br><code>if else while and or handle with perform match record for in return break continue fun</code><br>とリテラル <code>true false none</code></li>
 <li>整数は10進（<code>10</code>・<code>-3</code>）・<code>0x1f</code>・<code>0o17</code>・<code>0b101</code> です。</li>
+<li>浮動小数点数は小数点のある10進（<code>1.5</code>）です。</li>
 <li>文字列は1行の <code>"..."</code> で、エスケープ <code>\a \b \t \n \v \f \r \" \' \\</code> が使えます。<code>f"...{e}..."</code> は式 <code>e</code> の値を埋め込みます。<code>e</code> の中に文字列や f 文字列を書けます。<code>{{</code> と <code>}}</code> は波括弧そのものです。<code>f</code> の付かない文字列は何も埋め込みません。</li>
 <li><code>#</code> から行の終わりまではコメントです。</li>
 <li><code>f(a)</code> の <code>f</code> と <code>(</code> の間、<code>a[i]</code> の <code>a</code> と <code>[</code> の間、<code>Head{a}</code> の <code>Head</code> と <code>{</code> の間には空白を入れません。</li>

@@ -3,20 +3,35 @@
 <p class="lead">The evaluator works on M-expressions. This page defines the kinds of values, the special forms, patterns, effects and the top level.</p>
 
 <h2>M-expressions</h2>
-<p>An M-expression is a symbol (<code>x</code>), an integer (<code>42</code>, <code>-1</code>), a string (<code>"abc"</code>) or <code>Head{a, b, ...}</code>. A string at the top level has no effect, so it can be used as a comment.</p>
+<p>An M-expression is a symbol (<code>x</code>), an integer (<code>42</code>, <code>-1</code>), a float (<code>1.5</code>), a string (<code>"abc"</code>) or <code>Head{a, b, ...}</code>. A symbol is a letter, <code>_</code> or <code>%</code> followed by letters, digits and <code>_</code>. A string is up to 65535 bytes and <code>Head{...}</code> has up to 64 arguments. A string at the top level has no effect, so it can be used as a comment.</p>
 <p><code>true</code>, <code>false</code> and <code>none</code> are literals. Each is the symbol of the same name, and its value is that symbol, so <code>true</code> and <code>Quote{true}</code> have the same value. They are not variables: <code>Def{true, e}</code>, <code>Set{true, e}</code> and <code>Declare{true}</code> stop the program with a message before the expression runs.</p>
 
 <h2>Values</h2>
 <table>
 <tr><th><code>typeof</code></th><th>Value</th></tr>
-<tr><td><code>int</code></td><td>Integer</td></tr>
+<tr><td><code>int</code></td><td>Integer of arbitrary precision</td></tr>
+<tr><td><code>float</code></td><td>Float, IEEE 754 binary64</td></tr>
+<tr><td><code>complex</code></td><td>Complex number, a pair of floats</td></tr>
 <tr><td><code>string</code></td><td>String</td></tr>
 <tr><td><code>symbol</code></td><td>Symbol (<code>true</code>, <code>false</code> and <code>none</code> are literals of symbols)</td></tr>
 <tr><td><code>mexpr</code></td><td><code>Head{a, ...}</code></td></tr>
 <tr><td><code>function</code></td><td>Lambda, fusion, builtin function or continuation</td></tr>
 <tr><td><code>array</code></td><td>Mutable array of fixed length made by <code>array(n)</code></td></tr>
+<tr><td><code>plain</code></td><td>Mutable array of elements of one type, made by <code>plain_array(kind, n)</code></td></tr>
 </table>
-<p>An array is the only value that can be written. Integers, strings, symbols and M-expressions are immutable. A list (<code>Cons{x, xs}</code>) and a tuple (<code>Tuple{a, ...}</code>) are M-expressions, so they are immutable too. A table <code>Table{a}</code> and a vector <code>Vector{a}</code> are M-expressions that hold an array, and <code>a[i] = e</code> writes them (see <a href="syntax.html#index">Indexing and rewriting</a>).</p>
+<p>Arrays and plain arrays are the values that can be written. Numbers, strings, symbols and M-expressions are immutable. A list (<code>Cons{x, xs}</code>) and a tuple (<code>Tuple{a, ...}</code>) are M-expressions, so they are immutable too. A table <code>Table{a}</code> and a vector <code>Vector{a}</code> are M-expressions that hold an array, and <code>a[i] = e</code> writes them (see <a href="syntax.html#index">Indexing and rewriting</a>).</p>
+
+<h3 id="numbers">Numbers</h3>
+<ul>
+<li>No integer is out of range, and nothing wraps around or is truncated.</li>
+<li>Floats round to nearest even, and floating-point exceptions do not stop the program. A complex number is made by <code>complex(re, im)</code> and has no literal.</li>
+<li><code>_add</code> <code>_sub</code> <code>_mul</code> <code>_div</code> take integers, floats and complex numbers, and stop the program on any other value. When the types are mixed, the operands are raised to the higher type in the order integer, float, complex, and the result has that type.</li>
+<li>An integer raised to a float is rounded to the nearest value. Raising an integer beyond the range of floats is a runtime error.</li>
+<li><code>_div</code> of two integers is the quotient truncated toward 0, and a zero divisor is a runtime error. A division that involves a float or a complex number does not stop on a zero divisor: a float gives an infinity or NaN, and a complex number gives the same rule applied to its components.</li>
+<li><code>_mod(a, b)</code> of two integers is <code>a - b * (a / b)</code>, and a zero divisor is a runtime error.</li>
+<li><code>_lt</code> <code>_le</code> <code>_gt</code> <code>_ge</code> compare an integer and a float by their mathematical values without raising the type, and give <code>false</code> when NaN is involved. They stop the program on a value that is not a number and on a complex number.</li>
+<li><code>_eq</code> says that numbers of different types are equal when their values are the same (<code>1 == 1.0</code>). NaN is not equal to itself. Complex numbers are equal when both components are equal. <code>_ne</code> is the opposite of <code>_eq</code>.</li>
+</ul>
 
 <h2>Special forms</h2>
 <table>
@@ -50,7 +65,7 @@
 
 <h2>Algebraic effects</h2>
 <p><code>Handle{body, handler}</code> evaluates <code>body</code>. <code>Perform{v}</code> calls the nearest <code>handler(v, k)</code> that has a matching pattern, where <code>k</code> is the continuation of the <code>Perform</code>. Handlers are deep: they stay installed in the continuation. When no pattern matches, the effect goes to the outer handler.</p>
-<p><code>k</code> is an ordinary function and can be called any number of times, even after <code>Handle</code> has returned. Variables are shared between the resumed copies.</p>
+<p><code>k</code> is an ordinary function and can be called any number of times, even after <code>Handle</code> has returned. Variables that are defined when the continuation is captured are shared between the resumed copies. A variable defined by <code>x := e</code> after the resumption is defined separately in each copy, unless a function written inside refers to it.</p>
 <!--ex t5_resume-->
 
 <h2>Top level</h2>
