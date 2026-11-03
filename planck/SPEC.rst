@@ -14,7 +14,7 @@ so the given files are read by the syntax below.
 M-expressions
 -------------
 
-Symbols (``x``), integers (``42``, ``-1``), strings (``"abc"``) and ``Head{a, b, ...}``.
+Symbols (``x``), integers (``42``, ``-1``), floats (``1.5``), strings (``"abc"``) and ``Head{a, b, ...}``.
 A symbol is a letter, ``_`` or ``%`` followed by letters, digits and ``_``. A string is up to 65535 bytes and ``Head{...}`` has up to 64 arguments.
 A string used as a top-level expression has no effect, so it serves as a comment.
 
@@ -253,6 +253,7 @@ Lexical rules:
 * identifiers are ``[A-Za-z_][A-Za-z0-9_]*`` except the reserved words
   ``if else while and or handle with perform match record for in return break continue fun``.
 * integers are decimal (``10``, ``-3``), ``0x1f``, ``0o17`` or ``0b101``.
+* floats are decimal with a point, as ``1.5``.
 * strings are ``"..."`` in one line with the escapes ``\a \b \t \n \v \f \r \" \' \\``.
   ``f"...{e}..."`` embeds the value of the expression ``e``, which may contain strings and f-strings;
   ``{{`` and ``}}`` are the braces themselves. A string without the prefix ``f`` embeds nothing.
@@ -300,7 +301,7 @@ Indexing and rewriting
      - ``plain_set(a, i, e)``
    * - string
      - integer
-     - the character at ``i``, a string of length 1
+     - the byte at ``i``, a string of length 1
      - stops, see below
    * - table
      - any value
@@ -441,7 +442,11 @@ Values
    * - ``typeof``
      - Value
    * - ``int``
-     - Integer
+     - Integer of arbitrary precision
+   * - ``float``
+     - Float, IEEE 754 binary64
+   * - ``complex``
+     - Complex number, a pair of floats
    * - ``string``
      - String
    * - ``symbol``
@@ -452,6 +457,26 @@ Values
      - Lambda, Fusion, builtin function or continuation
    * - ``array``
      - Mutable array made by ``array(n)``
+   * - ``plain``
+     - Mutable array of elements of one type, made by ``plain_array(kind, n)``
+
+Numbers
+~~~~~~~
+
+* No integer is out of range, and nothing wraps around or is truncated.
+* Floats round to nearest even, and floating-point exceptions do not stop the program.
+  A complex number is made by ``complex(re, im)`` and has no literal.
+* ``_add`` ``_sub`` ``_mul`` ``_div`` take integers, floats and complex numbers, and stop the program on any other value.
+  When the types are mixed, the operands are raised to the higher type in the order integer, float, complex, and the result has that type.
+* An integer raised to a float is rounded to the nearest value. Raising an integer beyond the range of floats is a runtime error.
+* ``_div`` of two integers is the quotient truncated toward 0, and a zero divisor is a runtime error.
+  A division that involves a float or a complex number does not stop on a zero divisor:
+  a float gives an infinity or NaN, and a complex number gives the same rule applied to its components.
+* ``_mod(a, b)`` of two integers is ``a - b * (a / b)``, and a zero divisor is a runtime error.
+* ``_lt`` ``_le`` ``_gt`` ``_ge`` compare an integer and a float by their mathematical values without raising the type,
+  and give ``false`` when NaN is involved. They stop the program on a value that is not a number and on a complex number.
+* ``_eq`` says that numbers of different types are equal when their values are the same (``1 == 1.0``).
+  NaN is not equal to itself. Complex numbers are equal when both components are equal. ``_ne`` is the opposite of ``_eq``.
 
 Special forms
 -------------
@@ -530,10 +555,14 @@ Builtin functions
      - Functions
    * - Output
      - ``print`` ``println`` ``put``
-   * - Integers
+   * - Numbers
      - ``_add`` ``_sub`` ``_mul`` ``_div`` ``_mod``
    * - Comparison
      - ``_lt`` ``_le`` ``_gt`` ``_ge`` ``_eq`` ``_ne``
+   * - Floats
+     - ``itof`` ``fsqrt`` ``ffloor`` ``ftoi`` ``ftobits`` ``bitstof`` ``ftos`` ``stof`` ``fexp`` ``flog`` ``fsin`` ``fcos`` ``fpow`` ``fatan2``
+   * - Complex numbers
+     - ``complex`` ``real`` ``imag`` ``conj``
    * - M-expressions
      - ``head`` ``arity`` ``arg`` ``mexpr`` ``push`` ``typeof``
    * - Strings
@@ -541,7 +570,8 @@ Builtin functions
    * - Arrays
      - ``array`` ``array_get`` ``array_set`` ``array_len`` ``hash``
    * - Plain arrays
-     - ``u8_array`` ``u16_array`` ``i32_array`` ``plain_get`` ``plain_set`` ``plain_len`` ``plain_kind`` ``plain_copy``
+     - ``plain_array`` ``bool_array`` ``i8_array`` ``i16_array`` ``i32_array`` ``i64_array`` ``u8_array`` ``u16_array`` ``u32_array`` ``u64_array``
+       ``f16_array`` ``f32_array`` ``f64_array`` ``c64_array`` ``c128_array`` ``plain_get`` ``plain_set`` ``plain_len`` ``plain_kind`` ``plain_copy``
    * - Bit operations
      - ``bit_and`` ``bit_or`` ``bit_xor`` ``bit_not`` ``bit_shl`` ``bit_shr`` ``bit_sar``
    * - Files
@@ -564,9 +594,9 @@ Builtin functions
 * ``_record_declare(name, fields)``: set the field names of the head ``name`` (``fields`` is ``Tuple{f, ...}``). ``_record_get(t, name)``: the field.
 * ``peg_for(xs, f)``: call ``f`` with each element of the list or vector ``xs``, and return ``none``.
 * ``symname(sym)``: the name of the symbol as a string (the inverse of ``intern``).
-* ``strlen(s)``: the number of characters. ``ord(s, i)``: the code of the character at ``i``, or ``-1`` when ``i`` is out of range.
-  ``s[i]``: the character at ``i`` as a string of length 1.
-* ``substr(s, i, j)``: the characters from ``i`` to ``j - 1``. ``_strcat(a, b)``: ``a`` followed by ``b``.
+* ``strlen(s)``: the number of bytes, 0 bytes included. ``ord(s, i)``: the byte at ``i``, or ``-1`` when ``i`` is out of range.
+  ``s[i]``: the byte at ``i`` as a string of length 1.
+* ``substr(s, i, j)``: the bytes from ``i`` to ``j - 1``, and a runtime error out of range. ``_strcat(a, b)``: ``a`` followed by ``b``.
 * ``intern(s)``: the symbol named ``s``.
 * ``push(Head{a, ...}, x)``: ``Head{a, ..., x}``.
 * ``array(n)``: a new array of ``n`` elements, all ``none``. ``array_get(a, i)``, ``array_set(a, i, x)`` (returns ``x``) and ``array_len(a)``.
@@ -574,14 +604,38 @@ Builtin functions
 * ``hash(x)``: a non-negative integer. Values equal by ``_eq`` have the same hash.
 * ``table()``: a new hash table ``Table{a}``, where ``a`` is made of arrays. ``table_get(t, key, default)``, ``table_set(t, key, value)``.
   Keys are compared by ``==``.
-* ``u8_array(n)``, ``u16_array(n)``, ``i32_array(n)``: a plain array of ``n`` elements, an array of untagged integers, all 0.
-  The element is 0 to 255, 0 to 65535 or an integer. ``a[i]`` and ``a[i] = x`` (``plain_get(a, i)``, ``plain_set(a, i, x)``) read and write an element;
-  a value that does not fit the type and an index outside ``0`` to ``n - 1`` are runtime errors.
-  ``plain_len(a)``: ``n``. ``plain_kind(a)``: ``'u8``, ``'u16`` or ``'i32``.
+* ``plain_array(kind, n)``: a plain array of ``n`` elements of the type ``kind``, all 0 of that type (``false``, ``0``, ``0.0`` or ``complex(0, 0)``).
+  It is a runtime error when ``kind`` is not one of the types or ``n`` is negative. ``u8_array(n)`` is ``plain_array('u8, n)``, and the other types have the same form.
+  The types are ``'bool``, the signed integers ``'i8`` ``'i16`` ``'i32`` ``'i64`` (-2^(n-1) to 2^(n-1)-1), the unsigned integers ``'u8`` ``'u16`` ``'u32`` ``'u64`` (0 to 2^n-1),
+  the floats ``'f16`` ``'f32`` ``'f64`` (IEEE 754 binary16, binary32 and binary64), and the complex numbers ``'c64`` ``'c128`` (parts in binary32 and binary64).
+  ``a[i]`` and ``a[i] = x`` (``plain_get(a, i)``, ``plain_set(a, i, x)``) read and write an element; an index outside ``0`` to ``n - 1`` is a runtime error.
+  Reading gives a value of the language, with ``'f16``, ``'f32`` and ``'c64`` widened to binary64 without changing the value.
+  ``plain_len(a)``: ``n``. ``plain_kind(a)``: the symbol of the type.
   ``plain_copy(dst, di, src, si, n)`` copies ``n`` elements; the types must be the same and the ranges may overlap in one array.
-* ``bit_and(a, b)``, ``bit_or(a, b)``, ``bit_xor(a, b)``, ``bit_not(a)``: bit by bit on 31-bit two's complement integers.
-  ``bit_shl(a, k)`` shifts left by ``k`` (0 to 31) bits and keeps 31 bits. ``bit_shr(a, k)`` is the logical shift of ``a`` as a 31-bit unsigned integer.
-  ``bit_sar(a, k)`` is the arithmetic shift.
+* Writing to a plain array converts the value:
+
+  * An integer out of the range of an integer type is a runtime error and never wraps around.
+  * A float written to an integer type is truncated toward 0, then the range is checked. NaN and infinities are runtime errors.
+  * A complex number written to an integer type or to ``'f16``, ``'f32`` or ``'f64`` is a runtime error.
+  * A number written to ``'bool`` is ``false`` when it is 0 (``0``, ``0.0``, ``-0.0``, ``complex(0, 0)``), and otherwise ``true``, also for NaN.
+  * ``true`` and ``false`` written to ``'bool`` stay as they are, and written to a number type are 1 and 0.
+  * An integer or a float written to a complex type is the real part, and the imaginary part is 0.
+  * A number written to a float or complex type is rounded to the nearest value. A value that rounds beyond the maximum of the type is an infinity of the same sign.
+    An integer beyond the range of binary64 is a runtime error.
+  * Any other value is a runtime error for every type.
+
+* ``bit_and(a, b)``, ``bit_or(a, b)``, ``bit_xor(a, b)``, ``bit_not(a)``: bit by bit on integers, as infinite-width two's complement, negative integers included.
+  ``bit_shl(a, k)`` shifts left by ``k`` bits and does not wrap around. ``bit_sar(a, k)`` is the arithmetic shift. A negative ``k`` is a runtime error.
+  ``bit_shr(a, k)`` is ``bit_sar(a, k)`` when ``a`` is not negative, and otherwise a runtime error.
+* ``itof(n)``: ``n + 0.0``. ``fsqrt(a)``: the square root, NaN for a negative number. ``ffloor(a)``: the floor as a float.
+  ``ftoi(a)``: the integer truncated toward 0, and a runtime error for NaN and infinities.
+  ``ftobits(a)``: the 64 bits as a non-negative integer. ``bitstof(n)``: the inverse, and a runtime error when ``n`` does not fit 64 bits.
+  ``ftos(a)``: the shortest decimal string that reads back to the same value, which is also what ``print`` writes for a float.
+  ``stof(s)``: read a decimal string (an exponent is allowed), or ``none`` when it cannot be read.
+  ``fexp(a)``, ``flog(a)``, ``fsin(a)``, ``fcos(a)``, ``fpow(a, b)``, ``fatan2(a, b)``: exponential, natural logarithm, sine, cosine, power and the arctangent of two arguments.
+  These functions also take an integer and raise it to a float. A complex number is a runtime error.
+* ``complex(re, im)``: the complex number with the real part ``re`` and the imaginary part ``im``, each an integer or a float raised to a float.
+  ``real(z)``, ``imag(z)``: the parts as floats, and a runtime error unless ``z`` is a complex number. ``conj(z)``: ``complex(real(z), imag(z) * -1)``.
 * ``read_file(path)``: the contents of the file, including bytes 0. ``try_read_file(path)``: the same, or ``none`` when the file cannot be read. ``read_bytes(path)``: the same as a ``u8`` array.
   ``write_file(path, x)``: write all bytes of the string or ``u8`` array ``x`` to the file, which is created or emptied. ``chmod(path, mode)``.
 * ``argv()``: the array of the command-line strings of the program, as ``argv`` of C ``main``: the first is the program file and the rest are its arguments.
@@ -590,6 +644,8 @@ Builtin functions
 * ``_set_file(path)``: make ``path`` the file being loaded and return the previous one (``none`` if there is none).
 * ``_define_rule(name, e)``: define the rule by a parsing expression (see ``planck/peg.pk``).
 * ``use(name)``: ``load("planck/lib/<name>.pk")`` once, or the same with the preprocessed library (see Libraries).
+
+The name of a function in a runtime error message can differ from the builtin function that was called.
 
 Libraries
 ---------
@@ -679,7 +735,7 @@ A set is a table whose values are ``true``.
 
 A 64-bit value (``use("u64")``) is a ``u16`` array of four 16-bit limbs, the lowest first, which is not changed after it is made.
 ``u64(n)`` is the value of the integer ``n`` (sign-extended), ``u64_limbs(l3, l2, l1, l0)`` and ``u64_hex("0x...")`` (up to 16 digits) make one,
-and ``u64_to_hex(a)`` is ``0x`` and 16 digits. ``u64_to_int(a)`` stops the program unless the signed value fits in 31 bits.
+and ``u64_to_hex(a)`` is ``0x`` and 16 digits. ``u64_to_int(a)`` is the signed value of ``a``.
 ``u64_add``, ``u64_sub`` and ``u64_neg`` are modulo 2 to the 64th power. ``u64_shl``, ``u64_shr`` and ``u64_sar`` take 0 to 63 bits.
 ``u64_ucmp`` and ``u64_scmp`` are ``-1``, ``0`` or ``1`` as unsigned and as signed, and ``u64_ult`` and ``u64_slt`` are the tests.
 ``u64_write_le(buf, off, a)`` stores the 8 bytes of ``a`` into the ``u8`` array ``buf`` lowest first (``u64_write_be``: highest first),
