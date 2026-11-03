@@ -83,14 +83,14 @@ Stage3 starts with ``planck0``, an implementation of the Planck language written
 `planck0.sv <https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/planck0.sv>`_
 
 ``planck0`` treats a string as a sequence of bytes, so it handles ASCII characters only.
-The language is described in `planck/SPEC.rst <https://github.com/nineties/hex-to-compiler/blob/main/planck/SPEC.rst>`_.
+The language is defined in the `reference <https://nineties.github.io/hex-to-compiler/en/reference/index.html>`_.
 `planck/examples <https://github.com/nineties/hex-to-compiler/tree/main/planck/examples>`_ has sample programs,
 and ``make test-planck0`` runs ``planck/tests/core.pk``, ``planck/tests/syntax.pk``, ``planck/tests/define.pk``, ``planck/tests/builtins.pk``, ``planck/tests/lib.pk``, ``planck/tests/unparse.pk``, ``planck/tests/unparse_pattern.pk``, ``planck/tests/unparse_file.pk``, ``planck/tests/highlight.pk``, the examples and ``tools/test_preprocess.sh``.
 
 ``planck0 planck/vasmc.pk prog.vasm prog`` compiles a vasm source file to a 32-bit x86 Linux executable, with no assembler or linker of another system.
 The stages are libraries: ``ir``, ``wide``, ``sched``, ``regalloc``, ``x86``, ``x86enc``, ``os``, ``obj``, ``link`` and ``elf`` in ``planck/lib/backend``, which do not depend on vasm, and ``ir``, ``rt`` and ``build`` in ``planck/lib/vasm`` (``check`` is the vasm language itself).
 ``os`` is the one place that knows the system calls of the operating system.
-The programs are in ``planck/examples/vasm`` and ``planck/examples/backend``. ``make preprocess`` parses these libraries in advance (a ``.pkm`` file next to each library in ``planck/lib``), so that ``vasmc.pk`` does not parse them at each run (see `Preprocessed libraries <https://github.com/nineties/hex-to-compiler/blob/main/planck/SPEC.rst>`_).
+The programs are in ``planck/examples/vasm`` and ``planck/examples/backend``. ``make preprocess`` parses these libraries in advance (a ``.pkm`` file next to each library in ``planck/lib``), so that ``vasmc.pk`` does not parse them at each run (see `Preprocessed libraries <https://nineties.github.io/hex-to-compiler/en/reference/library.html#preprocess>`_).
 
 Hot to Run
 ----------

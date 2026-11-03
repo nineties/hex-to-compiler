@@ -1,24 +1,24 @@
 <!--title planckvm: 実行モデルと値-->
 <h1>planckvm: 実行モデルと値</h1>
-<p class="lead">planckvm は planck の全機能を実行するバイトコードです。planck で書いた評価器が式を planckvm の命令に変換し、命令ループで実行します。この頁と<a href="planckvm-isa.html">planckvm の命令</a>が外部仕様で、VM の利用者や planck からコードを生成する側が頼ってよい約束を書きます。この頁では機械、値、数を説明します。実装の中の設計は<a href="planckvm-internals.html">planckvm の内部仕様</a>に書きます。</p>
+<p class="lead">planckvm は planck の全機能を実行するバイトコードです。planck で書いた評価器が式を planckvm の命令に変換し、命令ループで実行します。この頁と<a href="planckvm-isa.html">planckvm の命令</a>が外部仕様で、VM の利用者や planck からコードを生成する側が前提にしてよい動作を定めます。この頁では機械、値、数を説明します。実装の中の設計は<a href="planckvm-internals.html">planckvm の内部仕様</a>に書きます。</p>
 
 <h2>実行モデル</h2>
-<p>機械はレジスタマシンです。命令はすべて、現在のフレームのレジスタを読み書きします。</p>
+<p>機械はレジスタマシンです。すべての命令は現在のフレームのレジスタを読み書きします。</p>
 <table>
 <tr><th>名前</th><th>中身</th></tr>
 <tr><td>コード（code）</td><td>1つの Lambda または1つのトップレベルの式の命令列と定数表。不変。形は<a href="planckvm-isa.html#format">バイトコードのフォーマット</a>のとおり</td></tr>
-<tr><td>レジスタ</td><td>フレームごとの <code>R[0]</code> から <code>R[nregs-1]</code>。<code>nregs</code> はコードの欄。値を1つずつ持つ</td></tr>
+<tr><td>レジスタ</td><td>フレームごとの <code>R[0]</code> から <code>R[nregs-1]</code>。<code>nregs</code> はコードの欄。1つのレジスタに値を1つ入れる</td></tr>
 <tr><td>フレーム</td><td>1回の呼び出しの状態</td></tr>
-<tr><td>環境（env）</td><td>捕捉される変数を置くヒープ上の領域。呼び出しごとに作り、親の環境を持つ</td></tr>
+<tr><td>環境（env）</td><td>「変数の置き場所」で決まる変数を置くヒープ上の領域。呼び出しごとに作り、親の環境を持つ</td></tr>
 <tr><td>セル</td><td>大域変数1つを表すオブジェクト。値と名前を持つ</td></tr>
 </table>
 
 <h3>レジスタの窓</h3>
 <ul>
-<li>すべてのフレームのレジスタは1本のレジスタスタックの上に載ります。フレームのレジスタの範囲を窓と呼びます。</li>
+<li>すべてのフレームのレジスタを1本のレジスタスタックの上に置きます。フレームのレジスタの範囲を窓と呼びます。</li>
 <li><code>CALL A B C</code> で呼ばれた Lambda の窓は、呼び出し元の <code>R[B+1]</code> から始まります。引数は呼び出し元が <code>R[B+1]</code> から <code>R[B+C]</code> に置くので、コピーせずに呼ばれた側の <code>R[0]</code> から <code>R[C-1]</code> になります。</li>
-<li>呼び出しの間、呼び出し元の <code>R[B]</code> は呼ばれた関数を持ち続けます。<code>R[B]</code> より上のレジスタの値は呼び出しで失われます。呼び出しをまたいで使う値は <code>R[B]</code> より下に置きます。</li>
-<li>引数以外のレジスタの初期値は決まっていません。読む前に書きます。</li>
+<li>呼び出しの間、呼び出し元の <code>R[B]</code> には呼ばれた関数が入ったままです。<code>R[B]</code> より上のレジスタの値は呼び出しで失われます。呼び出しをまたいで使う値は <code>R[B]</code> より下に置きます。</li>
+<li>引数以外のレジスタの初期値は決まっていないので、読む前に書きます。</li>
 <li>窓がレジスタスタックに収まらなければ <code>stack overflow</code> で止まります。</li>
 </ul>
 
@@ -31,17 +31,17 @@
 <tr><td>レジスタ</td><td>それ以外の関数の変数</td><td>命令のオペランドに直接書く</td></tr>
 </table>
 <ul>
-<li>「代入される」とは、<code>Set</code> の対象になることです。</li>
+<li>「代入される」とは <code>Set</code> の対象になることです。</li>
 <li>環境は1回の呼び出しにつき最大1つで、環境に置く変数があるコードだけが <code>NEWENV</code> で作ります。スロットの初期値は none です。<code>NEWENV</code> を実行しないコードの現在の環境は、Lambda が保持する環境です。</li>
 <li>環境の変数はコンパイル時に（深さ d, スロット i）へ解決されます。d は現在の環境から親をたどる回数です。</li>
 <li>Lambda は作られた場所の現在の環境を保持します。環境は共有されるので、Lambda の作成後に行った代入もその関数から見えます。</li>
-<li>レジスタの変数に、定義を通らずに届く経路があるときは、コードの入口で <code>LOADNONE</code> により none にします。</li>
+<li>定義を実行せずにレジスタの変数を読む経路があるときは、コードの入口で <code>LOADNONE</code> によりその変数を none にします。</li>
 <li>大域変数はセルで表し、初期値は none です。<code>Def</code> は新しいセルを作り、それ以降にコンパイルした式は新しいセルを指します。それ以前にコンパイルした式は古いセルを指したままです。<code>Set</code> は同じセルに書き込みます。</li>
 <li><code>true</code> <code>false</code> <code>none</code> はリテラルで、変数ではありません。レジスタにも環境にもセルにも置かず、定数としてコンパイルします。<code>Def</code> <code>Set</code> <code>Declare</code> の対象に書くとコンパイルエラーです。</li>
 </ul>
 
 <h3>呼び出し</h3>
-<p><code>CALL A B C</code> は <code>f = R[B]</code> と C 個の引数 <code>R[B+1]</code> 〜 <code>R[B+C]</code> で呼び出します。動作は <code>f</code> の種類で決まります。</p>
+<p><code>CALL A B C</code> は <code>f = R[B]</code> を C 個の引数 <code>R[B+1]</code> 〜 <code>R[B+C]</code> で呼び出します。動作は <code>f</code> の種類で決まります。</p>
 <table>
 <tr><th><code>f</code></th><th>選ぶ条件</th><th>動作</th></tr>
 <tr><td>Lambda</td><td>コードの arity が C に等しいとき</td><td>新しいフレームを作り、コードの先頭から実行する</td></tr>
@@ -51,14 +51,14 @@
 <tr><td>その他</td><td></td><td><code>not a function</code> で止まる</td></tr>
 </table>
 <p>コードの入口の命令列がパターンを照合します。一致しなければ <code>NEXT</code> が同じ引数で次の選択肢を試します。入口の命令列は引数のレジスタを書き換えません。選択肢が尽きると <code>matching failed</code> で止まります。</p>
-<p>呼ばれた側の <code>RET</code> の値は、呼び出した命令に応じて受け取ります。</p>
+<p>呼ばれた側の <code>RET</code> の値は呼び出した命令に応じて受け取ります。</p>
 <table>
 <tr><th>呼び出した命令</th><th>受け取り方</th></tr>
-<tr><td>条件の命令（<code>T</code> で始まる命令）</td><td>値が <code>false</code> 以外なら条件が真として、条件の命令の規則に従う</td></tr>
+<tr><td>条件の命令（<code>TEST</code> から <code>TGEI</code> まで）</td><td>値が <code>false</code> 以外なら条件が真として、条件の命令の規則に従う</td></tr>
 <tr><td><code>ASET</code> <code>PLAINSET</code></td><td>捨てる</td></tr>
 <tr><td>それ以外</td><td><code>R[A]</code> に入れる</td></tr>
 </table>
-<p>命令の表の「組み込み」の欄に名前のある命令は、その名前の組み込みのセルが組み込みのままのときだけ表の動作をします。セルに別の値が代入されていれば、窓の上に呼び出しを置いてその値を同じ引数で呼び、結果を上の表のとおりに受け取ります。即値は整数の引数として渡します。</p>
+<p>命令の表の「組み込み」の欄に名前のある命令は、その名前のセルの値が元の組み込みのときだけ表の動作をします。セルに別の値が代入されていれば、窓の上に関数と引数を置いてその値を同じ引数で呼び、結果を上の表のとおりに受け取ります。即値は整数の引数として渡します。</p>
 
 <h3>継続とハンドラ</h3>
 <ul>
@@ -78,7 +78,7 @@
 <ul>
 <li>トップレベルの式1つが arity 0 のコード1つになります。ブロック内の局所変数は関数の変数と同じ規則で、このコードのレジスタか環境に置きます。</li>
 <li>式を読んで実行するループは評価器の入口にあり、命令ではありません。式ごとに大域変数 <code>parse</code> と <code>eval</code> のセルを読み、次の入口のコードで呼び出します。</li>
-<li>入口のコードは <code>CALL R0 R0 n</code> と <code>HALT R0</code> の2語です。評価器が <code>R[0]</code> に関数、<code>R[1]</code> から引数を置いてレジスタスタックの底で実行します。</li>
+<li>入口のコードは <code>CALL R0 R0 n</code> と <code>HALT R0</code> の2語です。評価器は <code>R[0]</code> に関数を、<code>R[1]</code> 以降に引数を置いて、レジスタスタックの底で実行します。</li>
 <li><code>eval(e)</code> は e をコンパイルしたコードを呼び出したのと同じように実行します。</li>
 </ul>
 
@@ -99,7 +99,7 @@
 <ul>
 <li><code>Tuple{...}</code> と <code>Cons{x, xs}</code> と <code>Nil{}</code> は頭が固定された M式です。<code>true</code> <code>false</code> <code>none</code> は同名のシンボルを表すリテラルです。</li>
 <li>偽として扱う値はシンボル <code>false</code> だけです。</li>
-<li>文字列は 0 バイトも含めて全長を扱います。<code>EQ</code> の比較、<code>put</code> と <code>print</code> の出力、<code>STRLEN</code> <code>_strcat</code> <code>substr</code> は 0 バイトで切れません。</li>
+<li>文字列の処理は 0 バイトも含む全長を対象にします。<code>EQ</code> の比較、<code>put</code> と <code>print</code> の出力、<code>STRLEN</code> <code>_strcat</code> <code>substr</code> は 0 バイトで打ち切りません。</li>
 <li>等しさ（<code>EQ</code>）: 数は値で比べます（次の「数」を参照）。文字列は中身で、M式は頭と引数を再帰的に、シンボルは同一性で比べます。配列、plain 配列、関数は同一のオブジェクトだけが等しくなります。</li>
 <li><code>HASH</code> は <code>EQ</code> で等しい値に同じ値を返します。整数に等しい浮動小数点数と、虚部が 0 で実部が整数に等しい複素数には、その整数と同じ値を返します。配列、関数、plain 配列には、オブジェクトごとに変わらない番号を割り当てます。</li>
 </ul>
@@ -112,8 +112,8 @@
 <li>整数を浮動小数点数に揃えると、最も近い値に丸められます。2^53 を超える整数は精度が落ちます（<code>2^53 + 1 + 0.0</code> は浮動小数点数の <code>2^53</code>）。浮動小数点数で表せる範囲（約 1.8 x 10^308）を超える整数を揃えようとするとエラーです。</li>
 <li>整数どうしの <code>DIV</code> は 0 方向へ切り捨てた商を返し、除数が 0 ならエラーです。浮動小数点数か複素数を含む割り算は、0 で割っても止まりません。浮動小数点数なら無限大か NaN になり、複素数なら各成分に同じ規則を適用した値になります。</li>
 <li><code>LT</code> と <code>GE</code> は整数と浮動小数点数が混在しても型を揃えず、数学的な値で比べます。NaN を含むと <code>false</code> です。複素数には順序がないので、<code>LT</code> と <code>GE</code> に複素数を渡すとエラーです。</li>
-<li><code>EQ</code> では型が違っても値が同じなら等しくなります（<code>1 == 1.0</code> <code>1 == 1+0j</code>）。NaN は自分自身とも等しくありません。複素数は実部と虚部がともに等しいときに等しくなります。</li>
-<li>浮動小数点例外が起きても止めません。</li>
+<li><code>EQ</code> では型が違っても値が同じなら等しくなります（<code>1 == 1.0</code> <code>1 == complex(1, 0)</code>）。NaN は自分自身とも等しくありません。複素数は実部と虚部がともに等しいときに等しくなります。</li>
+<li>浮動小数点例外が起きてもプログラムは止まりません。</li>
 <li>複素数は <code>complex(re, im)</code> で作ります。リテラルはありません。</li>
 </ul>
 
@@ -129,7 +129,7 @@
 <p>要素を読み出すと言語の値になります。整数型は整数に、<code>'bool</code> は <code>true</code> か <code>false</code> に、<code>'f16</code> と <code>'f32</code> は値を変えずに binary64 へ広げた浮動小数点数に、<code>'c64</code> は実部と虚部を広げた複素数になります。</p>
 
 <h3>plain 配列への書き込み</h3>
-<p><code>PLAINSET</code> の変換は numpy 2.0.2（Python 3.9.6）に合わせます。numpy がエラーにする場合は実行時エラーにし、変換する場合は同じ変換をします。</p>
+<p><code>PLAINSET</code> は書く値を次の表のとおりに変換します。</p>
 <table>
 <tr><th>書く値</th><th>配列の型</th><th><code>PLAINSET</code></th></tr>
 <tr><td>範囲内の整数</td><td>整数型</td><td>そのまま格納する</td></tr>
@@ -138,15 +138,15 @@
 <tr><td>切り捨て後に範囲外になる値（<code>'i8</code> へ <code>128.0</code>、<code>'i32</code> へ <code>1e30</code>、<code>'i64</code> へ <code>2.0^63</code>）</td><td>整数型</td><td>エラー</td></tr>
 <tr><td><code>-0.5</code></td><td><code>'u8</code></td><td><code>0</code></td></tr>
 <tr><td>NaN・無限大</td><td>整数型</td><td>エラー</td></tr>
-<tr><td>複素数（虚部が 0 の <code>1+0j</code> も）</td><td>整数型・<code>'f16</code> <code>'f32</code> <code>'f64</code></td><td>エラー</td></tr>
+<tr><td>複素数（虚部が 0 の <code>complex(1, 0)</code> も）</td><td>整数型・<code>'f16</code> <code>'f32</code> <code>'f64</code></td><td>エラー</td></tr>
 <tr><td>0 以外の数・NaN・0 以外の成分を持つ複素数</td><td><code>'bool</code></td><td><code>true</code></td></tr>
-<tr><td><code>0</code> <code>0.0</code> <code>-0.0</code> <code>0+0j</code></td><td><code>'bool</code></td><td><code>false</code></td></tr>
+<tr><td><code>0</code> <code>0.0</code> <code>-0.0</code> <code>complex(0, 0)</code></td><td><code>'bool</code></td><td><code>false</code></td></tr>
 <tr><td><code>true</code> <code>false</code></td><td>整数型・浮動小数点型・複素数型</td><td><code>1</code> <code>0</code>（<code>1.0</code> <code>0.0</code>）</td></tr>
 <tr><td>整数・浮動小数点数</td><td>複素数型</td><td>実部に格納する（虚部は 0）</td></tr>
 <tr><td>整数（<code>2^53 + 1</code>）・浮動小数点数</td><td><code>'f64</code></td><td>最も近い値に丸める（<code>2^53 + 1</code> は <code>9007199254740992.0</code>）</td></tr>
 <tr><td>浮動小数点数</td><td><code>'f32</code> <code>'f16</code> <code>'c64</code></td><td>最も近い値に丸める。小さすぎる値（<code>1e-46</code>）は <code>0.0</code> になる</td></tr>
 <tr><td><code>'f32</code> の最大値（約 3.4028235 x 10^38）を超える値（<code>1e39</code>）</td><td><code>'f32</code> <code>'c64</code></td><td>同じ符号の無限大を格納する。止まらない</td></tr>
 <tr><td><code>'f16</code> の最大値（65504）を超える値（<code>65520.0</code> <code>1e5</code>）</td><td><code>'f16</code></td><td>同じ符号の無限大を格納する。<code>65519.0</code> は <code>65504</code> になる</td></tr>
-<tr><td>倍精度の範囲を超える整数（<code>2^1100</code>）</td><td>浮動小数点型・複素数型</td><td>エラー</td></tr>
+<tr><td>binary64 の範囲を超える整数（<code>2^1100</code>）</td><td>浮動小数点型・複素数型</td><td>エラー</td></tr>
 <tr><td>文字列・<code>none</code>・<code>true</code> <code>false</code> 以外のシンボル・M式・配列・関数</td><td>すべての型</td><td>エラー。言語の数値型ではないので変換しない</td></tr>
 </table>
