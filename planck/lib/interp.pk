@@ -63,8 +63,11 @@ ip_native := true
 
 # ===== Errors =====
 
-# the standard error output is the file /dev/stderr
-ip_stderr(s) := write_file("/dev/stderr", s)
+# The standard error output is the file /dev/stderr. write_file empties the file, so the text that the file has is written again before s.
+ip_stderr(s) := {
+    old := try_read_file("/dev/stderr")
+    write_file("/dev/stderr", if (old == none) s else _strcat(old, s))
+}
 
 ip_die(msg) := {
     ip_stderr(_strcat(msg, "\n"))
@@ -78,10 +81,10 @@ ip_malformed(e) := ip_die_at("compile error: malformed expression: ", e)
 # ===== Functions of the program =====
 
 fun ip_is_fn
-ip_is_fn = (IpLambda{_, _}) -> true
-         | (IpFusion{_, _}) -> true
-         | (IpPrim{_, _, _}) -> true
-         | (IpCont{_}) -> true
+ip_is_fn = (IpLambda{IpCode{_, _, _, _, _, _}, e @ array}) -> true
+         | (IpFusion{f, g}) if ip_is_fn(f) and ip_is_fn(g) -> true
+         | (IpPrim{n @ int, f @ function, s @ symbol}) -> true
+         | (IpCont{k @ function}) -> true
          | (_) -> false
 
 ip_typeof(x) := if (ip_is_fn(x)) 'function else typeof(x)
@@ -134,17 +137,17 @@ ip_fmt = (b, IpLambda{IpCode{_, _, _, _, pats, _}, _}) -> {
              ip_fmt_args(b, pats, 0)
              strbuf_add(b, ")>")
          }
-       | (b, IpFusion{f, g}) -> {
+       | (b, IpFusion{f, g}) if ip_is_fn(f) and ip_is_fn(g) -> {
              ip_fmt(b, f)
              strbuf_add(b, "|")
              ip_fmt(b, g)
          }
-       | (b, IpPrim{_, _, name}) -> {
+       | (b, IpPrim{n @ int, f @ function, name @ symbol}) -> {
              strbuf_add(b, "<prim:")
              strbuf_add(b, symname(name))
              strbuf_add(b, ">")
          }
-       | (b, IpCont{_}) -> strbuf_add(b, "<cont>")
+       | (b, IpCont{k @ function}) -> strbuf_add(b, "<cont>")
        | (b, v @ int) -> strbuf_add(b, int_to_str(v))
        | (b, v @ symbol) -> strbuf_add(b, symname(v))
        | (b, v @ string) -> ip_fmt_string(b, v)
