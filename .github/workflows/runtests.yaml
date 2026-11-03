@@ -41,11 +41,44 @@ jobs:
               if: github.ref != 'refs/heads/main'
               run:
                   ./plisp2 plisp/test.lisp
+            - name: restore planck0
+              id: planck0-cache
+              uses: actions/cache/restore@v6.1.0
+              with:
+                  path: planck0
+                  key: planck0-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Makefile', 'pforth.xxd', 'plisp.fs', 'plisp2.sv', 'asm.lisp', 'asm/*.lisp', 'sasm.lisp', 'sasm/*.lisp', 'sasm/lib/*.sv', 'planck0.sv') }}
+            - name: use cached planck0
+              if: steps.planck0-cache.outputs.cache-hit == 'true'
+              run:
+                  touch planck0
             - name: build planck0
-              if: github.ref != 'refs/heads/main'
+              if: steps.planck0-cache.outputs.cache-hit != 'true'
               run:
                   make planck0
-            - name: test planck0
+            - name: save planck0
+              if: steps.planck0-cache.outputs.cache-hit != 'true'
+              uses: actions/cache/save@v6.1.0
+              with:
+                  path: planck0
+                  key: ${{ steps.planck0-cache.outputs.cache-primary-key }}
+            - name: restore the mark of passed test planck0
+              id: planck0-test-cache
               if: github.ref != 'refs/heads/main'
+              uses: actions/cache/restore@v6.1.0
+              with:
+                  path: tmp-test-planck0-passed
+                  key: test-${{ steps.planck0-cache.outputs.cache-primary-key }}-${{ hashFiles('Makefile', 'planck/**', '!planck/SPEC.rst', 'tools/**') }}
+            - name: test planck0
+              if: github.ref != 'refs/heads/main' && steps.planck0-test-cache.outputs.cache-hit != 'true'
               run:
                   make test-planck0
+            - name: save the mark of passed test planck0
+              if: github.ref != 'refs/heads/main' && steps.planck0-test-cache.outputs.cache-hit != 'true'
+              run:
+                  touch tmp-test-planck0-passed
+            - name: save the mark
+              if: github.ref != 'refs/heads/main' && steps.planck0-test-cache.outputs.cache-hit != 'true'
+              uses: actions/cache/save@v6.1.0
+              with:
+                  path: tmp-test-planck0-passed
+                  key: ${{ steps.planck0-test-cache.outputs.cache-primary-key }}
