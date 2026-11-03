@@ -1043,5 +1043,91 @@ ng(vasm{|
     }
 |}, 'type)
 
+# === ports to the arguments and the files: argc, argv, open, read and close ===
+ok(vasm{|
+    fn ports[r](name: &r [u8]) -> i64 {
+        var n: i64
+        var fd: i64
+        var a: own [u8]
+        var s: &static [u8]
+        n = argc()
+        s = argv(0)
+        fd = open(name)
+        a = alloc(16, 0)
+        region q {
+            var m: &mut q [u8]
+            m = &mut q a
+            n = read(fd, m)
+        }
+        close(fd)
+        fd = open("data")
+        return n
+    }
+|})
+# the index of argv, the file of read and close are integers; the result of argv is a borrow that lasts to the end of the program
+ng(vasm{|
+    fn bad_index(c: bool) {
+        var s: &static [u8]
+        s = argv(c)     # NG
+    }
+|}, 'type)
+ng(vasm{|
+    fn bad_count() {
+        var n: i32
+        n = argc()      # NG
+    }
+|}, 'type)
+ng(vasm{|
+    fn bad_close(c: bool) {
+        close(c)    # NG
+    }
+|}, 'type)
+# the name of the file is a borrow of an array of u8, not an integer or an owner
+ng(vasm{|
+    fn bad_name() {
+        var fd: i64
+        fd = open(3)    # NG
+    }
+|}, 'type)
+ng(vasm{|
+    fn bad_owner_name(a: own [u8]) {
+        var fd: i64
+        fd = open(a)    # NG
+        free(a)
+    }
+|}, 'type)
+# read writes the array, so it takes a mutable borrow of an array of u8
+ng(vasm{|
+    fn read_shared[r](a: &r [u8]) {
+        var n: i64
+        n = read(0, a)  # NG
+    }
+|}, 'type)
+ng(vasm{|
+    fn read_words[r](a: &mut r [i64]) {
+        var n: i64
+        n = read(0, a)  # NG
+    }
+|}, 'type)
+# the borrow of the array of read lasts only for the call, and the array cannot be freed while it is borrowed by a name
+ng(vasm{|
+    fn read_freed() {
+        var a: own [u8]
+        var n: i64
+        a = alloc(4, 0)
+        region r {
+            var m: &mut r [u8]
+            m = &mut r a
+            free(a)     # NG
+            n = read(0, m)
+        }
+    }
+|}, 'borrowed)
+# the names of the ports belong to the language
+ng(vasm{|
+    fn open(a: i64) {  # NG
+    }
+|}, 'type)
+
 put("Tests passed "); print(passed); put("/"); println(passed + failed)
 if (failed > 0) exit(1)
