@@ -1,0 +1,86 @@
+<!--title planckvm internals-->
+<h1>planckvm internals</h1>
+<p class="lead">The design inside an implementation of planckvm. What the user of the VM may rely on is in the external specification: <a href="planckvm.html">planckvm: execution model and values</a> and <a href="planckvm-isa.html">planckvm instructions</a>.</p>
+
+<h2>Principles</h2>
+<ul>
+<li>The evaluator is a bytecode interpreter: an expression is translated into instructions, and an instruction loop runs them. An expression is not turned into a closure.</li>
+<li>The evaluator has its own garbage collector, a generational copying collector. It owns the heap of values and the roots.</li>
+<li>The evaluator does not use the effects, the continuations or the M-expression reader of the host. They are written in planck as parts of the evaluator.</li>
+</ul>
+
+<h2>Code and frames</h2>
+<ul>
+<li>A jump target and the pc are indices, not addresses, because the collector moves objects.</li>
+<li>When a code is made, the maximum height of its operand stack is computed.</li>
+</ul>
+
+<h3>Frames</h3>
+<table>
+<tr><th>Field</th><th>Meaning</th></tr>
+<tr><td>caller</td><td>The frame that receives the value. None for the entry of a top-level expression</td></tr>
+<tr><td>code, pc, env</td><td>The running code, the next instruction and the environment</td></tr>
+<tr><td>remaining alternatives</td><td>The functions of <code>f | g</code> that have not been tried yet, or none</td></tr>
+<tr><td>boundary</td><td>The handler function. Only a frame made by <code>HANDLE</code> has it</td></tr>
+<tr><td>forwarding mark</td><td>Only a frame that <code>PERFORM</code> uses to call a handler has it. It tells where to go to the outer boundary when the alternatives run out</td></tr>
+<tr><td>arguments</td><td>The <code>n</code> values of the call, kept until the matching at the entry is over</td></tr>
+<tr><td>operand stack</td><td>The intermediate values. Its height is bounded by a maximum that the code determines</td></tr>
+</table>
+<p>Frames are pushed on a contiguous region, the frame stack. The evaluator owns the region and it is a root of the collector. When it is full the program stops with <code>stack overflow</code>.</p>
+
+<h3>Environments</h3>
+<p>An environment is <code>| parent environment | slot 0 | slot 1 | ... |</code>. It is on the heap and made for each call.</p>
+
+<h2>Heap and garbage collection</h2>
+<h3>Values and the heap</h3>
+<ul>
+<li>A value is one tagged word. A small integer is an immediate value and every other value is a reference into the heap. Floats, complex numbers, large integers, strings, M-expressions and arrays are objects on the heap.</li>
+<li>The heap is built on one integer array, as regions for the generations.</li>
+<li>The collector is a generational copying collector, written in planck as a part of the evaluator. It is not a runtime added to vasm.</li>
+</ul>
+
+<h3>Allocation and safe points</h3>
+<ul>
+<li>An instruction marked S in the instruction tables may allocate, and the collector may run when it allocates.</li>
+<li>The collector runs before the side effects of the instruction. The inputs of the instruction remain on the operand stack during the collection and are updated by it. The instruction reads its inputs again after the collection.</li>
+<li>Every running value can be reached from the frame stack, the environments or the cells. No value lives only in a local of the evaluator.</li>
+<li>The collector does not run in an instruction that allocates nothing (<code>JMP</code>, <code>LOAD</code>, <code>POP</code> and so on). No safe point is placed in the middle of a loop.</li>
+</ul>
+
+<h3>Roots</h3>
+<table>
+<tr><th>Root</th><th>Contents</th></tr>
+<tr><td>The frame stack</td><td>The env, code, arguments and operand stack (up to the saved height) of every frame</td></tr>
+<tr><td>Cells</td><td>The global variables</td></tr>
+<tr><td>The state of the evaluator</td><td>The symbol table, the constant tables and the state during compilation</td></tr>
+</table>
+<p>Every field of a frame is a value or an integer of a header, and can be followed from its tag. There is no stack map. The pc is an index, so a move of the code does not affect it. The constant table is followed as a part of the code.</p>
+
+<h3>The write record</h3>
+<p>The method is a remembered set: a list of old objects. When a reference to a young object is written into an old object, the old object is recorded. The targets are <code>STORE</code>, <code>GSET</code> and <code>ASET</code>. A plain array has no references and is not recorded. The initialization of a newly allocated object is not recorded, and neither is a write to the frame stack, because the frame stack is traced as a root every time.</p>
+
+<h3>Identity</h3>
+<p>Arrays, plain arrays and functions have identity (<code>EQ</code> and <code>HASH</code>). It is not held as an address. The first <code>HASH</code> assigns a number. A symbol has a number that comes from its name, an M-expression and a string have one from their contents, and a number has one from its value.</p>
+
+<h3>Continuations</h3>
+<p><code>PERFORM</code> allocates, because it copies frames. The frames are copied twice: when <code>k</code> is captured and when it is resumed. Continuations do not use the effects of the host. The frames are data and are copied as data. The frames inside a continuation have the same form as ordinary frames and are traced in the same way.</p>
+
+<h3>Representation of numbers and plain arrays</h3>
+<ul>
+<li>A small integer is an immediate value and a large one is an array of digits.</li>
+<li>When the result of two integers fits a small integer, the instruction need not allocate. An allocation happens when digits are added, and when the result is a float or a complex number.</li>
+<li>Floats and complex numbers are immutable boxes on the heap. vasm holds a complex number as a pair of floats.</li>
+<li>The elements of a plain array carry no tag. A plain array holds no references, so the collector does not scan it and writing to it is not recorded. A complex element is two numbers inside the array, not a box.</li>
+</ul>
+
+<h2>Partial evaluation</h2>
+<p>The purpose of planckvm is to partially evaluate an evaluator written in planck and to get an implementation of planck in vasm. The following properties of the design are meant to serve this.</p>
+<ul>
+<li>The instructions do not change after a code is made and the jump targets are immediate, so for a static code the reading of instructions and the choice of the next one can be unrolled.</li>
+<li>The height of the operand stack is determined at each pc, so the stack can be kept as a static sequence.</li>
+<li>Pattern matching is in the code that is called. A match can be specialized for each function, and no matcher that walks a data tree is needed.</li>
+<li>Continuations are copies of frames and use no effects of the host, so the evaluator does not use <code>Perform</code> and does not meet the limit on continuations in <code>planck/lib/pe.pk</code>.</li>
+<li>A dynamic indirect call goes only to a function reached by <code>CALL</code>. If the set of codes that can be called is closed, each code can become one function.</li>
+<li>The guard of <code>CALLP</code> can be folded when the cell is static and immutable. A global variable is a mutable cell, so a global that is assigned cannot be treated as static.</li>
+<li>With <code>PLAINGET</code> and <code>PLAINSET</code>, the elements are read and written as numbers without boxes.</li>
+</ul>

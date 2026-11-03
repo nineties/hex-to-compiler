@@ -58,6 +58,7 @@ SECTIONS = {
             ("vasm", "vasm の検査器"),
             ("planckvm", "planckvm: 実行モデルと値"),
             ("planckvm-isa", "planckvm の命令"),
+            ("planckvm-internals", "planckvm の内部仕様"),
         ]),
     ],
     "en": [
@@ -93,6 +94,7 @@ SECTIONS = {
             ("vasm", "The vasm checker"),
             ("planckvm", "planckvm: execution model and values"),
             ("planckvm-isa", "planckvm instructions"),
+            ("planckvm-internals", "planckvm internals"),
         ]),
     ],
 }
