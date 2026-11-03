@@ -2432,7 +2432,7 @@ defer macroexpand-list
 :noname
     root-env @
 
-    s" plisp/init.lisp" eval-file
+    s" bootstrap/plisp/init.lisp" eval-file
     argc @ 1 <= if ." no input file" cr 1 quit then
     1 arg eval-file
 

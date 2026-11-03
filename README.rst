@@ -37,11 +37,11 @@ Stage1: Hex -> Forth -> Lisp
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Stage1 begins with a minimal Forth interpreter written by hand in machine code.
-`planck.xxd <https://github.com/nineties/hex-to-compiler/blob/main/pforth.xxd>`_
+`planck.xxd <https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/pforth.xxd>`_
 
 Using Forth’s self-extensibility, this interpreter is grown into a more capable
 language environment, eventually producing a simple Lisp interpreter.
-`plisp.fs <https://github.com/nineties/hex-to-compiler/blob/main/plisp.fs>`_
+`plisp.fs <https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/plisp.fs>`_
 
 Starting from hand-written machine code imposes strong constraints, but these can
 be addressed by leveraging core features of Forth.
@@ -57,22 +57,22 @@ In Stage 2, we develop a suite of intermediate tools to move away from hand-writ
 These tools are "disposable" utilities designed to bridge the gap toward a more complete system,
 prioritizing ease of implementation over performance and safety.
 
-First, we implement `asm.lisp <https://github.com/nineties/hex-to-compiler/blob/main/asm.lisp>`_, a basic assembler. It makes significant architectural compromises to keep the implementation simple:
+First, we implement `asm.lisp <https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/asm.lisp>`_, a basic assembler. It makes significant architectural compromises to keep the implementation simple:
 
 * **Target:** x86 32-bit mode only.
 * **Direct Output:** It generates standalone executables directly, bypassing separate compilation.
 * **Monolithic ELF:** All headers and code/data are packed into a single ``PT_LOAD (RWX)`` segment to avoid complex page alignment logic.
 
-Example: `hello.s <https://github.com/nineties/hex-to-compiler/blob/main/asm/examples/hello.s>`_
+Example: `hello.s <https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/asm/examples/hello.s>`_
 
-Second, we implement `sasm.lisp <https://github.com/nineties/hex-to-compiler/blob/main/sasm.lisp>`_ (Structured Assembly).
+Second, we implement `sasm.lisp <https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/sasm.lisp>`_ (Structured Assembly).
 This is a C-like untyped language implemented as an internal DSL within plisp.
 To simplify development, it generates code for a stack-machine model using frequent push/pop instructions instead of complex register allocation.
 
-Example: `hello.sv <https://github.com/nineties/hex-to-compiler/blob/main/sasm/examples/hello.sv>`_
+Example: `hello.sv <https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/sasm/examples/hello.sv>`_
 
 Finally, I re-implemented ``plisp`` using ``sasm`` to create ``plisp2``. 
-`plisp2.sv <https://github.com/nineties/hex-to-compiler/blob/main/plisp2.sv>`_
+`plisp2.sv <https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/plisp2.sv>`_
 
 The performance of the initial plisp (built from hand-written machine code via Forth) was insufficient for complex tasks. While memory usage remains significant, ``plisp2`` provides the minimum efficiency required to proceed with the implementation of a full-scale language environment.
 
@@ -80,7 +80,7 @@ Stage3: Implementing Full-Scale Language Processor
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Stage3 starts with ``planck0``, an implementation of the Planck language written in ``sasm``.
-`planck0.sv <https://github.com/nineties/hex-to-compiler/blob/main/planck0.sv>`_
+`planck0.sv <https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/planck0.sv>`_
 
 ``planck0`` treats a string as a sequence of bytes, so it handles ASCII characters only.
 The language is described in `planck/SPEC.rst <https://github.com/nineties/hex-to-compiler/blob/main/planck/SPEC.rst>`_.

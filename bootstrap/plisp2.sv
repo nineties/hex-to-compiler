@@ -1015,7 +1015,7 @@
     (init_symbols)
     (init_prim env)
 
-    (eval_file "plisp/init.lisp" env)
+    (eval_file "bootstrap/plisp/init.lisp" env)
     (eval_file (get argv 1) env)
     (puts "total memory used: ")
     (puti (/ (- heap_pos heap_root) 0x100000))

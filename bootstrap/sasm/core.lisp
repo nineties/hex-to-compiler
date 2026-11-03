@@ -1,7 +1,7 @@
 ; Simple compiler for C-like language written in plancklisp
 ; Copyright (C) 2026 nineties
 
-(import "asm/core.lisp")
+(import "bootstrap/asm/core.lisp")
 
 (define compile (decls) (do
     (def asm-code ())
@@ -522,7 +522,7 @@
         (for decl decls (switch (car decl)
             ('fun   (compile-fundecl decl))
             ('include (do
-                (def path (strcat "sasm/lib/" (cadr decl)))
+                (def path (strcat "bootstrap/sasm/lib/" (cadr decl)))
                 (when (not (member? path included)) (do
                     (compile-topdecls (read-sexp-list path))
                     (set included (cons path included))
