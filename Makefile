@@ -43,6 +43,7 @@ planck0: planck0.sv plisp2 $(SASM_LIBS)
 
 VASM_EXAMPLES := $(wildcard planck/examples/vasm/*.vasm)
 BACKEND_EXAMPLES := $(wildcard planck/examples/backend/*.pk)
+PE_EXAMPLES := $(wildcard planck/examples/pe/*.pk)
 
 .PHONY: clean test test-planck0 preprocess
 clean:
@@ -75,6 +76,7 @@ test-planck0: planck0
 	tools/test_preprocess.sh
 	./planck0 planck/tests/vasm.pk
 	./planck0 planck/tests/vasm2.pk
+	./planck0 planck/tests/pe.pk
 	@for f in $(PLANCK_EXAMPLES); do \
 		./planck0 $$f > tmp-example.out || exit 1; \
 		diff -u $${f%.pk}.out tmp-example.out || exit 1; \
@@ -100,3 +102,11 @@ test-planck0: planck0
 		if [ -f $${f%.vasm}.out ]; then diff -u $${f%.vasm}.out tmp-vasm.out || exit 1; fi; \
 		echo "$$f: ok"; \
 	done; rm -f tmp-vasm tmp-vasm.out
+	@for f in $(PE_EXAMPLES); do \
+		./planck0 $$f tmp-pe > tmp-pe.out || exit 1; \
+		diff -u $${f%.pk}.out tmp-pe.out || exit 1; \
+		./tmp-pe tmp-pe > tmp-pe.run; s=$$?; \
+		[ "$$s" = "$$(cat $${f%.pk}.status)" ] || { echo "$$f: exit status $$s"; exit 1; }; \
+		diff -u $${f%.pk}.run tmp-pe.run || exit 1; \
+		echo "$$f: ok"; \
+	done; rm -f tmp-pe tmp-pe.out tmp-pe.run tmp-pe-file

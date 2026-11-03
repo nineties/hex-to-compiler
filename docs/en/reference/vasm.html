@@ -52,6 +52,7 @@ fn f[r, ...](x: T, ...) -&gt; T { ... }</pre>
 <tr><td><code>&amp;mut r T</code></td><td>an exclusive borrow in region <code>r</code></td></tr>
 <tr><td><code>own [T]</code> <code>&amp;r [T]</code> <code>&amp;mut r [T]</code></td><td>arrays; <code>[T]</code> is written only inside <code>own</code> or a borrow</td></tr>
 <tr><td><code>&amp;static T</code></td><td>a shared borrow that lasts to the end of the program; the type of a string literal is <code>&amp;static [u8]</code></td></tr>
+<tr><td><code>val</code></td><td>a value of planck: an integer, a string, a symbol, a constructed value, an array or a function</td></tr>
 </table>
 <p>A field of a struct, the contents of an <code>own</code> and the element of an array can be <code>own</code>. They cannot be borrows. A value of a type that owns something always has exactly one owner.</p>
 
@@ -81,6 +82,12 @@ fn f[r, ...](x: T, ...) -&gt; T { ... }</pre>
 <tr><td><code>len(a: &amp;r [T]) -&gt; i64</code></td><td>the length of an array</td></tr>
 <tr><td><code>write(fd: i64, a: &amp;r [u8]) -&gt; i64</code></td><td>asks the system to write the bytes of an array to the file <code>fd</code> (1 is the output, 2 the error output); the array is only borrowed. The result is the number of bytes written, or negative for an error</td></tr>
 <tr><td><code>exit(status: i64)</code></td><td>asks the system to end the program with the status (its low 8 bits are seen outside)</td></tr>
+<tr><td><code>argc() -&gt; i64</code></td><td>the number of arguments of the program (the name of the program is one of them)</td></tr>
+<tr><td><code>argv(i: i64) -&gt; &amp;static [u8]</code></td><td>the bytes of the <code>i</code>-th argument, without a terminator. <code>argv(0)</code> is the name of the program. The array is not released while the program runs, so the borrow is <code>static</code>; an <code>i</code> that is not less than the number of arguments ends the program as failed</td></tr>
+<tr><td><code>open(path: &amp;r [u8]) -&gt; i64</code></td><td>asks the system to open for reading the file whose name is the bytes of the array <code>path</code>. The result is an integer that stands for the file, or negative for an error</td></tr>
+<tr><td><code>read(fd: i64, a: &amp;mut r [u8]) -&gt; i64</code></td><td>asks the system to read bytes from the file <code>fd</code> into the array <code>a</code>, as many as it holds at most, from its first element. The result is the number of bytes read, 0 at the end of the file, or negative for an error; the array is only borrowed</td></tr>
+<tr><td><code>create(path: &amp;r [u8]) -&gt; i64</code></td><td>asks the system to open for writing the file whose name is the bytes of the array <code>path</code>, emptied or made new. The result is an integer for the file, or negative for an error</td></tr>
+<tr><td><code>close(fd: i64)</code></td><td>asks the system to close the file <code>fd</code></td></tr>
 <tr><td><code>swap(x, v: T) -&gt; T</code></td><td>puts <code>v</code> in <code>x</code> and returns the previous value; <code>x</code> is a place of the form <code>*p</code>, <code>p[i]</code> or <code>p.f</code></td></tr>
 </table>
 
@@ -109,6 +116,33 @@ fn f[r, ...](x: T, ...) -&gt; T { ... }</pre>
 <li>From a struct register <code>s</code>, <code>x = s.f</code> moves out a field that owns. Reading the field taken out or taking it out again is an error; <code>s.f = v</code> puts one back. Afterwards <code>s</code> cannot be used as a whole, and the remaining fields are released where <code>s</code> goes away.</li>
 <li>An element of an array and a field of the struct that a pointer points to are exchanged with <code>swap(p[i], v)</code> and <code>swap(p.f, v)</code>. <code>*p</code> is exchanged with <code>swap(*p, v)</code>. The place must be writable from an <code>own</code> (not borrowed) or a <code>&amp;mut</code>.</li>
 <li>A value that owns something cannot be copied out of an array element, the target of a pointer or a borrow.</li>
+</ul>
+
+<h2>val</h2>
+<p>A value of <code>val</code> holds its own kind. The checker sees <code>val</code> or another type, and a value of another kind ends the program as failed when it runs, as an index out of range does.</p>
+<table>
+<tr><th>Form</th><th>Meaning</th></tr>
+<tr><td><code>'name</code></td><td>a symbol, written where an operand is taken. <code>'true</code> <code>'false</code> <code>'none</code> are symbols, as in planck</td></tr>
+<tr><td><code>x = a as val</code></td><td>makes a value of an integer, a <code>bool</code> or a <code>&amp;r [u8]</code>. The bytes are copied</td></tr>
+<tr><td><code>x = v as i64</code> <code>x = v as bool</code> <code>x = v as own [u8]</code></td><td>takes out an integer, a <code>bool</code> or the bytes of a string. Any integer type can be given to <code>as</code>, and a narrower one keeps the low bits</td></tr>
+<tr><td><code>x = val Cons(a, b)</code></td><td>makes a constructed value. The arguments are all <code>val</code></td></tr>
+<tr><td><code>x = fn f(a, b)</code></td><td>makes a function value that keeps <code>a</code> and <code>b</code> for the first arguments of <code>f</code>. All that <code>f</code> takes and gives is <code>val</code>, and it has no region arguments</td></tr>
+<tr><td><code>x = v(a, b)</code> <code>v(a, b)</code></td><td>calls the function value in the register <code>v</code>. The arguments and the result are <code>val</code>. Another number of arguments ends the program as failed</td></tr>
+<tr><td><code>x = v[i]</code></td><td>reads an argument of a constructed value or an element of an array</td></tr>
+<tr><td><code>v[i] = a</code></td><td>writes an element of an array, which all holders of the array see</td></tr>
+<tr><td><code>x = a == b</code> <code>x = a != b</code></td><td>compares values: constructed values, strings and symbols by their contents, arrays and functions by being the same one</td></tr>
+<tr><td><code>is(v: val, h: val, n: i64) -&gt; bool</code></td><td><code>v</code> is a constructed value with the head <code>h</code> and <code>n</code> arguments</td></tr>
+<tr><td><code>typeof(v: val) -&gt; val</code></td><td>the symbol <code>'int</code> <code>'string</code> <code>'symbol</code> <code>'mexpr</code> <code>'array</code> or <code>'function</code></td></tr>
+<tr><td><code>head(v: val) -&gt; val</code></td><td>the head of a constructed value</td></tr>
+<tr><td><code>arity(v: val) -&gt; i64</code></td><td>the number of the arguments of a constructed value, the elements of an array, or the bytes of a string or symbol</td></tr>
+<tr><td><code>array(n: i64, v: val) -&gt; val</code></td><td>makes an array whose elements are all <code>v</code></td></tr>
+<tr><td><code>mexpr(h: val, a: val) -&gt; val</code></td><td>makes a constructed value with the head <code>h</code> and the elements of the array <code>a</code> as its arguments</td></tr>
+<tr><td><code>intern(s: val) -&gt; val</code> <code>symname(s: val) -&gt; val</code></td><td>makes a symbol from a string, and a string from a symbol</td></tr>
+</table>
+<ul>
+<li>A <code>val</code> in a register is copied like an integer. It is not moved or borrowed.</li>
+<li>The holders of a value are counted, and the value is released when none is left. A holder is gone where an <code>own</code> is released automatically. An array that holds itself is not released.</li>
+<li>A <code>val</code> in a field of a struct, in a box or in an element of an array of <code>own</code> is what an <code>own</code> is there: it is taken out with <code>swap</code> or by a move.</li>
 </ul>
 
 <h2>Borrows and regions</h2>

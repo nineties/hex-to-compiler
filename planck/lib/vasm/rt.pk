@@ -1,4 +1,5 @@
-# vasm/rt: the runtime that programs of vasm/ir.pk need: the start of the program, the allocator, and 64-bit arithmetic that is a call
+# vasm/rt: the runtime that programs of vasm/ir.pk need: the start of the program, the allocator, the ports to the arguments and the files,
+# and 64-bit arithmetic that is a call
 # Copyright (C) 2026 nineties
 #
 # _start calls main and ends the program with its result as the exit status.
@@ -23,7 +24,37 @@ rt_freelists_data := IRData{"__freelists", ".bss", 4, {
     b
 }, true}
 
-rt_data() := [rt_heap_data, rt_freelists_data]
+rt_args_data := IRData{"__args", ".bss", 4, vec_from_list([0, 0, 0, 0]), true}
+
+# A value of val is the address of a block: the number of its holders (negative for a block that is never released), the kind, and then
+#   integer: the low and the high word
+#   string, symbol: the number of bytes, 0 and the bytes, which is the layout of an array of u8
+#   constructed value: the head (a symbol), the number of arguments n and n values
+#   array: the number of elements n, 0 and n values
+#   function: the address of the code, the number of values kept in it n, the number of the other arguments and n values
+rt_kind_int := 2
+rt_kind_str := 3
+rt_kind_sym := 4
+rt_kind_con := 5
+rt_kind_arr := 6
+rt_kind_fun := 7
+
+# the bytes of the block of the symbol with the name s
+rt_symbol_bytes(s) := {
+    b := bb_new()
+    bb_u32(b, -1)
+    bb_u32(b, rt_kind_sym)
+    bb_u32(b, strlen(s))
+    bb_u32(b, 0)
+    bb_str(b, s)
+    b
+}
+
+# the symbols that the functions on values give
+rt_names := [Tuple{"__sym_true", "true"}, Tuple{"__sym_false", "false"}, Tuple{"__sym_int", "int"}, Tuple{"__sym_string", "string"},
+    Tuple{"__sym_symbol", "symbol"}, Tuple{"__sym_mexpr", "mexpr"}, Tuple{"__sym_array", "array"}, Tuple{"__sym_function", "function"}]
+
+rt_data() := append([rt_heap_data, rt_freelists_data, rt_args_data], map((Tuple{n, s}) -> IRData{n, ".rodata", 4, rt_symbol_bytes(s), false}, rt_names))
 
 # a function from a list of instructions whose registers and labels are named by symbols
 rt_fn(name, specs) := {
@@ -118,12 +149,550 @@ rt_free_fn() := rt_fn("__free", [
     I{'label, [L{'out}]},
     I{'ret, [Us{[]}]}])
 
-# rt_start_fn(ret) is _start for a main that returns the type ret: its value (0 for no value) is the exit status
+# __argv(i) is the address of a new array (the layout of vasm/ir.pk) that holds the bytes of the i-th argument of the program; it is not freed.
+# An i that is not less than the number of arguments is trap.
+rt_argv_fn() := rt_fn("__argv", [
+    I{'getarg, [D{'i}, K{0}]},
+    I{'la, [D{'ap}, S{"__args", 0}]},
+    I{'ld, [W{'w32}, D{'base}, M{U{'ap}, 0}]},
+    I{'ld, [W{'w32}, D{'argc}, M{U{'base}, 0}]},
+    I{'br, [Cc{'ltu}, U{'i}, U{'argc}, L{'ok}, L{'bad}]},
+    I{'label, [L{'bad}]},
+    I{'trap, []},
+    I{'label, [L{'ok}]},
+    I{'shl, [D{'i4}, U{'i}, K{2}]},
+    I{'add, [D{'t}, U{'base}, U{'i4}]},
+    I{'ld, [W{'w32}, D{'p}, M{U{'t}, 4}]},
+    I{'li, [D{'n}, K{0}]},
+    I{'label, [L{'scan}]},
+    I{'add, [D{'q}, U{'p}, U{'n}]},
+    I{'ld, [W{'u8}, D{'c}, M{U{'q}, 0}]},
+    I{'br, [Cc{'eq}, U{'c}, K{0}, L{'made}, L{'step}]},
+    I{'label, [L{'step}]},
+    I{'add, [D{'n}, U{'n}, K{1}]},
+    I{'jmp, [L{'scan}]},
+    I{'label, [L{'made}]},
+    I{'add, [D{'sz}, U{'n}, K{8}]},
+    I{'call, [S{"__alloc", 0}, Us{['sz]}, Ds{['a]}]},
+    I{'st, [W{'w32}, M{U{'a}, 0}, U{'n}]},
+    I{'st, [W{'w32}, M{U{'a}, 4}, K{0}]},
+    I{'li, [D{'k}, K{0}]},
+    I{'label, [L{'copy}]},
+    I{'br, [Cc{'ltu}, U{'k}, U{'n}, L{'put}, L{'out}]},
+    I{'label, [L{'put}]},
+    I{'add, [D{'s}, U{'p}, U{'k}]},
+    I{'ld, [W{'u8}, D{'b}, M{U{'s}, 0}]},
+    I{'add, [D{'d}, U{'a}, U{'k}]},
+    I{'st, [W{'w8}, M{U{'d}, 8}, U{'b}]},
+    I{'add, [D{'k}, U{'k}, K{1}]},
+    I{'jmp, [L{'copy}]},
+    I{'label, [L{'out}]},
+    I{'ret, [Us{['a]}]}])
+
+# __open(a) opens for reading the file whose name is the bytes of the array a (the layout of vasm/ir.pk) and gives the file, or a negative number,
+# and __create(a) opens it for writing
+rt_open_fn(name, service) := rt_fn(name, [
+    I{'getarg, [D{'a}, K{0}]},
+    I{'ld, [W{'w32}, D{'n}, M{U{'a}, 0}]},
+    I{'add, [D{'sz}, U{'n}, K{1}]},
+    I{'call, [S{"__alloc", 0}, Us{['sz]}, Ds{['buf]}]},
+    I{'li, [D{'k}, K{0}]},
+    I{'label, [L{'copy}]},
+    I{'br, [Cc{'ltu}, U{'k}, U{'n}, L{'put}, L{'out}]},
+    I{'label, [L{'put}]},
+    I{'add, [D{'s}, U{'a}, U{'k}]},
+    I{'ld, [W{'u8}, D{'b}, M{U{'s}, 8}]},
+    I{'add, [D{'d}, U{'buf}, U{'k}]},
+    I{'st, [W{'w8}, M{U{'d}, 0}, U{'b}]},
+    I{'add, [D{'k}, U{'k}, K{1}]},
+    I{'jmp, [L{'copy}]},
+    I{'label, [L{'out}]},
+    I{'add, [D{'e}, U{'buf}, U{'n}]},
+    I{'st, [W{'w8}, M{U{'e}, 0}, K{0}]},
+    I{'os, [N{service}, Us{['buf]}, D{'fd}]},
+    I{'call, [S{"__free", 0}, Us{['buf]}, Ds{[]}]},
+    I{'ret, [Us{['fd]}]}])
+
+# the functions of the ports that the calls to the names called need
+rt_ports(called) := concat([if (member("__argv", called)) [rt_argv_fn()] else [],
+    if (member("__open", called)) [rt_open_fn("__open", 'open)] else [],
+    if (member("__create", called)) [rt_open_fn("__create", 'create)] else []])
+
+# === Values of val ===
+
+# a jump to l unless the kind of the block p is the kind k
+rt_need(p, k, t) := [I{'ld, [W{'w32}, D{'kind}, M{U{p}, 4}]}, I{'br, [Cc{'eq}, U{'kind}, K{k}, L{t}, L{'bad}]}, I{'label, [L{t}]}]
+rt_bad := [I{'label, [L{'bad}]}, I{'trap, []}]
+
+rt_val_inc_fn() := rt_fn("__val_inc", [
+    I{'getarg, [D{'p}, K{0}]},
+    I{'br, [Cc{'eq}, U{'p}, K{0}, L{'out}, L{'go}]},
+    I{'label, [L{'go}]},
+    I{'ld, [W{'w32}, D{'c}, M{U{'p}, 0}]},
+    I{'br, [Cc{'lt}, U{'c}, K{0}, L{'out}, L{'add}]},
+    I{'label, [L{'add}]},
+    I{'add, [D{'c}, U{'c}, K{1}]},
+    I{'st, [W{'w32}, M{U{'p}, 0}, U{'c}]},
+    I{'label, [L{'out}]},
+    I{'ret, [Us{[]}]}])
+
+# The last of the values in a block is released without a new call, so a long list does not use the stack.
+rt_val_drop_fn() := rt_fn("__val_drop", [
+    I{'getarg, [D{'p}, K{0}]},
+    I{'label, [L{'top}]},
+    I{'br, [Cc{'eq}, U{'p}, K{0}, L{'out}, L{'a}]},
+    I{'label, [L{'a}]},
+    I{'ld, [W{'w32}, D{'c}, M{U{'p}, 0}]},
+    I{'br, [Cc{'lt}, U{'c}, K{0}, L{'out}, L{'b}]},
+    I{'label, [L{'b}]},
+    I{'sub, [D{'c}, U{'c}, K{1}]},
+    I{'br, [Cc{'gt}, U{'c}, K{0}, L{'keep}, L{'dead}]},
+    I{'label, [L{'keep}]},
+    I{'st, [W{'w32}, M{U{'p}, 0}, U{'c}]},
+    I{'ret, [Us{[]}]},
+    I{'label, [L{'dead}]},
+    I{'ld, [W{'w32}, D{'k}, M{U{'p}, 4}]},
+    I{'br, [Cc{'eq}, U{'k}, K{rt_kind_con}, L{'con}, L{'k2}]},
+    I{'label, [L{'k2}]},
+    I{'br, [Cc{'eq}, U{'k}, K{rt_kind_arr}, L{'arr}, L{'k3}]},
+    I{'label, [L{'k3}]},
+    I{'br, [Cc{'eq}, U{'k}, K{rt_kind_fun}, L{'func}, L{'leaf}]},
+    I{'label, [L{'con}]},
+    I{'ld, [W{'w32}, D{'h}, M{U{'p}, 8}]},
+    I{'call, [S{"__val_drop", 0}, Us{['h]}, Ds{[]}]},
+    I{'ld, [W{'w32}, D{'n}, M{U{'p}, 12}]},
+    I{'add, [D{'base}, U{'p}, K{16}]},
+    I{'jmp, [L{'kids}]},
+    I{'label, [L{'arr}]},
+    I{'ld, [W{'w32}, D{'n}, M{U{'p}, 8}]},
+    I{'add, [D{'base}, U{'p}, K{16}]},
+    I{'jmp, [L{'kids}]},
+    I{'label, [L{'func}]},
+    I{'ld, [W{'w32}, D{'n}, M{U{'p}, 12}]},
+    I{'add, [D{'base}, U{'p}, K{20}]},
+    I{'jmp, [L{'kids}]},
+    I{'label, [L{'kids}]},
+    I{'br, [Cc{'eq}, U{'n}, K{0}, L{'leaf}, L{'some}]},
+    I{'label, [L{'some}]},
+    I{'sub, [D{'n}, U{'n}, K{1}]},
+    I{'li, [D{'i}, K{0}]},
+    I{'label, [L{'loop}]},
+    I{'br, [Cc{'ltu}, U{'i}, U{'n}, L{'one}, L{'lastk}]},
+    I{'label, [L{'one}]},
+    I{'shl, [D{'i4}, U{'i}, K{2}]},
+    I{'add, [D{'e}, U{'base}, U{'i4}]},
+    I{'ld, [W{'w32}, D{'x}, M{U{'e}, 0}]},
+    I{'call, [S{"__val_drop", 0}, Us{['x]}, Ds{[]}]},
+    I{'add, [D{'i}, U{'i}, K{1}]},
+    I{'jmp, [L{'loop}]},
+    I{'label, [L{'lastk}]},
+    I{'shl, [D{'i4}, U{'n}, K{2}]},
+    I{'add, [D{'e}, U{'base}, U{'i4}]},
+    I{'ld, [W{'w32}, D{'q}, M{U{'e}, 0}]},
+    I{'call, [S{"__free", 0}, Us{['p]}, Ds{[]}]},
+    I{'mov, [D{'p}, U{'q}]},
+    I{'jmp, [L{'top}]},
+    I{'label, [L{'leaf}]},
+    I{'call, [S{"__free", 0}, Us{['p]}, Ds{[]}]},
+    I{'label, [L{'out}]},
+    I{'ret, [Us{[]}]}])
+
+# __val_int(lo, hi) is a new integer
+rt_val_int_fn() := rt_fn("__val_int", [
+    I{'getarg, [D{'lo}, K{0}]},
+    I{'getarg, [D{'hi}, K{1}]},
+    I{'li, [D{'sz}, K{16}]},
+    I{'call, [S{"__alloc", 0}, Us{['sz]}, Ds{['p]}]},
+    I{'st, [W{'w32}, M{U{'p}, 0}, K{1}]},
+    I{'st, [W{'w32}, M{U{'p}, 4}, K{rt_kind_int}]},
+    I{'st, [W{'w32}, M{U{'p}, 8}, U{'lo}]},
+    I{'st, [W{'w32}, M{U{'p}, 12}, U{'hi}]},
+    I{'ret, [Us{['p]}]}])
+
+# __val_unint(v) gives the low and the high word of the integer v
+rt_val_unint_fn() := rt_fn("__val_unint", append(append([I{'getarg, [D{'p}, K{0}]}], rt_need('p, rt_kind_int, 'ok)), append([
+    I{'ld, [W{'w32}, D{'lo}, M{U{'p}, 8}]},
+    I{'ld, [W{'w32}, D{'hi}, M{U{'p}, 12}]},
+    I{'ret, [Us{['lo, 'hi]}]}], rt_bad)))
+
+# __val_bool(b) is the symbol true or false
+rt_val_bool_fn() := rt_fn("__val_bool", [
+    I{'getarg, [D{'b}, K{0}]},
+    I{'br, [Cc{'ne}, U{'b}, K{0}, L{'t}, L{'f}]},
+    I{'label, [L{'t}]},
+    I{'la, [D{'r}, S{"__sym_true", 0}]},
+    I{'ret, [Us{['r]}]},
+    I{'label, [L{'f}]},
+    I{'la, [D{'r}, S{"__sym_false", 0}]},
+    I{'ret, [Us{['r]}]}])
+
+# __val_unbool(v) is 1 for the symbol true, 0 for the symbol false
+rt_val_unbool_fn() := rt_fn("__val_unbool", append([
+    I{'getarg, [D{'v}, K{0}]},
+    I{'la, [D{'t}, S{"__sym_true", 0}]},
+    I{'call, [S{"__val_eq", 0}, Us{['v, 't]}, Ds{['r]}]},
+    I{'br, [Cc{'ne}, U{'r}, K{0}, L{'yes}, L{'no}]},
+    I{'label, [L{'yes}]},
+    I{'li, [D{'one}, K{1}]},
+    I{'ret, [Us{['one]}]},
+    I{'label, [L{'no}]},
+    I{'la, [D{'f}, S{"__sym_false", 0}]},
+    I{'call, [S{"__val_eq", 0}, Us{['v, 'f]}, Ds{['r]}]},
+    I{'br, [Cc{'ne}, U{'r}, K{0}, L{'zero}, L{'bad}]},
+    I{'label, [L{'zero}]},
+    I{'li, [D{'z}, K{0}]},
+    I{'ret, [Us{['z]}]}], rt_bad))
+
+# copy n bytes from the address s to the address d
+rt_copy(d, s, n) := [
+    I{'li, [D{'k}, K{0}]},
+    I{'label, [L{'copy}]},
+    I{'br, [Cc{'ltu}, U{'k}, U{n}, L{'put}, L{'copied}]},
+    I{'label, [L{'put}]},
+    I{'add, [D{'sa}, U{s}, U{'k}]},
+    I{'ld, [W{'u8}, D{'byte}, M{U{'sa}, 0}]},
+    I{'add, [D{'da}, U{d}, U{'k}]},
+    I{'st, [W{'w8}, M{U{'da}, 0}, U{'byte}]},
+    I{'add, [D{'k}, U{'k}, K{1}]},
+    I{'jmp, [L{'copy}]},
+    I{'label, [L{'copied}]}]
+
+# __val_str(a, kind) is a new string or symbol with the bytes of the array a
+rt_val_str_fn() := rt_fn("__val_str", append(append([
+    I{'getarg, [D{'a}, K{0}]},
+    I{'getarg, [D{'kd}, K{1}]},
+    I{'ld, [W{'w32}, D{'n}, M{U{'a}, 0}]},
+    I{'add, [D{'sz}, U{'n}, K{16}]},
+    I{'call, [S{"__alloc", 0}, Us{['sz]}, Ds{['p]}]},
+    I{'st, [W{'w32}, M{U{'p}, 0}, K{1}]},
+    I{'st, [W{'w32}, M{U{'p}, 4}, U{'kd}]},
+    I{'st, [W{'w32}, M{U{'p}, 8}, U{'n}]},
+    I{'st, [W{'w32}, M{U{'p}, 12}, K{0}]},
+    I{'add, [D{'src}, U{'a}, K{8}]},
+    I{'add, [D{'dst}, U{'p}, K{16}]}], rt_copy('dst, 'src, 'n)), [
+    I{'ret, [Us{['p]}]}]))
+
+# __val_bytes(v) is a new array of the bytes of the string v
+rt_val_bytes_fn() := rt_fn("__val_bytes", append(append(append([I{'getarg, [D{'v}, K{0}]}], rt_need('v, rt_kind_str, 'ok)), append([
+    I{'ld, [W{'w32}, D{'n}, M{U{'v}, 8}]},
+    I{'add, [D{'sz}, U{'n}, K{8}]},
+    I{'call, [S{"__alloc", 0}, Us{['sz]}, Ds{['a]}]},
+    I{'st, [W{'w32}, M{U{'a}, 0}, U{'n}]},
+    I{'st, [W{'w32}, M{U{'a}, 4}, K{0}]},
+    I{'add, [D{'src}, U{'v}, K{16}]},
+    I{'add, [D{'dst}, U{'a}, K{8}]}], rt_copy('dst, 'src, 'n))), append([
+    I{'ret, [Us{['a]}]}], rt_bad)))
+
+# __val_retag(v, kind) is a new string or symbol with the bytes of the string or symbol v
+rt_val_retag_fn() := rt_fn("__val_retag", append([
+    I{'getarg, [D{'v}, K{0}]},
+    I{'getarg, [D{'kd}, K{1}]},
+    I{'ld, [W{'w32}, D{'k}, M{U{'v}, 4}]},
+    I{'br, [Cc{'eq}, U{'k}, K{rt_kind_str}, L{'ok}, L{'k2}]},
+    I{'label, [L{'k2}]},
+    I{'br, [Cc{'eq}, U{'k}, K{rt_kind_sym}, L{'ok}, L{'bad}]},
+    I{'label, [L{'ok}]},
+    I{'add, [D{'a}, U{'v}, K{8}]},
+    I{'call, [S{"__val_str", 0}, Us{['a, 'kd]}, Ds{['r]}]},
+    I{'ret, [Us{['r]}]}], rt_bad))
+
+# __val_eq(a, b) is 1 when a == b of planck holds: the same kind and the same contents, and the same block for an array or a function.
+# The last argument of a constructed value is compared without a new call.
+rt_val_eq_fn() := rt_fn("__val_eq", append([
+    I{'getarg, [D{'a}, K{0}]},
+    I{'getarg, [D{'b}, K{1}]},
+    I{'label, [L{'top}]},
+    I{'br, [Cc{'eq}, U{'a}, U{'b}, L{'yes}, L{'diff}]},
+    I{'label, [L{'diff}]},
+    I{'ld, [W{'w32}, D{'ka}, M{U{'a}, 4}]},
+    I{'ld, [W{'w32}, D{'kb}, M{U{'b}, 4}]},
+    I{'br, [Cc{'eq}, U{'ka}, U{'kb}, L{'same}, L{'no}]},
+    I{'label, [L{'same}]},
+    I{'br, [Cc{'eq}, U{'ka}, K{rt_kind_int}, L{'int}, L{'s1}]},
+    I{'label, [L{'s1}]},
+    I{'br, [Cc{'eq}, U{'ka}, K{rt_kind_str}, L{'bytes}, L{'s2}]},
+    I{'label, [L{'s2}]},
+    I{'br, [Cc{'eq}, U{'ka}, K{rt_kind_sym}, L{'bytes}, L{'s3}]},
+    I{'label, [L{'s3}]},
+    I{'br, [Cc{'eq}, U{'ka}, K{rt_kind_con}, L{'con}, L{'no}]},
+    I{'label, [L{'int}]},
+    I{'ld, [W{'w32}, D{'x}, M{U{'a}, 8}]},
+    I{'ld, [W{'w32}, D{'y}, M{U{'b}, 8}]},
+    I{'br, [Cc{'eq}, U{'x}, U{'y}, L{'int2}, L{'no}]},
+    I{'label, [L{'int2}]},
+    I{'ld, [W{'w32}, D{'x}, M{U{'a}, 12}]},
+    I{'ld, [W{'w32}, D{'y}, M{U{'b}, 12}]},
+    I{'br, [Cc{'eq}, U{'x}, U{'y}, L{'yes}, L{'no}]},
+    I{'label, [L{'bytes}]},
+    I{'ld, [W{'w32}, D{'n}, M{U{'a}, 8}]},
+    I{'ld, [W{'w32}, D{'m}, M{U{'b}, 8}]},
+    I{'br, [Cc{'eq}, U{'n}, U{'m}, L{'b0}, L{'no}]},
+    I{'label, [L{'b0}]},
+    I{'li, [D{'i}, K{0}]},
+    I{'label, [L{'bloop}]},
+    I{'br, [Cc{'ltu}, U{'i}, U{'n}, L{'b1}, L{'yes}]},
+    I{'label, [L{'b1}]},
+    I{'add, [D{'pa}, U{'a}, U{'i}]},
+    I{'add, [D{'pb}, U{'b}, U{'i}]},
+    I{'ld, [W{'u8}, D{'x}, M{U{'pa}, 16}]},
+    I{'ld, [W{'u8}, D{'y}, M{U{'pb}, 16}]},
+    I{'add, [D{'i}, U{'i}, K{1}]},
+    I{'br, [Cc{'eq}, U{'x}, U{'y}, L{'bloop}, L{'no}]}], [
+    I{'label, [L{'con}]},
+    I{'ld, [W{'w32}, D{'n}, M{U{'a}, 12}]},
+    I{'ld, [W{'w32}, D{'m}, M{U{'b}, 12}]},
+    I{'br, [Cc{'eq}, U{'n}, U{'m}, L{'c0}, L{'no}]},
+    I{'label, [L{'c0}]},
+    I{'ld, [W{'w32}, D{'x}, M{U{'a}, 8}]},
+    I{'ld, [W{'w32}, D{'y}, M{U{'b}, 8}]},
+    I{'call, [S{"__val_eq", 0}, Us{['x, 'y]}, Ds{['r]}]},
+    I{'br, [Cc{'ne}, U{'r}, K{0}, L{'c1}, L{'no}]},
+    I{'label, [L{'c1}]},
+    I{'br, [Cc{'eq}, U{'n}, K{0}, L{'yes}, L{'c2}]},
+    I{'label, [L{'c2}]},
+    I{'sub, [D{'n}, U{'n}, K{1}]},
+    I{'li, [D{'i}, K{0}]},
+    I{'label, [L{'cloop}]},
+    I{'br, [Cc{'ltu}, U{'i}, U{'n}, L{'c3}, L{'clast}]},
+    I{'label, [L{'c3}]},
+    I{'shl, [D{'i4}, U{'i}, K{2}]},
+    I{'add, [D{'pa}, U{'a}, U{'i4}]},
+    I{'add, [D{'pb}, U{'b}, U{'i4}]},
+    I{'ld, [W{'w32}, D{'x}, M{U{'pa}, 16}]},
+    I{'ld, [W{'w32}, D{'y}, M{U{'pb}, 16}]},
+    I{'call, [S{"__val_eq", 0}, Us{['x, 'y]}, Ds{['r]}]},
+    I{'add, [D{'i}, U{'i}, K{1}]},
+    I{'br, [Cc{'ne}, U{'r}, K{0}, L{'cloop}, L{'no}]},
+    I{'label, [L{'clast}]},
+    I{'shl, [D{'i4}, U{'n}, K{2}]},
+    I{'add, [D{'pa}, U{'a}, U{'i4}]},
+    I{'add, [D{'pb}, U{'b}, U{'i4}]},
+    I{'ld, [W{'w32}, D{'a}, M{U{'pa}, 16}]},
+    I{'ld, [W{'w32}, D{'b}, M{U{'pb}, 16}]},
+    I{'jmp, [L{'top}]},
+    I{'label, [L{'yes}]},
+    I{'li, [D{'one}, K{1}]},
+    I{'ret, [Us{['one]}]},
+    I{'label, [L{'no}]},
+    I{'li, [D{'z}, K{0}]},
+    I{'ret, [Us{['z]}]}]))
+
+# __val_is(v, h, n) is 1 when v is a constructed value with the head h and n arguments
+rt_val_is_fn() := rt_fn("__val_is", [
+    I{'getarg, [D{'v}, K{0}]},
+    I{'getarg, [D{'h}, K{1}]},
+    I{'getarg, [D{'n}, K{2}]},
+    I{'ld, [W{'w32}, D{'k}, M{U{'v}, 4}]},
+    I{'br, [Cc{'eq}, U{'k}, K{rt_kind_con}, L{'a}, L{'no}]},
+    I{'label, [L{'a}]},
+    I{'ld, [W{'w32}, D{'m}, M{U{'v}, 12}]},
+    I{'br, [Cc{'eq}, U{'m}, U{'n}, L{'b}, L{'no}]},
+    I{'label, [L{'b}]},
+    I{'ld, [W{'w32}, D{'x}, M{U{'v}, 8}]},
+    I{'call, [S{"__val_eq", 0}, Us{['x, 'h]}, Ds{['r]}]},
+    I{'ret, [Us{['r]}]},
+    I{'label, [L{'no}]},
+    I{'li, [D{'z}, K{0}]},
+    I{'ret, [Us{['z]}]}])
+
+# the number of elements n and the address of the first element of the constructed value or the array v, in the registers 'n and 'base
+rt_elems(v) := [
+    I{'ld, [W{'w32}, D{'k}, M{U{v}, 4}]},
+    I{'br, [Cc{'eq}, U{'k}, K{rt_kind_con}, L{'ec}, L{'e2}]},
+    I{'label, [L{'e2}]},
+    I{'br, [Cc{'eq}, U{'k}, K{rt_kind_arr}, L{'ea}, L{'bad}]},
+    I{'label, [L{'ec}]},
+    I{'ld, [W{'w32}, D{'n}, M{U{v}, 12}]},
+    I{'jmp, [L{'ed}]},
+    I{'label, [L{'ea}]},
+    I{'ld, [W{'w32}, D{'n}, M{U{v}, 8}]},
+    I{'jmp, [L{'ed}]},
+    I{'label, [L{'ed}]},
+    I{'add, [D{'base}, U{v}, K{16}]}]
+
+# __val_get(v, lo, hi) is the element of the constructed value or the array v at the index, with a new holder
+rt_val_get_fn() := rt_fn("__val_get", append(append(append([
+    I{'getarg, [D{'v}, K{0}]},
+    I{'getarg, [D{'lo}, K{1}]},
+    I{'getarg, [D{'hi}, K{2}]},
+    I{'br, [Cc{'eq}, U{'hi}, K{0}, L{'h0}, L{'bad}]},
+    I{'label, [L{'h0}]}], rt_elems('v)), [
+    I{'br, [Cc{'ltu}, U{'lo}, U{'n}, L{'inrange}, L{'bad}]},
+    I{'label, [L{'inrange}]},
+    I{'shl, [D{'i4}, U{'lo}, K{2}]},
+    I{'add, [D{'e}, U{'base}, U{'i4}]},
+    I{'ld, [W{'w32}, D{'x}, M{U{'e}, 0}]},
+    I{'call, [S{"__val_inc", 0}, Us{['x]}, Ds{[]}]},
+    I{'ret, [Us{['x]}]}]), rt_bad))
+
+# __val_set(v, lo, hi, x) puts x in the array v at the index; the place holds x and what it held before has one holder less
+rt_val_set_fn() := rt_fn("__val_set", append(append(append([
+    I{'getarg, [D{'v}, K{0}]},
+    I{'getarg, [D{'lo}, K{1}]},
+    I{'getarg, [D{'hi}, K{2}]},
+    I{'getarg, [D{'x}, K{3}]},
+    I{'br, [Cc{'eq}, U{'hi}, K{0}, L{'h0}, L{'bad}]},
+    I{'label, [L{'h0}]}], rt_need('v, rt_kind_arr, 'isarr)), [
+    I{'ld, [W{'w32}, D{'n}, M{U{'v}, 8}]},
+    I{'br, [Cc{'ltu}, U{'lo}, U{'n}, L{'inrange}, L{'bad}]},
+    I{'label, [L{'inrange}]},
+    I{'shl, [D{'i4}, U{'lo}, K{2}]},
+    I{'add, [D{'e}, U{'v}, U{'i4}]},
+    I{'ld, [W{'w32}, D{'old}, M{U{'e}, 16}]},
+    I{'st, [W{'w32}, M{U{'e}, 16}, U{'x}]},
+    I{'call, [S{"__val_drop", 0}, Us{['old]}, Ds{[]}]},
+    I{'ret, [Us{[]}]}]), rt_bad))
+
+rt_val_arity_fn() := rt_fn("__val_arity", append([
+    I{'getarg, [D{'v}, K{0}]},
+    I{'ld, [W{'w32}, D{'k}, M{U{'v}, 4}]},
+    I{'br, [Cc{'eq}, U{'k}, K{rt_kind_con}, L{'con}, L{'other}]},
+    I{'label, [L{'con}]},
+    I{'ld, [W{'w32}, D{'n}, M{U{'v}, 12}]},
+    I{'ret, [Us{['n]}]},
+    I{'label, [L{'other}]},
+    I{'br, [Cc{'geu}, U{'k}, K{rt_kind_str}, L{'o2}, L{'bad}]},
+    I{'label, [L{'o2}]},
+    I{'br, [Cc{'eq}, U{'k}, K{rt_kind_fun}, L{'bad}, L{'o3}]},
+    I{'label, [L{'o3}]},
+    I{'ld, [W{'w32}, D{'n}, M{U{'v}, 8}]},
+    I{'ret, [Us{['n]}]}], rt_bad))
+
+rt_val_head_fn() := rt_fn("__val_head", append(append(append([I{'getarg, [D{'v}, K{0}]}], rt_need('v, rt_kind_con, 'ok)), [
+    I{'ld, [W{'w32}, D{'h}, M{U{'v}, 8}]},
+    I{'call, [S{"__val_inc", 0}, Us{['h]}, Ds{[]}]},
+    I{'ret, [Us{['h]}]}]), rt_bad))
+
+# one case of __val_typeof
+rt_typeof_case(k, name, next) := [
+    I{'br, [Cc{'eq}, U{'k}, K{k}, L{intern(name)}, L{next}]},
+    I{'label, [L{intern(name)}]},
+    I{'la, [D{'r}, S{name, 0}]},
+    I{'ret, [Us{['r]}]},
+    I{'label, [L{next}]}]
+
+rt_val_typeof_fn() := rt_fn("__val_typeof", concat([
+    [I{'getarg, [D{'v}, K{0}]},
+     I{'ld, [W{'w32}, D{'k}, M{U{'v}, 4}]}],
+    rt_typeof_case(rt_kind_int, "__sym_int", 'n1),
+    rt_typeof_case(rt_kind_str, "__sym_string", 'n2),
+    rt_typeof_case(rt_kind_sym, "__sym_symbol", 'n3),
+    rt_typeof_case(rt_kind_con, "__sym_mexpr", 'n4),
+    rt_typeof_case(rt_kind_arr, "__sym_array", 'n5),
+    [I{'la, [D{'r}, S{"__sym_function", 0}]},
+     I{'ret, [Us{['r]}]}]]))
+
+# __val_array(lo, hi, x) is a new array of that many elements x
+rt_val_array_fn() := rt_fn("__val_array", append([
+    I{'getarg, [D{'lo}, K{0}]},
+    I{'getarg, [D{'hi}, K{1}]},
+    I{'getarg, [D{'x}, K{2}]},
+    I{'br, [Cc{'eq}, U{'hi}, K{0}, L{'h0}, L{'bad}]},
+    I{'label, [L{'h0}]},
+    I{'li, [D{'lim}, K{1}]},
+    I{'shl, [D{'lim}, U{'lim}, K{27}]},
+    I{'br, [Cc{'ltu}, U{'lo}, U{'lim}, L{'fits}, L{'bad}]},
+    I{'label, [L{'fits}]},
+    I{'shl, [D{'bytes}, U{'lo}, K{2}]},
+    I{'add, [D{'sz}, U{'bytes}, K{16}]},
+    I{'call, [S{"__alloc", 0}, Us{['sz]}, Ds{['p]}]},
+    I{'st, [W{'w32}, M{U{'p}, 0}, K{1}]},
+    I{'st, [W{'w32}, M{U{'p}, 4}, K{rt_kind_arr}]},
+    I{'st, [W{'w32}, M{U{'p}, 8}, U{'lo}]},
+    I{'st, [W{'w32}, M{U{'p}, 12}, K{0}]},
+    I{'li, [D{'i}, K{0}]},
+    I{'label, [L{'loop}]},
+    I{'br, [Cc{'ltu}, U{'i}, U{'lo}, L{'one}, L{'done}]},
+    I{'label, [L{'one}]},
+    I{'shl, [D{'i4}, U{'i}, K{2}]},
+    I{'add, [D{'e}, U{'p}, U{'i4}]},
+    I{'st, [W{'w32}, M{U{'e}, 16}, U{'x}]},
+    I{'call, [S{"__val_inc", 0}, Us{['x]}, Ds{[]}]},
+    I{'add, [D{'i}, U{'i}, K{1}]},
+    I{'jmp, [L{'loop}]},
+    I{'label, [L{'done}]},
+    I{'ret, [Us{['p]}]}], rt_bad))
+
+# __val_mexpr(h, a) is a new constructed value with the head h and the elements of the array a
+rt_val_mexpr_fn() := rt_fn("__val_mexpr", append(append(append([
+    I{'getarg, [D{'h}, K{0}]},
+    I{'getarg, [D{'a}, K{1}]}], rt_need('a, rt_kind_arr, 'isarr)), [
+    I{'ld, [W{'w32}, D{'n}, M{U{'a}, 8}]},
+    I{'shl, [D{'bytes}, U{'n}, K{2}]},
+    I{'add, [D{'sz}, U{'bytes}, K{16}]},
+    I{'call, [S{"__alloc", 0}, Us{['sz]}, Ds{['p]}]},
+    I{'st, [W{'w32}, M{U{'p}, 0}, K{1}]},
+    I{'st, [W{'w32}, M{U{'p}, 4}, K{rt_kind_con}]},
+    I{'st, [W{'w32}, M{U{'p}, 8}, U{'h}]},
+    I{'st, [W{'w32}, M{U{'p}, 12}, U{'n}]},
+    I{'call, [S{"__val_inc", 0}, Us{['h]}, Ds{[]}]},
+    I{'li, [D{'i}, K{0}]},
+    I{'label, [L{'loop}]},
+    I{'br, [Cc{'ltu}, U{'i}, U{'n}, L{'one}, L{'done}]},
+    I{'label, [L{'one}]},
+    I{'shl, [D{'i4}, U{'i}, K{2}]},
+    I{'add, [D{'sa}, U{'a}, U{'i4}]},
+    I{'ld, [W{'w32}, D{'x}, M{U{'sa}, 16}]},
+    I{'call, [S{"__val_inc", 0}, Us{['x]}, Ds{[]}]},
+    I{'add, [D{'da}, U{'p}, U{'i4}]},
+    I{'st, [W{'w32}, M{U{'da}, 16}, U{'x}]},
+    I{'add, [D{'i}, U{'i}, K{1}]},
+    I{'jmp, [L{'loop}]},
+    I{'label, [L{'done}]},
+    I{'ret, [Us{['p]}]}]), rt_bad))
+
+# __val_code(f, n) is the address of the code of the function value f, which takes n arguments
+rt_val_code_fn() := rt_fn("__val_code", append(append(append([
+    I{'getarg, [D{'f}, K{0}]},
+    I{'getarg, [D{'n}, K{1}]}], rt_need('f, rt_kind_fun, 'isfun)), [
+    I{'ld, [W{'w32}, D{'m}, M{U{'f}, 16}]},
+    I{'br, [Cc{'eq}, U{'m}, U{'n}, L{'fine}, L{'bad}]},
+    I{'label, [L{'fine}]},
+    I{'ld, [W{'w32}, D{'c}, M{U{'f}, 8}]},
+    I{'ret, [Us{['c]}]}]), rt_bad))
+
+# the functions on values of val that the code calls, with the functions that these call
+rt_val_makers := [Tuple{"__val_inc", rt_val_inc_fn}, Tuple{"__val_drop", rt_val_drop_fn}, Tuple{"__val_int", rt_val_int_fn}, Tuple{"__val_unint", rt_val_unint_fn},
+    Tuple{"__val_bool", rt_val_bool_fn}, Tuple{"__val_unbool", rt_val_unbool_fn}, Tuple{"__val_str", rt_val_str_fn}, Tuple{"__val_bytes", rt_val_bytes_fn},
+    Tuple{"__val_retag", rt_val_retag_fn}, Tuple{"__val_eq", rt_val_eq_fn}, Tuple{"__val_is", rt_val_is_fn}, Tuple{"__val_get", rt_val_get_fn}, Tuple{"__val_set", rt_val_set_fn},
+    Tuple{"__val_arity", rt_val_arity_fn}, Tuple{"__val_head", rt_val_head_fn}, Tuple{"__val_typeof", rt_val_typeof_fn}, Tuple{"__val_array", rt_val_array_fn},
+    Tuple{"__val_mexpr", rt_val_mexpr_fn}, Tuple{"__val_code", rt_val_code_fn}]
+
+rt_call_names(f) := concat_map(i -> match i {
+    I{'call, [S{n, _}, _, _]} -> [n]
+  | _ -> []
+}, ir_code(f))
+
+rt_val_fns(called) := {
+    done := table()
+    out := []
+    work := called
+    while (work != []) {
+        n := work[0]
+        work = drop(work, 1)
+        e := find(p -> arg(p, 0) == n, rt_val_makers)
+        if (e != none and not table_has(done, n)) {
+            table_set(done, n, true)
+            f := arg(e, 1)()
+            out = f :: out
+            work = append(rt_call_names(f), work)
+        }
+    }
+    reverse(out)
+}
+
+# rt_start_fn(ret) is _start for a main that returns the type ret: its value (0 for no value) is the exit status.
+# It keeps the arguments of the program (the service args) in __args first.
 rt_start_fn(ret) := {
     f := ir_fn("_start")
     e := i -> ir_emit(f, i)
     st := ir_vreg(f, 32)
     z := ir_vreg(f, 32)
+    av := ir_vreg(f, 32)
+    ap := ir_vreg(f, 32)
+    e(I{'os, [N{'args}, Us{[]}, D{av}]})
+    e(I{'la, [D{ap}, S{"__args", 0}]})
+    e(I{'st, [W{'w32}, M{U{ap}, 0}, U{av}]})
     if (ret == Unit{}) e(I{'li, [D{st}, K{0}]})
     else if (ret == I64{} or ret == U64{}) {
         r := ir_vreg(f, 64)

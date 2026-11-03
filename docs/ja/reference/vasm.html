@@ -52,6 +52,7 @@ fn f[r, ...](x: T, ...) -&gt; T { ... }</pre>
 <tr><td><code>&amp;mut r T</code></td><td>領域 <code>r</code> の中の排他の借用</td></tr>
 <tr><td><code>own [T]</code> <code>&amp;r [T]</code> <code>&amp;mut r [T]</code></td><td>配列。<code>[T]</code> は <code>own</code> か借用の中にだけ書ける</td></tr>
 <tr><td><code>&amp;static T</code></td><td>プログラムの終わりまで続く共有の借用。文字列リテラルの型は <code>&amp;static [u8]</code></td></tr>
+<tr><td><code>val</code></td><td>planck の値1つ。整数・文字列・シンボル・構築子・配列・関数のどれか</td></tr>
 </table>
 <p>構造体のフィールド・<code>own</code> の中身・配列の要素には <code>own</code> を入れられます。借用は入れられません。<code>own</code> を持つ型の値は、持ち主がいつも1人です。</p>
 
@@ -81,6 +82,12 @@ fn f[r, ...](x: T, ...) -&gt; T { ... }</pre>
 <tr><td><code>len(a: &amp;r [T]) -&gt; i64</code></td><td>配列の長さ</td></tr>
 <tr><td><code>write(fd: i64, a: &amp;r [u8]) -&gt; i64</code></td><td>配列のバイトをファイル <code>fd</code> に書くようシステムに頼む（1 は出力、2 はエラー出力）。配列は借りるだけ。結果は書いたバイト数で、誤りなら負</td></tr>
 <tr><td><code>exit(status: i64)</code></td><td>状態を付けてプログラムを終えるようシステムに頼む（外から見えるのは下位8ビット）</td></tr>
+<tr><td><code>argc() -&gt; i64</code></td><td>プログラムの引数の数（プログラムの名前を含む）</td></tr>
+<tr><td><code>argv(i: i64) -&gt; &amp;static [u8]</code></td><td><code>i</code> 番目の引数のバイト（終端なし）。<code>argv(0)</code> はプログラムの名前。配列はプログラムの終わりまで解放されないので <code>static</code> の借用で、<code>i</code> が引数の数以上なら異常終了する</td></tr>
+<tr><td><code>open(path: &amp;r [u8]) -&gt; i64</code></td><td>名前が配列 <code>path</code> のバイトであるファイルを読むために開くようシステムに頼む。結果はファイルを表す整数で、誤りなら負</td></tr>
+<tr><td><code>read(fd: i64, a: &amp;mut r [u8]) -&gt; i64</code></td><td>ファイル <code>fd</code> から配列 <code>a</code> に入るだけ（最大でその長さ）のバイトを読んで <code>a</code> の先頭から入れるようシステムに頼む。結果は読んだバイト数で、ファイルの終わりでは 0、誤りなら負。配列は借りるだけ</td></tr>
+<tr><td><code>create(path: &amp;r [u8]) -&gt; i64</code></td><td>名前が配列 <code>path</code> のバイトであるファイルを、空にするか新しく作って書くために開くようシステムに頼む。結果はファイルを表す整数で、誤りなら負</td></tr>
+<tr><td><code>close(fd: i64)</code></td><td>ファイル <code>fd</code> を閉じるようシステムに頼む</td></tr>
 <tr><td><code>swap(x, v: T) -&gt; T</code></td><td><code>x</code> に <code>v</code> を入れ、前の値を返す。<code>x</code> は <code>*p</code>・<code>p[i]</code>・<code>p.f</code> の形の場所</td></tr>
 </table>
 
@@ -109,6 +116,33 @@ fn f[r, ...](x: T, ...) -&gt; T { ... }</pre>
 <li>構造体のレジスタ <code>s</code> からは <code>x = s.f</code> で <code>own</code> を持つフィールドを move して取り出せます。取り出した欄を読む・もう一度取り出すのは誤りで、<code>s.f = v</code> で入れ直せます。取り出したあとの <code>s</code> は丸ごとは使えず、残った欄は <code>s</code> がなくなる所で解放されます。</li>
 <li>配列の要素やポインタの指す構造体のフィールドは、<code>swap(p[i], v)</code>・<code>swap(p.f, v)</code> で入れ替えて取り出します。<code>*p</code> も <code>swap(*p, v)</code> で入れ替えられます。場所は <code>own</code>（借りられていない）か <code>&amp;mut</code> から書けるものです。</li>
 <li><code>own</code> を持つ値を、配列の要素・ポインタの指す先・借用からコピーして読むことはできません。</li>
+</ul>
+
+<h2>val</h2>
+<p><code>val</code> の値がどの種類かは値が持ちます。検査器が見るのは <code>val</code> かほかの型かで、種類が違うのは実行時に異常終了します。配列の添字の範囲と同じ扱いです。</p>
+<table>
+<tr><th>形</th><th>意味</th></tr>
+<tr><td><code>'name</code></td><td>シンボル。項を取る所に書ける。<code>'true</code> <code>'false</code> <code>'none</code> も planck と同じくシンボル</td></tr>
+<tr><td><code>x = a as val</code></td><td>整数・<code>bool</code>・<code>&amp;r [u8]</code> を値にする。バイト列はコピーする</td></tr>
+<tr><td><code>x = v as i64</code> <code>x = v as bool</code> <code>x = v as own [u8]</code></td><td>整数・<code>bool</code>・文字列のバイトを取り出す。<code>as</code> の整数は整数の型ならどれでもよく、狭めるときは下位のビットを残す</td></tr>
+<tr><td><code>x = val Cons(a, b)</code></td><td>構築子の値を作る。引数は全部 <code>val</code></td></tr>
+<tr><td><code>x = fn f(a, b)</code></td><td>関数の値を作る。<code>f</code> の先頭の引数に <code>a</code> <code>b</code> を閉じ込める。<code>f</code> は引数も結果も全部 <code>val</code> で、領域の引数を持たない関数</td></tr>
+<tr><td><code>x = v(a, b)</code> <code>v(a, b)</code></td><td>レジスタ <code>v</code> の関数の値を呼ぶ。引数も結果も <code>val</code>。引数の数が違えば異常終了する</td></tr>
+<tr><td><code>x = v[i]</code></td><td>構築子の引数か配列の要素を読む</td></tr>
+<tr><td><code>v[i] = a</code></td><td>配列の要素を書き換える。同じ配列の持ち主全部から見える</td></tr>
+<tr><td><code>x = a == b</code> <code>x = a != b</code></td><td>値を比べる。構築子と文字列とシンボルは中身で、配列と関数は同じものかどうかで比べる</td></tr>
+<tr><td><code>is(v: val, h: val, n: i64) -&gt; bool</code></td><td><code>v</code> が頭 <code>h</code> で引数 <code>n</code> 個の構築子か</td></tr>
+<tr><td><code>typeof(v: val) -&gt; val</code></td><td>シンボル <code>'int</code> <code>'string</code> <code>'symbol</code> <code>'mexpr</code> <code>'array</code> <code>'function</code></td></tr>
+<tr><td><code>head(v: val) -&gt; val</code></td><td>構築子の頭</td></tr>
+<tr><td><code>arity(v: val) -&gt; i64</code></td><td>構築子の引数・配列の要素・文字列とシンボルのバイトの数</td></tr>
+<tr><td><code>array(n: i64, v: val) -&gt; val</code></td><td>要素が全部 <code>v</code> の配列を作る</td></tr>
+<tr><td><code>mexpr(h: val, a: val) -&gt; val</code></td><td>頭 <code>h</code> で配列 <code>a</code> の要素を引数にした構築子を作る</td></tr>
+<tr><td><code>intern(s: val) -&gt; val</code> <code>symname(s: val) -&gt; val</code></td><td>文字列からシンボルを、シンボルから文字列を作る</td></tr>
+</table>
+<ul>
+<li>レジスタの <code>val</code> は整数と同じくコピーされます。move も借用もありません。</li>
+<li>同じ値を指す持ち主を数えます。持ち主がなくなると解放します。持ち主がなくなる所は <code>own</code> の自動解放と同じです。配列に自分を入れた値は解放されません。</li>
+<li>構造体のフィールド・箱の中身・<code>own</code> の配列の要素に入れた <code>val</code> は <code>own</code> と同じ扱いです。<code>swap</code> や move で取り出します。</li>
 </ul>
 
 <h2>借用と領域</h2>
