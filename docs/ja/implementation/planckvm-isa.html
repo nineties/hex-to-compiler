@@ -36,129 +36,142 @@
 </ol></details></nav>
 <main>
 <h1>planckvm の命令</h1>
-<p class="lead">planckvm の外部仕様のうち、命令、組み込み関数、planck の各機能に対応する命令を説明します。機械と値については<a href="planckvm.html">planckvm: 実行モデルと値</a>を、実装の中の設計については<a href="planckvm-internals.html">planckvm の内部仕様</a>を参照してください。</p>
+<p class="lead">planckvm の外部仕様のうち、バイトコードのフォーマット、命令、組み込み関数、planck の各機能に対応する命令を説明します。機械と値については<a href="planckvm.html">planckvm: 実行モデルと値</a>を、実装の中の設計については<a href="planckvm-internals.html">planckvm の内部仕様</a>を参照してください。</p>
 
-<p>表記: スタックは左を底として書きます。<code>a b -&gt; r</code> は2個取り出して1個積むことを表します。オペランドは、<code>k</code> が定数表の添字、<code>c</code> がセル（<code>k</code> の一種）、<code>d i</code> が環境の深さと添字、<code>L</code> が命令列の添字、<code>n</code> が個数、<code>p</code> が組み込みの命令の値です。列の印は、<strong>S</strong> が確保などで GC が走りうるセーフポイント、<strong>W</strong> がライトバリア、<strong>T</strong> が条件を満たさないと止まることを表します。</p>
+<p>表記: スタックは左を底として書きます。<code>a b -&gt; r</code> は2個取り出して1個積むことを表します。オペランドは、<code>k</code> が定数表の添字、<code>c</code> がセル（<code>k</code> の一種）、<code>d i</code> が環境の深さと添字、<code>L</code> が命令列の添字、<code>n</code> が個数、<code>p</code> が組み込みの命令のオペコードです。列の印は、<strong>S</strong> が確保などで GC が走りうるセーフポイント、<strong>W</strong> がライトバリア、<strong>T</strong> が条件を満たさないと止まることを表します。</p>
+
+<h2 id="format">バイトコードのフォーマット</h2>
+<p>バイトコードの単位はコードです。1つの Lambda または1つのトップレベルの式が1つのコードになります。入れ子の関数のコードは、外側のコードの定数表に入ります。</p>
+<table>
+<tr><th>欄</th><th>意味</th></tr>
+<tr><td><code>arity</code></td><td>引数の個数</td></tr>
+<tr><td><code>nslots</code></td><td>環境のスロット数</td></tr>
+<tr><td><code>params</code></td><td>引数のパターンの木。実行には使わず、関数の表示と照合失敗のメッセージに使う</td></tr>
+<tr><td><code>instrs</code></td><td>命令列。作成後は変更しない</td></tr>
+<tr><td><code>consts</code></td><td>定数表</td></tr>
+</table>
+
+<h3>命令列</h3>
+<ul>
+<li>命令列は整数の列です。1命令は、オペコードの整数とそれに続くオペランドの整数からなります。</li>
+<li>オペランドの個数と並びはオペコードごとに決まっています（命令の表のとおり）。</li>
+<li>ジャンプ先 <code>L</code> と pc は、命令列の添字で表します。</li>
+<li>コードの作成時に、オペランドスタックの高さが全命令で一意に決まること、ジャンプ先が命令の先頭であること、スタックの高さが負にならないことを検査します。高さの最大値もこのときに求めます。</li>
+<li><code>MATCH*</code> の失敗先 <code>L</code> では、スタックの高さは 0 です。</li>
+</ul>
+
+<h3>定数表</h3>
+<p>定数表はコードごとに持つ値の並びで、オペランド <code>k</code> と <code>c</code> はその添字です。</p>
+<table>
+<tr><th>要素</th><th>使う命令</th></tr>
+<tr><td>整数・浮動小数点数・文字列・シンボルのリテラル、<code>Quote</code> の中身</td><td><code>CONST</code></td></tr>
+<tr><td>整数・文字列・<code>Quote{v}</code> の v</td><td><code>MATCHEQ</code></td></tr>
+<tr><td>シンボル</td><td><code>BUILD</code> <code>MATCHHEAD</code> <code>MATCHTYPE</code></td></tr>
+<tr><td>セル</td><td><code>GLOAD</code> <code>GSET</code> <code>CALLP</code></td></tr>
+<tr><td>入れ子のコード</td><td><code>CLOSURE</code></td></tr>
+</table>
 
 <h2>命令</h2>
 <table>
-<tr><th>ニーモニック</th><th>値</th><th>オペランド</th><th>スタック</th><th>動作</th><th>組み込み</th><th>S</th><th>W</th><th>T</th></tr>
-<tr><td><code>CONST</code></td><td>0</td><td>k</td><td>-&gt; v</td><td>定数表の値を積む。整数・浮動小数点数・文字列・シンボルのリテラルと <code>Quote</code> の中身に使う。M式と文字列は不変なので共有する</td><td></td><td></td><td></td><td></td></tr>
-<tr><td><code>POP</code></td><td>1</td><td></td><td>v -&gt;</td><td>捨てる</td><td></td><td></td><td></td><td></td></tr>
-<tr><td><code>DUP</code></td><td>2</td><td></td><td>v -&gt; v v</td><td>複製する</td><td></td><td></td><td></td><td></td></tr>
-<tr><td><code>LOAD</code></td><td>3</td><td>d i</td><td>-&gt; v</td><td>親を d 回たどった環境のスロット i の値を積む。検査はしない</td><td></td><td></td><td></td><td></td></tr>
-<tr><td><code>STORE</code></td><td>4</td><td>d i</td><td>v -&gt; v</td><td>スロット i に書き込む。値はスタックに残す</td><td></td><td></td><td>○</td><td></td></tr>
-<tr><td><code>GLOAD</code></td><td>5</td><td>c</td><td>-&gt; v</td><td>セルの値を積む。検査はしない</td><td></td><td></td><td></td><td></td></tr>
-<tr><td><code>GSET</code></td><td>6</td><td>c</td><td>v -&gt; v</td><td>セルに書き込む。値はスタックに残す。<code>Def</code> の大域変数にも <code>Set</code> の大域変数にもこの命令を使う</td><td></td><td></td><td>○</td><td></td></tr>
-<tr><td><code>JMP</code></td><td>7</td><td>L</td><td></td><td>L へジャンプする</td><td></td><td></td><td></td><td></td></tr>
-<tr><td><code>JF</code></td><td>8</td><td>L</td><td>c -&gt;</td><td>c がシンボル <code>false</code> なら L へジャンプし、それ以外なら次の命令へ進む</td><td></td><td></td><td></td><td></td></tr>
-<tr><td><code>CALL</code></td><td>9</td><td>n</td><td>f a1..an -&gt; r</td><td>実行モデルの「呼び出し」の規則に従って呼ぶ</td><td></td><td>○</td><td></td><td>○</td></tr>
-<tr><td><code>TCALL</code></td><td>10</td><td>n</td><td>f a1..an -&gt; r</td><td>現在のフレームを捨てて呼ぶ（末尾呼び出し）。どの場所でも使う。入口のフレームでも同様で、呼ばれた関数の <code>RET</code> が結果を評価器に返す。現在のフレームが境界なら <code>CALL</code> と同じ</td><td></td><td>○</td><td></td><td>○</td></tr>
-<tr><td><code>RET</code></td><td>11</td><td></td><td>v -&gt;</td><td>フレームを捨て、呼び出し元のオペランドスタックに v を積んで実行を続ける。入口のフレームなら実行結果として評価器に返す</td><td></td><td></td><td></td><td></td></tr>
-<tr><td><code>CALLP</code></td><td>12</td><td>c p</td><td>a1..an -&gt; r</td><td>セル c の現在の値が組み込み p なら、その命令をこの場で実行する。そうでなければ c の値を <code>CALL</code> で呼ぶ。n は p の引数の個数</td><td></td><td>○</td><td></td><td>○</td></tr>
-<tr><td><code>CLOSURE</code></td><td>13</td><td>k</td><td>-&gt; f</td><td>定数 k のコードと現在の環境から Lambda を作る</td><td></td><td>○</td><td></td><td></td></tr>
-<tr><td><code>FUSION</code></td><td>14</td><td></td><td>f g -&gt; h</td><td><code>f | g</code> を作る。f が none なら g を返す。どちらも関数でなければ止まる</td><td></td><td>○</td><td></td><td>○</td></tr>
-<tr><td><code>BUILD</code></td><td>15</td><td>k n</td><td>a1..an -&gt; m</td><td>定数 k のシンボルを頭とする M式を作る。<code>Tuple</code> も <code>Cons</code> もこの命令で作る。n が 64 を超えれば止まる</td><td></td><td>○</td><td></td><td>○</td></tr>
-<tr><td><code>ARGI</code></td><td>16</td><td>i</td><td>m -&gt; a</td><td>M式 m の i 番目の引数を取り出す。M式でないか範囲外なら止まる。照合の後で使う</td><td></td><td></td><td></td><td>○</td></tr>
-<tr><td><code>PARAM</code></td><td>17</td><td>a</td><td>-&gt; v</td><td>呼び出しの a 番目の引数を積む</td><td></td><td></td><td></td><td></td></tr>
-<tr><td><code>MATCHEQ</code></td><td>18</td><td>k L</td><td>v -&gt;</td><td>v が定数 k と <code>EQ</code> で等しければ次へ進み、そうでなければ L へジャンプする。整数、文字列、<code>Quote{v}</code> のパターンに使う</td><td></td><td></td><td></td><td></td></tr>
-<tr><td><code>MATCHHEAD</code></td><td>19</td><td>k n L</td><td>v -&gt; v</td><td>v が、頭がシンボル k で引数が n 個の M式なら次へ進み、そうでなければ L へジャンプする</td><td></td><td></td><td></td><td></td></tr>
-<tr><td><code>MATCHTYPE</code></td><td>20</td><td>k L</td><td>v -&gt; v</td><td><code>typeof</code> v が定数 k のシンボルなら次へ進み、そうでなければ L へジャンプする。<code>_TypeOf{p, type}</code> のパターンに使う</td><td></td><td></td><td></td><td></td></tr>
-<tr><td><code>NEXT</code></td><td>21</td><td></td><td></td><td>現在のフレームを捨て、同じ引数で残りの選択肢を試す。尽きれば止まる（<code>matching failed</code>）。<code>PERFORM</code> が呼んだフレームでは外側の境界へ進む</td><td></td><td></td><td></td><td>○</td></tr>
-<tr><td><code>HANDLE</code></td><td>22</td><td></td><td>body h -&gt; r</td><td>body（arity 0 の Lambda）を境界フレームで実行する。h が関数でなければ止まる</td><td></td><td>○</td><td></td><td>○</td></tr>
-<tr><td><code>PERFORM</code></td><td>23</td><td></td><td>v -&gt; r</td><td>実行モデルの「継続とハンドラ」の規則に従う。値は再開の引数になる</td><td></td><td>○</td><td></td><td>○</td></tr>
-<tr><td><code>ADD</code></td><td>24</td><td></td><td>a b -&gt; r</td><td>a + b</td><td><code>_add</code></td><td>○</td><td></td><td>○</td></tr>
-<tr><td><code>SUB</code></td><td>25</td><td></td><td>a b -&gt; r</td><td>a - b</td><td><code>_sub</code></td><td>○</td><td></td><td>○</td></tr>
-<tr><td><code>MUL</code></td><td>26</td><td></td><td>a b -&gt; r</td><td>a * b</td><td><code>_mul</code></td><td>○</td><td></td><td>○</td></tr>
-<tr><td><code>DIV</code></td><td>27</td><td></td><td>a b -&gt; r</td><td>整数どうしなら 0 方向へ切り捨てた商で、b が 0 なら止まる。それ以外は通常の割り算で、0 で割っても止まらない</td><td><code>_div</code></td><td>○</td><td></td><td>○</td></tr>
-<tr><td><code>LT</code></td><td>28</td><td></td><td>a b -&gt; r</td><td>a &lt; b を <code>true</code> か <code>false</code> で返す。複素数を含めば止まる</td><td><code>_lt</code></td><td></td><td></td><td>○</td></tr>
-<tr><td><code>EQ</code></td><td>29</td><td></td><td>a b -&gt; r</td><td>実行モデルの「値」の等しさ。数に限らずすべての値を受け取る。<code>true</code> か <code>false</code> を返す</td><td><code>_eq</code></td><td></td><td></td><td></td></tr>
-<tr><td><code>HEAD</code></td><td>30</td><td></td><td>m -&gt; sym</td><td>頭のシンボル</td><td><code>head</code></td><td></td><td></td><td>○</td></tr>
-<tr><td><code>ARITY</code></td><td>31</td><td></td><td>m -&gt; n</td><td>引数の個数</td><td><code>arity</code></td><td></td><td></td><td>○</td></tr>
-<tr><td><code>ARG</code></td><td>32</td><td></td><td>m i -&gt; a</td><td>i 番目の引数（0 始まり）</td><td><code>arg</code></td><td></td><td></td><td>○</td></tr>
-<tr><td><code>PUSH</code></td><td>33</td><td></td><td>m x -&gt; m'</td><td>引数の末尾に x を加えた M式。64個を超えれば止まる</td><td><code>push</code></td><td>○</td><td></td><td>○</td></tr>
-<tr><td><code>TYPEOF</code></td><td>34</td><td></td><td>v -&gt; sym</td><td>「値」の表の名前</td><td><code>typeof</code></td><td></td><td></td><td></td></tr>
-<tr><td><code>STRLEN</code></td><td>35</td><td></td><td>s -&gt; n</td><td>バイト数（0 バイトも数える）</td><td><code>strlen</code></td><td></td><td></td><td>○</td></tr>
-<tr><td><code>ORD</code></td><td>36</td><td></td><td>s i -&gt; n</td><td>i 番目のバイト。範囲外なら -1</td><td><code>ord</code></td><td></td><td></td><td>○</td></tr>
-<tr><td><code>AGET</code></td><td>37</td><td></td><td>a i -&gt; v</td><td>要素を読む</td><td><code>array_get</code></td><td></td><td></td><td>○</td></tr>
-<tr><td><code>ASET</code></td><td>38</td><td></td><td>a i v -&gt; v</td><td>要素に書き込み、v を返す</td><td><code>array_set</code></td><td></td><td>○</td><td>○</td></tr>
-<tr><td><code>ALEN</code></td><td>39</td><td></td><td>a -&gt; n</td><td>長さ</td><td><code>array_len</code></td><td></td><td></td><td>○</td></tr>
-<tr><td><code>HASH</code></td><td>40</td><td></td><td>v -&gt; n</td><td>非負の整数。「値」の規則に従う</td><td><code>hash</code></td><td></td><td></td><td></td></tr>
-<tr><td><code>PLAINGET</code></td><td>41</td><td></td><td>a i -&gt; v</td><td>要素を読む。値は「plain 配列の型」のとおり</td><td><code>plain_get</code></td><td></td><td></td><td>○</td></tr>
-<tr><td><code>PLAINSET</code></td><td>42</td><td></td><td>a i v -&gt; v</td><td>要素に書き込み、v を返す。型に収まらなければ止まる。変換は「plain 配列への書き込み」のとおり</td><td><code>plain_set</code></td><td></td><td></td><td>○</td></tr>
+<tr><th>ニーモニック</th><th>オペコード</th><th>オペランド</th><th>スタック</th><th>動作</th><th>組み込み</th><th>S</th><th>W</th><th>T</th></tr>
+<tr><td><code>CONST</code></td><td>0x00</td><td>k</td><td>-&gt; v</td><td>定数表の値を積む。整数・浮動小数点数・文字列・シンボルのリテラルと <code>Quote</code> の中身に使う。M式と文字列は不変なので共有する</td><td></td><td></td><td></td><td></td></tr>
+<tr><td><code>POP</code></td><td>0x01</td><td></td><td>v -&gt;</td><td>捨てる</td><td></td><td></td><td></td><td></td></tr>
+<tr><td><code>DUP</code></td><td>0x02</td><td></td><td>v -&gt; v v</td><td>複製する</td><td></td><td></td><td></td><td></td></tr>
+<tr><td><code>LOAD</code></td><td>0x03</td><td>d i</td><td>-&gt; v</td><td>親を d 回たどった環境のスロット i の値を積む。検査はしない</td><td></td><td></td><td></td><td></td></tr>
+<tr><td><code>STORE</code></td><td>0x04</td><td>d i</td><td>v -&gt; v</td><td>スロット i に書き込む。値はスタックに残す</td><td></td><td></td><td>○</td><td></td></tr>
+<tr><td><code>GLOAD</code></td><td>0x05</td><td>c</td><td>-&gt; v</td><td>セルの値を積む。検査はしない</td><td></td><td></td><td></td><td></td></tr>
+<tr><td><code>GSET</code></td><td>0x06</td><td>c</td><td>v -&gt; v</td><td>セルに書き込む。値はスタックに残す。<code>Def</code> の大域変数にも <code>Set</code> の大域変数にもこの命令を使う</td><td></td><td></td><td>○</td><td></td></tr>
+<tr><td><code>JMP</code></td><td>0x07</td><td>L</td><td></td><td>L へジャンプする</td><td></td><td></td><td></td><td></td></tr>
+<tr><td><code>JF</code></td><td>0x08</td><td>L</td><td>c -&gt;</td><td>c がシンボル <code>false</code> なら L へジャンプし、それ以外なら次の命令へ進む</td><td></td><td></td><td></td><td></td></tr>
+<tr><td><code>CALL</code></td><td>0x09</td><td>n</td><td>f a1..an -&gt; r</td><td>実行モデルの「呼び出し」の規則に従って呼ぶ</td><td></td><td>○</td><td></td><td>○</td></tr>
+<tr><td><code>TCALL</code></td><td>0x0A</td><td>n</td><td>f a1..an -&gt; r</td><td>現在のフレームを捨てて呼ぶ（末尾呼び出し）。どの場所でも使う。入口のフレームでも同様で、呼ばれた関数の <code>RET</code> が結果を評価器に返す。現在のフレームが境界なら <code>CALL</code> と同じ</td><td></td><td>○</td><td></td><td>○</td></tr>
+<tr><td><code>RET</code></td><td>0x0B</td><td></td><td>v -&gt;</td><td>フレームを捨て、呼び出し元のオペランドスタックに v を積んで実行を続ける。入口のフレームなら実行結果として評価器に返す</td><td></td><td></td><td></td><td></td></tr>
+<tr><td><code>CALLP</code></td><td>0x0C</td><td>c p</td><td>a1..an -&gt; r</td><td>セル c の現在の値が組み込み p なら、その命令をこの場で実行する。そうでなければ c の値を <code>CALL</code> で呼ぶ。n は p の引数の個数</td><td></td><td>○</td><td></td><td>○</td></tr>
+<tr><td><code>CLOSURE</code></td><td>0x0D</td><td>k</td><td>-&gt; f</td><td>定数 k のコードと現在の環境から Lambda を作る</td><td></td><td>○</td><td></td><td></td></tr>
+<tr><td><code>FUSION</code></td><td>0x0E</td><td></td><td>f g -&gt; h</td><td><code>f | g</code> を作る。f が none なら g を返す。どちらも関数でなければ止まる</td><td></td><td>○</td><td></td><td>○</td></tr>
+<tr><td><code>BUILD</code></td><td>0x0F</td><td>k n</td><td>a1..an -&gt; m</td><td>定数 k のシンボルを頭とする M式を作る。<code>Tuple</code> も <code>Cons</code> もこの命令で作る。n が 64 を超えれば止まる</td><td></td><td>○</td><td></td><td>○</td></tr>
+<tr><td><code>ARGI</code></td><td>0x10</td><td>i</td><td>m -&gt; a</td><td>M式 m の i 番目の引数を取り出す。M式でないか範囲外なら止まる。照合の後で使う</td><td></td><td></td><td></td><td>○</td></tr>
+<tr><td><code>PARAM</code></td><td>0x11</td><td>a</td><td>-&gt; v</td><td>呼び出しの a 番目の引数を積む</td><td></td><td></td><td></td><td></td></tr>
+<tr><td><code>MATCHEQ</code></td><td>0x12</td><td>k L</td><td>v -&gt;</td><td>v が定数 k と <code>EQ</code> で等しければ次へ進み、そうでなければ L へジャンプする。整数、文字列、<code>Quote{v}</code> のパターンに使う</td><td></td><td></td><td></td><td></td></tr>
+<tr><td><code>MATCHHEAD</code></td><td>0x13</td><td>k n L</td><td>v -&gt; v</td><td>v が、頭がシンボル k で引数が n 個の M式なら次へ進み、そうでなければ L へジャンプする</td><td></td><td></td><td></td><td></td></tr>
+<tr><td><code>MATCHTYPE</code></td><td>0x14</td><td>k L</td><td>v -&gt; v</td><td><code>typeof</code> v が定数 k のシンボルなら次へ進み、そうでなければ L へジャンプする。<code>_TypeOf{p, type}</code> のパターンに使う</td><td></td><td></td><td></td><td></td></tr>
+<tr><td><code>NEXT</code></td><td>0x15</td><td></td><td></td><td>現在のフレームを捨て、同じ引数で残りの選択肢を試す。尽きれば止まる（<code>matching failed</code>）。<code>PERFORM</code> が呼んだフレームでは外側の境界へ進む</td><td></td><td></td><td></td><td>○</td></tr>
+<tr><td><code>HANDLE</code></td><td>0x16</td><td></td><td>body h -&gt; r</td><td>body（arity 0 の Lambda）を境界フレームで実行する。h が関数でなければ止まる</td><td></td><td>○</td><td></td><td>○</td></tr>
+<tr><td><code>PERFORM</code></td><td>0x17</td><td></td><td>v -&gt; r</td><td>実行モデルの「継続とハンドラ」の規則に従う。値は再開の引数になる</td><td></td><td>○</td><td></td><td>○</td></tr>
+<tr><td><code>ADD</code></td><td>0x18</td><td></td><td>a b -&gt; r</td><td>a + b</td><td><code>_add</code></td><td>○</td><td></td><td>○</td></tr>
+<tr><td><code>SUB</code></td><td>0x19</td><td></td><td>a b -&gt; r</td><td>a - b</td><td><code>_sub</code></td><td>○</td><td></td><td>○</td></tr>
+<tr><td><code>MUL</code></td><td>0x1A</td><td></td><td>a b -&gt; r</td><td>a * b</td><td><code>_mul</code></td><td>○</td><td></td><td>○</td></tr>
+<tr><td><code>DIV</code></td><td>0x1B</td><td></td><td>a b -&gt; r</td><td>整数どうしなら 0 方向へ切り捨てた商で、b が 0 なら止まる。それ以外は通常の割り算で、0 で割っても止まらない</td><td><code>_div</code></td><td>○</td><td></td><td>○</td></tr>
+<tr><td><code>MOD</code></td><td>0x1C</td><td></td><td>a b -&gt; r</td><td>整数どうしなら <code>a - b * (a / b)</code>（商は <code>DIV</code> のとおり）で、b が 0 なら止まる</td><td><code>_mod</code></td><td>○</td><td></td><td>○</td></tr>
+<tr><td><code>LT</code></td><td>0x1D</td><td></td><td>a b -&gt; r</td><td>a &lt; b を <code>true</code> か <code>false</code> で返す。複素数を含めば止まる</td><td><code>_lt</code></td><td></td><td></td><td>○</td></tr>
+<tr><td><code>GE</code></td><td>0x1E</td><td></td><td>a b -&gt; r</td><td>a &gt;= b を <code>true</code> か <code>false</code> で返す。複素数を含めば止まる</td><td><code>_ge</code></td><td></td><td></td><td>○</td></tr>
+<tr><td><code>EQ</code></td><td>0x1F</td><td></td><td>a b -&gt; r</td><td>実行モデルの「値」の等しさ。数に限らずすべての値を受け取る。<code>true</code> か <code>false</code> を返す</td><td><code>_eq</code></td><td></td><td></td><td></td></tr>
+<tr><td><code>NE</code></td><td>0x20</td><td></td><td>a b -&gt; r</td><td><code>EQ</code> の逆。数に限らずすべての値を受け取る。<code>true</code> か <code>false</code> を返す</td><td><code>_ne</code></td><td></td><td></td><td></td></tr>
+<tr><td><code>HEAD</code></td><td>0x21</td><td></td><td>m -&gt; sym</td><td>頭のシンボル</td><td><code>head</code></td><td></td><td></td><td>○</td></tr>
+<tr><td><code>ARITY</code></td><td>0x22</td><td></td><td>m -&gt; n</td><td>引数の個数</td><td><code>arity</code></td><td></td><td></td><td>○</td></tr>
+<tr><td><code>ARG</code></td><td>0x23</td><td></td><td>m i -&gt; a</td><td>i 番目の引数（0 始まり）</td><td><code>arg</code></td><td></td><td></td><td>○</td></tr>
+<tr><td><code>PUSH</code></td><td>0x24</td><td></td><td>m x -&gt; m'</td><td>引数の末尾に x を加えた M式。64個を超えれば止まる</td><td><code>push</code></td><td>○</td><td></td><td>○</td></tr>
+<tr><td><code>TYPEOF</code></td><td>0x25</td><td></td><td>v -&gt; sym</td><td>「値」の表の名前</td><td><code>typeof</code></td><td></td><td></td><td></td></tr>
+<tr><td><code>STRLEN</code></td><td>0x26</td><td></td><td>s -&gt; n</td><td>バイト数（0 バイトも数える）</td><td><code>strlen</code></td><td></td><td></td><td>○</td></tr>
+<tr><td><code>ORD</code></td><td>0x27</td><td></td><td>s i -&gt; n</td><td>i 番目のバイト。範囲外なら -1</td><td><code>ord</code></td><td></td><td></td><td>○</td></tr>
+<tr><td><code>AGET</code></td><td>0x28</td><td></td><td>a i -&gt; v</td><td>要素を読む</td><td><code>array_get</code></td><td></td><td></td><td>○</td></tr>
+<tr><td><code>ASET</code></td><td>0x29</td><td></td><td>a i v -&gt; v</td><td>要素に書き込み、v を返す</td><td><code>array_set</code></td><td></td><td>○</td><td>○</td></tr>
+<tr><td><code>ALEN</code></td><td>0x2A</td><td></td><td>a -&gt; n</td><td>長さ</td><td><code>array_len</code></td><td></td><td></td><td>○</td></tr>
+<tr><td><code>HASH</code></td><td>0x2B</td><td></td><td>v -&gt; n</td><td>非負の整数。「値」の規則に従う</td><td><code>hash</code></td><td></td><td></td><td></td></tr>
+<tr><td><code>PLAINGET</code></td><td>0x2C</td><td></td><td>a i -&gt; v</td><td>要素を読む。値は「plain 配列の型」のとおり</td><td><code>plain_get</code></td><td></td><td></td><td>○</td></tr>
+<tr><td><code>PLAINSET</code></td><td>0x2D</td><td></td><td>a i v -&gt; v</td><td>要素に書き込み、v を返す。型に収まらなければ止まる。変換は「plain 配列への書き込み」のとおり</td><td><code>plain_set</code></td><td></td><td></td><td>○</td></tr>
 </table>
-<p>プログラムは <code>_index_get</code> のように大域の関数に代入できるので、<code>a + b</code> を <code>ADD</code> に決め打ちできません。<code>CALLP</code> を使えば、組み込みを上書きしたプログラムも正しく動きます。</p>
-<p>関数の入口には、パターンの数だけ命令列を並べます。照合に失敗すると <code>L</code> へジャンプし、そのとき<strong>オペランドスタックを空にします</strong>。<code>L</code> には <code>NEXT</code> を置きます。引数がパターンの変数に束縛されるときは、<code>STORE 0 i</code> と <code>POP</code> で環境に書き込みます。<code>PARAM</code> <code>STORE</code> <code>POP</code> を1つにまとめた命令は用意しません。</p>
-<p><code>HANDLE</code> の本体の末尾呼び出しは <code>TCALL</code> と書きますが、境界フレームは捨てません。</p>
-<p><code>ADD</code> <code>SUB</code> <code>MUL</code> <code>DIV</code> <code>LT</code> は引数が数でなければ止まります。型の混在と結果の型については、実行モデルの「数」を参照してください。<code>HEAD</code> から <code>PLAINSET</code> までの命令は、引数の型が違うときと範囲外のときに止まります（<code>ORD</code> の範囲外を除く）。</p>
+<p>関数の入口には、パターンの数だけ命令列を並べます。照合に失敗すると <code>L</code> へジャンプし、そのとき<strong>オペランドスタックを空にします</strong>。<code>L</code> には <code>NEXT</code> を置きます。引数がパターンの変数に束縛されるときは、<code>STORE 0 i</code> と <code>POP</code> で環境に書き込みます。</p>
+<p><code>ADD</code> <code>SUB</code> <code>MUL</code> <code>DIV</code> <code>MOD</code> <code>LT</code> <code>GE</code> は引数が数でなければ止まります。型の混在と結果の型については、実行モデルの「数」を参照してください。<code>HEAD</code> から <code>PLAINSET</code> までの命令は、引数の型が違うときと範囲外のときに止まります（<code>ORD</code> の範囲外を除く）。</p>
 
 <h2 id="builtins">組み込みと命令</h2>
 <p>高頻度で呼ばれるものだけを命令にします。実行のたびに通る定数、変数、制御、呼び出し、照合、エフェクト、演算子と、呼び出しの多い組み込みが該当します。それ以外は組み込み関数にして、命令を増やしません。型で分かれる演算は、値の型を見る1つの命令にします。</p>
 
 <h3>命令にしない組み込み</h3>
-<p>種類が planck のものは、命令を使った planck の関数として、評価器のイメージに含めます。大域変数の名前と振る舞いは組み込みと同じです。種類が機械のものは、機械の組み込みです（実行モデルの「呼び出し」の表の組み込み）。どちらも <code>GLOAD c</code> と引数を積んで <code>CALL n</code> で呼びます。</p>
+<p>機械の組み込みです（実行モデルの「呼び出し」の表の組み込み）。<code>GLOAD c</code> と引数を積んで <code>CALL n</code> で呼びます。</p>
 <table>
-<tr><th>組み込み</th><th>種類</th><th>書き方・動作</th></tr>
-<tr><td><code>mexpr(h, t)</code></td><td>機械</td><td>頭を h（シンボル）、引数を <code>Tuple</code> t の引数とする M式</td></tr>
-<tr><td><code>substr(s, i, j)</code></td><td>機械</td><td>i から j-1 までのバイト列。範囲外ならエラー</td></tr>
-<tr><td><code>_strcat(a, b)</code></td><td>機械</td><td>連結</td></tr>
-<tr><td><code>intern(s)</code></td><td>機械</td><td>名前が s のシンボル</td></tr>
-<tr><td><code>symname(sym)</code></td><td>機械</td><td>シンボルの名前</td></tr>
-<tr><td><code>array(n)</code></td><td>機械</td><td>none で埋めた要素数 n の配列。n が負ならエラー</td></tr>
-<tr><td><code>plain_array(kind, n)</code></td><td>機械</td><td>型 kind の要素 n 個を 0 で埋めた plain 配列。ここでの 0 は、型に応じて <code>false</code> <code>0</code> <code>0.0</code> <code>0+0j</code> のいずれか。kind が14種類のどれでもないか n が負ならエラー</td></tr>
-<tr><td><code>plain_len(a)</code></td><td>機械</td><td>長さ</td></tr>
-<tr><td><code>plain_kind(a)</code></td><td>機械</td><td>型のシンボル</td></tr>
-<tr><td><code>bit_and(a, b)</code></td><td>機械</td><td>ビットごとの論理積</td></tr>
-<tr><td><code>bit_or(a, b)</code></td><td>機械</td><td>ビットごとの論理和</td></tr>
-<tr><td><code>bit_xor(a, b)</code></td><td>機械</td><td>ビットごとの排他的論理和</td></tr>
-<tr><td><code>bit_shl(a, k)</code></td><td>機械</td><td>a を k ビット左へシフトする。ラップアラウンドしない。k が負ならエラー</td></tr>
-<tr><td><code>bit_sar(a, k)</code></td><td>機械</td><td>a を k ビット右へシフトする（符号を保つ）。k が負ならエラー</td></tr>
-<tr><td><code>fsqrt(a)</code></td><td>機械</td><td>平方根。負なら NaN</td></tr>
-<tr><td><code>ffloor(a)</code></td><td>機械</td><td>床関数。結果は浮動小数点数</td></tr>
-<tr><td><code>ftoi(a)</code></td><td>機械</td><td>0 方向へ切り捨てた整数。NaN か無限大ならエラー</td></tr>
-<tr><td><code>ftobits(a)</code></td><td>機械</td><td>64 ビットのビット列を非負の整数で返す</td></tr>
-<tr><td><code>bitstof(n)</code></td><td>機械</td><td><code>ftobits</code> の逆。n が 64 ビットに収まらなければエラー</td></tr>
-<tr><td><code>ftos(a)</code></td><td>機械</td><td>読み戻すと同じ値になる最短の10進文字列</td></tr>
-<tr><td><code>stof(s)</code></td><td>機械</td><td>10進（指数付きも可）の文字列を読む。読めなければ none</td></tr>
-<tr><td><code>fexp(a)</code> <code>flog(a)</code> <code>fsin(a)</code> <code>fcos(a)</code></td><td>機械</td><td>指数関数・自然対数・正弦・余弦</td></tr>
-<tr><td><code>fpow(a, b)</code> <code>fatan2(a, b)</code></td><td>機械</td><td>べき乗・2引数の逆正接</td></tr>
-<tr><td><code>complex(re, im)</code></td><td>機械</td><td>実部 re、虚部 im の複素数。re と im は整数か浮動小数点数で、浮動小数点数に揃える</td></tr>
-<tr><td><code>real(z)</code> <code>imag(z)</code></td><td>機械</td><td>複素数 z の実部・虚部（浮動小数点数）。z が複素数でなければエラー</td></tr>
-<tr><td><code>put(s)</code></td><td>機械</td><td>文字列の全バイトを標準出力に書く（0 バイトも書く）。none を返す</td></tr>
-<tr><td><code>print(v)</code></td><td>機械</td><td>値の文字列表現を標準出力に書く。関数は <code>&lt;lambda:(...)&gt;</code> <code>&lt;prim:名前&gt;</code> <code>&lt;cont&gt;</code> のように、Fusion は <code>f|g</code> と書く。浮動小数点数は <code>ftos</code> の文字列を書く。none を返す</td></tr>
-<tr><td><code>println(v)</code></td><td>機械</td><td><code>print</code> の後に改行を書く。none を返す</td></tr>
-<tr><td><code>try_read_file(path)</code></td><td>機械</td><td>ファイルの全バイト（0 バイトも含む）。読めなければ none</td></tr>
-<tr><td><code>read_bytes(path)</code></td><td>機械</td><td>全バイトを入れた <code>'u8</code> 配列。読めなければエラー</td></tr>
-<tr><td><code>write_file(path, x)</code></td><td>機械</td><td>文字列か <code>'u8</code> 配列の全バイトを書く。ファイルは新しく作るか空にする。書けなければエラー。none を返す</td></tr>
-<tr><td><code>chmod(path, mode)</code></td><td>機械</td><td>権限を変更する。失敗すればエラー。none を返す</td></tr>
-<tr><td><code>argv()</code></td><td>機械</td><td>起動時の引数の文字列を並べた配列</td></tr>
-<tr><td><code>exit(n)</code></td><td>機械</td><td>終了状態 n で終了する。戻らない</td></tr>
-<tr><td><code>_set_file(path)</code></td><td>機械</td><td>読み込み中のファイルを path にし、前の値（無ければ none）を返す。コンパイラが大域変数の定義元を判定するのに使う</td></tr>
-<tr><td><code>eval(e)</code></td><td>機械</td><td>M式 e を現在の大域環境でコードに変換して実行する。結果は呼び出し元へ返る。コンパイルエラーは実行時エラーと同じく止まる（<code>undefined variable</code> など）</td></tr>
-<tr><td><code>_ne(a, b)</code></td><td>planck</td><td><code>if (a == b) false else true</code></td></tr>
-<tr><td><code>_le(a, b)</code></td><td>planck</td><td><code>if (a &lt; b) true else (a == b)</code>（NaN を含めば <code>false</code>）</td></tr>
-<tr><td><code>_gt(a, b)</code></td><td>planck</td><td><code>b &lt; a</code></td></tr>
-<tr><td><code>_ge(a, b)</code></td><td>planck</td><td><code>_le(b, a)</code></td></tr>
-<tr><td><code>_mod(a, b)</code></td><td>planck</td><td><code>a - b * (a / b)</code>（整数の剰余）</td></tr>
-<tr><td><code>bit_not(a)</code></td><td>planck</td><td><code>-1 - a</code></td></tr>
-<tr><td><code>bit_shr(a, k)</code></td><td>planck</td><td>a が非負なら <code>bit_sar(a, k)</code>。負ならエラー</td></tr>
-<tr><td><code>plain_copy(dst, di, src, si, n)</code></td><td>planck</td><td><code>plain_get</code> と <code>plain_set</code> の繰り返し。型が異なればエラー。同じ配列で領域が重なるときはコピーの向きを選ぶ</td></tr>
-<tr><td><code>read_file(path)</code></td><td>planck</td><td><code>try_read_file</code> が none ならエラーメッセージを出して <code>exit(1)</code></td></tr>
-<tr><td><code>parse(s)</code></td><td>planck</td><td>M式の読み取り。<code>ORD</code> <code>BUILD</code> <code>PUSH</code> と <code>substr</code> <code>mexpr</code> で書く。浮動小数点リテラルは <code>stof</code> で読む</td></tr>
-<tr><td><code>u8_array(n)</code> <code>u16_array(n)</code> <code>i32_array(n)</code></td><td>planck</td><td><code>plain_array('u8, n)</code> など</td></tr>
-<tr><td><code>bool_array(n)</code> <code>i8_array(n)</code> <code>i16_array(n)</code> <code>i64_array(n)</code> <code>u32_array(n)</code> <code>u64_array(n)</code> <code>f16_array(n)</code> <code>f32_array(n)</code> <code>f64_array(n)</code> <code>c64_array(n)</code> <code>c128_array(n)</code></td><td>planck</td><td>同じ形。<code>plain_array('i8, n)</code> など</td></tr>
-<tr><td><code>itof(n)</code></td><td>planck</td><td><code>n + 0.0</code></td></tr>
-<tr><td><code>conj(z)</code></td><td>planck</td><td><code>complex(real(z), imag(z) * -1)</code></td></tr>
+<tr><th>組み込み</th><th>動作</th></tr>
+<tr><td><code>mexpr(h, t)</code></td><td>頭を h（シンボル）、引数を <code>Tuple</code> t の引数とする M式</td></tr>
+<tr><td><code>substr(s, i, j)</code></td><td>i から j-1 までのバイト列。範囲外ならエラー</td></tr>
+<tr><td><code>_strcat(a, b)</code></td><td>連結</td></tr>
+<tr><td><code>intern(s)</code></td><td>名前が s のシンボル</td></tr>
+<tr><td><code>symname(sym)</code></td><td>シンボルの名前</td></tr>
+<tr><td><code>array(n)</code></td><td>none で埋めた要素数 n の配列。n が負ならエラー</td></tr>
+<tr><td><code>plain_array(kind, n)</code></td><td>型 kind の要素 n 個を 0 で埋めた plain 配列。ここでの 0 は、型に応じて <code>false</code> <code>0</code> <code>0.0</code> <code>0+0j</code> のいずれか。kind が14種類のどれでもないか n が負ならエラー</td></tr>
+<tr><td><code>plain_len(a)</code></td><td>長さ</td></tr>
+<tr><td><code>plain_kind(a)</code></td><td>型のシンボル</td></tr>
+<tr><td><code>bit_and(a, b)</code></td><td>ビットごとの論理積</td></tr>
+<tr><td><code>bit_or(a, b)</code></td><td>ビットごとの論理和</td></tr>
+<tr><td><code>bit_xor(a, b)</code></td><td>ビットごとの排他的論理和</td></tr>
+<tr><td><code>bit_shl(a, k)</code></td><td>a を k ビット左へシフトする。ラップアラウンドしない。k が負ならエラー</td></tr>
+<tr><td><code>bit_sar(a, k)</code></td><td>a を k ビット右へシフトする（符号を保つ）。k が負ならエラー</td></tr>
+<tr><td><code>fsqrt(a)</code></td><td>平方根。負なら NaN</td></tr>
+<tr><td><code>ffloor(a)</code></td><td>床関数。結果は浮動小数点数</td></tr>
+<tr><td><code>ftoi(a)</code></td><td>0 方向へ切り捨てた整数。NaN か無限大ならエラー</td></tr>
+<tr><td><code>ftobits(a)</code></td><td>64 ビットのビット列を非負の整数で返す</td></tr>
+<tr><td><code>bitstof(n)</code></td><td><code>ftobits</code> の逆。n が 64 ビットに収まらなければエラー</td></tr>
+<tr><td><code>ftos(a)</code></td><td>読み戻すと同じ値になる最短の10進文字列</td></tr>
+<tr><td><code>stof(s)</code></td><td>10進（指数付きも可）の文字列を読む。読めなければ none</td></tr>
+<tr><td><code>fexp(a)</code> <code>flog(a)</code> <code>fsin(a)</code> <code>fcos(a)</code></td><td>指数関数・自然対数・正弦・余弦</td></tr>
+<tr><td><code>fpow(a, b)</code> <code>fatan2(a, b)</code></td><td>べき乗・2引数の逆正接</td></tr>
+<tr><td><code>complex(re, im)</code></td><td>実部 re、虚部 im の複素数。re と im は整数か浮動小数点数で、浮動小数点数に揃える</td></tr>
+<tr><td><code>real(z)</code> <code>imag(z)</code></td><td>複素数 z の実部・虚部（浮動小数点数）。z が複素数でなければエラー</td></tr>
+<tr><td><code>put(s)</code></td><td>文字列の全バイトを標準出力に書く（0 バイトも書く）。none を返す</td></tr>
+<tr><td><code>print(v)</code></td><td>値の文字列表現を標準出力に書く。関数は <code>&lt;lambda:(...)&gt;</code> <code>&lt;prim:名前&gt;</code> <code>&lt;cont&gt;</code> のように、Fusion は <code>f|g</code> と書く。浮動小数点数は <code>ftos</code> の文字列を書く。none を返す</td></tr>
+<tr><td><code>println(v)</code></td><td><code>print</code> の後に改行を書く。none を返す</td></tr>
+<tr><td><code>try_read_file(path)</code></td><td>ファイルの全バイト（0 バイトも含む）。読めなければ none</td></tr>
+<tr><td><code>read_bytes(path)</code></td><td>全バイトを入れた <code>'u8</code> 配列。読めなければエラー</td></tr>
+<tr><td><code>write_file(path, x)</code></td><td>文字列か <code>'u8</code> 配列の全バイトを書く。ファイルは新しく作るか空にする。書けなければエラー。none を返す</td></tr>
+<tr><td><code>chmod(path, mode)</code></td><td>権限を変更する。失敗すればエラー。none を返す</td></tr>
+<tr><td><code>argv()</code></td><td>起動時の引数の文字列を並べた配列</td></tr>
+<tr><td><code>exit(n)</code></td><td>終了状態 n で終了する。戻らない</td></tr>
+<tr><td><code>_set_file(path)</code></td><td>読み込み中のファイルを path にし、前の値（無ければ none）を返す。コンパイラが大域変数の定義元を判定するのに使う</td></tr>
+<tr><td><code>eval(e)</code></td><td>M式 e を現在の大域環境でコードに変換して実行する。結果は呼び出し元へ返る。コンパイルエラーは実行時エラーと同じく止まる（<code>undefined variable</code> など）</td></tr>
 </table>
 <p>機械の組み込みの確保とエラーは、呼んだ <code>CALL</code> の S と T に含まれます。<code>mexpr</code> <code>substr</code> <code>_strcat</code> <code>intern</code> <code>symname</code> <code>array</code> <code>plain_array</code> <code>plain_len</code> <code>plain_kind</code> は、引数の型が違うときと範囲外のときもエラーです。</p>
 <p>ビット演算の引数は整数です。負の数も含めて無限桁の2の補数として扱います。</p>
-<p>浮動小数点数を受け取る組み込みは整数も受け取り、浮動小数点数に揃えます。複素数を渡すとエラーです。数学関数は <code>fexp</code> <code>flog</code> <code>fsin</code> <code>fcos</code> <code>fpow</code> <code>fatan2</code> の6つだけです。複素数の加減乗除と等値比較は <code>ADD</code> <code>SUB</code> <code>MUL</code> <code>DIV</code> <code>EQ</code> で書けます。</p>
-<p>フレームを作る組み込みは <code>eval</code> だけです。その実行中に <code>PERFORM</code> が起きても、eval の内側のフレームは通常のフレームとして複製できます。</p>
-<p>エラーメッセージに出る関数名は、呼んだ組み込みと異なることがあります。たとえば <code>_mod</code> の引数が整数でないときのメッセージには <code>_div</code> の名前が出ます。</p>
-
-<h3>planck のコードで定義する名前</h3>
-<p>仕様の組み込み関数の表にあって機械の組み込みでない名前は、planck のコードで定義するので命令を必要としません: <code>_define_rule</code> <code>_index_get</code> <code>_index_set</code> <code>_not</code> <code>_record_declare</code> <code>_record_get</code> <code>_to_text</code> <code>false</code> <code>load</code> <code>none</code> <code>parse_mexpr</code> <code>peg_for</code> <code>peg_parse</code> <code>subst</code> <code>table</code> <code>table_get</code> <code>table_set</code> <code>true</code> <code>use</code> <code>used_libs</code>。</p>
-<p>planckvm が仕様に追加する組み込みは、<code>plain_array</code>、浮動小数点数の関数 <code>fsqrt</code> <code>ffloor</code> <code>ftoi</code> <code>ftobits</code> <code>bitstof</code> <code>ftos</code> <code>stof</code> <code>fexp</code> <code>flog</code> <code>fsin</code> <code>fcos</code> <code>fpow</code> <code>fatan2</code>、複素数の <code>complex</code> <code>real</code> <code>imag</code>、plain 配列の型ごとの作成関数、<code>itof</code> <code>conj</code> です。</p>
+<p>浮動小数点数を受け取る組み込みは整数も受け取り、浮動小数点数に揃えます。複素数を渡すとエラーです。</p>
+<p><code>eval</code> の実行中に <code>PERFORM</code> が起きても、eval の内側のフレームは通常のフレームとして複製できます。</p>
 
 <h2>言語の機能と命令</h2>
 <p>仕様の構文の表の行ごとに示します。<code>&lt;e&gt;</code> は e の命令列です。変数の読み書きには、実行モデルの規則に従って <code>LOAD</code> / <code>STORE</code>（局所）か <code>GLOAD</code> / <code>GSET</code>（大域）を使います。</p>
@@ -175,11 +188,11 @@
 <tr><td><code>f | g</code></td><td><code>&lt;f&gt;</code> <code>&lt;g&gt;</code> <code>FUSION</code></td></tr>
 <tr><td><code>p if c -&gt; e | g</code></td><td>コードの本体を <code>If{c, e, g の呼び出し}</code> にした Lambda と Fusion。引数は <code>%</code> で始まる名前の変数に束縛して g に渡す</td></tr>
 <tr><td><code>f(a, ...)</code></td><td><code>&lt;f&gt;</code> <code>&lt;a&gt;</code>... <code>CALL n</code>。末尾なら <code>TCALL n</code></td></tr>
-<tr><td><code>a + b</code> <code>a - b</code> <code>a * b</code> <code>a / b</code></td><td>組み込みが上書きされていなければ <code>&lt;a&gt;</code> <code>&lt;b&gt;</code> <code>CALLP c p</code>、上書きされていれば <code>GLOAD c</code> <code>&lt;a&gt;</code> <code>&lt;b&gt;</code> <code>CALL 2</code></td></tr>
-<tr><td><code>a % b</code> <code>a &lt;= b</code> など命令にしない組み込み</td><td><code>GLOAD c</code> <code>&lt;a&gt;</code> <code>&lt;b&gt;</code> <code>CALL 2</code></td></tr>
+<tr><td><code>a + b</code> <code>a - b</code> <code>a * b</code> <code>a / b</code> <code>a % b</code></td><td>組み込みが上書きされていなければ <code>&lt;a&gt;</code> <code>&lt;b&gt;</code> <code>CALLP c p</code>、上書きされていれば <code>GLOAD c</code> <code>&lt;a&gt;</code> <code>&lt;b&gt;</code> <code>CALL 2</code></td></tr>
+<tr><td><code>a &lt;= b</code> <code>a &gt; b</code></td><td><code>GLOAD c</code> <code>&lt;a&gt;</code> <code>&lt;b&gt;</code> <code>CALL 2</code></td></tr>
 <tr><td><code>-a</code></td><td><code>CONST 0</code> <code>&lt;a&gt;</code> <code>SUB</code>（<code>Apply{_sub, Tuple{0, a}}</code>）。<code>-0.0</code> は作らない（<code>0 - 0.0</code> は <code>0.0</code>）</td></tr>
-<tr><td><code>a == b</code> <code>a &lt; b</code></td><td><code>EQ</code> と <code>LT</code> の <code>CALLP</code></td></tr>
-<tr><td><code>not a</code> <code>a != b</code></td><td>planck の関数の <code>CALL</code></td></tr>
+<tr><td><code>a == b</code> <code>a != b</code> <code>a &lt; b</code> <code>a &gt;= b</code></td><td><code>EQ</code> <code>NE</code> <code>LT</code> <code>GE</code> の <code>CALLP</code></td></tr>
+<tr><td><code>not a</code></td><td>planck の関数の <code>CALL</code></td></tr>
 <tr><td><code>a and b</code> <code>a or b</code></td><td><code>If</code></td></tr>
 <tr><td><code>c ? a : b</code> <code>if (c) a else b</code></td><td><code>&lt;c&gt;</code> <code>JF L1</code> <code>&lt;a&gt;</code> <code>JMP L2</code> <code>L1:</code> <code>&lt;b&gt;</code> <code>L2:</code>。<code>else</code> が無ければ b は <code>CONST none</code></td></tr>
 <tr><td><code>while (c) e</code></td><td><code>L0:</code> <code>&lt;c&gt;</code> <code>JF L1</code> <code>&lt;e&gt;</code> <code>POP</code> <code>JMP L0</code> <code>L1:</code> <code>CONST none</code></td></tr>
@@ -206,35 +219,6 @@
 <tr><td>整数・文字列・<code>Quote{v}</code></td><td><code>MATCHEQ k L</code></td></tr>
 <tr><td><code>Head{p1, ..., pn}</code></td><td><code>MATCHHEAD k n L</code>、続いて各 j について <code>DUP</code> <code>ARGI j</code> と p_j の命令、最後に <code>POP</code></td></tr>
 <tr><td><code>_TypeOf{p, type}</code></td><td><code>MATCHTYPE k L</code>、続いて p の命令</td></tr>
-</table>
-
-<h3>仕様の節との対応</h3>
-<table>
-<tr><th>節</th><th>実現方法</th></tr>
-<tr><td>M-expressions</td><td><code>BUILD</code> <code>ARGI</code> <code>HEAD</code> <code>ARITY</code> <code>ARG</code> <code>PUSH</code> と <code>mexpr</code>。文字列は <code>CONST</code></td></tr>
-<tr><td>Names the sugar calls</td><td>大域変数への <code>CALL</code> と <code>CALLP</code>。<code>_</code> で始まる名前は組み込みか planck の関数</td></tr>
-<tr><td>Indexing and rewriting</td><td><code>_index_get</code> <code>_index_set</code> <code>subst</code> は planck の関数。要素の操作には <code>AGET</code> <code>ASET</code> <code>PLAINGET</code> <code>PLAINSET</code> <code>ORD</code> <code>ARG</code> と <code>substr</code> を使う</td></tr>
-<tr><td>Grammar declarations, Text of a rule</td><td><code>peg.pk</code> の planck の関数 <code>_define_rule</code> と <code>peg_parse</code>。<code>peg_parse</code> を構文解析時に呼び、結果を <code>CONST</code> にする</td></tr>
-<tr><td>Special forms</td><td><code>Def</code> <code>Set</code> <code>Declare</code> は変数の命令。ほかは上の表のとおり</td></tr>
-<tr><td>Patterns</td><td>入口の照合の命令</td></tr>
-<tr><td>Algebraic effects</td><td><code>HANDLE</code> <code>PERFORM</code> と継続の呼び出し</td></tr>
-<tr><td>Top level</td><td>評価器の入口。<code>parse</code> と <code>eval</code> のセルを読んで呼ぶ。<code>eval</code> と <code>_set_file</code></td></tr>
-<tr><td>Libraries, Preprocessed libraries</td><td>すべて planck のコード。<code>try_read_file</code> と <code>write_file</code>、<code>parse</code>、通常の <code>eval</code> を使う</td></tr>
-</table>
-
-<h2>場所によって変わる規則</h2>
-<p>命令の意味は場所によって変わりません。違いはコンパイラが選ぶ命令に現れます。</p>
-<table>
-<tr><th>場所</th><th>規則</th><th>命令への影響</th></tr>
-<tr><td>トップレベル（ブロックの外）の <code>x := e</code></td><td>大域変数。新しいセルを作る</td><td><code>GSET c</code></td></tr>
-<tr><td>トップレベルでも <code>if</code> や <code>while</code> のブロックの中にある <code>x := e</code></td><td>局所変数。トップレベルのコードの環境に置く</td><td><code>STORE 0 i</code></td></tr>
-<tr><td>関数の中の <code>x := e</code></td><td>局所変数。同じ関数の新しいスロットに置く</td><td><code>STORE 0 i</code></td></tr>
-<tr><td><code>Declare{x}</code>（<code>f(p) := e</code> の前半）</td><td>同じ場所に変数があれば何もしない。トップレベルで同じ場所にあたるのは、読み込み中のファイルで定義した大域変数だけ。別ファイルの大域変数は同じ場所ではないので、新しく作って隠す</td><td><code>_set_file</code> が示すファイルを使ってコンパイル時に判定する</td></tr>
-<tr><td>関数の中の <code>Declare{x}</code></td><td>同じ場所にあたるのは同じ関数の環境にある変数だけ。外側の関数の変数は同じ場所ではない</td><td>コンパイル時に判定する</td></tr>
-<tr><td>末尾呼び出し</td><td>どの場所でも <code>TCALL</code>。結果は同じで、スタックの深さだけが変わる</td><td>命令の選択は場所で変わらない</td></tr>
-<tr><td><code>HANDLE</code> の本体の末尾呼び出し</td><td><code>TCALL</code> と書いても境界フレームは捨てない</td><td>実行時の規則</td></tr>
-<tr><td>名前が見つからない</td><td>どの場所でも、式の実行前にコンパイル時に止める</td><td>命令は生成しない</td></tr>
-<tr><td>前方参照</td><td><code>fun f</code> で先に宣言する。関数の中でもトップレベルでも同じ</td><td><code>fun f</code> は none で始まり、呼ぶと止まる（<code>not a function: none</code>）。<code>GLOAD</code> と <code>LOAD</code> は検査しない</td></tr>
 </table>
 
 <nav class="pager"><a class="prev" href="planckvm.html"><small>前のページ</small>planckvm: 実行モデルと値</a><a class="next" href="planckvm-internals.html"><small>次のページ</small>planckvm の内部仕様</a></nav>

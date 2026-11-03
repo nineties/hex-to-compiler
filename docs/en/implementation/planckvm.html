@@ -36,39 +36,17 @@
 </ol></details></nav>
 <main>
 <h1>planckvm: execution model and values</h1>
-<p class="lead">planckvm is the bytecode that runs all of planck. An evaluator written in planck translates an expression into planckvm instructions and runs them in an instruction loop. This page and <a href="planckvm-isa.html">planckvm instructions</a> are the external specification: what the user of the VM and a code generator from planck may rely on. This page covers the machine, the values and the numbers. The design inside an implementation is in <a href="planckvm-internals.html">planckvm internals</a>. The differences from <code>planck/SPEC.rst</code> are listed in <a href="#spec">Differences from SPEC</a>.</p>
-
-<h2>Principles</h2>
-<ul>
-<li>Arbitrary-precision integers, floating-point numbers and complex numbers are primitives of the machine.</li>
-<li>A builtin function is not an instruction by default. Only what is called at a high frequency is an instruction (see <a href="planckvm-isa.html#builtins">Builtins and instructions</a>).</li>
-</ul>
+<p class="lead">planckvm is the bytecode that runs all of planck. An evaluator written in planck translates an expression into planckvm instructions and runs them in an instruction loop. This page and <a href="planckvm-isa.html">planckvm instructions</a> are the external specification: what the user of the VM and a code generator from planck may rely on. This page covers the machine, the values and the numbers. The design inside an implementation is in <a href="planckvm-internals.html">planckvm internals</a>.</p>
 
 <h2>Execution model</h2>
 <p>The machine is a stack machine. The intermediate values of an expression are pushed on the operand stack of each frame.</p>
 <table>
 <tr><th>Name</th><th>Contents</th></tr>
-<tr><td>code</td><td>The instructions of one lambda or of one top-level expression. Immutable</td></tr>
+<tr><td>code</td><td>The instructions of one lambda or of one top-level expression. Immutable. Its form is in <a href="planckvm-isa.html#format">Bytecode format</a></td></tr>
 <tr><td>frame</td><td>The state of one call. It is pushed on the frame stack</td></tr>
 <tr><td>environment</td><td>The place for the variables of one call. It is made for each call</td></tr>
 <tr><td>cell</td><td>One global variable: an object that holds a value and a name</td></tr>
 </table>
-
-<h3>Code</h3>
-<table>
-<tr><th>Field</th><th>Meaning</th></tr>
-<tr><td><code>arity</code></td><td>The number of arguments</td></tr>
-<tr><td><code>nslots</code></td><td>The number of slots of the environment</td></tr>
-<tr><td><code>params</code></td><td>The tree of the parameter patterns. It is not used to run the code; it serves to print a function and to report a matching failure</td></tr>
-<tr><td><code>instrs</code></td><td>The instructions. They never change after the code is made</td></tr>
-<tr><td><code>consts</code></td><td>The constant table: literals, symbols, cells and nested codes</td></tr>
-</table>
-<ul>
-<li>The instructions are a sequence of integers. An instruction is its number followed by its operands.</li>
-<li>A jump target <code>L</code> and the pc are indices into the instruction sequence.</li>
-<li>When a code is made it is checked: the height of the operand stack is determined uniquely at every instruction, every jump target is the start of an instruction, and the stack never goes below zero. The maximum height is computed.</li>
-<li>The height at the failure target <code>L</code> of a <code>MATCH*</code> instruction is 0.</li>
-</ul>
 
 <h3>Frames</h3>
 <p>A frame is the state of one call, pushed on the frame stack. When the frame stack is full the program stops with <code>stack overflow</code>.</p>
@@ -78,7 +56,7 @@
 <li>A call makes one environment, and every slot starts as <code>none</code>.</li>
 <li>A variable is decided by where it is written. It is resolved at compile time to a depth <code>d</code> (the number of parent links to follow) and a slot <code>i</code>. Name resolution ends at compile time, and at run time there is no state of an undefined variable.</li>
 <li>A lambda keeps the environment of the place where it was made. The environment is shared, so an assignment after the lambda was made is seen by the lambda.</li>
-<li>Resuming a continuation does not copy environments. The resumed copies share the same variables, as the specification requires.</li>
+<li>Resuming a continuation does not copy environments. The resumed copies share the same variables.</li>
 <li>A global variable is a cell, whose first value is <code>none</code>. <code>Def</code> makes a new cell, and the expressions compiled after it refer to the new cell. The expressions compiled before keep referring to the old one. <code>Set</code> writes the same cell.</li>
 </ul>
 
@@ -143,10 +121,9 @@
 <li><code>ADD</code>, <code>SUB</code>, <code>MUL</code> and <code>DIV</code> look at the types of their arguments, as one instruction each, and take integers, floats and complex numbers. When the types are mixed, the operands are raised to the higher type in the order integer, float, complex, and the result has that type.</li>
 <li>An integer raised to a float is rounded to the nearest value. An integer above 2^53 loses precision: <code>2^53 + 1 + 0.0</code> is the float <code>2^53</code>. Raising an integer that is beyond the range of floats (about 1.8 x 10^308) is an error.</li>
 <li><code>DIV</code> of two integers is the quotient truncated toward 0, and a zero divisor is an error. A division that involves a float or a complex number does not stop on a zero divisor: a float gives an infinity or NaN, and a complex number gives the same rule applied to its components.</li>
-<li><code>LT</code> compares an integer and a float by their mathematical values without raising the type. It gives <code>false</code> when NaN is involved. A complex number has no order, so <code>LT</code> on a complex number is an error.</li>
+<li><code>LT</code> and <code>GE</code> compare an integer and a float by their mathematical values without raising the type. They give <code>false</code> when NaN is involved. A complex number has no order, so <code>LT</code> or <code>GE</code> on a complex number is an error.</li>
 <li><code>EQ</code> says that values of different types are equal when their values are the same (<code>1 == 1.0</code>, <code>1 == 1+0j</code>). NaN is not equal to itself. Complex numbers are equal when both components are equal.</li>
-<li>Bit operations take integers only. Negative integers are treated as infinite-width two's complement.</li>
-<li>Floating-point exceptions do not stop the program. The mathematical functions are exactly six: exp, log, sin, cos, pow and atan2.</li>
+<li>Floating-point exceptions do not stop the program.</li>
 <li>A complex number is made by <code>complex(re, im)</code>. There is no literal.</li>
 </ul>
 
@@ -159,10 +136,10 @@
 <tr><td><code>'f16</code> <code>'f32</code> <code>'f64</code></td><td>Float</td><td>IEEE 754 binary16, binary32 and binary64</td></tr>
 <tr><td><code>'c64</code> <code>'c128</code></td><td>Complex</td><td>The real and the imaginary part are binary32 and binary64</td></tr>
 </table>
-<p>Reading an element gives a language value: an integer for an integer type, <code>true</code> or <code>false</code> for <code>'bool</code>, a float widened to binary64 without changing the value for <code>'f16</code> and <code>'f32</code>, and a complex number with widened components for <code>'c64</code>. The integer of the language stays one arbitrary-precision type; 32 bits and so on are only the way an array holds it. An integer outside the range is an error and is never wrapped around.</p>
+<p>Reading an element gives a language value: an integer for an integer type, <code>true</code> or <code>false</code> for <code>'bool</code>, a float widened to binary64 without changing the value for <code>'f16</code> and <code>'f32</code>, and a complex number with widened components for <code>'c64</code>.</p>
 
 <h3>Writing to a plain array</h3>
-<p>The conversions of <code>PLAINSET</code> follow numpy 2.0.2 (Python 3.9.6). Where numpy raises an error, <code>PLAINSET</code> is a runtime error; where numpy converts, it converts in the same way. numpy 1.26.4 wraps an out-of-range integer around with only a warning; planckvm follows the behavior that raises an error.</p>
+<p>The conversions of <code>PLAINSET</code> follow numpy 2.0.2 (Python 3.9.6). Where numpy raises an error, <code>PLAINSET</code> is a runtime error; where numpy converts, it converts in the same way.</p>
 <table>
 <tr><th>Value written</th><th>Array type</th><th><code>PLAINSET</code></th></tr>
 <tr><td>An integer in range</td><td>Integer</td><td>Stored as it is</td></tr>
@@ -182,18 +159,6 @@
 <tr><td>A value above the maximum of <code>'f16</code> (65504, such as <code>65520.0</code> or <code>1e5</code>)</td><td><code>'f16</code></td><td>An infinity of the same sign. <code>65519.0</code> becomes <code>65504</code></td></tr>
 <tr><td>An integer beyond the range of doubles (<code>2^1100</code>)</td><td>Float and complex types</td><td>Error</td></tr>
 <tr><td>A string, <code>none</code>, a symbol other than <code>true</code> and <code>false</code>, an M-expression, an array or a function</td><td>Every type</td><td>Error: the value is not of a numeric type of the language, and nothing is converted</td></tr>
-</table>
-<p>A write to <code>'bool</code> is the only place where a number is made into <code>false</code> by being 0 and into <code>true</code> otherwise. This is separate from the rule that only the symbol <code>false</code> is false in <code>if</code>.</p>
-<h2 id="spec">Differences from SPEC</h2>
-<p>These are the points where planckvm differs from <code>planck/SPEC.rst</code>.</p>
-<table>
-<tr><th>Point</th><th>SPEC</th><th>planckvm</th></tr>
-<tr><td>Integers</td><td>Bit operations and <code>u64_to_int</code> are written with 31 bits</td><td>Arbitrary precision. <code>ADD</code> <code>SUB</code> <code>MUL</code> are exact, with no wrap-around and no truncation</td></tr>
-<tr><td>Bit operations</td><td>31-bit two's complement. <code>bit_shl</code> keeps 31 bits</td><td>Infinite-width two's complement. <code>bit_shl</code> does not wrap around</td></tr>
-<tr><td><code>strlen</code>, <code>ord</code>, <code>substr</code></td><td>Written in characters</td><td>Bytes, 0 included</td></tr>
-<tr><td>Floats, complex numbers</td><td>Not described</td><td>Values, literals of floats such as <code>1.5</code>, <code>typeof</code> of <code>'float</code> and <code>'complex</code>, and the float and complex builtins</td></tr>
-<tr><td>Plain arrays</td><td><code>'u8</code> <code>'u16</code> <code>'i32</code></td><td>The 14 types, made by <code>plain_array(kind, n)</code>. <code>typeof</code> is <code>'plain</code></td></tr>
-<tr><td>Builtins that are planck functions</td><td>Builtin functions</td><td>The names and behavior stay the same, but the names that appear in some error messages may change</td></tr>
 </table>
 
 <nav class="pager"><a class="prev" href="vasm.html"><small>Previous</small>The vasm checker</a><a class="next" href="planckvm-isa.html"><small>Next</small>planckvm instructions</a></nav>
