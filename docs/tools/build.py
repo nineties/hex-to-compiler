@@ -56,6 +56,8 @@ SECTIONS = {
             ("peg", "packrat パーサ"),
             ("syntax", "構文の定義"),
             ("vasm", "vasm の検査器"),
+            ("planckvm", "planckvm: 実行モデルと値"),
+            ("planckvm-isa", "planckvm の命令"),
         ]),
     ],
     "en": [
@@ -89,6 +91,8 @@ SECTIONS = {
             ("peg", "The packrat parser"),
             ("syntax", "Defining the syntax"),
             ("vasm", "The vasm checker"),
+            ("planckvm", "planckvm: execution model and values"),
+            ("planckvm-isa", "planckvm instructions"),
         ]),
     ],
 }

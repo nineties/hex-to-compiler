@@ -1,0 +1,227 @@
+<!--title planckvm: execution model and values-->
+<h1>planckvm: execution model and values</h1>
+<p class="lead">planckvm is the bytecode that runs all of planck. An evaluator written in planck translates an expression into planckvm instructions and runs them in an instruction loop. This page is the design of planckvm: the machine, the values, the numbers and the garbage collector. The instructions are in <a href="planckvm-isa.html">planckvm instructions</a>.</p>
+
+<p><strong>Status.</strong> planckvm is a design that is yet to be implemented. What runs today is planck0, which is described in <a href="planck0.html">planck0</a>, and the vasm of the <a href="../reference/vasm.html">reference</a>. Where this page differs from <code>planck/SPEC.rst</code>, the difference is listed in <a href="#spec">Differences from SPEC</a>.</p>
+
+<h2>Principles</h2>
+<ul>
+<li>The evaluator is a bytecode interpreter: an expression is translated into instructions, and an instruction loop runs them. An expression is not turned into a closure.</li>
+<li>The evaluator has its own garbage collector, a generational copying collector. It owns the heap of values and the roots.</li>
+<li>Arbitrary-precision integers, floating-point numbers and complex numbers are primitives of the machine.</li>
+<li>A builtin function is not an instruction by default. A builtin becomes an instruction only when other instructions and planck expressions cannot express it (see <a href="planckvm-isa.html#builtins">Builtins and instructions</a>).</li>
+<li>The evaluator does not use the effects, the continuations or the M-expression reader of the host. They are written in planck as parts of the evaluator.</li>
+</ul>
+
+<h2>Execution model</h2>
+<p>The machine is a stack machine. The intermediate values of an expression are pushed on the operand stack of each frame.</p>
+<table>
+<tr><th>Name</th><th>Contents</th></tr>
+<tr><td>code</td><td>The instructions of one lambda or of one top-level expression. Immutable</td></tr>
+<tr><td>frame</td><td>The state of one call. It is pushed on the frame stack</td></tr>
+<tr><td>environment</td><td>The place for the variables of one call. It is on the heap and made for each call</td></tr>
+<tr><td>cell</td><td>One global variable: a heap object that holds a value and a name</td></tr>
+<tr><td>heap</td><td>Owned by the evaluator and managed by the garbage collector</td></tr>
+</table>
+
+<h3>Code</h3>
+<table>
+<tr><th>Field</th><th>Meaning</th></tr>
+<tr><td><code>arity</code></td><td>The number of arguments</td></tr>
+<tr><td><code>nslots</code></td><td>The number of slots of the environment</td></tr>
+<tr><td><code>params</code></td><td>The tree of the parameter patterns. It is not used to run the code; it serves to print a function and to report a matching failure</td></tr>
+<tr><td><code>instrs</code></td><td>The instructions. They never change after the code is made</td></tr>
+<tr><td><code>consts</code></td><td>The constant table: literals, symbols, cells and nested codes</td></tr>
+</table>
+<ul>
+<li>The instructions are a sequence of integers. An instruction is its number followed by its operands.</li>
+<li>A jump target <code>L</code> and the pc are indices into the instruction sequence, not addresses, because the collector moves objects.</li>
+<li>When a code is made it is checked: the height of the operand stack is determined uniquely at every instruction, every jump target is the start of an instruction, and the stack never goes below zero. The maximum height is computed.</li>
+<li>The height at the failure target <code>L</code> of a <code>MATCH*</code> instruction is 0.</li>
+</ul>
+
+<h3>Frames</h3>
+<table>
+<tr><th>Field</th><th>Meaning</th></tr>
+<tr><td>caller</td><td>The frame that receives the value. None for the entry of a top-level expression</td></tr>
+<tr><td>code, pc, env</td><td>The running code, the next instruction and the environment</td></tr>
+<tr><td>remaining alternatives</td><td>The functions of <code>f | g</code> that have not been tried yet, or none</td></tr>
+<tr><td>boundary</td><td>The handler function. Only a frame made by <code>HANDLE</code> has it</td></tr>
+<tr><td>forwarding mark</td><td>Only a frame that <code>PERFORM</code> uses to call a handler has it. It tells where to go to the outer boundary when the alternatives run out</td></tr>
+<tr><td>arguments</td><td>The <code>n</code> values of the call, kept until the matching at the entry is over</td></tr>
+<tr><td>operand stack</td><td>The intermediate values. Its height is bounded by a maximum that the code determines</td></tr>
+</table>
+<p>Frames are pushed on a contiguous region, the frame stack. The evaluator owns the region and it is a root of the collector. When it is full the program stops with <code>stack overflow</code>.</p>
+
+<h3>Environments and variables</h3>
+<ul>
+<li>An environment is <code>| parent environment | slot 0 | slot 1 | ... |</code>. A call makes one, and every slot starts as <code>none</code>.</li>
+<li>A variable is decided by where it is written. It is resolved at compile time to a depth <code>d</code> (the number of parent links to follow) and a slot <code>i</code>. Name resolution ends at compile time, and at run time there is no state of an undefined variable.</li>
+<li>A lambda keeps the environment of the place where it was made. The environment is shared, so an assignment after the lambda was made is seen by the lambda.</li>
+<li>Resuming a continuation does not copy environments. The resumed copies share the same variables, as the specification requires.</li>
+<li>A global variable is a cell, whose first value is <code>none</code>. <code>Def</code> makes a new cell, and the expressions compiled after it refer to the new cell. The expressions compiled before keep referring to the old one. <code>Set</code> writes the same cell.</li>
+</ul>
+
+<h3>Calls</h3>
+<p><code>CALL n</code> takes <code>f a1 ... an</code> from the stack. The function <code>f</code> is chosen as follows.</p>
+<table>
+<tr><th><code>f</code></th><th>Condition</th></tr>
+<tr><td>Lambda</td><td>The arity of its code is <code>n</code></td></tr>
+<tr><td>Fusion <code>a | b</code></td><td>Try <code>a</code> first, then <code>b</code> when <code>a</code> runs out</td></tr>
+<tr><td>Builtin</td><td>The number of arguments fits. No frame is made and the result is returned at once (only <code>EVAL</code> makes a frame)</td></tr>
+<tr><td>Continuation</td><td><code>n</code> is 1. It resumes</td></tr>
+<tr><td>Anything else</td><td>Stops with <code>not a function</code></td></tr>
+</table>
+<p>When a lambda is chosen, a frame and an environment are made, the arguments are put in the frame and the code runs from its first instruction. The instructions at the entry match the patterns. When they do not match, <code>NEXT</code> tries the next alternative with the same arguments. When the alternatives run out, the program stops with <code>matching failed</code>.</p>
+
+<h3>Continuations and handlers</h3>
+<ul>
+<li><code>HANDLE</code> runs its body in a boundary frame. When the body ends normally, its value is the value of the <code>Handle</code>.</li>
+<li><code>PERFORM v</code> follows the callers to the innermost boundary, copies the frames up to it and makes a continuation <code>k</code>. It calls the handler of the boundary with <code>(v, k)</code> and returns the result to the caller of the boundary.</li>
+<li>When no alternative of the handler matches, the effect goes to the next boundary outside. Then <code>k</code> is made again as a copy up to that outer boundary, and the inner boundary is in the copy.</li>
+<li>With no boundary the program stops with <code>unhandled effect: v</code>.</li>
+<li>Calling <code>k</code> copies the saved frames again on top of the caller. The handler of the boundary stays installed (deep handlers). The value of the call becomes the value of the <code>PERFORM</code> in the innermost frame, and when the body ends, its value returns to the caller of <code>k</code>.</li>
+<li>The frames are copied twice: when <code>k</code> is captured and when it is resumed. <code>k</code> can be called any number of times.</li>
+<li>Continuations do not use the effects of the host. The frames are data and are copied as data.</li>
+</ul>
+
+<h3>Stopping</h3>
+<p>A runtime error writes its message to the standard error and ends with status 1. There is no way to catch it. The <code>Error</code> effect of <code>error_at</code> is not an error of this kind; it is an ordinary <code>PERFORM</code>.</p>
+
+<h3>Top level</h3>
+<ul>
+<li>One top-level expression is one code of arity 0. The local variables of a block in it are in the environment of this code.</li>
+<li>The loop that reads and runs the expressions is the entry of the evaluator, not an instruction. For each expression it reads the cells of the global variables <code>parse</code> and <code>eval</code> and calls them.</li>
+<li><code>eval(e)</code> makes a code of the same form and runs it.</li>
+</ul>
+
+<h2>Values</h2>
+<table>
+<tr><th>Kind</th><th>Contents</th><th><code>typeof</code></th></tr>
+<tr><td>Integer</td><td>Arbitrary precision</td><td><code>'int</code></td></tr>
+<tr><td>Float</td><td>IEEE 754 binary64. An immutable box on the heap</td><td><code>'float</code></td></tr>
+<tr><td>Complex</td><td>Two binary64 numbers, the real and the imaginary part. An immutable box on the heap</td><td><code>'complex</code></td></tr>
+<tr><td>String</td><td>An immutable sequence of bytes, which may contain 0</td><td><code>'string</code></td></tr>
+<tr><td>Symbol</td><td>Unique for its name</td><td><code>'symbol</code></td></tr>
+<tr><td>M-expression</td><td>A head symbol and 0 to 64 arguments. Immutable</td><td><code>'mexpr</code></td></tr>
+<tr><td>Array</td><td>A mutable sequence of values</td><td><code>'array</code></td></tr>
+<tr><td>Plain array</td><td>A mutable sequence of elements of one of the 14 types below</td><td><code>'plain</code></td></tr>
+<tr><td>Function</td><td>Lambda, fusion, builtin or continuation</td><td><code>'function</code></td></tr>
+<tr><td>Internal</td><td>Environment, cell and code. They are never passed to a program as values</td><td></td></tr>
+</table>
+<ul>
+<li><code>Tuple{...}</code>, <code>Cons{x, xs}</code> and <code>Nil{}</code> are M-expressions with a fixed head. <code>true</code>, <code>false</code> and <code>none</code> are symbols.</li>
+<li>The only value treated as false is the symbol <code>false</code>.</li>
+<li>A string is handled by its whole length, including the 0 bytes. The comparison of <code>EQ</code>, the output of <code>PUT</code> and <code>PRINT</code>, and <code>STRLEN</code>, <code>STRCAT</code> and <code>SUBSTR</code> do not stop at a 0 byte.</li>
+<li>Equality (<code>EQ</code>): numbers are compared by value (see below). Strings are equal by contents, M-expressions by head and arguments recursively, and symbols by identity. Arrays, plain arrays and functions are equal only to themselves.</li>
+<li><code>HASH</code> gives equal values the same number. A float equal to an integer, and a complex number whose imaginary part is 0 and whose real part is equal to an integer, have the hash of that integer. Arrays, functions and plain arrays are given a number that does not change when the collector moves them.</li>
+</ul>
+
+<h2>Numbers</h2>
+<ul>
+<li>Integers have arbitrary precision. A small integer is an immediate value and a large one is an array of digits. There is one integer type in the language: no integer is out of range, and nothing wraps around or is truncated.</li>
+<li>A float is IEEE 754 binary64 with rounding to nearest even. A complex number is a pair of floats.</li>
+<li><code>ADD</code>, <code>SUB</code>, <code>MUL</code> and <code>DIV</code> look at the types of their arguments, as one instruction each, and take integers, floats and complex numbers. When the types are mixed, the operands are raised to the higher type in the order integer, float, complex, and the result has that type.</li>
+<li>An integer raised to a float is rounded to the nearest value. An integer above 2^53 loses precision: <code>2^53 + 1 + 0.0</code> is the float <code>2^53</code>. Raising an integer that is beyond the range of floats (about 1.8 x 10^308) is an error.</li>
+<li><code>DIV</code> of two integers is the quotient truncated toward 0, and a zero divisor is an error. A division that involves a float or a complex number does not stop on a zero divisor: a float gives an infinity or NaN, and a complex number gives the same rule applied to its components.</li>
+<li><code>LT</code> compares an integer and a float by their mathematical values without raising the type. It gives <code>false</code> when NaN is involved. A complex number has no order, so <code>LT</code> on a complex number is an error.</li>
+<li><code>EQ</code> says that values of different types are equal when their values are the same (<code>1 == 1.0</code>, <code>1 == 1+0j</code>). NaN is not equal to itself. Complex numbers are equal when both components are equal.</li>
+<li>Bit operations take integers only. Negative integers are treated as infinite-width two's complement.</li>
+<li>Floating-point exceptions do not stop the program. The mathematical functions are exactly six: exp, log, sin, cos, pow and atan2.</li>
+<li>A complex number is made by <code>complex(re, im)</code>. There is no literal. vasm gets float types and operations, but no complex type; vasm holds a complex number as a pair of floats.</li>
+</ul>
+
+<h3>Plain array types</h3>
+<table>
+<tr><th>Type</th><th>Element</th><th>Range</th></tr>
+<tr><td><code>'bool</code></td><td><code>true</code> or <code>false</code></td><td></td></tr>
+<tr><td><code>'i8</code> <code>'i16</code> <code>'i32</code> <code>'i64</code></td><td>Signed integer</td><td>-2^(n-1) to 2^(n-1)-1</td></tr>
+<tr><td><code>'u8</code> <code>'u16</code> <code>'u32</code> <code>'u64</code></td><td>Unsigned integer</td><td>0 to 2^n-1</td></tr>
+<tr><td><code>'f16</code> <code>'f32</code> <code>'f64</code></td><td>Float</td><td>IEEE 754 binary16, binary32 and binary64</td></tr>
+<tr><td><code>'c64</code> <code>'c128</code></td><td>Complex</td><td>The real and the imaginary part are binary32 and binary64</td></tr>
+</table>
+<p>The elements carry no tag. Reading an element gives a language value: an integer for an integer type, <code>true</code> or <code>false</code> for <code>'bool</code>, a float widened to binary64 without changing the value for <code>'f16</code> and <code>'f32</code>, and a complex number with widened components for <code>'c64</code>. The integer of the language stays one arbitrary-precision type; 32 bits and so on are only the way an array holds it. An integer outside the range is an error and is never wrapped around.</p>
+<p>A plain array holds no references, so the collector does not scan it and writing to it is not recorded. A complex element is two numbers inside the array, not a box.</p>
+
+<h3>Writing to a plain array</h3>
+<p>The conversions of <code>PLAINSET</code> follow numpy 2.0.2 (Python 3.9.6). Where numpy raises an error, <code>PLAINSET</code> is a runtime error; where numpy converts, it converts in the same way. numpy 1.26.4 wraps an out-of-range integer around with only a warning; planckvm follows the behavior that raises an error.</p>
+<table>
+<tr><th>Value written</th><th>Array type</th><th><code>PLAINSET</code></th></tr>
+<tr><td>An integer in range</td><td>Integer</td><td>Stored as it is</td></tr>
+<tr><td>An integer out of range (<code>256</code> or <code>-1</code> to <code>'u8</code>, <code>128</code> to <code>'i8</code>, <code>2^31</code> to <code>'i32</code>, <code>2^63</code> to <code>'i64</code>, <code>2^64</code> to <code>'u64</code>)</td><td>Integer</td><td>Error. It is not wrapped around</td></tr>
+<tr><td>A float with a fraction (<code>1.5</code> <code>-1.5</code> <code>255.9</code> <code>-128.9</code>)</td><td>Integer</td><td>Truncated toward 0 (<code>1</code> <code>-1</code> <code>255</code> <code>-128</code>), then the range is checked</td></tr>
+<tr><td>A float that is out of range after truncation (<code>128.0</code> to <code>'i8</code>, <code>1e30</code> to <code>'i32</code>, <code>2.0^63</code> to <code>'i64</code>)</td><td>Integer</td><td>Error</td></tr>
+<tr><td><code>-0.5</code></td><td><code>'u8</code></td><td><code>0</code></td></tr>
+<tr><td>NaN or an infinity</td><td>Integer</td><td>Error</td></tr>
+<tr><td>A complex number (even <code>1+0j</code>)</td><td>Integer, <code>'f16</code> <code>'f32</code> <code>'f64</code></td><td>Error</td></tr>
+<tr><td>A nonzero number, NaN, or a complex number with a nonzero component</td><td><code>'bool</code></td><td><code>true</code></td></tr>
+<tr><td><code>0</code> <code>0.0</code> <code>-0.0</code> <code>0+0j</code></td><td><code>'bool</code></td><td><code>false</code></td></tr>
+<tr><td><code>true</code> <code>false</code></td><td>Integer, float and complex types</td><td><code>1</code> <code>0</code> (<code>1.0</code> <code>0.0</code>)</td></tr>
+<tr><td>An integer or a float</td><td>Complex</td><td>It is the real part and the imaginary part is 0</td></tr>
+<tr><td>An integer (<code>2^53 + 1</code>) or a float</td><td><code>'f64</code></td><td>Rounded to the nearest value (<code>2^53 + 1</code> becomes <code>9007199254740992.0</code>)</td></tr>
+<tr><td>A float</td><td><code>'f32</code> <code>'f16</code> <code>'c64</code></td><td>Rounded to the nearest value. A value too small (<code>1e-46</code>) becomes <code>0.0</code></td></tr>
+<tr><td>A value above the maximum of <code>'f32</code> (about 3.4028235 x 10^38, such as <code>1e39</code>)</td><td><code>'f32</code> <code>'c64</code></td><td>An infinity of the same sign. It does not stop</td></tr>
+<tr><td>A value above the maximum of <code>'f16</code> (65504, such as <code>65520.0</code> or <code>1e5</code>)</td><td><code>'f16</code></td><td>An infinity of the same sign. <code>65519.0</code> becomes <code>65504</code></td></tr>
+<tr><td>An integer beyond the range of doubles (<code>2^1100</code>)</td><td>Float and complex types</td><td>Error</td></tr>
+<tr><td>A string, <code>none</code>, a symbol other than <code>true</code> and <code>false</code>, an M-expression, an array or a function</td><td>Every type</td><td>Error: the value is not of a numeric type of the language, and nothing is converted</td></tr>
+</table>
+<p>A write to <code>'bool</code> is the only place where a number is made into <code>false</code> by being 0 and into <code>true</code> otherwise. This is separate from the rule that only the symbol <code>false</code> is false in <code>if</code>.</p>
+
+<h2>Heap and garbage collection</h2>
+<h3>Values and the heap</h3>
+<ul>
+<li>A value is one tagged word. A small integer is an immediate value and every other value is a reference into the heap. Floats, complex numbers, large integers, strings, M-expressions and arrays are objects on the heap.</li>
+<li>The heap is built on one integer array, as regions for the generations.</li>
+<li>The collector is a generational copying collector, written in planck as a part of the evaluator. It is not a runtime added to vasm.</li>
+</ul>
+
+<h3>Allocation and safe points</h3>
+<ul>
+<li>An instruction marked S in the instruction tables may allocate, and the collector may run when it allocates.</li>
+<li>The collector runs before the side effects of the instruction. The inputs of the instruction remain on the operand stack during the collection and are updated by it. The instruction reads its inputs again after the collection.</li>
+<li>Every running value can be reached from the frame stack, the environments or the cells. No value lives only in a local of the evaluator.</li>
+<li>The collector does not run in an instruction that allocates nothing (<code>JMP</code>, <code>LOAD</code>, <code>POP</code> and so on). No safe point is placed in the middle of a loop.</li>
+</ul>
+
+<h3>Roots</h3>
+<table>
+<tr><th>Root</th><th>Contents</th></tr>
+<tr><td>The frame stack</td><td>The env, code, arguments and operand stack (up to the saved height) of every frame</td></tr>
+<tr><td>Cells</td><td>The global variables</td></tr>
+<tr><td>The state of the evaluator</td><td>The symbol table, the constant tables and the state during compilation</td></tr>
+</table>
+<p>Every field of a frame is a value or an integer of a header, and can be followed from its tag. There is no stack map. The pc is an index, so a move of the code does not affect it. The constant table is followed as a part of the code.</p>
+
+<h3>The write record</h3>
+<p>The method is a remembered set: a list of old objects. When a reference to a young object is written into an old object, the old object is recorded. The targets are <code>STORE</code>, <code>GSET</code> and <code>ASET</code>. A plain array has no references and is not recorded. The initialization of a newly allocated object is not recorded, and neither is a write to the frame stack, because the frame stack is traced as a root every time.</p>
+
+<h3>Identity</h3>
+<p>Arrays, plain arrays and functions have identity (<code>EQ</code> and <code>HASH</code>). It is not held as an address. The first <code>HASH</code> assigns a number. A symbol has a number that comes from its name, an M-expression and a string have one from their contents, and a number has one from its value.</p>
+
+<h3>Continuations</h3>
+<p><code>PERFORM</code> allocates, because it copies frames. The frames inside a continuation have the same form as ordinary frames and are traced in the same way.</p>
+
+<h2>Partial evaluation</h2>
+<p>The purpose of planckvm is to partially evaluate an evaluator written in planck and to get an implementation of planck in vasm. The following properties of the design are meant to serve this.</p>
+<ul>
+<li>The instructions do not change after a code is made and the jump targets are immediate, so for a static code the reading of instructions and the choice of the next one can be unrolled.</li>
+<li>The height of the operand stack is determined at each pc, so the stack can be kept as a static sequence.</li>
+<li>Pattern matching is in the code that is called. A match can be specialized for each function, and no matcher that walks a data tree is needed.</li>
+<li>Continuations are copies of frames and use no effects of the host, so the evaluator does not use <code>Perform</code> and does not meet the limit on continuations in <code>planck/lib/pe.pk</code>.</li>
+<li>A dynamic indirect call goes only to a function reached by <code>CALL</code>. If the set of codes that can be called is closed, each code can become one function.</li>
+<li>The guard of <code>CALLP</code> can be folded when the cell is static and immutable. A global variable is a mutable cell, so a global that is assigned cannot be treated as static.</li>
+<li>With <code>PLAINGET</code> and <code>PLAINSET</code>, the elements are read and written as numbers without boxes.</li>
+</ul>
+<p>The partial evaluator itself is described in <code>planck/lib/pe.pk</code>. Its integer types are <code>I32{}</code> and <code>I64{}</code>, and it has no arbitrary-precision type, so folding arbitrary-precision integers statically and the float operations of vasm are to be added when they are needed.</p>
+
+<h2 id="spec">Differences from SPEC</h2>
+<p>These are the points where planckvm differs from <code>planck/SPEC.rst</code>.</p>
+<table>
+<tr><th>Point</th><th>SPEC</th><th>planckvm</th></tr>
+<tr><td>Integers</td><td>Bit operations and <code>u64_to_int</code> are written with 31 bits</td><td>Arbitrary precision. <code>ADD</code> <code>SUB</code> <code>MUL</code> are exact, with no wrap-around and no truncation</td></tr>
+<tr><td>Bit operations</td><td>31-bit two's complement. <code>bit_shl</code> keeps 31 bits</td><td>Infinite-width two's complement. <code>BSHL</code> does not wrap around</td></tr>
+<tr><td><code>strlen</code>, <code>ord</code>, <code>substr</code></td><td>Written in characters</td><td>Bytes, 0 included</td></tr>
+<tr><td>Floats, complex numbers</td><td>Not described</td><td>Values, literals of floats such as <code>1.5</code>, <code>typeof</code> of <code>'float</code> and <code>'complex</code>, and the builtins of the float and complex instructions</td></tr>
+<tr><td>Plain arrays</td><td><code>'u8</code> <code>'u16</code> <code>'i32</code></td><td>The 14 types, made by <code>plain_array(kind, n)</code>. <code>typeof</code> is <code>'plain</code></td></tr>
+<tr><td>Builtins that are planck functions</td><td>Builtin functions</td><td>The names and behavior stay the same, but the names that appear in some error messages may change</td></tr>
+</table>
