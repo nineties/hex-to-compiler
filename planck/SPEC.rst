@@ -450,7 +450,7 @@ Values
    * - ``string``
      - String
    * - ``symbol``
-     - Symbol (``true``, ``false`` and ``none`` are symbols defined in ``planck/init.pk``)
+     - Symbol (``true``, ``false`` and ``none`` are symbols defined in ``planck/init.pk``, and those variables cannot be assigned)
    * - ``mexpr``
      - ``Head{a, ...}``
    * - ``function``
@@ -531,7 +531,8 @@ Algebraic effects
 where ``k`` is the continuation of the ``Perform``. Handlers are deep: they stay installed in the continuation.
 When no pattern matches, the effect goes to the outer handler.
 ``k`` is an ordinary function and can be called any number of times, even after ``Handle`` has returned.
-Variables are shared between the resumed copies.
+Variables that are defined when the continuation is captured are shared between the resumed copies.
+A variable defined by ``x := e`` after the resumption is defined separately in each copy, unless a function written inside refers to it.
 
 Top level
 ---------
