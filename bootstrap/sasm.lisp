@@ -1,7 +1,7 @@
 ; Simple compiler for C-like language written in plancklisp
 ; Copyright (C) 2026 nineties
 
-(import "sasm/core.lisp")
+(import "bootstrap/sasm/core.lisp")
 
 (def args (commandline-args))
 (when (< (length args) 4) (do
