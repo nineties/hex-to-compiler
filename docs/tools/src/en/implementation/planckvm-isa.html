@@ -54,75 +54,57 @@
 <tr><td><code>PLAINGET</code></td><td>44</td><td></td><td>a i -&gt; v</td><td>An element, as a value of the rule in Plain array types</td><td><code>plain_get</code></td><td></td><td></td><td>○</td></tr>
 <tr><td><code>PLAINSET</code></td><td>45</td><td></td><td>a i v -&gt; v</td><td>Write an element and return <code>v</code>. It stops if it does not fit the type. The conversions are in Writing to a plain array</td><td><code>plain_set</code></td><td></td><td></td><td>○</td></tr>
 </table>
-<p>A program can assign a global function such as <code>_index_get</code>, so <code>a + b</code> cannot be fixed to <code>ADD</code>. <code>CALLP</code> keeps such an override working.</p>
-<p>The entry of a function has one instruction sequence for each pattern. When a match fails, the program goes to <code>L</code> and <strong>empties the operand stack</strong>. At <code>L</code> there is a <code>NEXT</code>. When an argument is bound to a variable of the pattern, <code>STORE 0 i</code> and <code>POP</code> write it into the environment. There is no instruction that fuses <code>PARAM</code>, <code>STORE</code> and <code>POP</code>.</p>
-<p>A call in the tail position of the body of a <code>HANDLE</code> is written <code>TCALL</code>, but the boundary frame is not dropped.</p>
+<p>The entry of a function has one instruction sequence for each pattern. When a match fails, the program goes to <code>L</code> and <strong>empties the operand stack</strong>. At <code>L</code> there is a <code>NEXT</code>. When an argument is bound to a variable of the pattern, <code>STORE 0 i</code> and <code>POP</code> write it into the environment.</p>
 <p><code>ADD</code>, <code>SUB</code>, <code>MUL</code>, <code>DIV</code>, <code>MOD</code>, <code>LT</code> and <code>GE</code> stop on an argument that is not a number. The mixing of types and the result type are in Numbers of the execution model. The instructions from <code>HEAD</code> to <code>PLAINSET</code> stop on an argument of a wrong type or out of range (except <code>ORD</code> out of range).</p>
 
 <h2 id="builtins">Builtins and instructions</h2>
 <p>Only what is called at a high frequency is an instruction: the constants, variables, control, calls, matching, effects and operators that every run goes through, and the builtins that are called the most. Everything else is a builtin function, and no instruction is added for it. An operation that differs by type is one instruction that looks at the type of its value.</p>
 
 <h3>Builtins that are not instructions</h3>
-<p>Those of the kind planck are planck functions that use the instructions, and are part of the image of the evaluator. The names of the global variables and the behavior are the same as those of the builtins. Those of the kind machine are builtins of the machine (the Builtin of the table in Calls of the execution model). Both are called with <code>GLOAD c</code>, the arguments and <code>CALL n</code>.</p>
+<p>These are builtins of the machine (the Builtin of the table in Calls of the execution model). They are called with <code>GLOAD c</code>, the arguments and <code>CALL n</code>.</p>
 <table>
-<tr><th>Builtin</th><th>Kind</th><th>Definition or action</th></tr>
-<tr><td><code>mexpr(h, t)</code></td><td>machine</td><td>The M-expression with head <code>h</code> (a symbol) and the arguments of the <code>Tuple</code> <code>t</code></td></tr>
-<tr><td><code>substr(s, i, j)</code></td><td>machine</td><td>The bytes from <code>i</code> to <code>j-1</code>. An error out of range</td></tr>
-<tr><td><code>_strcat(a, b)</code></td><td>machine</td><td>Concatenation</td></tr>
-<tr><td><code>intern(s)</code></td><td>machine</td><td>The symbol named <code>s</code></td></tr>
-<tr><td><code>symname(sym)</code></td><td>machine</td><td>The name of the symbol</td></tr>
-<tr><td><code>array(n)</code></td><td>machine</td><td>An array of <code>n</code> elements filled with <code>none</code>. An error if <code>n</code> is negative</td></tr>
-<tr><td><code>plain_array(kind, n)</code></td><td>machine</td><td>A plain array of <code>n</code> elements of the type <code>kind</code>, filled with 0 of that type (<code>false</code>, <code>0</code>, <code>0.0</code> or <code>0+0j</code>). An error if <code>kind</code> is none of the 14 types or <code>n</code> is negative</td></tr>
-<tr><td><code>plain_len(a)</code></td><td>machine</td><td>The length</td></tr>
-<tr><td><code>plain_kind(a)</code></td><td>machine</td><td>The symbol of the type</td></tr>
-<tr><td><code>bit_and(a, b)</code></td><td>machine</td><td>Bitwise and</td></tr>
-<tr><td><code>bit_or(a, b)</code></td><td>machine</td><td>Bitwise or</td></tr>
-<tr><td><code>bit_xor(a, b)</code></td><td>machine</td><td>Bitwise exclusive or</td></tr>
-<tr><td><code>bit_shl(a, k)</code></td><td>machine</td><td>Shift <code>a</code> left by <code>k</code> bits. It does not wrap around. An error if <code>k</code> is negative</td></tr>
-<tr><td><code>bit_sar(a, k)</code></td><td>machine</td><td>Shift <code>a</code> right by <code>k</code> bits keeping the sign. An error if <code>k</code> is negative</td></tr>
-<tr><td><code>fsqrt(a)</code></td><td>machine</td><td>Square root. NaN for a negative number</td></tr>
-<tr><td><code>ffloor(a)</code></td><td>machine</td><td>Floor, as a float</td></tr>
-<tr><td><code>ftoi(a)</code></td><td>machine</td><td>The integer truncated toward 0. An error for NaN and infinities</td></tr>
-<tr><td><code>ftobits(a)</code></td><td>machine</td><td>The 64 bits as a non-negative integer</td></tr>
-<tr><td><code>bitstof(n)</code></td><td>machine</td><td>The inverse of <code>ftobits</code>. An error if <code>n</code> does not fit 64 bits</td></tr>
-<tr><td><code>ftos(a)</code></td><td>machine</td><td>The shortest decimal string that reads back to the same value</td></tr>
-<tr><td><code>stof(s)</code></td><td>machine</td><td>Read a decimal string (an exponent is allowed). <code>none</code> if it cannot be read</td></tr>
-<tr><td><code>fexp(a)</code> <code>flog(a)</code> <code>fsin(a)</code> <code>fcos(a)</code></td><td>machine</td><td>Exponential, natural logarithm, sine and cosine</td></tr>
-<tr><td><code>fpow(a, b)</code> <code>fatan2(a, b)</code></td><td>machine</td><td>Power and arctangent of two arguments</td></tr>
-<tr><td><code>complex(re, im)</code></td><td>machine</td><td>The complex number with real part <code>re</code> and imaginary part <code>im</code>, each an integer or a float raised to a float</td></tr>
-<tr><td><code>real(z)</code> <code>imag(z)</code></td><td>machine</td><td>The real part and the imaginary part (floats). An error unless <code>z</code> is a complex number</td></tr>
-<tr><td><code>put(s)</code></td><td>machine</td><td>Write all bytes of the string to the standard output, 0 bytes included. It returns <code>none</code></td></tr>
-<tr><td><code>print(v)</code></td><td>machine</td><td>Write the text of the value. A function is <code>&lt;lambda:(...)&gt;</code>, <code>&lt;prim:name&gt;</code> or <code>&lt;cont&gt;</code>, and a fusion is <code>f|g</code>. A float is the string of <code>ftos</code>. It returns <code>none</code></td></tr>
-<tr><td><code>println(v)</code></td><td>machine</td><td><code>print</code> followed by a newline. It returns <code>none</code></td></tr>
-<tr><td><code>try_read_file(path)</code></td><td>machine</td><td>All bytes of the file (0 included), or <code>none</code> if it cannot be read</td></tr>
-<tr><td><code>read_bytes(path)</code></td><td>machine</td><td>A <code>'u8</code> array of all bytes. An error if it cannot be read</td></tr>
-<tr><td><code>write_file(path, x)</code></td><td>machine</td><td>Write all bytes of a string or a <code>'u8</code> array, creating or emptying the file. An error if it cannot be written. It returns <code>none</code></td></tr>
-<tr><td><code>chmod(path, mode)</code></td><td>machine</td><td>Change the permissions. An error on failure. It returns <code>none</code></td></tr>
-<tr><td><code>argv()</code></td><td>machine</td><td>The array of the command-line strings</td></tr>
-<tr><td><code>exit(n)</code></td><td>machine</td><td>End with status <code>n</code>. It does not return</td></tr>
-<tr><td><code>_set_file(path)</code></td><td>machine</td><td>Make <code>path</code> the file being loaded and return the previous one (<code>none</code> if there is none). The compiler uses it to decide where a global variable was defined</td></tr>
-<tr><td><code>eval(e)</code></td><td>machine</td><td>Turn the M-expression <code>e</code> into a code in the present global environment and run it. The result returns to the caller. A compile error stops the program as a runtime error does (such as <code>undefined variable</code>)</td></tr>
-<tr><td><code>_le(a, b)</code></td><td>planck</td><td><code>if (a &lt; b) true else (a == b)</code> (<code>false</code> if NaN is involved)</td></tr>
-<tr><td><code>_gt(a, b)</code></td><td>planck</td><td><code>b &lt; a</code></td></tr>
-<tr><td><code>bit_not(a)</code></td><td>planck</td><td><code>-1 - a</code></td></tr>
-<tr><td><code>bit_shr(a, k)</code></td><td>planck</td><td><code>bit_sar(a, k)</code> if <code>a</code> is not negative, otherwise an error</td></tr>
-<tr><td><code>plain_copy(dst, di, src, si, n)</code></td><td>planck</td><td>A repetition of <code>plain_get</code> and <code>plain_set</code>. An error unless the types are the same. For overlapping ranges in one array the direction is chosen</td></tr>
-<tr><td><code>read_file(path)</code></td><td>planck</td><td>If <code>try_read_file</code> gives <code>none</code>, print a failure message and <code>exit(1)</code></td></tr>
-<tr><td><code>parse(s)</code></td><td>planck</td><td>The reader of M-expressions, written with <code>ORD</code> <code>BUILD</code> <code>PUSH</code>, <code>substr</code> and <code>mexpr</code>. A float literal is read with <code>stof</code></td></tr>
-<tr><td><code>u8_array(n)</code> <code>u16_array(n)</code> <code>i32_array(n)</code></td><td>planck</td><td><code>plain_array('u8, n)</code> and so on</td></tr>
-<tr><td><code>bool_array(n)</code> <code>i8_array(n)</code> <code>i16_array(n)</code> <code>i64_array(n)</code> <code>u32_array(n)</code> <code>u64_array(n)</code> <code>f16_array(n)</code> <code>f32_array(n)</code> <code>f64_array(n)</code> <code>c64_array(n)</code> <code>c128_array(n)</code></td><td>planck</td><td>The same form: <code>plain_array('i8, n)</code> and so on</td></tr>
-<tr><td><code>itof(n)</code></td><td>planck</td><td><code>n + 0.0</code></td></tr>
-<tr><td><code>conj(z)</code></td><td>planck</td><td><code>complex(real(z), imag(z) * -1)</code></td></tr>
+<tr><th>Builtin</th><th>Action</th></tr>
+<tr><td><code>mexpr(h, t)</code></td><td>The M-expression with head <code>h</code> (a symbol) and the arguments of the <code>Tuple</code> <code>t</code></td></tr>
+<tr><td><code>substr(s, i, j)</code></td><td>The bytes from <code>i</code> to <code>j-1</code>. An error out of range</td></tr>
+<tr><td><code>_strcat(a, b)</code></td><td>Concatenation</td></tr>
+<tr><td><code>intern(s)</code></td><td>The symbol named <code>s</code></td></tr>
+<tr><td><code>symname(sym)</code></td><td>The name of the symbol</td></tr>
+<tr><td><code>array(n)</code></td><td>An array of <code>n</code> elements filled with <code>none</code>. An error if <code>n</code> is negative</td></tr>
+<tr><td><code>plain_array(kind, n)</code></td><td>A plain array of <code>n</code> elements of the type <code>kind</code>, filled with 0 of that type (<code>false</code>, <code>0</code>, <code>0.0</code> or <code>0+0j</code>). An error if <code>kind</code> is none of the 14 types or <code>n</code> is negative</td></tr>
+<tr><td><code>plain_len(a)</code></td><td>The length</td></tr>
+<tr><td><code>plain_kind(a)</code></td><td>The symbol of the type</td></tr>
+<tr><td><code>bit_and(a, b)</code></td><td>Bitwise and</td></tr>
+<tr><td><code>bit_or(a, b)</code></td><td>Bitwise or</td></tr>
+<tr><td><code>bit_xor(a, b)</code></td><td>Bitwise exclusive or</td></tr>
+<tr><td><code>bit_shl(a, k)</code></td><td>Shift <code>a</code> left by <code>k</code> bits. It does not wrap around. An error if <code>k</code> is negative</td></tr>
+<tr><td><code>bit_sar(a, k)</code></td><td>Shift <code>a</code> right by <code>k</code> bits keeping the sign. An error if <code>k</code> is negative</td></tr>
+<tr><td><code>fsqrt(a)</code></td><td>Square root. NaN for a negative number</td></tr>
+<tr><td><code>ffloor(a)</code></td><td>Floor, as a float</td></tr>
+<tr><td><code>ftoi(a)</code></td><td>The integer truncated toward 0. An error for NaN and infinities</td></tr>
+<tr><td><code>ftobits(a)</code></td><td>The 64 bits as a non-negative integer</td></tr>
+<tr><td><code>bitstof(n)</code></td><td>The inverse of <code>ftobits</code>. An error if <code>n</code> does not fit 64 bits</td></tr>
+<tr><td><code>ftos(a)</code></td><td>The shortest decimal string that reads back to the same value</td></tr>
+<tr><td><code>stof(s)</code></td><td>Read a decimal string (an exponent is allowed). <code>none</code> if it cannot be read</td></tr>
+<tr><td><code>fexp(a)</code> <code>flog(a)</code> <code>fsin(a)</code> <code>fcos(a)</code></td><td>Exponential, natural logarithm, sine and cosine</td></tr>
+<tr><td><code>fpow(a, b)</code> <code>fatan2(a, b)</code></td><td>Power and arctangent of two arguments</td></tr>
+<tr><td><code>complex(re, im)</code></td><td>The complex number with real part <code>re</code> and imaginary part <code>im</code>, each an integer or a float raised to a float</td></tr>
+<tr><td><code>real(z)</code> <code>imag(z)</code></td><td>The real part and the imaginary part (floats). An error unless <code>z</code> is a complex number</td></tr>
+<tr><td><code>put(s)</code></td><td>Write all bytes of the string to the standard output, 0 bytes included. It returns <code>none</code></td></tr>
+<tr><td><code>print(v)</code></td><td>Write the text of the value. A function is <code>&lt;lambda:(...)&gt;</code>, <code>&lt;prim:name&gt;</code> or <code>&lt;cont&gt;</code>, and a fusion is <code>f|g</code>. A float is the string of <code>ftos</code>. It returns <code>none</code></td></tr>
+<tr><td><code>println(v)</code></td><td><code>print</code> followed by a newline. It returns <code>none</code></td></tr>
+<tr><td><code>try_read_file(path)</code></td><td>All bytes of the file (0 included), or <code>none</code> if it cannot be read</td></tr>
+<tr><td><code>read_bytes(path)</code></td><td>A <code>'u8</code> array of all bytes. An error if it cannot be read</td></tr>
+<tr><td><code>write_file(path, x)</code></td><td>Write all bytes of a string or a <code>'u8</code> array, creating or emptying the file. An error if it cannot be written. It returns <code>none</code></td></tr>
+<tr><td><code>chmod(path, mode)</code></td><td>Change the permissions. An error on failure. It returns <code>none</code></td></tr>
+<tr><td><code>argv()</code></td><td>The array of the command-line strings</td></tr>
+<tr><td><code>exit(n)</code></td><td>End with status <code>n</code>. It does not return</td></tr>
+<tr><td><code>_set_file(path)</code></td><td>Make <code>path</code> the file being loaded and return the previous one (<code>none</code> if there is none). The compiler uses it to decide where a global variable was defined</td></tr>
+<tr><td><code>eval(e)</code></td><td>Turn the M-expression <code>e</code> into a code in the present global environment and run it. The result returns to the caller. A compile error stops the program as a runtime error does (such as <code>undefined variable</code>)</td></tr>
 </table>
 <p>The allocations and errors of a machine builtin are covered by the S and T of the <code>CALL</code> that called it. <code>mexpr</code>, <code>substr</code>, <code>_strcat</code>, <code>intern</code>, <code>symname</code>, <code>array</code>, <code>plain_array</code>, <code>plain_len</code> and <code>plain_kind</code> are also errors for an argument of a wrong type or out of range.</p>
 <p>The arguments of the bit operations are integers, treated as infinite-width two's complement, negative numbers included.</p>
-<p>A builtin that takes a float also takes an integer and raises it to a float. A complex number is an error. The mathematical functions are exactly these six: <code>fexp</code> <code>flog</code> <code>fsin</code> <code>fcos</code> <code>fpow</code> <code>fatan2</code>. The addition, subtraction, multiplication, division and equality of complex numbers are written with <code>ADD</code>, <code>SUB</code>, <code>MUL</code>, <code>DIV</code> and <code>EQ</code>.</p>
-<p><code>eval</code> is the only builtin that makes a frame. If a <code>PERFORM</code> happens during it, the frames inside the eval are ordinary frames and can be copied.</p>
-<p>The name of a function in an error message can differ from the builtin that was called. For example the message for a non-number argument of <code>_gt</code> names <code>_lt</code>.</p>
-
-<h3>Names defined by planck code</h3>
-<p>The names in the table of builtin functions of the specification that are not builtins of the machine are defined by planck code and need no instruction: <code>_define_rule</code> <code>_index_get</code> <code>_index_set</code> <code>_not</code> <code>_record_declare</code> <code>_record_get</code> <code>_to_text</code> <code>false</code> <code>load</code> <code>none</code> <code>parse_mexpr</code> <code>peg_for</code> <code>peg_parse</code> <code>subst</code> <code>table</code> <code>table_get</code> <code>table_set</code> <code>true</code> <code>use</code> <code>used_libs</code>.</p>
-<p>The new builtins that planckvm adds to the specification are <code>plain_array</code>, the float functions <code>fsqrt</code> <code>ffloor</code> <code>ftoi</code> <code>ftobits</code> <code>bitstof</code> <code>ftos</code> <code>stof</code> <code>fexp</code> <code>flog</code> <code>fsin</code> <code>fcos</code> <code>fpow</code> <code>fatan2</code>, the complex functions <code>complex</code> <code>real</code> <code>imag</code>, the array makers of each plain type, <code>itof</code> and <code>conj</code>.</p>
+<p>A builtin that takes a float also takes an integer and raises it to a float. A complex number is an error.</p>
+<p>If a <code>PERFORM</code> happens during an <code>eval</code>, the frames inside the eval are ordinary frames and can be copied.</p>
 
 <h2>Language features and instructions</h2>
 <p>One row for each row of the Syntax table of the specification. <code>&lt;e&gt;</code> is the instructions of <code>e</code>. A variable is read and written with <code>LOAD</code> and <code>STORE</code> (local) or <code>GLOAD</code> and <code>GSET</code> (global), by the rules of the execution model.</p>
@@ -140,7 +122,7 @@
 <tr><td><code>p if c -&gt; e | g</code></td><td>A lambda and a fusion whose body is <code>If{c, e, call of g}</code>. The arguments are bound to variables whose names start with <code>%</code> and passed to <code>g</code></td></tr>
 <tr><td><code>f(a, ...)</code></td><td><code>&lt;f&gt;</code> <code>&lt;a&gt;</code>... <code>CALL n</code>. <code>TCALL n</code> in the tail position</td></tr>
 <tr><td><code>a + b</code> <code>a - b</code> <code>a * b</code> <code>a / b</code> <code>a % b</code></td><td>If the builtin is still there, <code>&lt;a&gt;</code> <code>&lt;b&gt;</code> <code>CALLP c p</code>; otherwise <code>GLOAD c</code> <code>&lt;a&gt;</code> <code>&lt;b&gt;</code> <code>CALL 2</code></td></tr>
-<tr><td><code>a &lt;= b</code>, <code>a &gt; b</code> and other builtins that are not instructions</td><td><code>GLOAD c</code> <code>&lt;a&gt;</code> <code>&lt;b&gt;</code> <code>CALL 2</code></td></tr>
+<tr><td><code>a &lt;= b</code> <code>a &gt; b</code></td><td><code>GLOAD c</code> <code>&lt;a&gt;</code> <code>&lt;b&gt;</code> <code>CALL 2</code></td></tr>
 <tr><td><code>-a</code></td><td><code>CONST 0</code> <code>&lt;a&gt;</code> <code>SUB</code> (<code>Apply{_sub, Tuple{0, a}}</code>). It does not make <code>-0.0</code>: <code>0 - 0.0</code> is <code>0.0</code></td></tr>
 <tr><td><code>a == b</code> <code>a != b</code> <code>a &lt; b</code> <code>a &gt;= b</code></td><td><code>CALLP</code> of <code>EQ</code>, <code>NE</code>, <code>LT</code> and <code>GE</code></td></tr>
 <tr><td><code>not a</code></td><td><code>CALL</code> of a planck function</td></tr>
@@ -170,33 +152,4 @@
 <tr><td>An integer, a string, <code>Quote{v}</code></td><td><code>MATCHEQ k L</code></td></tr>
 <tr><td><code>Head{p1, ..., pn}</code></td><td><code>MATCHHEAD k n L</code>, then for each <code>j</code> a <code>DUP</code>, <code>ARGI j</code> and the instructions of <code>p_j</code>, and a final <code>POP</code></td></tr>
 <tr><td><code>_TypeOf{p, type}</code></td><td><code>MATCHTYPE k L</code>, then the instructions of <code>p</code></td></tr>
-</table>
-
-<h3>Features of the specification</h3>
-<table>
-<tr><th>Section</th><th>What realizes it</th></tr>
-<tr><td>M-expressions</td><td><code>BUILD</code> <code>ARGI</code> <code>HEAD</code> <code>ARITY</code> <code>ARG</code> <code>PUSH</code> and <code>mexpr</code>. A string is a <code>CONST</code></td></tr>
-<tr><td>Names the sugar calls</td><td>Calls to global variables with <code>CALL</code> and <code>CALLP</code>. A name that starts with <code>_</code> is a builtin or a planck function</td></tr>
-<tr><td>Indexing and rewriting</td><td><code>_index_get</code>, <code>_index_set</code> and <code>subst</code> are planck functions. The elements are handled with <code>AGET</code> <code>ASET</code> <code>PLAINGET</code> <code>PLAINSET</code> <code>ORD</code> <code>ARG</code> and <code>substr</code></td></tr>
-<tr><td>Grammar declarations, Text of a rule</td><td>Planck functions of <code>peg.pk</code>: <code>_define_rule</code> and <code>peg_parse</code>. <code>peg_parse</code> is called while parsing and its result is a <code>CONST</code></td></tr>
-<tr><td>Special forms</td><td><code>Def</code> <code>Set</code> <code>Declare</code> are the instructions of variables. The others are in the table above</td></tr>
-<tr><td>Patterns</td><td>The matching instructions</td></tr>
-<tr><td>Algebraic effects</td><td><code>HANDLE</code>, <code>PERFORM</code> and calls of continuations</td></tr>
-<tr><td>Top level</td><td>The entry of the evaluator. It reads the cells of <code>parse</code> and <code>eval</code> and calls them. <code>eval</code> and <code>_set_file</code></td></tr>
-<tr><td>Libraries, preprocessed libraries</td><td>All planck code. <code>try_read_file</code> and <code>write_file</code>, <code>parse</code>, and the usual <code>eval</code></td></tr>
-</table>
-
-<h2>Where the rules depend on the place</h2>
-<p>An instruction does not change its meaning with the place. The difference is in the instruction that the compiler picks.</p>
-<table>
-<tr><th>Place</th><th>Rule</th><th>Effect on the instructions</th></tr>
-<tr><td><code>x := e</code> at the top level, outside a block</td><td>A global variable. A new cell is made</td><td><code>GSET c</code></td></tr>
-<tr><td><code>x := e</code> in the block of an <code>if</code> or <code>while</code> at the top level</td><td>A local variable in the environment of the top-level code</td><td><code>STORE 0 i</code></td></tr>
-<tr><td><code>x := e</code> in a function</td><td>A local variable: a new slot of the same function</td><td><code>STORE 0 i</code></td></tr>
-<tr><td><code>Declare{x}</code> (the first half of <code>f(p) := e</code>)</td><td>Nothing if a variable is at the same place. At the top level, the same place means a global variable defined by the file being loaded; a global variable of another file is made anew and hides it</td><td>A decision at compile time with the file given by <code>_set_file</code></td></tr>
-<tr><td><code>Declare{x}</code> in a function</td><td>Only a variable of the environment of the same function is at the same place. A variable of an outer function is not</td><td>A decision at compile time</td></tr>
-<tr><td>A tail call</td><td><code>TCALL</code> in every place. The result is the same and only the depth of the stack differs</td><td>The choice of instruction does not depend on the place</td></tr>
-<tr><td>A tail call in the body of a <code>HANDLE</code></td><td>Written <code>TCALL</code>, but the boundary frame is not dropped</td><td>A rule at run time</td></tr>
-<tr><td>A name that is not found</td><td>Stops at compile time before the expression runs, in every place</td><td>No instruction is produced</td></tr>
-<tr><td>A forward reference</td><td>Declare with <code>fun f</code> first, in a function and at the top level alike</td><td><code>fun f</code> starts as <code>none</code> and stops when called (<code>not a function: none</code>). <code>GLOAD</code> and <code>LOAD</code> do not check</td></tr>
 </table>
