@@ -1,47 +1,49 @@
 <!--title planck0-->
 <h1>planck0</h1>
-<p class="lead">planck0 は M式だけを読む処理系です。トップレベルの M式を1つ読むたびにバイトコードにコンパイルし、専用のフレームスタックにフレームを置く仮想機械で実行します。ソースは <a href="@REPO@/blob/main/bootstrap/planck0.sv">planck0.sv</a> の1本です。</p>
+<p class="lead">planck0 は M式だけを読む処理系です。トップレベルの M式を1つ読むたびにバイトコードにコンパイルし、専用のフレームスタックにフレームを置く仮想機械で実行します。ソースは <a href="@REPO@/blob/main/bootstrap/planck0.sv">planck0.sv</a> の1ファイルです。</p>
 
 <h2>トップレベル</h2>
-<p><code>main</code> は準備をしてから <code>planck/init.pk</code> を読み、続いて最初の引数のプログラムファイルを読みます。</p>
+<p><code>main</code> は状態を初期化してから <code>planck/init.pk</code> を読み、続いて最初の引数のプログラムファイルを読みます。</p>
 <!--file bootstrap/planck0.sv fun main-->
-<p>ファイルは <code>interpret_file</code> が読みます（[[bootstrap/planck0.sv fun interpret_file]]）。式ごとに大域変数 <code>parse</code> と <code>eval</code> を <code>call_global</code> で呼び直します。<code>call_global</code> は <code>Apply{名前, Tuple{引数}}</code> を組み立ててコンパイルし、実行します（[[bootstrap/planck0.sv fun call_global]]）。このため <code>parse</code> を差し替えると次の式から新しい <code>parse</code> で読まれ、planck の構文はこの仕組みで入ります。</p>
+<p>ファイルは <code>interpret_file</code> が読みます（[[bootstrap/planck0.sv fun interpret_file]]）。式ごとに大域変数 <code>parse</code> と <code>eval</code> を <code>call_global</code> で呼び出します。<code>call_global</code> は <code>Apply{名前, Tuple{引数}}</code> を組み立ててコンパイルし、実行します（[[bootstrap/planck0.sv fun call_global]]）。このためプログラムが <code>parse</code> を差し替えると次の式から新しい <code>parse</code> で読みます。planck の構文はこの仕組みで導入します。</p>
 <!--file bootstrap/planck0.sv ; The loop looks up the global variables .. fun call_global-->
 
 <h2>値の表現</h2>
 <p>値は32ビットの1語です。最下位ビットが1なら1ビット左シフトした整数、0ならヒープ上のオブジェクトへのポインタです。オブジェクトは先頭の1語のヘッダに種類と長さを持ちます。</p>
 <!--file bootstrap/planck0.sv ; === data layout (planck0) .. ; === Hash table-->
-<p>シンボルと M式は intern します。同じ構造の M式はメモリ上で1つなので、等価性はポインタの比較です（[[bootstrap/planck0.sv ; intern a temporary m-expr object]]）。</p>
-<p>ヒープは起動時に <code>mmap2</code> で確保する固定の領域です。ヘッダの1語を持つチャンクが並び、オブジェクトのチャンクの先頭をビットマップに記録します（[[bootstrap/planck0.sv ; The heap is a fixed area .. ; === data layout (planck0)]]）。GC はオブジェクトを動かない mark-sweep で、全体を止めて、到達できないオブジェクトを解放します（[[bootstrap/planck0.sv ; === Garbage Collection .. fun main]]）。保守的で、根（大域変数・フレームスタック・機械のスタック）や印を付けたオブジェクトの語のうち、オブジェクトの中を指すものは、先頭でなくてもそのオブジェクトを残します。掃除では隣り合う空きチャンクをつなぎ、<code>allocate</code> はその中から first fit で取ります。前回の GC のあとに確保した量が前回の生きている量に達すると GC を始めます。</p>
+<p>シンボルと M式は intern します。同じ構造の M式はメモリ上に1つしかないので、等価性はポインタの比較で判定します（[[bootstrap/planck0.sv ; intern a temporary m-expr object]]）。</p>
+<p>ヒープは起動時に <code>mmap2</code> で確保する固定の領域です。ヒープにはヘッダ1語を持つチャンクが並び、オブジェクトのチャンクの先頭をビットマップに記録します（[[bootstrap/planck0.sv ; The heap is a fixed area .. ; === data layout (planck0)]]）。</p>
+<p>GC はオブジェクトを動かさない stop-the-world の mark-sweep で、到達できないオブジェクトを解放します（[[bootstrap/planck0.sv ; === Garbage Collection .. fun main]]）。この GC は保守的です。根（planck0 自身の大域変数・フレームスタック・機械のスタック）の語か印を付けたオブジェクトの語がオブジェクトの内部を指していれば、指す位置が先頭でなくてもそのオブジェクトを解放しません。sweep は隣り合う空きチャンクを連結し、<code>allocate</code> はその中から first fit で取ります。前回の GC のあとに確保した量が前回の GC で生きていた量に達すると、次の GC を始めます。</p>
 
 <h2>M式のリーダ</h2>
-<p>組み込みの <code>parse</code> が読むのは、シンボル・整数・文字列と、シンボルの直後に <code>{</code> が続く <code>Head{...}</code> の4種類です（[[bootstrap/planck0.sv fun parse_mexpr .. ; === Bytecode VM]]）。M式の引数は64個までです。</p>
+<p>組み込みの <code>parse</code> が読むのは、シンボル・整数・文字列と、シンボルに <code>{</code> が続く <code>Head{...}</code> の4種類です（[[bootstrap/planck0.sv fun parse_mexpr .. ; === Bytecode VM]]）。M式の引数は64個までです。</p>
 <!--file bootstrap/planck0.sv fun parse_-->
-<p>planck の構文が入ったあとも、このリーダは <code>parse_mexpr</code> として残ります。</p>
+<p>planck の構文を導入したあとも、このリーダは <code>parse_mexpr</code> として残ります。</p>
 <!--ex i_parse-->
 
 <h2>コンパイラ</h2>
 <p><code>compile</code> は整数と文字列を定数に、シンボルを変数の参照にし、M式を <code>compile_mexpr</code> に渡します（[[bootstrap/planck0.sv fun compile]]）。</p>
 <p><code>compile_mexpr</code> は頭で分岐します（[[bootstrap/planck0.sv fun compile_mexpr]]）。<code>Apply</code>・<code>Def</code>・<code>Declare</code>・<code>Set</code>・<code>Do</code>・<code>If</code>・<code>While</code>・<code>Lambda</code>・<code>Fusion</code>・<code>Quote</code>・<code>QuasiQuote</code>・<code>Handle</code>・<code>Perform</code> が特殊形式で、それ以外の頭は引数を評価して同じ頭の M式を作るコンストラクタになります。</p>
-<p>局所変数はコンパイル時に（環境の深さ, 位置）の組に解決します。大域変数は欄（値・名前・定義したファイルの3語）で、コンパイラは名前から最新の欄を引く表 <code>global_table</code> を持ちます。トップレベルの <code>Def</code> は新しい欄を作って表の項目を差し替え（[[bootstrap/planck0.sv fun define_global]]）、命令 <code>GLOAD</code>・<code>GDEF</code>・<code>GSET</code> には名前でなく欄を埋め込みます（[[bootstrap/planck0.sv fun global_cell .. ; allocate slots for variables in a pattern]]）。名前が指す変数は式を実行する前に決まり、前にコンパイルした関数は前の欄を指したままです。<code>Set</code> は今の欄に書き込みます。局所にも大域にも見つからない名前は、その式を実行する前にメッセージを出して止まります。</p>
-<p><code>Def</code> は右辺をコンパイルしたあとに欄を作るので、右辺からは前の変数が見えます。関数が自分自身を参照できるのは、構文が <code>Declare{f}</code> で先に欄を作り、<code>Set</code> で関数を入れる形に読み替えるからです。埋める前に呼ぶと <code>none</code> を呼ぶことになって止まります。<code>Declare{f}</code> が <code>Def{f, none}</code> としてコンパイルされるのは、<code>f</code> がまだその場所の変数でないときだけです。トップレベルでは <code>global_table</code> を引いて、欄のファイルを読み込み中のファイル <code>cur_file</code> と比べます。<code>cur_file</code> は <code>interpret_file</code> と、<code>load</code> が呼ぶ <code>_set_file</code> が設定します。関数の中ではコンパイル時の環境からその関数の深さの項目を探します（[[bootstrap/planck0.sv fun defined_here]]・[[bootstrap/planck0.sv if (== head DeclareS)]]）。</p>
+<p>局所変数はコンパイル時に（環境の深さ, 位置）の組に解決します。大域変数はセル（値・名前・定義したファイルの3語）で表し、コンパイラは名前から最新のセルを引く表 <code>global_table</code> を持ちます。トップレベルの <code>Def</code> は新しいセルを作って表の項目を差し替え（[[bootstrap/planck0.sv fun define_global]]）、命令 <code>GLOAD</code>・<code>GDEF</code>・<code>GSET</code> には名前でなくセルを埋め込みます（[[bootstrap/planck0.sv fun global_cell .. ; allocate slots for variables in a pattern]]）。このため名前の指す変数は式を実行する前に決まり、前にコンパイルした関数は前のセルを指したままです。<code>Set</code> は今のセルに書き込みます。局所にも大域にも見つからない名前があると、その式を実行する前にメッセージを出して止まります。</p>
+<p><code>Def</code> は右辺をコンパイルしたあとにセルを作るので、右辺からは前の変数が見えます。関数が自分自身を参照できるのは、構文が関数定義を <code>Declare{f}</code> で先にセルを作り <code>Set</code> で関数を入れる形に読み替えるからです。<code>Set</code> の前に関数を呼ぶと <code>none</code> を呼ぶことになって止まります。</p>
+<p><code>Declare{f}</code> が <code>Def{f, none}</code> としてコンパイルされるのは、<code>f</code> がまだその場所の変数でないときだけです。トップレベルでは <code>global_table</code> を引いて、セルのファイルを読み込み中のファイル <code>cur_file</code> と比べます。<code>cur_file</code> は <code>interpret_file</code> と、<code>load</code> が呼ぶ <code>_set_file</code> が設定します。関数の中ではコンパイル時の環境からその関数の深さの項目を探します（[[bootstrap/planck0.sv fun defined_here]]・[[bootstrap/planck0.sv if (== head DeclareS)]]）。</p>
 
 <h2>仮想機械</h2>
-<p>仮想機械の設計はソース中の注釈にあります。</p>
+<p>仮想機械の設計はソースのコメントに書いてあります。</p>
 <!--file bootstrap/planck0.sv ; === Bytecode VM .. def C_ARITY-->
 <p>フレームは機械のスタックでなく、専用のフレームスタックに置きます。フレームは呼び出し元のすぐ上に置き、戻ると捨てます。仮想機械は自分自身を再帰呼び出ししません。計算の状態は現在のフレームからトップレベルまでのフレームの鎖だけで表せるので、継続はこの鎖の複製で済みます。</p>
 
 <h2>呼び出しとパターン照合</h2>
-<p>呼び出しでは <code>select</code> が引数に合う関数を選びます（[[bootstrap/planck0.sv fun select]]）。<code>Fusion</code> は左、失敗すれば右を試します。<code>Lambda</code> は引数の数を比べてからパターンを順に照合します。</p>
+<p>呼び出しでは <code>select</code> が引数に合う関数を選びます（[[bootstrap/planck0.sv fun select]]）。<code>Fusion</code> は左の関数を試し、失敗すれば右の関数を試します。<code>Lambda</code> は引数の数を比べてからパターンを順に照合します。</p>
 <!--file bootstrap/planck0.sv fun match_pat-->
-<p><code>match_pat</code> は、変数なら新しい環境の次の位置に値を書き、<code>Quote</code> なら等価性を比べ、<code>_TypeOf</code> なら種類を確かめてから内側を照合します。M式のパターンは頭と引数の数を比べ、引数ごとに再帰します。合う関数がなければ <code>matching failed</code> で止まります（[[bootstrap/planck0.sv fun match_error]]）。</p>
-<p>組み込みの <code>eval</code> は、M式をトップレベルの式としてコンパイルし、新しいフレームで実行します（[[bootstrap/planck0.sv if (== (get callee 3) PRIM_EVAL)]]）。</p>
+<p><code>match_pat</code> は変数なら新しい環境の次の位置に値を書き、<code>Quote</code> なら等価性を比べ、<code>_TypeOf</code> なら種類を確かめてから内側を照合します。M式のパターンは頭と引数の数を比べ、引数ごとに再帰します。合う関数がなければ <code>matching failed</code> で止まります（[[bootstrap/planck0.sv fun match_error]]）。</p>
+<p>組み込みの <code>eval</code> は M式をトップレベルの式としてコンパイルし、新しいフレームで実行します（[[bootstrap/planck0.sv if (== (get callee 3) PRIM_EVAL)]]）。</p>
 
 <h2>組み込み関数</h2>
-<p>組み込み関数は <code>init_prims</code> が <code>defprim</code> で大域の表に欄を作って登録します。名前・引数の数・実装の関数・種類を渡します（[[bootstrap/planck0.sv fun defprim]]）。演算子と文字列の連結は糖衣の呼ぶ名前で登録され、<code>_add</code>・<code>_sub</code>・<code>_mul</code>・<code>_div</code>・<code>_mod</code>・<code>_lt</code>・<code>_le</code>・<code>_gt</code>・<code>_ge</code>・<code>_eq</code>・<code>_ne</code>・<code>_strcat</code> のように <code>_</code> で始まります（[[bootstrap/planck0.sv fun init_prims]]）。<code>_</code> のない <code>add</code> や <code>strcat</code> は登録しないので、プログラムの同名の変数が演算子の意味を変えません。</p>
+<p><code>init_prims</code> は <code>defprim</code> で大域の表にセルを作り、組み込み関数を登録します。<code>defprim</code> には名前・引数の数・実装の関数・種類を渡します（[[bootstrap/planck0.sv fun defprim]]）。演算子と文字列の連結は構文糖衣が呼ぶ名前で登録します。これらの名前は <code>_add</code>・<code>_sub</code>・<code>_mul</code>・<code>_div</code>・<code>_mod</code>・<code>_lt</code>・<code>_le</code>・<code>_gt</code>・<code>_ge</code>・<code>_eq</code>・<code>_ne</code>・<code>_strcat</code> のように <code>_</code> で始まります（[[bootstrap/planck0.sv fun init_prims]]）。<code>_</code> のない <code>add</code> や <code>strcat</code> は登録しないので、プログラムが同名の変数を定義しても演算子の意味は変わりません。</p>
 
 <h2 id="effects">エフェクト</h2>
 <p><code>Handle</code> は本体を新しいフレームで実行し、そのフレームにハンドラを記録します（[[bootstrap/planck0.sv fun op_handle]]）。<code>Perform</code> は現在のフレームから呼び出し元へ鎖をたどり、ハンドラを持つフレームを探します。</p>
 <!--file bootstrap/planck0.sv fun op_perform-->
 <p>見つけたら継続 <code>k</code>（現在のフレームから境界のフレームまでの鎖の、ヒープ上の複製）を作り、ハンドラを <code>(v, k)</code> で照合します。合わなければさらに外側を探します。ハンドラの値は境界のフレームの呼び出し元に返り、<code>Handle</code> 式の値になります。</p>
-<p><code>k</code> を呼ぶと、<code>k</code> の鎖をフレームスタックに複製し、複製を実行します（<code>resume</code>、[[bootstrap/planck0.sv fun resume]]）。元のフレームは実行しないので、同じ <code>k</code> を何度でも呼べます（多重継続）。</p>
+<p><code>k</code> を呼ぶと、<code>k</code> の鎖をフレームスタックに複製し、複製を実行します（<code>resume</code>、[[bootstrap/planck0.sv fun resume]]）。元のフレームは実行しないので、同じ <code>k</code> を何度でも呼べます（マルチショット継続）。</p>

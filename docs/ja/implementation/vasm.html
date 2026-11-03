@@ -36,9 +36,9 @@
 </ol></details></nav>
 <main>
 <h1>vasm の検査器</h1>
-<p class="lead"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm/check.pk">planck/lib/vasm/check.pk</a>は、機械命令に近い低級な言語 vasm の読み込みと検査を planck で書いたライブラリです。<code>use("vasm/check")</code> で読み、<code>vasm{| ... |}</code> に書いた関数と構造体の並びを、所有と借用の違反・解放後の使用・未初期化の読み出しについて型の規則だけで検査します。言語の規則は<a href="../reference/vasm.html">リファレンスの vasm</a>にあります。</p>
+<p class="lead"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm/check.pk">planck/lib/vasm/check.pk</a>は、機械命令に近い低級な言語 vasm の読み込みと検査を planck で書いたライブラリです。<code>use("vasm/check")</code> で読み込みます。<code>vasm{| ... |}</code> に書いた関数と構造体の並びを、所有と借用の違反・解放後の使用・未初期化の読み出しについて型の規則だけで検査します。言語の規則は<a href="../reference/vasm.html">リファレンスの vasm</a>にあります。</p>
 
-<h2>入口</h2>
+<h2>入口の関数</h2>
 <div class="example">
 <p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm/check.pk#L1-L11">planck/lib/vasm/check.pk: vasm/check: a language</a></p>
 <pre class="pk"><span class="tok-com"># vasm/check: a language with types, ownership and named regions, written in .pk files</span>
@@ -53,7 +53,7 @@
 <span class="tok-name">use</span><span class="tok-op">(</span><span class="tok-str">"string"</span><span class="tok-op">)</span>
 <span class="tok-name">use</span><span class="tok-op">(</span><span class="tok-str">"error"</span><span class="tok-op">)</span></pre>
 </div>
-<p><code>vasm{| ... |}</code> は <code>Module{[Struct{...}, Fn{...}, ...]}</code> に読まれ、検査は <code>vasm_check(m)</code> がこれを受け取って <code>VasmErr{kind, Pos{d}, msg}</code> のリストを返します。<code>vasm_errors(file, m)</code> は位置をファイルの <code>Loc{file, line, column}</code> に直し、<code>vasm_report(file, m)</code> はそれを <code>file:行:列: メッセージ</code> で書きます。誤りのない関数は結果に現れず、1つの関数の誤りは最初の1件だけです。この頁の例は、各ファイルの <code>report</code> で結果を1行ずつ書きます。</p>
+<p><code>vasm{| ... |}</code> は <code>Module{[Struct{...}, Fn{...}, ...]}</code> に読まれます。<code>vasm_check(m)</code> はこれを受け取り、<code>VasmErr{kind, Pos{d}, msg}</code> のリストを返します。<code>vasm_errors(file, m)</code> は位置をファイルの <code>Loc{file, line, column}</code> に直し、<code>vasm_report(file, m)</code> はそれを <code>file:行:列: メッセージ</code> で書きます。誤りのない関数は結果に現れず、1つの関数の誤りは最初の1件だけです。この頁の例は各ファイルの <code>report</code> で結果を1行ずつ書きます。</p>
 
 <h2>構文</h2>
 <p>vasm の構文は <a href="peg.html">packrat パーサ</a>の規則として <code>::=</code> で宣言します（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm/check.pk#L38-L39"><code>planck/lib/vasm/check.pk: vasm_kw</code></a>）。予約語は <code>vasm_kw</code> に集め、名前は予約語でない識別子です。文の規則は頭ごとに選択肢を並べ、読んだ結果を <code>Decl{...}</code>・<code>IfS{...}</code>・<code>Assign{...}</code> などの M式にします。</p>
@@ -72,7 +72,7 @@
     <span class="tok-op">|</span> <span class="tok-name">at</span><span class="tok-op">:</span><span class="tok-name">vasm_here</span> <span class="tok-name">x</span><span class="tok-op">:</span><span class="tok-name">vasm_name</span> <span class="tok-str">"="</span> <span class="tok-name">r</span><span class="tok-op">:</span><span class="tok-name">vasm_rhs</span> <span class="tok-op">{</span> <span class="tok-name">Assign</span><span class="tok-op">{</span><span class="tok-name">at</span><span class="tok-op">,</span> <span class="tok-name">x</span><span class="tok-op">,</span> <span class="tok-name">r</span><span class="tok-op">}</span> <span class="tok-op">}</span>
     <span class="tok-op">|</span> <span class="tok-name">at</span><span class="tok-op">:</span><span class="tok-name">vasm_here</span> <span class="tok-name">f</span><span class="tok-op">:</span><span class="tok-name">vasm_name</span> <span class="tok-str">"("</span> <span class="tok-name">args</span><span class="tok-op">:</span><span class="tok-name">vasm_args</span><span class="tok-op">?</span> <span class="tok-str">")"</span> <span class="tok-op">{</span> <span class="tok-name">CallS</span><span class="tok-op">{</span><span class="tok-name">at</span><span class="tok-op">,</span> <span class="tok-name">f</span><span class="tok-op">,</span> <span class="tok-name">vasm_opt_list</span><span class="tok-op">(</span><span class="tok-name">args</span><span class="tok-op">)</span><span class="tok-op">}</span> <span class="tok-op">}</span></pre>
 </div>
-<p>どの規則の結果にも、位置の <code>at</code> が入っています。<code>vasm_here</code> は何も読まずに、次の字句から本文の終わりまでの文字数を <code>Pos{d}</code> として返す規則です（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm/check.pk#L29-L34"><code>planck/lib/vasm/check.pk: vasm_here reads nothing</code></a>）。検査の誤りはこの <code>Pos</code> を持ち、<code>vasm_errors</code> が本文の長さから引いて行と列にします。</p>
+<p>どの規則の結果にも位置の <code>at</code> が入っています。<code>vasm_here</code> は何も読まずに、次の字句から本文の終わりまでの文字数を <code>Pos{d}</code> として返す規則です（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm/check.pk#L29-L34"><code>planck/lib/vasm/check.pk: vasm_here reads nothing</code></a>）。検査の誤りはこの <code>Pos</code> を持ち、<code>vasm_errors</code> が本文の長さから引いて行と列にします。</p>
 
 <h2>型と検査の状態</h2>
 <p>型も M式です。整数は <code>I8{}</code> から <code>U64{}</code>、箱は <code>Own{u}</code>、借用は <code>Ref{'shr または 'mut, 領域, u}</code>、配列は <code>Arr{u}</code>、構造体は <code>Named{s}</code> です。文字列リテラルは項 <code>Str{at, s}</code> で、型は <code>Ref{'shr, 'static, Arr{U8{}}}</code> です。<code>static</code> は予約語で、<code>vasm_outlives</code> がどの領域よりも長く続く領域として扱います。</p>
@@ -92,8 +92,8 @@
 <span class="tok-name">vasm_fn_regions</span> <span class="tok-op">:=</span> <span class="tok-op">[</span><span class="tok-op">]</span>
 <span class="tok-name">vasm_ret_type</span> <span class="tok-op">:=</span> <span class="tok-name">Unit</span><span class="tok-op">{</span><span class="tok-op">}</span></pre>
 </div>
-<p>関数ごとに、変数の宣言を <code>vasm_info</code>（名前から型へ）に、変数の状態を表の <code>Vs{status, loans}</code> に持ちます。<code>status</code> は初期化済み・未初期化・move 済み・解放済み・中身を取り出した箱・フィールドを取り出した構造体のどれかで、<code>loans</code> はその変数を借りている借用の並びです。<code>if</code> や <code>while</code> は状態の表を複製して分岐ごとに検査し、あとで突き合わせます。</p>
-<p>値が move されるかコピーされるかは型で決まります。<code>own</code> と <code>own</code> を持つ構造体は<em>線形</em>で、使うと move され、ちょうど1回 move か解放しなければなりません。整数・<code>bool</code>・<code>own</code> を持たない構造体と共有の借用はコピーされます。</p>
+<p>検査器は関数ごとに、変数の宣言を <code>vasm_info</code>（名前から型へ）に、変数の状態を <code>Vs{status, loans}</code> の表に保持します。<code>status</code> は初期化済み・未初期化・move 済み・解放済み・中身を取り出した箱・フィールドを取り出した構造体のどれかで、<code>loans</code> はその変数を借りている借用の並びです。<code>if</code> や <code>while</code> は状態の表を複製して分岐ごとに検査し、あとで突き合わせます。</p>
+<p>値が move されるかコピーされるかは型で決まります。<code>own</code> と <code>own</code> を持つ構造体は<em>線形</em>で、使うと move され、move と解放は合わせて高々1回です。整数・<code>bool</code>・<code>own</code> を持たない構造体と共有の借用はコピーされます。</p>
 <div class="example">
 <p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm/check.pk#L226-L231">planck/lib/vasm/check.pk: An integer literal is Lit{n} until</a></p>
 <pre class="pk"><span class="tok-com"># An integer literal is Lit{n} until it meets an integer type; Lit{none} is the result of an operation on literals.</span>
@@ -140,7 +140,7 @@
 <p class="label">出力</p>
 <pre class="out">ok</pre>
 </div>
-<p><code>own i64</code> は <code>box</code> で確保した整数への、ただ1つの持ち主です。<code>bump</code> の <code>[r]</code> は呼び出しごとに決まる領域の引数です。<code>&amp;mut</code> を借用の引数に渡す呼び出しは、<code>vasm_reborrows</code> が呼び出しの間だけ借り直すものとして扱い、move しません（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm/check.pk#L528-L534"><code>planck/lib/vasm/check.pk: An &amp;mut register given to a borrow parameter</code></a>）。<code>m</code> がそのあとも使えるのはこのためです。</p>
+<p><code>own i64</code> は <code>box</code> で確保した整数のただ1つの持ち主です。<code>bump</code> の <code>[r]</code> は呼び出しごとに決まる領域の引数です。<code>&amp;mut</code> を借用の引数に渡す呼び出しは、<code>vasm_reborrows</code> が呼び出しの間だけ借り直すものとして扱い、move しません（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm/check.pk#L528-L534"><code>planck/lib/vasm/check.pk: An &amp;mut register given to a borrow parameter</code></a>）。<code>m</code> がそのあとも使えるのはこのためです。</p>
 <div class="example">
 <p class="file">vasm_freed.pk</p>
 <pre class="pk"><span class="tok-name">use</span><span class="tok-op">(</span><span class="tok-str">"vasm/check"</span><span class="tok-op">)</span>
@@ -217,7 +217,7 @@ line 27: q is used after it is moved</pre>
 <p class="label">出力</p>
 <pre class="out">ok</pre>
 </div>
-<p><code>own</code> を持った値は、持ち主がなくなる所で自動的に解放されるので、上の例はどれも誤りになりません。その場所は、ブロックや関数の終わり、上書き、文として捨てた関数の結果、<code>free</code> した値の中に残ったものです。解放は実行時の動作で、検査器は何も数えません。ブロックや関数の終わりで残りを調べる関数 <code>vasm_leak_all</code> は、解放の場所を示すために残してある空の関数です（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm/check.pk#L711-L714"><code>planck/lib/vasm/check.pk: What an own value still owns</code></a>）。上書きは <code>vasm_assign</code> が状態を初期化済みに戻すだけです（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm/check.pk#L699-L709"><code>planck/lib/vasm/check.pk: vasm_assign(at, st, x, t</code></a>）。<code>free</code> は早く手放したいときに書きます。</p>
+<p><code>own</code> を持った値は持ち主がなくなる所で自動的に解放されます。その場所は、ブロックや関数の終わり、上書き、文として捨てた関数の結果、<code>free</code> した値の中に残ったものです。このため上の例はどれも誤りになりません。解放は実行時の動作で、検査の対象ではありません。<code>return</code> と関数の終わりで呼ぶ <code>vasm_leak_all</code> は本体が空の関数で、解放の場所を示すためにあります（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm/check.pk#L711-L714"><code>planck/lib/vasm/check.pk: What an own value still owns</code></a>）。上書きは <code>vasm_assign</code> が状態を初期化済みに戻すだけです（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm/check.pk#L699-L709"><code>planck/lib/vasm/check.pk: vasm_assign(at, st, x, t</code></a>）。<code>free</code> は早く解放したいときに書きます。</p>
 
 <h2>借用と領域</h2>
 <div class="example">
@@ -276,7 +276,7 @@ line 27: q is used after it is moved</pre>
 <pre class="out">line 34: p is borrowed as mut and cannot be borrowed
 line 44: p is borrowed and cannot be assigned</pre>
 </div>
-<p>借用した変数の <code>Vs</code> には <code>Loan{region, kind}</code> が入ります。借りている間の move・解放・代入は <code>vasm_no_loans</code> が、<code>&amp;mut</code> で借りている間の読み書きは <code>vasm_no_mut_loan</code> が拒みます（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm/check.pk#L303-L304"><code>planck/lib/vasm/check.pk: vasm_no_loans(at, st, x, what</code></a>）。共有の借用は同時にいくつでも持てますが、<code>&amp;mut</code> は1つだけで、借りている間は元の値を読むことも書き換えることも解放することもできません。<code>region r { ... }</code> は <code>vasm_end_region</code> で終わりに <code>r</code> の貸しを消します（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm/check.pk#L748"><code>planck/lib/vasm/check.pk: vasm_end_region(st, r</code></a>）。</p>
+<p>借用した変数の <code>Vs</code> には <code>Loan{region, kind}</code> が入ります。借りている間の move・解放・代入は <code>vasm_no_loans</code> が、<code>&amp;mut</code> で借りている間の読み書きは <code>vasm_no_mut_loan</code> が誤りにします（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm/check.pk#L303-L304"><code>planck/lib/vasm/check.pk: vasm_no_loans(at, st, x, what</code></a>）。共有の借用は同時にいくつでも持てますが、<code>&amp;mut</code> は1つだけで、借りている間は元の値を読むことも書き換えることも解放することもできません。<code>region r { ... }</code> の終わりでは、<code>vasm_end_region</code> が <code>r</code> の貸しを消します（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm/check.pk#L748"><code>planck/lib/vasm/check.pk: vasm_end_region(st, r</code></a>）。</p>
 <div class="example">
 <p class="file">vasm_escape.pk</p>
 <pre class="pk"><span class="tok-name">use</span><span class="tok-op">(</span><span class="tok-str">"vasm/check"</span><span class="tok-op">)</span>
@@ -317,7 +317,7 @@ line 44: p is borrowed and cannot be assigned</pre>
 <p class="label">出力</p>
 <pre class="out">line 18: a borrow of region inner is put in keep, which lives outside the region</pre>
 </div>
-<p>領域の内外は <code>vasm_outlives(q, r)</code> が決めます。<code>q</code> が <code>r</code> と同じか、<code>r</code> が関数の中で開いた領域で <code>q</code> がそれより前に開いたものなら、<code>q</code> は <code>r</code> より長く生きます。関数の領域の引数どうしには順序がありません。</p>
+<p>領域の内外は <code>vasm_outlives(q, r)</code> が決めます。<code>q</code> が <code>r</code> と同じか <code>static</code> のとき、または <code>r</code> が関数の中で開いた領域で <code>q</code> がそれより前に開いたものであるとき、<code>q</code> は <code>r</code> より長く続きます。関数の領域の引数どうしには順序がありません。</p>
 <div class="example">
 <p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm/check.pk#L334-L336">planck/lib/vasm/check.pk: q outlives r</a></p>
 <pre class="pk"><span class="tok-com"># q outlives r: q is r, or q is static (the region of the string literals, which lasts to the end of the program),</span>
@@ -339,7 +339,7 @@ line 44: p is borrowed and cannot be assigned</pre>
 <span class="tok-com"># a borrow that does not fit only because its region is opened inside the function and does not outlive the expected one</span>
 <span class="tok-name">vasm_escapes</span><span class="tok-op">(</span><span class="tok-name">e</span><span class="tok-op">,</span> <span class="tok-name">t</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-name">head</span><span class="tok-op">(</span><span class="tok-name">e</span><span class="tok-op">)</span> <span class="tok-op">==</span> <span class="tok-op">'</span><span class="tok-name">Ref</span> <span class="tok-kw">and</span> <span class="tok-name">head</span><span class="tok-op">(</span><span class="tok-name">t</span><span class="tok-op">)</span> <span class="tok-op">==</span> <span class="tok-op">'</span><span class="tok-name">Ref</span> <span class="tok-kw">and</span> <span class="tok-name">arg</span><span class="tok-op">(</span><span class="tok-name">e</span><span class="tok-op">,</span> <span class="tok-num">0</span><span class="tok-op">)</span> <span class="tok-op">==</span> <span class="tok-name">arg</span><span class="tok-op">(</span><span class="tok-name">t</span><span class="tok-op">,</span> <span class="tok-num">0</span><span class="tok-op">)</span> <span class="tok-kw">and</span> <span class="tok-name">arg</span><span class="tok-op">(</span><span class="tok-name">e</span><span class="tok-op">,</span> <span class="tok-num">2</span><span class="tok-op">)</span> <span class="tok-op">==</span> <span class="tok-name">arg</span><span class="tok-op">(</span><span class="tok-name">t</span><span class="tok-op">,</span> <span class="tok-num">2</span><span class="tok-op">)</span> <span class="tok-kw">and</span> <span class="tok-kw">not</span> <span class="tok-name">member</span><span class="tok-op">(</span><span class="tok-name">arg</span><span class="tok-op">(</span><span class="tok-name">t</span><span class="tok-op">,</span> <span class="tok-num">1</span><span class="tok-op">)</span><span class="tok-op">,</span> <span class="tok-name">vasm_fn_regions</span><span class="tok-op">)</span></pre>
 </div>
-<p>代入や引数で借用の型が合うかは <code>vasm_fits</code> が見ます。外側の領域の借用を内側の領域の借用として使うのは外のほうが長く生きるので通り、逆は通りません。逆のうち、受け側が関数の中で開いた領域より外のレジスタである場合は、<code>vasm_escapes</code> が <code>'escape</code> の誤りにします。</p>
+<p>代入や引数で借用の型が合うかは <code>vasm_fits</code> が判定します。外側の領域の借用を内側の領域の借用として使うことは、外側のほうが長く続くので許され、逆は許されません。逆のうち、受け側が関数の中で開いた領域より外のレジスタである場合は、<code>vasm_escapes</code> で判定して <code>'escape</code> の誤りにします。</p>
 
 <h2>分岐とループ</h2>
 <div class="example">
@@ -371,7 +371,7 @@ line 44: p is borrowed and cannot be assigned</pre>
     <span class="tok-kw">if</span> <span class="tok-op">(</span><span class="tok-name">vasm_moves</span><span class="tok-op">(</span><span class="tok-name">t</span><span class="tok-op">)</span> <span class="tok-kw">and</span> <span class="tok-name">vasm_key</span><span class="tok-op">(</span><span class="tok-name">t</span><span class="tok-op">,</span> <span class="tok-name">vasm_status</span><span class="tok-op">(</span><span class="tok-name">a</span><span class="tok-op">,</span> <span class="tok-name">x</span><span class="tok-op">)</span><span class="tok-op">)</span> <span class="tok-op">!=</span> <span class="tok-name">vasm_key</span><span class="tok-op">(</span><span class="tok-name">t</span><span class="tok-op">,</span> <span class="tok-name">vasm_status</span><span class="tok-op">(</span><span class="tok-name">b</span><span class="tok-op">,</span> <span class="tok-name">x</span><span class="tok-op">)</span><span class="tok-op">)</span><span class="tok-op">)</span> <span class="tok-name">vasm_fail</span><span class="tok-op">(</span><span class="tok-name">at</span><span class="tok-op">,</span> <span class="tok-op">'</span><span class="tok-name">loop</span><span class="tok-op">,</span> <span class="tok-str">f"</span><span class="tok-op">{</span><span class="tok-name">symname</span><span class="tok-op">(</span><span class="tok-name">x</span><span class="tok-op">)</span><span class="tok-op">}</span> <span class="tok-str">is moved or freed in the loop and not given a value again</span><span class="tok-str">"</span><span class="tok-op">)</span>
 <span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">vasm_vars</span><span class="tok-op">(</span><span class="tok-name">a</span><span class="tok-op">)</span><span class="tok-op">)</span></pre>
 </div>
-<p><code>if</code> は両方の分岐を複製した状態で検査し、<code>vasm_merge</code> が突き合わせます。片方の分岐だけで move や解放をした値は、あとで持ち主かどうかが決まらないので <code>'branch</code> の誤りです。<code>return</code> で終わった分岐は、<code>.dead</code> の印を付けて突き合わせから外します。<code>while</code> は本体を2周分検査し、<code>vasm_loop_same</code> が、ループで move した値が次の周の前に入れ直されているかを見ます（<code>'loop</code>）。</p>
+<p><code>if</code> は両方の分岐を複製した状態で検査し、<code>vasm_merge</code> が突き合わせます。片方の分岐だけで move や解放をした値は、あとで持ち主かどうかが決まらないので <code>'branch</code> の誤りです。<code>return</code> で終わった分岐は <code>.dead</code> の印を付けて突き合わせから外します。<code>while</code> は本体を2周分検査し、<code>vasm_loop_same</code> が、ループで move した値が次の周の前に入れ直されているかを確かめます（<code>'loop</code>）。</p>
 
 <h2>整数の幅</h2>
 <div class="example">
@@ -415,7 +415,7 @@ line 44: p is borrowed and cannot be assigned</pre>
 <pre class="out">line 12: the operands are u32 and u8
 line 31: 0x7F454C46 is out of the range of a literal, -32768 to 32767; make it with &lt;&lt; and |</pre>
 </div>
-<p>整数の型は <code>vasm_ints</code> の表（型・名前・ビット数・符号）に並べてあります（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm/check.pk#L165-L172"><code>planck/lib/vasm/check.pk: the integer types</code></a>）。演算の両辺は同じ型で、幅や符号を変えるには <code>as</code> を使います。リテラルは、はじめ型のない <code>Lit{n}</code> で、整数の型に出会ったところで範囲を調べます。範囲は -32768 から 32767 までで、符号なしの型は 0 から、8 ビットの型はその型の範囲に狭まります（<code>vasm_lit_lo</code>・<code>vasm_lit_hi</code>、<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm/check.pk#L176-L177"><code>planck/lib/vasm/check.pk: vasm_lit_lo(e</code></a>）。大きな値は、シフトと <code>|</code> で組み立てます。</p>
+<p>整数の型は <code>vasm_ints</code> の表（型・名前・ビット数・符号）に並べてあります（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm/check.pk#L165-L172"><code>planck/lib/vasm/check.pk: the integer types</code></a>）。演算の両辺は同じ型で、幅や符号を変えるには <code>as</code> を使います。リテラルははじめ型のない <code>Lit{n}</code> で、整数の型と合わせるときに範囲を検査します。範囲は -32768 から 32767 までで、符号なしの型は 0 から、8 ビットの型はその型の範囲に狭まります（<code>vasm_lit_lo</code>・<code>vasm_lit_hi</code>、<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm/check.pk#L176-L177"><code>planck/lib/vasm/check.pk: vasm_lit_lo(e</code></a>）。大きな値はシフトと <code>|</code> で組み立てます。</p>
 
 <h2>配列と構造体</h2>
 <div class="example">
@@ -468,7 +468,7 @@ line 31: 0x7F454C46 is out of the range of a literal, -32768 to 32767; make it w
 <p class="label">出力</p>
 <pre class="out">ok</pre>
 </div>
-<p>組み込みの関数は、型変数 <code>T</code> を含む型 <code>Sig{領域, 引数, 結果}</code> の表 <code>vasm_builtins</code> に並べてあります（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm/check.pk#L233-L241"><code>planck/lib/vasm/check.pk: the built-in functions</code></a>）。<code>alloc(n, v)</code> は <code>v</code> を <code>n</code> 個並べた <code>own [T]</code> を作り、<code>len</code> は長さを返します。添字は <code>i64</code> で、範囲の検査は実行時に回し、検査器は型と所有だけを見ます。構造体は全部のフィールドを1回ずつ書いて作り、<code>own</code> を持たなければ整数と同じくコピーされます。<code>own</code> を持つかどうかは <code>vasm_owning</code> が、フィールドをたどって決めます（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm/check.pk#L207-L221"><code>planck/lib/vasm/check.pk: t owns a value</code></a>）。</p>
+<p>組み込みの関数は、型変数 <code>T</code> を含む型 <code>Sig{領域, 引数, 結果}</code> の表 <code>vasm_builtins</code> に並べてあります（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm/check.pk#L233-L241"><code>planck/lib/vasm/check.pk: the built-in functions</code></a>）。<code>alloc(n, v)</code> は <code>v</code> を <code>n</code> 個並べた <code>own [T]</code> を作り、<code>len</code> は長さを返します。添字は <code>i64</code> です。範囲の検査は実行時に行い、検査器が検査するのは型と所有だけです。構造体は全部のフィールドを1回ずつ書いて作り、<code>own</code> を持たなければ整数と同じくコピーされます。<code>own</code> を持つかどうかは <code>vasm_owning</code> がフィールドをたどって判定します（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/vasm/check.pk#L207-L221"><code>planck/lib/vasm/check.pk: t owns a value</code></a>）。</p>
 
 <h3>own を持つ値の入れ替え</h3>
 <div class="example">
@@ -505,7 +505,7 @@ line 31: 0x7F454C46 is out of the range of a literal, -32768 to 32767; make it w
 <p class="label">出力</p>
 <pre class="out">line 25: the elements of parts own values and are not copied; use swap(parts[i], v)</pre>
 </div>
-<p><code>own</code> を持つ値は、配列の要素やポインタの指す先から読んでコピーすることができません（持ち主が2人になるため）。<code>swap(p[i], v)</code> は <code>v</code> を入れて前の値を取り出します。引数の型 <code>Place{T}</code> は、<code>*p</code>・<code>p[i]</code>・<code>p.f</code> の形の場所だけを受けます。構造体のレジスタのフィールドへの書き込み <code>img.body = b</code> は、前の値を解放して入れ替えます。</p>
+<p><code>own</code> を持つ値は、配列の要素やポインタの指す先から読んでコピーできません（持ち主が2人になるため）。<code>swap(p[i], v)</code> は <code>v</code> を入れて前の値を取り出します。引数の型 <code>Place{T}</code> は、<code>*p</code>・<code>p[i]</code>・<code>p.f</code> の形の場所だけを受け付けます。構造体のレジスタのフィールドへの書き込み <code>img.body = b</code> は、前の値を解放して入れ替えます。</p>
 
 <h2>誤りの返し方</h2>
 <div class="example">
@@ -530,7 +530,7 @@ line 31: 0x7F454C46 is out of the range of a literal, -32768 to 32767; make it w
     <span class="tok-name">reverse</span><span class="tok-op">(</span><span class="tok-name">errs</span><span class="tok-op">)</span>
 <span class="tok-op">}</span></pre>
 </div>
-<p>検査の途中で誤りに出会うと <code>vasm_fail</code> が代数的エフェクト <code>VasmFail{at, kind, msg}</code> を起こします（<a href="../tutorial/5.html">代数的エフェクト</a>）。<code>vasm_check</code> は構造体と関数ごとに <code>handle</code> でこれを受け、<code>VasmErr</code> にして検査を打ち切るので、1つの関数の誤りは最初の1件になります。<code>kind</code> の種類は<a href="../reference/vasm.html">リファレンス</a>の表にあります。</p>
+<p>検査の途中で誤りを見つけると <code>vasm_fail</code> が代数的エフェクト <code>VasmFail{at, kind, msg}</code> を起こします（<a href="../tutorial/5.html">代数的エフェクト</a>）。<code>vasm_check</code> は構造体と関数ごとに <code>handle</code> でこれを受け、<code>VasmErr</code> にして検査を打ち切るので、1つの関数の誤りは最初の1件になります。<code>kind</code> の種類は<a href="../reference/vasm.html">リファレンス</a>の表にあります。</p>
 
 <nav class="pager"><a class="prev" href="syntax.html"><small>前のページ</small>構文の定義</a><a class="next" href="planckvm.html"><small>次のページ</small>planckvm: 実行モデルと値</a></nav>
 </main>
