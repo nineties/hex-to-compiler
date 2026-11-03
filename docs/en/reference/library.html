@@ -121,9 +121,9 @@ planck</pre>
 </div>
 
 <h2 id="u64">u64</h2>
-<p>Integers have 31 bits, so a 64-bit value is a <code>u16</code> array of four 16-bit limbs, the lowest first. It is not changed after it is made.</p>
+<p>A 64-bit value is a <code>u16</code> array of four 16-bit limbs, the lowest first. It is not changed after it is made.</p>
 <ul>
-<li><code>u64(n)</code> is the value of the integer <code>n</code>, sign-extended when it is negative. <code>u64_limbs(l3, l2, l1, l0)</code> is made of the 16-bit limbs, and <code>u64_hex("0x...")</code> of a hexadecimal string (up to 16 digits; <code>_</code> is ignored). <code>u64_to_hex(a)</code> is <code>0x</code> and 16 digits, and <code>u64_to_int(a)</code> is the integer when the signed value fits in 31 bits. Otherwise the program stops.</li>
+<li><code>u64(n)</code> is the value of the integer <code>n</code>, sign-extended when it is negative. <code>u64_limbs(l3, l2, l1, l0)</code> is made of the 16-bit limbs, and <code>u64_hex("0x...")</code> of a hexadecimal string (up to 16 digits; <code>_</code> is ignored). <code>u64_to_hex(a)</code> is <code>0x</code> and 16 digits, and <code>u64_to_int(a)</code> is the signed value of <code>a</code>.</li>
 <li><code>u64_add</code>, <code>u64_sub</code> and <code>u64_neg</code> compute modulo 2 to the 64th power. <code>u64_and</code>, <code>u64_or</code>, <code>u64_xor</code> and <code>u64_not</code> work bit by bit.</li>
 <li><code>u64_shl(a, k)</code>, <code>u64_shr(a, k)</code> and <code>u64_sar(a, k)</code> are the left shift, the logical right shift and the arithmetic right shift by <code>k</code> bits (0 to 63).</li>
 <li><code>u64_eq(a, b)</code> tests equality. <code>u64_ucmp(a, b)</code> and <code>u64_scmp(a, b)</code> are <code>-1</code>, <code>0</code> or <code>1</code> comparing as unsigned and as signed. <code>u64_ult</code> and <code>u64_slt</code> tell whether <code>a</code> is smaller.</li>
@@ -271,7 +271,7 @@ Node{
 <ul>
 <li>An alternative <code>Act{Seq{e1, ...}, Lambda{Tuple{Tuple{l1, ...}}, body}}</code> is reversed when <code>body</code> is a quasi-quotation whose <code>!x</code> are labels, <code>Quote{c}</code>, labels, <code>Tuple{labels}</code> or <code>mexpr(h, args)</code>. The tree is matched against the quasi-quotation, the subtrees are put in the labels, and the elements are written in order. A string is written as it is, and a rule by <code>unparse_as(rule, subtree)</code>. A label <code>_</code> can be used for an element that always matches the same string (<code>"+"</code> or <code>Same{}</code>). An element is a string, a rule, or <code>Delimited</code>, <code>Delimited1</code>, <code>Many</code> or <code>Option</code> of a rule.</li>
 <li>Among the alternatives that match the tree, the one with the most parts of the quasi-quotation that are not <code>!x</code> is used.</li>
-<li>When an alternative of a stronger rule is placed where a weaker rule is wanted, it is enclosed in the first <code>"(" e ")"</code> of the grammar (the action can be anything). An alternative that is only a rule name connects the rule to the rules it can be, and decides which alternatives need parentheses. An alternative that ends with a weaker rule (<code>if (c) a else b</code> ends with <code>expr</code>) also needs parentheses, unless the same or a weaker rule is wanted.</li>
+<li>When an alternative of a stronger rule is placed where a weaker rule is wanted, it is enclosed in the first <code>"(" e ")"</code> of the grammar (the action can be anything). An alternative that is only a rule name connects the rule to the rules it can be, and decides which alternatives need parentheses. An alternative that ends with a weaker rule (<code>while (c) e</code> ends with <code>expr</code>) also needs parentheses, unless the same or a weaker rule is wanted.</li>
 <li><code>unparse_custom(owner, spec, tail, f)</code> adds an alternative to the rule <code>owner</code>. <code>f(t)</code> is the string of <code>t</code> or <code>none</code>, <code>spec</code> ranks it against the quasi-quotations, and <code>tail</code> is the last rule of the string or <code>none</code>. <code>unparse</code> writes <code>Do{...}</code> in <code>{ }</code> with one expression per line indented by four spaces, and writes <code>If</code> as <code>if (c) a else b</code>. Both are added in this way.</li>
 <li>The string of a tree that the grammar does not write is a constructor call <code>Head{a, ...}</code>. A symbol that is not an identifier, and a value that is not an integer, a string, a symbol or an M-expression, have no string.</li>
 </ul>
@@ -288,6 +288,12 @@ if (n &lt; 0) -n else n * (n + 1)</pre>
 
 <h2 id="base">base</h2>
 <p><code>panic(msg)</code> writes <code>msg</code> and stops with status 1. <code>assert(c, msg)</code> calls <code>panic(msg)</code> when <code>c</code> is not true.</p>
+
+<h2 id="preprocess">Preprocessed libraries</h2>
+<p>Running the program <code>tools/preprocess.pk</code> with the names of libraries as arguments parses the chosen libraries into M-expressions in advance. It loads each named library as <code>use("name")</code> does, with the libraries it uses, and writes the M-expressions that each library is parsed into to <code>planck/lib/&lt;name&gt;.pkm</code>, one M-expression on each line.</p>
+<p>Nothing is evaluated in advance: <code>use</code> reads the M-expressions of <code>planck/lib/&lt;name&gt;.pkm</code> and evaluates them one by one, so the program behaves as if <code>use</code> parsed <code>planck/lib/&lt;name&gt;.pk</code>. Without a usable <code>.pkm</code> file, <code>use</code> parses the library.</p>
+<p>A <code>.pkm</code> file is used when the text of the library and the grammar are the same as when the file was written. The grammar is the same when the files <code>planck/init.pk</code>, <code>planck/peg.pk</code> and <code>planck/syntax.pk</code> have the same text, the libraries that have declared rules are the same libraries with the same text in the same order, and no other rule has been declared (<code>peg_version</code> is the same). A file that cannot be read as M-expressions, or that does not end with its last expression, is not used either.</p>
+<p>A program that replaces <code>parse</code> or a function that the actions of the rules call is not detected. Removing the <code>.pkm</code> files is always safe. A library with a value that has no text as an M-expression (a function, an array) in its parse result cannot be preprocessed.</p>
 
 <nav class="pager"><a class="prev" href="builtins.html"><small>Previous</small>Builtin functions</a><a class="next" href="vasm.html"><small>Next</small>vasm</a></nav>
 </main>
