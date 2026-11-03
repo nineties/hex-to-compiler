@@ -48,6 +48,7 @@ SECTIONS = {
             ("builtins", "組み込み関数"),
             ("library", "ライブラリ"),
             ("vasm", "vasm"),
+            ("psys", "psys"),
         ]),
         ("implementation", "処理系の実装", [
             ("index", "構成"),
@@ -84,6 +85,7 @@ SECTIONS = {
             ("builtins", "Builtin functions"),
             ("library", "Libraries"),
             ("vasm", "vasm"),
+            ("psys", "psys"),
         ]),
         ("implementation", "Implementation", [
             ("index", "Overview"),

@@ -1,0 +1,457 @@
+# tests for psys (planck/lib/psys)
+# Copyright (C) 2026 nineties
+
+passed := 0
+failed := 0
+
+check(actual, expected) := if (actual == expected) {
+    passed = passed + 1
+} else {
+    failed = failed + 1
+    put("Test failed: expected "); print(expected)
+    put(" but got "); println(actual)
+}
+
+use("psys/expand")
+use("vasm/text")
+
+this_file := "planck/tests/psys.pk"
+this_src := read_file(this_file)
+
+# the module m of psys expands to the module of vasm n, which has no error
+same(m, n) := {
+    r := psys_expand_all(m)
+    check(arg(r, 1), [])
+    check(vasm_text(arg(r, 0)), vasm_text(n))
+    check(vasm_check(arg(r, 0)), [])
+}
+
+# the module has one error of the kind in the expansion, on the line marked with "# NG"
+ng(m, kind) := {
+    r := psys_expand_all(m)
+    es := psys_errors(this_file, arg(r, 1))
+    check(map((VasmErr{k, _, _}) -> k, es), [kind])
+    if (length(es) == 1) {
+        line := line_text(this_src, arg(arg(arg(es, 0), 1), 1))
+        check(index_of_str(line, "# NG", 0) >= 0, true)
+    }
+}
+
+# === syntax ===
+m := psys{|
+    struct S { a: i32, b: i64 }
+    fn f[r](x: i32, p: &r [i32]) -> i32 { let y: i32 = x + 1; y }
+|}
+check(head(m), 'PModule)
+check(map(head, arg(m, 0)), ['Struct, 'PFn])
+body := arg(arg(m, 0)[1], 5)
+check(map(head, body), ['SLet, 'SExpr])
+check(arg(body[0], 2), I32{})
+check(head(arg(body[0], 3)), 'EBin)
+# the precedence: & binds tighter than ==, == tighter than and, and and tighter than or
+e1 := arg(arg(psys{| fn f() { a | b and c == d & e } |}, 0)[0], 5)[0]
+check(head(arg(e1, 1)), 'EAnd)
+check(arg(arg(arg(e1, 1), 1), 1), 'bit_or)
+check(arg(arg(arg(e1, 1), 2), 1), 'eq)
+check(arg(arg(arg(arg(e1, 1), 2), 3), 1), 'bit_and)
+e2 := arg(arg(psys{| fn f() { a or b and c } |}, 0)[0], 5)[0]
+check(head(arg(e2, 1)), 'EOr)
+check(head(arg(arg(e2, 1), 2)), 'EAnd)
+e3 := arg(arg(psys{| fn f() { h & 1 == 0 } |}, 0)[0], 5)[0]
+check(arg(arg(e3, 1), 1), 'eq)
+check(arg(arg(arg(e3, 1), 2), 1), 'bit_and)
+# a new line separates statements: *p = 1 is not a multiplication
+b4 := arg(arg(psys{| fn f() {
+    x = a
+    *p = 1
+} |}, 0)[0], 5)
+check(map(head, b4), ['SSet, 'SSet])
+check(map(s -> head(arg(s, 1)), b4), ['EVar, 'EDeref])
+# S { starts a block after a condition, and S{f: e} is a struct value
+b5 := arg(arg(psys{| fn f() {
+    if x { y = 1 }
+    s = S { a: 1, b: 2 }
+} |}, 0)[0], 5)
+check(map(head, b5), ['SIf, 'SSet])
+check(head(arg(b5[1], 3)), 'EMake)
+check(map(s -> head(s), arg(b5[0], 2)), ['SSet])
+# for, compound assignments, else if
+b6 := arg(arg(psys{| fn f() {
+    for i in 0..n { x += i }
+    if a { return } else if b { return 1 } else { x <<= 2 }
+} |}, 0)[0], 5)
+check(map(head, b6), ['SFor, 'SIf])
+check(arg(arg(b6[0], 4)[0], 2), 'add)
+check(head(arg(b6[1], 3)[0]), 'SIf)
+
+# === expansion ===
+
+# nested expressions, let and a result at the end
+same(psys{|
+    fn f(a: i32, b: i32) -> i32 {
+        let c = a + b * 2
+        c
+    }
+|}, vasm{|
+    fn f(a: i32, b: i32) -> i32 {
+        var t0: i32
+        t0 = b * 2
+        var c: i32
+        c = a + t0
+        return c
+    }
+|})
+
+# a type after the name gives the type of a literal
+same(psys{|
+    fn f() -> i64 {
+        let x: i64 = 5
+        let y = x << 2
+        y - 1
+    }
+|}, vasm{|
+    fn f() -> i64 {
+        var x: i64
+        x = 5
+        var y: i64
+        y = x << 2
+        var t0: i64
+        t0 = y - 1
+        return t0
+    }
+|})
+
+# for: the end is read once, and the index is converted to i64
+same(psys{|
+    fn fill[r](m: &mut r [i32], n: i32) {
+        for i in 0 as i32..n {
+            m[i] = i * 2
+        }
+    }
+|}, vasm{|
+    fn fill[r](m: &mut r [i32], n: i32) {
+        var t0: i32
+        t0 = n
+        var i: i32
+        i = 0
+        while (i < t0) {
+            var t1: i32
+            t1 = i * 2
+            var t2: i64
+            t2 = i as i64
+            m[t2] = t1
+            i = i + 1
+        }
+    }
+|})
+
+# a compound assignment to an element reads the element once
+same(psys{|
+    fn bump[r](m: &mut r [i64], k: i64) {
+        m[k] += 3
+    }
+|}, vasm{|
+    fn bump[r](m: &mut r [i64], k: i64) {
+        var t0: i64
+        t0 = m[k]
+        t0 = t0 + 3
+        m[k] = t0
+    }
+|})
+
+# a compound assignment to a variable and to a field
+same(psys{|
+    struct P { x: i64, y: i64 }
+    fn f(p: P, k: i64) -> i64 {
+        var q: P
+        q = p
+        q.x -= k
+        q.y *= 2
+        q.x + q.y
+    }
+|}, vasm{|
+    struct P { x: i64, y: i64 }
+    fn f(p: P, k: i64) -> i64 {
+        var q: P
+        q = p
+        var t0: i64
+        t0 = q.x
+        t0 = t0 - k
+        q.x = t0
+        var t1: i64
+        t1 = q.y
+        t1 = t1 * 2
+        q.y = t1
+        var t2: i64
+        t2 = q.x
+        var t3: i64
+        t3 = q.y
+        var t4: i64
+        t4 = t2 + t3
+        return t4
+    }
+|})
+
+# and, or and not make if; the condition of while is computed again at the end of each round
+same(psys{|
+    fn f(a: i64, b: i64) -> bool {
+        if a > 0 and b > 0 { return true }
+        while a < 10 or not (b < 3) { a += 1 }
+        a == b
+    }
+|}, vasm{|
+    fn f(a: i64, b: i64) -> bool {
+        var t0: bool
+        t0 = a > 0
+        var t1: bool
+        t1 = t0
+        if (t1) {
+            var t2: bool
+            t2 = b > 0
+            t1 = t2
+        }
+        if (t1) {
+            return true
+        }
+        var t3: bool
+        t3 = a < 10
+        var t4: bool
+        t4 = t3
+        if (t4 == false) {
+            var t5: bool
+            t5 = b < 3
+            var t6: bool
+            t6 = t5 == false
+            t4 = t6
+        }
+        var t7: bool
+        t7 = t4
+        while (t7) {
+            a = a + 1
+            var t8: bool
+            t8 = a < 10
+            var t9: bool
+            t9 = t8
+            if (t9 == false) {
+                var t10: bool
+                t10 = b < 3
+                var t11: bool
+                t11 = t10 == false
+                t9 = t11
+            }
+            t7 = t9
+        }
+        var t12: bool
+        t12 = a == b
+        return t12
+    }
+|})
+
+# a literal beyond the range of vasm is made from parts of 15 bits, in the type that the context gives
+same(psys{|
+    fn f(x: i32) -> i32 {
+        let a: i64 = 0x123456789
+        let b: u32 = 4294967295
+        let c: i32 = -2147483648
+        x + 100000
+    }
+|}, vasm{|
+    fn f(x: i32) -> i32 {
+        var t0: i64
+        t0 = 4
+        t0 = t0 << 15
+        t0 = t0 | 18058
+        t0 = t0 << 15
+        t0 = t0 | 26505
+        var a: i64
+        a = t0
+        var t1: u32
+        t1 = 3
+        t1 = t1 << 15
+        t1 = t1 | 32767
+        t1 = t1 << 15
+        t1 = t1 | 32767
+        var b: u32
+        b = t1
+        var t2: i32
+        t2 = 2
+        t2 = t2 << 15
+        t2 = t2 | 0
+        t2 = t2 << 15
+        t2 = t2 | 0
+        t2 = 0 - t2
+        var c: i32
+        c = t2
+        var t3: i32
+        t3 = 3
+        t3 = t3 << 15
+        t3 = t3 | 1696
+        var t4: i32
+        t4 = x + t3
+        return t4
+    }
+|})
+
+# calls: the results of nested calls are kept in temporaries, and a borrow keeps its region
+same(psys{|
+    fn g(a: i64, b: i64) -> i64 { a + b }
+    fn h[r](a: &r [u8]) -> i64 {
+        let k = len(a)
+        g(k, g(1, 2)) * 3
+    }
+|}, vasm{|
+    fn g(a: i64, b: i64) -> i64 {
+        var t0: i64
+        t0 = a + b
+        return t0
+    }
+    fn h[r](a: &r [u8]) -> i64 {
+        var k: i64
+        k = len(a)
+        var t0: i64
+        t0 = g(1, 2)
+        var t1: i64
+        t1 = g(k, t0)
+        var t2: i64
+        t2 = t1 * 3
+        return t2
+    }
+|})
+
+# a name that is declared again gets another name in vasm, and the loop variable ends with the loop
+same(psys{|
+    fn f(n: i64) -> i64 {
+        var s: i64
+        s = 0
+        for i in 0 as i64..n { s += i }
+        for i in 0 as i64..n { s += i }
+        let s2 = s
+        s2
+    }
+|}, vasm{|
+    fn f(n: i64) -> i64 {
+        var s: i64
+        s = 0
+        var t0: i64
+        t0 = n
+        var i: i64
+        i = 0
+        while (i < t0) {
+            s = s + i
+            i = i + 1
+        }
+        var t1: i64
+        t1 = n
+        var i_2: i64
+        i_2 = 0
+        while (i_2 < t1) {
+            s = s + i_2
+            i_2 = i_2 + 1
+        }
+        var s2: i64
+        s2 = s
+        return s2
+    }
+|})
+
+# a value of val, a closure and a call of a val
+same(psys{|
+    fn f(v: val) -> val {
+        let w = v('a, 'b)
+        'done
+    }
+|}, vasm{|
+    fn f(v: val) -> val {
+        var w: val
+        w = v('a, 'b)
+        return 'done
+    }
+|})
+
+# a statement that returns in the middle, and the result of an if that ends a function
+same(psys{|
+    fn f(x: i64) -> i64 {
+        if x == 0 { return 1 } else { return 2 }
+    }
+|}, vasm{|
+    fn f(x: i64) -> i64 {
+        if (x == 0) {
+            return 1
+        } else {
+            return 2
+        }
+    }
+|})
+
+# === errors ===
+
+# the type of a literal alone is not known
+ng(psys{|
+    fn f() {
+        let x = 5  # NG
+    }
+|}, 'type)
+
+ng(psys{|
+    fn f() {
+        let x = 0x12345  # NG
+    }
+|}, 'type)
+
+# a literal beyond the range of its type
+ng(psys{|
+    fn f() {
+        let x: i32 = 4294967296  # NG
+    }
+|}, 'type)
+
+ng(psys{|
+    fn f() {
+        let x: u32 = -1000000  # NG
+    }
+|}, 'type)
+
+ng(psys{|
+    fn f(n: i64) {
+        y = n  # NG
+    }
+|}, 'undefined)
+
+ng(psys{|
+    fn f(n: i64) {
+        g(n)  # NG
+    }
+|}, 'undefined)
+
+ng(psys{|
+    fn f(n: i64) -> i64 {
+        n + 1  # NG
+        n
+    }
+|}, 'type)
+
+# for needs the type of the variable
+ng(psys{|
+    fn f(n: i64) {
+        for i in 0..10 {  # NG
+            n += 1
+        }
+    }
+|}, 'type)
+
+# only the first error of a function is reported, and the other functions are expanded
+r := psys_expand_all(psys{|
+    fn f() { x = 1 }
+    fn g() { y = 2 }
+    fn h() { }
+|})
+check(length(arg(r, 1)), 2)
+check(map(f -> arg(f, 1), arg(arg(r, 0), 0)), ['h])
+
+# an error of vasm_check on the expanded form is reported by vasm_check
+check(map((VasmErr{k, _, _}) -> k, vasm_check(psys_expand(psys{|
+    fn f(x: i64) -> i32 { x }
+|}))), ['type])
+
+put(f"psys: {passed} passed, {failed} failed\n")
+if (failed > 0) exit(1)
