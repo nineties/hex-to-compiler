@@ -44,7 +44,7 @@ planck0: planck0.sv plisp2 $(SASM_LIBS)
 VASM_EXAMPLES := $(wildcard planck/examples/vasm/*.vasm)
 BACKEND_EXAMPLES := $(wildcard planck/examples/backend/*.pk)
 
-.PHONY: clean test test-planck0 preprocess
+.PHONY: clean test test-planck0 test-interp preprocess
 clean:
 	rm -f planck/lib/*.pkm planck/lib/*/*.pkm
 	rm -f pforth
@@ -55,6 +55,10 @@ clean:
 
 test: pforth plisp.fs $(shell find plisp -name "*.lisp")
 	./pforth < plisp.fs plisp/test.lisp
+
+# run the programs of the tests with the evaluator written in Planck (planck/lib/interp.pk) and compare with planck0
+test-interp: planck0
+	tools/test_interp.sh
 
 # parse the libraries that planck/vasmc.pk uses in advance (planck/lib/*/*.pkm)
 preprocess: planck0

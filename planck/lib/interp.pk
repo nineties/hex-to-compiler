@@ -1,0 +1,1040 @@
+# interp: an evaluator of Planck written in Planck
+# Copyright (C) 2026 nineties
+#
+# interp_run(args, native_syntax) runs planck/init.pk and then the program args[0] with the evaluator below.
+# interp_start(args, native_syntax) only makes the global environment of the program,
+# interp_eval(e) evaluates an M-expression as the builtin function eval does,
+# and interp_file(path) reads a file with the function parse of the program and evaluates its expressions one by one.
+#
+# The evaluator turns an M-expression into a function of the environment before it runs,
+# so that the variables are resolved before the expression runs, as planck/SPEC.rst says.
+# A function of the program is IpLambda{code, env}, IpFusion{f, g}, IpPrim{arity, f, name} or IpCont{k}.
+# These heads are used for the functions only, and typeof gives 'function for them.
+# Handle and Perform of the program are the effects of the language that runs the evaluator, and k of a handler is IpCont{k}.
+# The builtin functions of the program are those of the language that runs the evaluator, except for the ones
+# that print a function, give its type, or are the evaluator itself (print, println, typeof, argv, _set_file, eval).
+#
+# When native_syntax is true the evaluator does not load planck/peg.pk and planck/syntax.pk.
+# The program is read by the function parse of the language that runs the evaluator, and a rule declared by the program
+# is a rule of that grammar (the actions of the rule are evaluated by the evaluator and given to _define_rule as functions).
+# The definitions that the syntax makes for the program are taken from planck/syntax.pk and planck/peg.pk,
+# as listed in ip_syntax_names and ip_peg_names, and the others are the ones of the language that runs the evaluator.
+# When native_syntax is false the evaluator loads planck/peg.pk and planck/syntax.pk like any other file.
+
+use("list")
+use("string")
+
+# ===== State =====
+
+# the functions that are used before they are defined
+fun ip_show
+fun ip_fmt
+fun ip_pm
+fun ip_pm_all
+fun ip_run_all
+fun ip_eval_args
+fun ip_comp
+fun ip_simple
+fun ip_call
+fun ip_on_effect
+fun ip_install_peg
+fun ip_install_syntax
+fun interp_eval
+
+# the value of a global variable which has no value yet
+ip_unset := array(1)
+
+# the global variables of the program: a table from a symbol to a cell
+# a cell is an array | value | symbol | file that defined it |
+ip_globals := table()
+
+# the file being loaded (none if there is none)
+ip_file := none
+
+# the strings of the command line for the program
+ip_args := array(0)
+
+# the function selected by ip_select, and the environment it runs in
+ip_sel_body := none
+ip_sel_env := none
+
+# whether the syntax of the program is made by the language that runs the evaluator
+ip_native := true
+
+# ===== Errors =====
+
+# the standard error output is the file /dev/stderr
+ip_stderr(s) := write_file("/dev/stderr", s)
+
+ip_die(msg) := {
+    ip_stderr(_strcat(msg, "\n"))
+    exit(1)
+}
+
+ip_die_at(msg, v) := ip_die(_strcat(msg, ip_show(v)))
+
+ip_malformed(e) := ip_die_at("compile error: malformed expression: ", e)
+
+# ===== Functions of the program =====
+
+fun ip_is_fn
+ip_is_fn = (IpLambda{_, _}) -> true
+         | (IpFusion{_, _}) -> true
+         | (IpPrim{_, _, _}) -> true
+         | (IpCont{_}) -> true
+         | (_) -> false
+
+ip_typeof(x) := if (ip_is_fn(x)) 'function else typeof(x)
+
+# ===== Text of values (the text that print writes) =====
+
+ip_esc(c) := if (c == 0) "0"
+             else if (c == 7) "a"
+             else if (c == 8) "b"
+             else if (c == 9) "t"
+             else if (c == 10) "n"
+             else if (c == 11) "v"
+             else if (c == 12) "f"
+             else if (c == 13) "r"
+             else if (c == 34) "\""
+             else if (c == 92) "\\"
+             else none
+
+ip_fmt_string(b, s) := {
+    strbuf_add(b, "\"")
+    n := strlen(s)
+    i := 0
+    start := 0
+    while (i < n) {
+        e := ip_esc(ord(s, i))
+        if (e != none) {
+            strbuf_add(b, substr(s, start, i))
+            strbuf_add(b, "\\")
+            strbuf_add(b, e)
+            start = i + 1
+        }
+        i = i + 1
+    }
+    strbuf_add(b, substr(s, start, n))
+    strbuf_add(b, "\"")
+}
+
+ip_fmt_args(b, t, first) := {
+    n := arity(t)
+    i := first
+    while (i < n) {
+        ip_fmt(b, arg(t, i))
+        i = i + 1
+        if (i < n) strbuf_add(b, ", ")
+    }
+}
+
+ip_fmt = (b, IpLambda{IpCode{_, _, _, _, pats, _}, _}) -> {
+             strbuf_add(b, "<lambda:(")
+             ip_fmt_args(b, pats, 0)
+             strbuf_add(b, ")>")
+         }
+       | (b, IpFusion{f, g}) -> {
+             ip_fmt(b, f)
+             strbuf_add(b, "|")
+             ip_fmt(b, g)
+         }
+       | (b, IpPrim{_, _, name}) -> {
+             strbuf_add(b, "<prim:")
+             strbuf_add(b, symname(name))
+             strbuf_add(b, ">")
+         }
+       | (b, IpCont{_}) -> strbuf_add(b, "<cont>")
+       | (b, v @ int) -> strbuf_add(b, int_to_str(v))
+       | (b, v @ symbol) -> strbuf_add(b, symname(v))
+       | (b, v @ string) -> ip_fmt_string(b, v)
+       | (b, v @ mexpr) -> {
+             strbuf_add(b, symname(head(v)))
+             strbuf_add(b, "{")
+             ip_fmt_args(b, v, 0)
+             strbuf_add(b, "}")
+         }
+       | (b, v @ array) -> strbuf_add(b, "<array>")
+       | (b, v @ plain) -> {
+             strbuf_add(b, "<")
+             strbuf_add(b, symname(plain_kind(v)))
+             strbuf_add(b, "[")
+             strbuf_add(b, int_to_str(plain_len(v)))
+             strbuf_add(b, "]>")
+         }
+       | (b, _) -> strbuf_add(b, "<?>")
+
+ip_show(v) = {
+    b := strbuf_new()
+    ip_fmt(b, v)
+    strbuf_str(b)
+}
+
+# ===== Compile-time environment =====
+
+# A compile context is an array | level | number of slots | depth of blocks | top level or not | variables |.
+# The variables are a list of Ent{symbol, level, slot}, the latest first.
+
+ip_new_cx(level, top, vars) := {
+    cx := array(5)
+    array_set(cx, 0, level)
+    array_set(cx, 1, 0)
+    array_set(cx, 2, 0)
+    array_set(cx, 3, top)
+    array_set(cx, 4, vars)
+    cx
+}
+
+ip_add_var(x, cx) := {
+    slot := array_get(cx, 1)
+    array_set(cx, 1, slot + 1)
+    array_set(cx, 4, Ent{x, array_get(cx, 0), slot} :: array_get(cx, 4))
+    slot
+}
+
+fun ip_lookup
+ip_lookup(x, Nil{}) = none
+ip_lookup(x, e :: rest) = if (arg(e, 0) == x) e else ip_lookup(x, rest)
+
+ip_global_scope(cx) := array_get(cx, 3) and array_get(cx, 2) == 0
+
+ip_begin_block(cx) := {
+    array_set(cx, 2, array_get(cx, 2) + 1)
+    array_get(cx, 4)
+}
+
+ip_end_block(cx, saved) := {
+    array_set(cx, 2, array_get(cx, 2) - 1)
+    array_set(cx, 4, saved)
+}
+
+# the cell of a new global variable
+ip_define_global(x) := {
+    cell := array(3)
+    array_set(cell, 0, ip_unset)
+    array_set(cell, 1, x)
+    array_set(cell, 2, ip_file)
+    table_set(ip_globals, x, cell)
+    cell
+}
+
+ip_global_cell(x) := {
+    cell := table_get(ip_globals, x, none)
+    if (cell == none) ip_die_at("undefined variable: ", x) else cell
+}
+
+# whether x is a variable of the place where Def defines it
+ip_defined_here(x, cx) := {
+    if (ip_global_scope(cx)) {
+        cell := table_get(ip_globals, x, none)
+        if (cell == none or ip_file == none) false
+        else array_get(cell, 2) == ip_file
+    } else {
+        ent := ip_lookup(x, array_get(cx, 4))
+        ent != none and arg(ent, 1) == array_get(cx, 0)
+    }
+}
+
+# ===== Patterns =====
+
+# allocate the slots of the variables of a pattern, in the order of appearance
+fun ip_bind
+ip_bind = (p @ symbol, cx) -> if (p != '_) ip_add_var(p, cx) else none
+        | (p @ int, cx) -> none
+        | (p @ string, cx) -> none
+        | (p @ mexpr, cx) if head(p) == 'Quote -> none
+        | (p @ mexpr, cx) if head(p) == '_TypeOf -> {
+              if (arity(p) != 2) ip_die_at("compile error: malformed _TypeOf pattern: ", p)
+              ip_bind(arg(p, 0), cx)
+          }
+        | (p @ mexpr, cx) -> {
+              n := arity(p)
+              i := 0
+              while (i < n) {
+                  ip_bind(arg(p, i), cx)
+                  i = i + 1
+              }
+          }
+        | (p, cx) -> ip_die_at("compile error: invalid pattern: ", p)
+
+# A matcher (v, env, i) binds the variables of the pattern from the index i of env and returns the next index,
+# or 0 when v does not match.
+
+ip_pm_wild := (v, env, i) -> i
+
+ip_pm_var := (v, env, i) -> {
+    array_set(env, i, v)
+    i + 1
+}
+
+ip_pm_eq(c) := (v, env, i) -> if (v == c) i else 0
+
+ip_pm_type(m, t) := (v, env, i) -> if (ip_typeof(v) == t) m(v, env, i) else 0
+
+ip_pm_n(h, n, ms) := (v, env, i) -> {
+    if (typeof(v) == 'mexpr and head(v) == h and arity(v) == n) ip_pm_all(ms, v, 0, env, i) else 0
+}
+
+ip_pm_args(h, [m0]) := (v, env, i) -> {
+    if (typeof(v) == 'mexpr and head(v) == h and arity(v) == 1) m0(arg(v, 0), env, i) else 0
+}
+ip_pm_args(h, [m0, m1]) := (v, env, i) -> {
+    if (typeof(v) == 'mexpr and head(v) == h and arity(v) == 2) {
+        j := m0(arg(v, 0), env, i)
+        if (j == 0) 0 else m1(arg(v, 1), env, j)
+    } else 0
+}
+ip_pm_args(h, [m0, m1, m2]) := (v, env, i) -> {
+    if (typeof(v) == 'mexpr and head(v) == h and arity(v) == 3) {
+        j := m0(arg(v, 0), env, i)
+        if (j == 0) 0 else {
+            k := m1(arg(v, 1), env, j)
+            if (k == 0) 0 else m2(arg(v, 2), env, k)
+        }
+    } else 0
+}
+ip_pm_args(h, ms) := ip_pm_n(h, length(ms), ms)
+
+ip_pm_all(Nil{}, v, k, env, i) = i
+ip_pm_all(m :: ms, v, k, env, i) = {
+    j := m(arg(v, k), env, i)
+    if (j == 0) 0 else ip_pm_all(ms, v, k + 1, env, j)
+}
+
+ip_pm_list(t) := {
+    n := arity(t)
+    i := n - 1
+    acc := []
+    while (i >= 0) {
+        acc = ip_pm(arg(t, i)) :: acc
+        i = i - 1
+    }
+    acc
+}
+
+ip_pm = (p @ symbol) -> if (p == '_) ip_pm_wild else ip_pm_var
+      | (p @ int) -> ip_pm_eq(p)
+      | (p @ string) -> ip_pm_eq(p)
+      | (p @ mexpr) if head(p) == 'Quote -> ip_pm_eq(arg(p, 0))
+      | (p @ mexpr) if head(p) == '_TypeOf -> ip_pm_type(ip_pm(arg(p, 0)), arg(p, 1))
+      | (p @ mexpr) -> ip_pm_args(head(p), ip_pm_list(p))
+
+# the matcher of the arguments: (args, env) -> true or false
+fun ip_match_all
+ip_match_all(Nil{}, args, k, env, i) = true
+ip_match_all(m :: ms, args, k, env, i) = {
+    j := m(arg(args, k), env, i)
+    if (j == 0) false else ip_match_all(ms, args, k + 1, env, j)
+}
+
+ip_bind_all(args, env, i, n) := {
+    while (i < n) {
+        array_set(env, i + 1, arg(args, i))
+        i = i + 1
+    }
+    true
+}
+
+ip_mk_simple(0) := (args, env) -> true
+ip_mk_simple(1) := (args, env) -> {
+    array_set(env, 1, arg(args, 0))
+    true
+}
+ip_mk_simple(2) := (args, env) -> {
+    array_set(env, 1, arg(args, 0))
+    array_set(env, 2, arg(args, 1))
+    true
+}
+ip_mk_simple(3) := (args, env) -> {
+    array_set(env, 1, arg(args, 0))
+    array_set(env, 2, arg(args, 1))
+    array_set(env, 3, arg(args, 2))
+    true
+}
+ip_mk_simple(n) := (args, env) -> ip_bind_all(args, env, 0, n)
+
+ip_mk_args([]) := (args, env) -> true
+ip_mk_args([m0]) := (args, env) -> m0(arg(args, 0), env, 1) != 0
+ip_mk_args([m0, m1]) := (args, env) -> {
+    i := m0(arg(args, 0), env, 1)
+    if (i == 0) false else m1(arg(args, 1), env, i) != 0
+}
+ip_mk_args([m0, m1, m2]) := (args, env) -> {
+    i := m0(arg(args, 0), env, 1)
+    if (i == 0) false else {
+        j := m1(arg(args, 1), env, i)
+        if (j == 0) false else m2(arg(args, 2), env, j) != 0
+    }
+}
+ip_mk_args(ms) := (args, env) -> ip_match_all(ms, args, 0, env, 1)
+
+# ===== Code of an expression: a function of the environment =====
+
+# An environment is an array | environment around | slot 0 | slot 1 | ... |.
+
+ip_const(v) := (env) -> v
+
+ip_up(env, 0) := env
+ip_up(env, d) := ip_up(array_get(env, 0), d - 1)
+
+ip_mk_local(0, i) := (env) -> array_get(env, i)
+ip_mk_local(1, i) := (env) -> array_get(array_get(env, 0), i)
+ip_mk_local(2, i) := (env) -> array_get(array_get(array_get(env, 0), 0), i)
+ip_mk_local(d, i) := (env) -> array_get(ip_up(env, d), i)
+
+# A cell of a variable of the language that runs the evaluator has a fourth element Tuple{get, set}.
+ip_is_alias(cell) := array_len(cell) == 4
+
+ip_mk_alias_get(get) := (env) -> get()
+
+ip_mk_cell_get(cell) := (env) -> {
+    v := array_get(cell, 0)
+    if (v == ip_unset) ip_die_at("undefined variable: ", array_get(cell, 1)) else v
+}
+
+ip_mk_global(cell) := {
+    if (ip_is_alias(cell)) ip_mk_alias_get(arg(array_get(cell, 3), 0))
+    else ip_mk_cell_get(cell)
+}
+
+ip_mk_store(0, i, r) := (env) -> array_set(env, i, r(env))
+ip_mk_store(d, i, r) := (env) -> array_set(ip_up(env, d), i, r(env))
+
+ip_mk_alias_set(set, r) := (env) -> {
+    v := r(env)
+    set(v)
+    v
+}
+
+ip_mk_cell_set(cell, r) := (env) -> array_set(cell, 0, r(env))
+
+ip_mk_gset(cell, r) := {
+    if (ip_is_alias(cell)) ip_mk_alias_set(arg(array_get(cell, 3), 1), r)
+    else ip_mk_cell_set(cell, r)
+}
+
+ip_mk_do_n(init, last) := (env) -> {
+    ip_run_all(init, env)
+    last(env)
+}
+
+ip_mk_do([]) := ip_const(none)
+ip_mk_do([a]) := a
+ip_mk_do([a, b]) := (env) -> {
+    a(env)
+    b(env)
+}
+ip_mk_do([a, b, c]) := (env) -> {
+    a(env)
+    b(env)
+    c(env)
+}
+ip_mk_do(cs) := ip_mk_do_n(take(cs, length(cs) - 1), nth(cs, length(cs) - 1))
+
+ip_run_all(Nil{}, env) = none
+ip_run_all(c :: cs, env) = {
+    c(env)
+    ip_run_all(cs, env)
+}
+
+ip_mk_if(c, a, b) := (env) -> if (c(env) == false) b(env) else a(env)
+
+ip_mk_while(c, b) := (env) -> {
+    while (c(env) != false) b(env)
+    none
+}
+
+ip_mk_lambda(code) := (env) -> IpLambda{code, env}
+
+ip_fuse(a, b) := {
+    if (a == none) b
+    else if (ip_is_fn(a) and ip_is_fn(b)) IpFusion{a, b}
+    else {
+        ip_die(_strcat(_strcat(_strcat("functions are expected for Fusion expr: ", ip_show(a)), ", "), ip_show(b)))
+    }
+}
+
+ip_mk_fusion(f, g) := (env) -> ip_fuse(f(env), g(env))
+
+# A call of a function whose parameters are variables (the field simple of IpCode is its number of parameters)
+# puts the arguments in the new environment, without making a tuple of them.
+ip_mk_apply(f, []) := (env) -> {
+    fv := f(env)
+    if (typeof(fv) == 'mexpr and head(fv) == 'IpLambda and arg(arg(fv, 0), 5) == 0) {
+        code := arg(fv, 0)
+        e2 := array(arg(code, 1) + 1)
+        array_set(e2, 0, arg(fv, 1))
+        body := arg(code, 3)
+        body(e2)
+    } else ip_call(fv, Tuple{})
+}
+ip_mk_apply(f, [a]) := (env) -> {
+    fv := f(env)
+    if (typeof(fv) == 'mexpr and head(fv) == 'IpLambda and arg(arg(fv, 0), 5) == 1) {
+        code := arg(fv, 0)
+        e2 := array(arg(code, 1) + 1)
+        array_set(e2, 0, arg(fv, 1))
+        array_set(e2, 1, a(env))
+        body := arg(code, 3)
+        body(e2)
+    } else if (typeof(fv) == 'mexpr and head(fv) == 'IpPrim and arg(fv, 0) == 1) {
+        fn := arg(fv, 1)
+        fn(a(env))
+    } else ip_call(fv, Tuple{a(env)})
+}
+ip_mk_apply(f, [a, b]) := (env) -> {
+    fv := f(env)
+    if (typeof(fv) == 'mexpr and head(fv) == 'IpLambda and arg(arg(fv, 0), 5) == 2) {
+        code := arg(fv, 0)
+        e2 := array(arg(code, 1) + 1)
+        array_set(e2, 0, arg(fv, 1))
+        array_set(e2, 1, a(env))
+        array_set(e2, 2, b(env))
+        body := arg(code, 3)
+        body(e2)
+    } else if (typeof(fv) == 'mexpr and head(fv) == 'IpPrim and arg(fv, 0) == 2) {
+        fn := arg(fv, 1)
+        fn(a(env), b(env))
+    } else ip_call(fv, Tuple{a(env), b(env)})
+}
+ip_mk_apply(f, [a, b, c]) := (env) -> {
+    fv := f(env)
+    if (typeof(fv) == 'mexpr and head(fv) == 'IpLambda and arg(arg(fv, 0), 5) == 3) {
+        code := arg(fv, 0)
+        e2 := array(arg(code, 1) + 1)
+        array_set(e2, 0, arg(fv, 1))
+        array_set(e2, 1, a(env))
+        array_set(e2, 2, b(env))
+        array_set(e2, 3, c(env))
+        body := arg(code, 3)
+        body(e2)
+    } else if (typeof(fv) == 'mexpr and head(fv) == 'IpPrim and arg(fv, 0) == 3) {
+        fn := arg(fv, 1)
+        fn(a(env), b(env), c(env))
+    } else ip_call(fv, Tuple{a(env), b(env), c(env)})
+}
+ip_mk_apply(f, [a, b, c, d]) := (env) -> ip_call(f(env), Tuple{a(env), b(env), c(env), d(env)})
+ip_mk_apply(f, cs) := (env) -> ip_call(f(env), ip_eval_args(cs, env, Tuple{}))
+
+ip_eval_args(Nil{}, env, acc) = acc
+ip_eval_args(c :: cs, env, acc) = ip_eval_args(cs, env, push(acc, c(env)))
+
+ip_mk_construct(h, []) := (env) -> mexpr(h, Tuple{})
+ip_mk_construct(h, [a]) := (env) -> mexpr(h, Tuple{a(env)})
+ip_mk_construct(h, [a, b]) := (env) -> mexpr(h, Tuple{a(env), b(env)})
+ip_mk_construct(h, [a, b, c]) := (env) -> mexpr(h, Tuple{a(env), b(env), c(env)})
+ip_mk_construct(h, cs) := (env) -> mexpr(h, ip_eval_args(cs, env, Tuple{}))
+
+ip_mk_tuple([]) := (env) -> Tuple{}
+ip_mk_tuple([a]) := (env) -> Tuple{a(env)}
+ip_mk_tuple([a, b]) := (env) -> Tuple{a(env), b(env)}
+ip_mk_tuple([a, b, c]) := (env) -> Tuple{a(env), b(env), c(env)}
+ip_mk_tuple(cs) := (env) -> ip_eval_args(cs, env, Tuple{})
+
+ip_mk_perform(v) := (env) -> perform v(env)
+
+ip_mk_handle(IpCode{n, ns, m, body, pats, simple}, hc) := (env) -> {
+    hv := hc(env)
+    if (not ip_is_fn(hv)) ip_die_at("handler is not a function: ", hv)
+    e2 := array(ns + 1)
+    array_set(e2, 0, env)
+    handle body(e2) with (v, k) -> ip_on_effect(hv, v, k)
+}
+
+# ===== Compiler =====
+
+ip_special(h) := h == 'Apply or h == 'Def or h == 'Declare or h == 'Set or h == 'Do or h == 'If or h == 'While
+                 or h == 'Lambda or h == 'Fusion or h == 'Quote or h == 'QuasiQuote or h == 'Handle or h == 'Perform
+
+ip_is_tuple(x) := typeof(x) == 'mexpr and head(x) == 'Tuple
+
+# compile the arguments of the M-expression t, in order
+ip_comp_args(t, cx) := {
+    n := arity(t)
+    i := 0
+    acc := []
+    while (i < n) {
+        acc = ip_comp(arg(t, i), cx) :: acc
+        i = i + 1
+    }
+    reverse(acc)
+}
+
+ip_comp_var(x, cx) := {
+    ent := ip_lookup(x, array_get(cx, 4))
+    if (ent == none) ip_mk_global(ip_global_cell(x))
+    else ip_mk_local(array_get(cx, 0) - arg(ent, 1), arg(ent, 2) + 1)
+}
+
+# define x with the value of r, where the code is
+ip_comp_def(x, r, cx) := {
+    if (ip_global_scope(cx)) {
+        cell := ip_define_global(x)
+        ip_mk_gset(cell, r)
+    } else {
+        slot := ip_add_var(x, cx)
+        ip_mk_store(0, slot + 1, r)
+    }
+}
+
+ip_comp_set(x, e, cx) := {
+    r := ip_comp(e, cx)
+    ent := ip_lookup(x, array_get(cx, 4))
+    if (ent == none) ip_mk_gset(ip_global_cell(x), r)
+    else ip_mk_store(array_get(cx, 0) - arg(ent, 1), arg(ent, 2) + 1, r)
+}
+
+# the code object of Lambda{pats, body}
+ip_comp_lambda(pats, body, cx) := {
+    cx2 := ip_new_cx(array_get(cx, 0) + 1, false, array_get(cx, 4))
+    n := arity(pats)
+    i := 0
+    while (i < n) {
+        ip_bind(arg(pats, i), cx2)
+        i = i + 1
+    }
+    b := ip_comp(body, cx2)
+    simple := ip_simple(pats)
+    m := if (simple >= 0) ip_mk_simple(simple) else ip_mk_args(ip_pm_list(pats))
+    IpCode{n, array_get(cx2, 1), m, b, pats, simple}
+}
+
+# The number of the parameters if they are variables, so that the arguments are put in the slots 1, 2, ... in order,
+# and -1 otherwise.
+ip_simple(pats) = {
+    n := arity(pats)
+    i := 0
+    r := true
+    while (r and i < n) {
+        p := arg(pats, i)
+        r = typeof(p) == 'symbol and p != '_
+        i = i + 1
+    }
+    if (r) n else -1
+}
+
+# whether the quasi-quotation e has an UnQuote at the nesting level nest
+ip_has_unquote(e, nest) := {
+    if (typeof(e) != 'mexpr) false
+    else {
+        h := head(e)
+        n := nest
+        found := false
+        if (h == 'UnQuote) {
+            if (nest == 0) found = true
+            else n = nest - 1
+        }
+        if (h == 'QuasiQuote) n = nest + 1
+        if (found) true
+        else {
+            i := 0
+            r := false
+            while (not r and i < arity(e)) {
+                r = ip_has_unquote(arg(e, i), n)
+                i = i + 1
+            }
+            r
+        }
+    }
+}
+
+ip_comp_qq(e, nest, cx) := {
+    if (not ip_has_unquote(e, nest)) ip_const(e)
+    else {
+        h := head(e)
+        if ((h == 'UnQuote or h == 'QuasiQuote) and arity(e) != 1) ip_malformed(e)
+        if (h == 'UnQuote and nest == 0) ip_comp(arg(e, 0), cx)
+        else {
+            n := if (h == 'UnQuote) nest - 1 else if (h == 'QuasiQuote) nest + 1 else nest
+            i := 0
+            acc := []
+            while (i < arity(e)) {
+                acc = ip_comp_qq(arg(e, i), n, cx) :: acc
+                i = i + 1
+            }
+            ip_mk_construct(h, reverse(acc))
+        }
+    }
+}
+
+ip_comp = (Apply{f, args}, cx) if ip_is_tuple(args) -> {
+              fc := ip_comp(f, cx)
+              ip_mk_apply(fc, ip_comp_args(args, cx))
+          }
+        | (e @ symbol, cx) -> ip_comp_var(e, cx)
+        | (e @ int, cx) -> ip_const(e)
+        | (e @ string, cx) -> ip_const(e)
+        | (Def{x @ symbol, e}, cx) -> ip_comp_def(x, ip_comp(e, cx), cx)
+        | (Declare{x @ symbol}, cx) -> {
+              if (ip_defined_here(x, cx)) ip_const(none)
+              else ip_comp_def(x, ip_const(none), cx)
+          }
+        | (Set{x @ symbol, e}, cx) -> ip_comp_set(x, e, cx)
+        | (If{c, a, b}, cx) -> {
+              cc := ip_comp(c, cx)
+              s1 := ip_begin_block(cx)
+              ac := ip_comp(a, cx)
+              ip_end_block(cx, s1)
+              s2 := ip_begin_block(cx)
+              bc := ip_comp(b, cx)
+              ip_end_block(cx, s2)
+              ip_mk_if(cc, ac, bc)
+          }
+        | (While{c, b}, cx) -> {
+              cc := ip_comp(c, cx)
+              s := ip_begin_block(cx)
+              bc := ip_comp(b, cx)
+              ip_end_block(cx, s)
+              ip_mk_while(cc, bc)
+          }
+        | (Lambda{pats, body}, cx) if ip_is_tuple(pats) -> ip_mk_lambda(ip_comp_lambda(pats, body, cx))
+        | (Fusion{f, g}, cx) -> {
+              fc := ip_comp(f, cx)
+              gc := ip_comp(g, cx)
+              ip_mk_fusion(fc, gc)
+          }
+        | (e @ mexpr, cx) if head(e) == 'Quote and arity(e) == 1 -> ip_const(arg(e, 0))
+        | (QuasiQuote{e}, cx) -> ip_comp_qq(e, 0, cx)
+        | (e @ mexpr, cx) if head(e) == 'UnQuote -> ip_die_at("compile error: UnQuote outside of QuasiQuote: ", e)
+        | (Handle{b, h}, cx) -> {
+              code := ip_comp_lambda(Tuple{}, b, cx)
+              ip_mk_handle(code, ip_comp(h, cx))
+          }
+        | (Perform{v}, cx) -> ip_mk_perform(ip_comp(v, cx))
+        | (e @ mexpr, cx) if head(e) == 'Do -> ip_mk_do(ip_comp_args(e, cx))
+        | (e @ mexpr, cx) if head(e) == 'Tuple -> ip_mk_tuple(ip_comp_args(e, cx))
+        | (e @ mexpr, cx) if ip_special(head(e)) -> ip_malformed(e)
+        | (e @ mexpr, cx) -> ip_mk_construct(head(e), ip_comp_args(e, cx))
+        | (e, cx) -> ip_die_at("compile error: cannot compile: ", e)
+
+# ===== Calls =====
+
+# Select the function to call for the arguments args. The result is 0 when no function matches,
+# 1 when a function of the program is selected (ip_sel_body runs in ip_sel_env),
+# and 2 when a function of the language that runs the evaluator is selected (ip_sel_body).
+fun ip_select
+ip_select = (IpLambda{IpCode{n, ns, m, body, pats, simple}, cenv}, args) -> {
+                if (arity(args) == n) {
+                    env := array(ns + 1)
+                    array_set(env, 0, cenv)
+                    if (m(args, env)) {
+                        ip_sel_body = body
+                        ip_sel_env = env
+                        1
+                    } else 0
+                } else 0
+            }
+          | (IpFusion{f, g}, args) -> {
+                r := ip_select(f, args)
+                if (r == 0) ip_select(g, args) else r
+            }
+          | (IpPrim{n, fn, name}, args) -> {
+                if (arity(args) == n) {
+                    ip_sel_body = fn
+                    2
+                } else 0
+            }
+          | (IpCont{k}, args) -> {
+                if (arity(args) == 1) {
+                    ip_sel_body = k
+                    2
+                } else 0
+            }
+          | (f, args) -> ip_die_at("not a function: ", f)
+
+ip_call_host(fn, args) := {
+    n := arity(args)
+    if (n == 1) fn(arg(args, 0))
+    else if (n == 2) fn(arg(args, 0), arg(args, 1))
+    else if (n == 0) fn()
+    else if (n == 3) fn(arg(args, 0), arg(args, 1), arg(args, 2))
+    else if (n == 5) fn(arg(args, 0), arg(args, 1), arg(args, 2), arg(args, 3), arg(args, 4))
+    else ip_die_at("too many arguments: ", args)
+}
+
+ip_match_error(f, args) := {
+    b := strbuf_new()
+    strbuf_add(b, "matching failed: ")
+    ip_fmt(b, f)
+    strbuf_add(b, " <-> (")
+    ip_fmt_args(b, args, 0)
+    strbuf_add(b, ")")
+    ip_die(strbuf_str(b))
+}
+
+ip_call(f, args) = {
+    k := ip_select(f, args)
+    if (k == 1) ip_sel_body(ip_sel_env)
+    else if (k == 2) ip_call_host(ip_sel_body, args)
+    else ip_match_error(f, args)
+}
+
+# the handler of the language that runs the evaluator for Handle{body, handler}
+ip_on_effect(hv, v, k) = {
+    args := Tuple{v, IpCont{k}}
+    kind := ip_select(hv, args)
+    if (kind == 1) ip_sel_body(ip_sel_env)
+    else if (kind == 2) ip_call_host(ip_sel_body, args)
+    else {
+        r := perform v
+        k(r)
+    }
+}
+
+# ===== Evaluation =====
+
+# interp_eval(e) evaluates the M-expression e in the global environment of the program
+interp_eval(e) = {
+    cx := ip_new_cx(0, true, [])
+    code := ip_comp(e, cx)
+    env := array(array_get(cx, 1) + 1)
+    code(env)
+}
+
+# call the function that the global variable name has
+ip_call_global(name, args) := {
+    v := array_get(ip_global_cell(name), 0)
+    if (v == ip_unset) ip_die_at("undefined variable: ", name) else ip_call(v, args)
+}
+
+ip_is_load_of(e, path) := match e {
+    Apply{'load, Tuple{p}} -> p == path
+  | _ -> false
+}
+
+# evaluate the expressions of a file one by one, read by the function parse of the program
+ip_run_file(path) := {
+    text := read_file(path)
+    saved := ip_file
+    ip_file = path
+    more := true
+    while (more) {
+        r := ip_call_global('parse, Tuple{text})
+        if (not (ip_is_tuple(r) and arity(r) == 2 and typeof(arg(r, 1)) == 'string)) {
+            ip_die(_strcat(_strcat(path, ": read must return Tuple{m-expr, string}, got "), ip_show(r)))
+        }
+        e := arg(r, 0)
+        if (e == Eof{}) more = false
+        else {
+            if (typeof(e) == 'mexpr and head(e) == 'SyntaxError) {
+                ip_die(_strcat(_strcat(path, ": syntax error: "), ip_show(e)))
+            }
+            if (ip_native and path == "planck/init.pk" and ip_is_load_of(e, "planck/peg.pk")) ip_install_peg()
+            else if (ip_native and path == "planck/init.pk" and ip_is_load_of(e, "planck/syntax.pk")) ip_install_syntax()
+            else ip_call_global('eval, Tuple{e})
+            text = arg(r, 1)
+        }
+    }
+    ip_file = saved
+    none
+}
+
+interp_file(path) := ip_run_file(path)
+
+# ===== The syntax of the language that runs the evaluator =====
+
+# The functions that the program takes from planck/syntax.pk and planck/peg.pk when native_syntax is true.
+ip_syntax_names := [
+    'peg_itoa, '_nomatch, 'peg_skip, 'peg_g, 'peg_ret_handler, 'peg_break_handler, 'peg_continue_handler,
+    'peg_catches, 'peg_scan, 'peg_guarded,
+    'show, '_to_text, 'record_fields, 'record_slots, '_record_declare, 'record_index,
+    '_record_get, 'peg_for, '_index_error, '_index_check, 'subst, '_list_get, '_index_get,
+    '_index_set_immutable, '_index_set
+]
+
+ip_peg_names := ['peg_inc, 'peg_is_head, 'peg_map_args]
+
+ip_def_name(e) := match e {
+    Def{x, _} -> x
+  | Set{x, _} -> x
+  | _ -> none
+}
+
+# evaluate the definitions of the names in a file that is read by the M-expression reader
+ip_take_defs(path, names) := {
+    text := read_file(path)
+    more := true
+    while (more) {
+        r := parse_mexpr(text)
+        e := arg(r, 0)
+        if (e == Eof{} or (typeof(e) == 'mexpr and head(e) == 'SyntaxError)) more = false
+        else {
+            if (member(ip_def_name(e), names)) interp_eval(e)
+            text = arg(r, 1)
+        }
+    }
+}
+
+ip_set_global(name, v) := array_set(ip_define_global(name), 0, v)
+
+# make the global variable name the variable of the language that runs the evaluator with the functions get and set
+ip_set_alias(name, get, set) := {
+    cell := array(4)
+    array_set(cell, 0, ip_unset)
+    array_set(cell, 1, name)
+    array_set(cell, 2, ip_file)
+    array_set(cell, 3, Tuple{get, set})
+    table_set(ip_globals, name, cell)
+}
+
+# a function of the language that runs the evaluator which calls the function f of the program
+ip_host_fn(f) := (x) -> ip_call(f, Tuple{x})
+
+# the function of the language that runs the evaluator for a value of the program that is assigned to one of its variables,
+# a function of n parameters
+ip_to_host(IpPrim{_, fn, _}, n) := fn
+ip_to_host(f, 2) := (x, y) -> ip_call(f, Tuple{x, y})
+ip_to_host(f, 1) := ip_host_fn(f)
+
+# _define_rule for the program: the actions are evaluated by the evaluator
+fun ip_adapt
+ip_adapt = (Act{e, f}) -> Act{ip_adapt(e), mexpr('Quote, Tuple{ip_host_fn(interp_eval(f))})}
+         | (f) if ip_is_fn(f) -> ip_host_fn(f)
+         | (e @ mexpr) -> {
+               r := mexpr(head(e), Tuple{})
+               i := 0
+               while (i < arity(e)) {
+                   r = push(r, ip_adapt(arg(e, i)))
+                   i = i + 1
+               }
+               r
+           }
+         | (e) -> e
+
+ip_define_rule(name, e) := {
+    old := table_get(peg_sources, name, Fail{})
+    r := _define_rule(name, ip_adapt(e))
+    table_set(peg_sources, name, peg_subst_prev(e, old))
+    array_set(ip_global_cell('peg_version), 0, peg_version)
+    r
+}
+
+ip_install_peg() = {
+    ip_set_global('peg_parse, IpPrim{2, peg_parse, 'peg_parse})
+    ip_set_global('peg_sources, peg_sources)
+    ip_set_global('peg_ids, peg_ids)
+    ip_set_global('peg_version, peg_version)
+    ip_set_alias('peg_src, () -> peg_src, (v) -> { peg_src = v })
+    ip_set_alias('peg_srclen, () -> peg_srclen, (v) -> { peg_srclen = v })
+    ip_set_alias('peg_pv, () -> peg_pv, (v) -> { peg_pv = v })
+    ip_set_alias('peg_far, () -> peg_far, (v) -> { peg_far = v })
+    ip_set_global('peg_rules, peg_rules)
+    ip_set_alias('peg_lit, () -> IpPrim{2, peg_lit, 'peg_lit}, (v) -> { peg_lit = ip_to_host(v, 2) })
+    ip_set_alias('peg_px_key, () -> IpPrim{2, peg_px_key, 'peg_px_key}, (v) -> { peg_px_key = ip_to_host(v, 2) })
+    ip_set_alias('peg_call_rule, () -> IpPrim{2, peg_call_rule, 'peg_call_rule}, (v) -> { peg_call_rule = ip_to_host(v, 2) })
+    ip_set_global('peg_skip_ws, IpPrim{1, peg_skip_ws, 'peg_skip_ws})
+    ip_set_global('peg_tok_int, IpPrim{1, peg_tok_int, 'peg_tok_int})
+    ip_set_global('peg_digit_value, IpPrim{1, peg_digit_value, 'peg_digit_value})
+    ip_set_global('peg_subst_prev, IpPrim{2, peg_subst_prev, 'peg_subst_prev})
+    ip_set_global('_define_rule, IpPrim{2, ip_define_rule, '_define_rule})
+    ip_take_defs("planck/peg.pk", ip_peg_names)
+}
+
+ip_install_syntax() = {
+    ip_set_global('parse, IpPrim{1, parse, 'parse})
+    ip_set_global('parse_mexpr, IpPrim{1, parse_mexpr, 'parse_mexpr})
+    ip_set_global('peg_reserved, peg_reserved)
+    ip_take_defs("planck/syntax.pk", ip_syntax_names)
+}
+
+# ===== Builtin functions =====
+
+ip_print(x) := {
+    put(ip_show(x))
+    none
+}
+
+ip_println(x) := {
+    put(ip_show(x))
+    put("\n")
+    none
+}
+
+ip_argv() := ip_args
+
+ip_set_file(path) := {
+    prev := ip_file
+    ip_file = path
+    prev
+}
+
+ip_defprim(name, n, fn) := ip_set_global(intern(name), IpPrim{n, fn, intern(name)})
+
+ip_setup() := {
+    ip_globals = table()
+    ip_file = none
+    ip_defprim("print", 1, ip_print)
+    ip_defprim("println", 1, ip_println)
+    ip_defprim("put", 1, put)
+    ip_defprim("_add", 2, _add)
+    ip_defprim("_sub", 2, _sub)
+    ip_defprim("_mul", 2, _mul)
+    ip_defprim("_div", 2, _div)
+    ip_defprim("_mod", 2, _mod)
+    ip_defprim("_lt", 2, _lt)
+    ip_defprim("_le", 2, _le)
+    ip_defprim("_gt", 2, _gt)
+    ip_defprim("_ge", 2, _ge)
+    ip_defprim("_eq", 2, _eq)
+    ip_defprim("_ne", 2, _ne)
+    ip_defprim("head", 1, head)
+    ip_defprim("arity", 1, arity)
+    ip_defprim("arg", 2, arg)
+    ip_defprim("mexpr", 2, mexpr)
+    ip_defprim("typeof", 1, ip_typeof)
+    ip_defprim("strlen", 1, strlen)
+    ip_defprim("ord", 2, ord)
+    ip_defprim("substr", 3, substr)
+    ip_defprim("_strcat", 2, _strcat)
+    ip_defprim("intern", 1, intern)
+    ip_defprim("symname", 1, symname)
+    ip_defprim("push", 2, push)
+    ip_defprim("array", 1, array)
+    ip_defprim("array_get", 2, array_get)
+    ip_defprim("array_set", 3, array_set)
+    ip_defprim("array_len", 1, array_len)
+    ip_defprim("hash", 1, hash)
+    ip_defprim("read_file", 1, read_file)
+    ip_defprim("try_read_file", 1, try_read_file)
+    ip_defprim("write_file", 2, write_file)
+    ip_defprim("read_bytes", 1, read_bytes)
+    ip_defprim("chmod", 2, chmod)
+    ip_defprim("u8_array", 1, u8_array)
+    ip_defprim("u16_array", 1, u16_array)
+    ip_defprim("i32_array", 1, i32_array)
+    ip_defprim("plain_len", 1, plain_len)
+    ip_defprim("plain_kind", 1, plain_kind)
+    ip_defprim("plain_get", 2, plain_get)
+    ip_defprim("plain_set", 3, plain_set)
+    ip_defprim("plain_copy", 5, plain_copy)
+    ip_defprim("bit_and", 2, bit_and)
+    ip_defprim("bit_or", 2, bit_or)
+    ip_defprim("bit_xor", 2, bit_xor)
+    ip_defprim("bit_not", 1, bit_not)
+    ip_defprim("bit_shl", 2, bit_shl)
+    ip_defprim("bit_shr", 2, bit_shr)
+    ip_defprim("bit_sar", 2, bit_sar)
+    ip_defprim("argv", 0, ip_argv)
+    ip_defprim("exit", 1, exit)
+    ip_defprim("_set_file", 1, ip_set_file)
+    ip_defprim("eval", 1, interp_eval)
+    ip_defprim("parse", 1, if (ip_native) parse else parse_mexpr)
+}
+
+# ===== Entry points =====
+
+# interp_start(args, native_syntax) makes the global environment of the program: the builtin functions and planck/init.pk.
+# args is the array of the strings of the command line for the program.
+interp_start(args, native_syntax) := {
+    ip_args = args
+    ip_native = native_syntax
+    ip_setup()
+    ip_run_file("planck/init.pk")
+}
+
+# interp_run(args, native_syntax) starts the evaluator and runs the program args[0]
+interp_run(args, native_syntax) := {
+    interp_start(args, native_syntax)
+    if (array_len(args) > 0) ip_run_file(array_get(args, 0))
+    none
+}

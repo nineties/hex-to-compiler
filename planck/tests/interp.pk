@@ -1,0 +1,148 @@
+# tests for planck/lib/interp.pk
+# Copyright (C) 2026 nineties
+#
+# The evaluator is started once. check(e, expected) evaluates the expression e in its global environment
+# and compares the value with expected. The names of the definitions are different in each test,
+# because the expressions share the global environment.
+
+use("interp")
+
+passed := 0
+failed := 0
+
+check(e, expected) := {
+    actual := interp_eval(e)
+    if (actual == expected) passed = passed + 1
+    else {
+        failed = failed + 1
+        put("Test failed: expected ")
+        print(expected)
+        put(" but got ")
+        print(actual)
+        put(" for ")
+        println(e)
+    }
+}
+
+interp_start(array(0), true)
+
+# the expressions are the top-level expressions of a file, as f(p) := e adds to a function defined by the same file
+interp_eval('(_set_file("planck/tests/interp.pk")))
+
+# === Atoms and arithmetic ===
+check('(42), 42)
+check('("abc"), "abc")
+check('(true), true)
+check('(1 + 2 * 3), 7)
+check('(10 - 4 - 3), 3)
+check('(-7 / 2), -3)
+check('(-7 % 3), -1)
+check('(2 < 3 and 3 <= 3), true)
+check('(not (1 == 2)), true)
+check('("ab" == "ab"), true)
+check('(f"a{1 + 1}b{"c"}"), "a2bc")
+
+# === Variables and blocks ===
+check('(t1 := 10), 10)
+check('(t1 = t1 + 1), 11)
+check('(t1), 11)
+check('(if (true) 1 else 2), 1)
+check('(if (0) 1 else 2), 1)
+check('(if (false) 1), none)
+check('({ i := 0; s := 0; while (i < 10) { s = s + i; i = i + 1 }; s }), 45)
+check('(while (false) 1), none)
+
+# a definition in a branch is local to the branch
+check('(t2 := 1), 1)
+check('(if (true) { t2 := 2; t2 } else 0), 2)
+check('(t2), 1)
+
+# === Functions and closures ===
+check('(((x) -> x + 1)(41)), 42)
+check('((((a) -> (b) -> a - b)(10))(3)), 7)
+check('({ mk_counter() := { c := 0; () -> { c = c + 1; c } }; k := mk_counter(); k(); k(); k() }), 3)
+
+# patterns and Fusion
+check('({ fa(0) := "zero"; fa("hi") := "greeting"; fa(Pt{x, _}) := x; fa(n @ int) := "int"; fa(_) := "other"
+          [fa(0), fa("hi"), fa(Pt{3, 4}), fa(5), fa(Pt{3}), fa("bye")] }),
+      '(["zero", "greeting", 3, "int", "other", "other"]))
+check('({ fb(a, b) := a + b; fb(a) := a; fb() := 0; (fb(), fb(1), fb(1, 2)) }), '((0, 1, 3)))
+check('({ fc(x :: xs) := x; fc(Nil{}) := "empty"; (fc([7, 8]), fc([])) }), '((7, "empty")))
+check('({ fd := (n) if n > 0 -> "pos" | (n) if n < 0 -> "neg" | (_) -> "zero"; (fd(1), fd(-1), fd(0)) }), '(("pos", "neg", "zero")))
+check('({ fe(a + b) := (a, b); fe('(1 + 2)) }), '((1, 2)))
+check('({ fh(x, x) := x; fh(1, 2) }), 2)
+
+# recursion
+check('({ fib(0) := 0; fib(1) := 1; fib(n) := fib(n - 1) + fib(n - 2); fib(15) }), 610)
+check('({ fun ev; od(n) := if (n == 0) false else ev(n - 1); ev(n) = if (n == 0) true else od(n - 1); ev(10) }), true)
+check('({ sum_to(n) := { loop(i, acc) := if (i > n) acc else loop(i + 1, acc + i); loop(1, 0) }; sum_to(20000) }), 200010000)
+check('({ down(0) := 0; down(n) := 1 + down(n - 1); down(20000) }), 20000)
+
+# the variables of the caller are not visible
+check('({ nv := "global"; nsee() := nv; ncall() := { nv := "local"; nsee() }; ncall() }), "global")
+
+# === Names resolved in the order they are written ===
+interp_eval('(nf(x) := 1))
+interp_eval('(ng() := nf(0)))
+interp_eval('(nf := (x) -> 2))
+check('(ng()), 1)
+check('(nf(0)), 2)
+interp_eval('(nh := (x) -> 1))
+interp_eval('(ni() := nh(0)))
+interp_eval('(nh = (x) -> 3))
+check('(ni()), 3)
+
+# === Control flow ===
+check('({ rf(xs) := { for (x in xs) if (x > 2) return x; none }; (rf([1, 2, 3, 4]), rf([1])) }), '((3, none)))
+check('({ lb() := { n := 0; while (true) { n = n + 1; if (n == 5) break }; n }; lb() }), 5)
+check('({ lc() := { n := 0; s := 0; while (n < 10) { n = n + 1; if (n % 2 == 0) continue; s = s + n }; s }; lc() }), 25)
+check('({ lm(e) := match e { a @ int + b @ int -> a + b | a + 0 -> a | _ -> e }; (lm('(1 + 2)), lm('(z + 0)), lm('(z * 2))) }),
+      '((3, z, (z * 2))))
+check('({ ls := 0; for (x in [1, 2, 3]) ls = ls + x; ls }), 6)
+
+# === Effects ===
+check('(handle (perform Ask{}) + 1 with (Ask{}, k) -> k(41)), 42)
+check('(handle (perform Ask{}) + 1 with (Ask{}, k) -> k(10) * 2), 22)
+check('(handle { perform Raise{"oops"}; 1 } with (Raise{m}, k) -> m), "oops")
+check('(handle (perform Flip{}) + 100 with (Flip{}, k) -> (k(1), k(2))), '((101, 102)))
+check('(handle { handle (perform A{}) + (perform B{}) with (A{}, k) -> k(1) } with (B{}, k) -> k(10)), 11)
+check('(handle { perform Put{(perform Get{}) + 5}; perform Get{} } with (Get{}, k) -> k(1) | (Put{v}, k) -> v), 6)
+check('({ sv := none; r := handle (perform Save{}) + 1 with (Save{}, k) -> { sv = k; 0 }; (r, sv(41), sv(9)) }), '((0, 42, 10)))
+
+# === Quotation ===
+check('(`(1 + !(2 + 3))), '(1 + 5))
+check('({ qv := 5; `(f(!qv, qv)) }), '(f(5, qv)))
+check('(`(a + `(b + !!(1 + 2)))), '(a + `(b + !3)))
+check('({ qx := 'i; `{ !qx := 0; !qx = !qx + 1 } }), '({ i := 0; i = i + 1 }))
+
+# === Records, indexing and rewriting ===
+check('({ record Pt3(x, y, z); p3 := Pt3{1, 2, 3}; p3.z }), 3)
+check('({ arr := array(3); arr[1] = 7; (arr[1], arr[0]) }), '((7, none)))
+check('("hello"[1]), "e")
+check('([5, 6, 7][2]), 7)
+check('({ tt := table(); tt["a"] = 1; (tt["a"], tt["b"]) }), '((1, none)))
+check('(('(x * 1 + 0 * y))[a * 1 -> a | 0 * _ -> 0]), '(x + 0))
+
+# === eval and parse ===
+check('(eval('(6 * 7))), 42)
+check('(eval(arg(parse("1 + 2 * 3"), 0))), 7)
+check('(typeof(eval('(() -> 1)))), 'function)
+check('(typeof(print)), 'function)
+
+# === Libraries ===
+check('(use("list")), none)
+check('(map((x) -> x * x, [1, 2, 3])), [1, 4, 9])
+check('(sort((a, b) -> a < b, [3, 1, 2])), [1, 2, 3])
+check('(use("string")), none)
+check('(join(", ", map(int_to_str, [1, 2, 3]))), "1, 2, 3")
+
+# === A grammar declared by the program ===
+interp_eval(arg(parse("primary ::= 'unless c:expr a:block 'else b:block { `If{!c, !b, !a} } | ..."), 0))
+check(arg(parse("unless (false) { 1 } else { 2 }"), 0), 1)
+check(arg(parse("unless (true) { 1 } else { 2 }"), 0), 2)
+
+put("Tests passed ")
+print(passed)
+put("/")
+println(passed + failed)
+if (failed != 0) exit(1)

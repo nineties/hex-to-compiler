@@ -650,6 +650,8 @@ A library with a value that has no text as an M-expression (a function, an array
      - ``quote_str`` ``show`` ``pretty`` ``pprint``
    * - ``unparse``
      - ``unparse`` ``unparse_as`` ``unparse_try`` ``unparse_custom``
+   * - ``interp``
+     - ``interp_start`` ``interp_run`` ``interp_eval`` ``interp_file``
 
 List functions:
 
@@ -723,3 +725,22 @@ columns on one line and puts every element of the others on its own line, indent
   ``unparse`` prints ``Do{...}`` as ``{ }`` with one expression to a line indented by 4 spaces, and ``If`` as ``if (c) a else b``, in this way.
 * The text of a tree not written by the grammar is the call of the constructor, ``Head{a, ...}``.
   A symbol that is not an identifier, and a value that is not an integer, a string, a symbol or an M-expression, has no text.
+
+The evaluator in Planck:
+
+* ``interp_start(args, native_syntax)`` makes the global variables of a program, the builtin functions and the definitions of ``planck/init.pk``.
+  ``args`` is the array that ``argv()`` returns to the program: its first string is the program file.
+  The program has global variables of its own, not shared with the program that uses the evaluator.
+* ``interp_eval(e)`` evaluates the M-expression ``e`` as ``eval`` does, ``interp_file(path)`` evaluates the expressions of the file one by one
+  with the functions ``parse`` and ``eval`` of the program, and ``interp_run(args, native_syntax)`` starts the evaluator and runs the file ``args[0]``.
+* ``Handle`` and ``Perform`` of the program are done by the effects of the program that uses the evaluator.
+  The builtin functions of the program are those of that program, except for ``print``, ``println``, ``typeof``, ``argv``, ``_set_file`` and ``eval``,
+  which know the functions and the files of the program.
+* With ``native_syntax`` true, the program is read by the ``parse`` of the program that uses the evaluator, and a rule that the program declares with ``::=`` is a rule of that grammar.
+  The program has ``parse``, ``parse_mexpr``, ``peg_parse``, ``peg_sources``, ``peg_ids``, ``peg_rules``, ``peg_reserved``, ``peg_version``, ``peg_subst_prev`` and ``_define_rule`` of that grammar,
+  the functions ``peg_skip_ws``, ``peg_tok_int`` and ``peg_digit_value``, and the variables ``peg_src``, ``peg_srclen``, ``peg_pv``, ``peg_far``, ``peg_lit``, ``peg_px_key`` and ``peg_call_rule`` of its parser,
+  which the program reads and assigns as the parser does.
+  It also has the definitions of ``planck/syntax.pk`` and ``planck/peg.pk`` that the syntax calls (``_to_text``, ``_record_declare``, ``_record_get``, ``peg_for``, ``_index_get``, ``_index_set``, ``subst``)
+  and that the libraries read (``peg_scan``, ``peg_guarded``, ``peg_skip``, ``peg_ret_handler``, ``peg_break_handler``, ``peg_continue_handler``, ``peg_is_head``, ``peg_map_args``).
+  A program that uses other variables of ``planck/peg.pk`` and ``planck/syntax.pk`` needs ``native_syntax`` false:
+  the evaluator then loads these two files in the program, which takes minutes and most of the memory of the language that runs the evaluator.
