@@ -1,193 +1,123 @@
 <!--title planckvm instructions-->
 <h1>planckvm instructions</h1>
-<p class="lead">The instructions of planckvm, how each feature of planck is translated into them, and which builtin functions are instructions. The machine and the values are in <a href="planckvm.html">planckvm: execution model and values</a>. planckvm is a design that is yet to be implemented.</p>
+<p class="lead">This page is part of the external specification of planckvm: the instructions, the builtin functions, and how each feature of planck is translated into instructions. The machine and the values are in <a href="planckvm.html">planckvm: execution model and values</a>. The design inside an implementation is in <a href="planckvm-internals.html">planckvm internals</a>.</p>
 
-<p>Notation: the stack is written with the bottom at the left, and <code>a b -&gt; r</code> pops two values and pushes one. Operands: <code>k</code> an index of the constant table, <code>c</code> a cell (a <code>k</code>), <code>d i</code> a depth and an index of the environment, <code>L</code> an index of the instructions, <code>n</code> a count, <code>p</code> the number of a builtin instruction. Marks: <strong>S</strong> a safe point where an allocation may run the collector, <strong>W</strong> a write that is recorded, <strong>T</strong> the program stops unless the condition holds.</p>
+<p>Notation: the stack is written with the bottom at the left, and <code>a b -&gt; r</code> pops two values and pushes one. Operands: <code>k</code> an index of the constant table, <code>c</code> a cell (a <code>k</code>), <code>d i</code> a depth and an index of the environment, <code>L</code> an index of the instructions, <code>n</code> a count, <code>p</code> the value of a builtin instruction. Mark columns: <strong>S</strong> a safe point where an allocation may run the collector, <strong>W</strong> a write that is recorded, <strong>T</strong> the program stops unless the condition holds.</p>
 
-<h2>Constants and the stack</h2>
+<h2>Instructions</h2>
 <table>
-<tr><th>Name</th><th>Operands</th><th>Stack</th><th>Meaning</th></tr>
-<tr><td><code>CONST</code></td><td>k</td><td>-&gt; v</td><td>Push a value of the constant table: the literal of an integer, a float, a string or a symbol, and the content of a <code>Quote</code>. M-expressions and strings are immutable and shared</td></tr>
-<tr><td><code>POP</code></td><td></td><td>v -&gt;</td><td>Discard</td></tr>
-<tr><td><code>DUP</code></td><td></td><td>v -&gt; v v</td><td>Duplicate</td></tr>
-</table>
-
-<h2>Variables</h2>
-<table>
-<tr><th>Name</th><th>Operands</th><th>Stack</th><th>Meaning</th></tr>
-<tr><td><code>LOAD</code></td><td>d i</td><td>-&gt; v</td><td>Push slot <code>i</code> of the environment <code>d</code> links up. No check</td></tr>
-<tr><td><code>STORE</code></td><td>d i</td><td>v -&gt; v</td><td>Write slot <code>i</code> and keep the value. W</td></tr>
-<tr><td><code>GLOAD</code></td><td>c</td><td>-&gt; v</td><td>Push the value of the cell. No check</td></tr>
-<tr><td><code>GSET</code></td><td>c</td><td>v -&gt; v</td><td>Write the cell and keep the value. Both the global of <code>Def</code> and that of <code>Set</code> use it. W</td></tr>
-</table>
-
-<h2>Control</h2>
-<table>
-<tr><th>Name</th><th>Operands</th><th>Stack</th><th>Meaning</th></tr>
-<tr><td><code>JMP</code></td><td>L</td><td></td><td>Go to <code>L</code></td></tr>
-<tr><td><code>JF</code></td><td>L</td><td>c -&gt;</td><td>Go to <code>L</code> if <code>c</code> is the symbol <code>false</code>, otherwise go on</td></tr>
-</table>
-
-<h2>Calls</h2>
-<table>
-<tr><th>Name</th><th>Operands</th><th>Stack</th><th>Meaning</th></tr>
-<tr><td><code>CALL</code></td><td>n</td><td>f a1..an -&gt; r</td><td>Call by the rules of Calls in the execution model. S T</td></tr>
-<tr><td><code>TCALL</code></td><td>n</td><td>f a1..an -&gt; r</td><td>Drop the current frame and call (a tail call). It is used in every place, also in the entry frame, where the <code>RET</code> of the called function returns the result to the evaluator. When the current frame is a boundary it is the same as <code>CALL</code>. S T</td></tr>
-<tr><td><code>RET</code></td><td></td><td>v -&gt;</td><td>Drop the frame and push <code>v</code> on the operand stack of the caller. In the entry frame it returns the result of the run to the evaluator</td></tr>
-<tr><td><code>CALLP</code></td><td>c p</td><td>a1..an -&gt; r</td><td>If the present value of the cell <code>c</code> is the builtin <code>p</code>, run that instruction here. Otherwise call the value of <code>c</code> with <code>CALL</code>. <code>n</code> is the number of arguments of <code>p</code>. S T</td></tr>
+<tr><th>Mnemonic</th><th>Value</th><th>Operands</th><th>Stack</th><th>Action</th><th>Builtin</th><th>S</th><th>W</th><th>T</th></tr>
+<tr><td><code>CONST</code></td><td>0</td><td>k</td><td>-&gt; v</td><td>Push a value of the constant table: the literal of an integer, a float, a string or a symbol, and the content of a <code>Quote</code>. M-expressions and strings are immutable and shared</td><td></td><td></td><td></td><td></td></tr>
+<tr><td><code>POP</code></td><td>1</td><td></td><td>v -&gt;</td><td>Discard</td><td></td><td></td><td></td><td></td></tr>
+<tr><td><code>DUP</code></td><td>2</td><td></td><td>v -&gt; v v</td><td>Duplicate</td><td></td><td></td><td></td><td></td></tr>
+<tr><td><code>LOAD</code></td><td>3</td><td>d i</td><td>-&gt; v</td><td>Push slot <code>i</code> of the environment <code>d</code> links up. No check</td><td></td><td></td><td></td><td></td></tr>
+<tr><td><code>STORE</code></td><td>4</td><td>d i</td><td>v -&gt; v</td><td>Write slot <code>i</code> and keep the value</td><td></td><td></td><td>○</td><td></td></tr>
+<tr><td><code>GLOAD</code></td><td>5</td><td>c</td><td>-&gt; v</td><td>Push the value of the cell. No check</td><td></td><td></td><td></td><td></td></tr>
+<tr><td><code>GSET</code></td><td>6</td><td>c</td><td>v -&gt; v</td><td>Write the cell and keep the value. Both the global of <code>Def</code> and that of <code>Set</code> use it</td><td></td><td></td><td>○</td><td></td></tr>
+<tr><td><code>JMP</code></td><td>7</td><td>L</td><td></td><td>Go to <code>L</code></td><td></td><td></td><td></td><td></td></tr>
+<tr><td><code>JF</code></td><td>8</td><td>L</td><td>c -&gt;</td><td>Go to <code>L</code> if <code>c</code> is the symbol <code>false</code>, otherwise go on</td><td></td><td></td><td></td><td></td></tr>
+<tr><td><code>CALL</code></td><td>9</td><td>n</td><td>f a1..an -&gt; r</td><td>Call by the rules of Calls in the execution model</td><td></td><td>○</td><td></td><td>○</td></tr>
+<tr><td><code>TCALL</code></td><td>10</td><td>n</td><td>f a1..an -&gt; r</td><td>Drop the current frame and call (a tail call). It is used in every place, also in the entry frame, where the <code>RET</code> of the called function returns the result to the evaluator. When the current frame is a boundary it is the same as <code>CALL</code></td><td></td><td>○</td><td></td><td>○</td></tr>
+<tr><td><code>RET</code></td><td>11</td><td></td><td>v -&gt;</td><td>Drop the frame and push <code>v</code> on the operand stack of the caller. In the entry frame it returns the result of the run to the evaluator</td><td></td><td></td><td></td><td></td></tr>
+<tr><td><code>CALLP</code></td><td>12</td><td>c p</td><td>a1..an -&gt; r</td><td>If the present value of the cell <code>c</code> is the builtin <code>p</code>, run that instruction here. Otherwise call the value of <code>c</code> with <code>CALL</code>. <code>n</code> is the number of arguments of <code>p</code></td><td></td><td>○</td><td></td><td>○</td></tr>
+<tr><td><code>CLOSURE</code></td><td>13</td><td>k</td><td>-&gt; f</td><td>Make a lambda of the code <code>k</code> and the present environment</td><td></td><td>○</td><td></td><td></td></tr>
+<tr><td><code>FUSION</code></td><td>14</td><td></td><td>f g -&gt; h</td><td>Make <code>f | g</code>. If <code>f</code> is <code>none</code> the result is <code>g</code>. It stops unless both are functions</td><td></td><td>○</td><td></td><td>○</td></tr>
+<tr><td><code>BUILD</code></td><td>15</td><td>k n</td><td>a1..an -&gt; m</td><td>Make an M-expression whose head is the symbol of constant <code>k</code>. <code>Tuple</code> and <code>Cons</code> use it too. It stops if <code>n</code> is above 64</td><td></td><td>○</td><td></td><td>○</td></tr>
+<tr><td><code>ARGI</code></td><td>16</td><td>i</td><td>m -&gt; a</td><td>Argument <code>i</code> of <code>m</code>. It stops if <code>m</code> is not an M-expression or <code>i</code> is out of range. It is used after a match</td><td></td><td></td><td></td><td>○</td></tr>
+<tr><td><code>PARAM</code></td><td>17</td><td>a</td><td>-&gt; v</td><td>Push argument <code>a</code> of the call</td><td></td><td></td><td></td><td></td></tr>
+<tr><td><code>MATCHEQ</code></td><td>18</td><td>k L</td><td>v -&gt;</td><td>Go on if <code>v</code> is <code>EQ</code> to the constant <code>k</code>, otherwise go to <code>L</code>. For the patterns of an integer, a string and <code>Quote{v}</code></td><td></td><td></td><td></td><td></td></tr>
+<tr><td><code>MATCHHEAD</code></td><td>19</td><td>k n L</td><td>v -&gt; v</td><td>Go on if <code>v</code> is an M-expression with the head symbol <code>k</code> and <code>n</code> arguments, otherwise go to <code>L</code></td><td></td><td></td><td></td><td></td></tr>
+<tr><td><code>MATCHTYPE</code></td><td>20</td><td>k L</td><td>v -&gt; v</td><td>Go on if the <code>typeof</code> of <code>v</code> is the symbol <code>k</code>, otherwise go to <code>L</code>. For the pattern <code>_TypeOf{p, type}</code></td><td></td><td></td><td></td><td></td></tr>
+<tr><td><code>NEXT</code></td><td>21</td><td></td><td></td><td>Drop the current frame and try the remaining alternatives with the same arguments. It stops when they run out (<code>matching failed</code>). In a frame that <code>PERFORM</code> called, it goes to the outer boundary</td><td></td><td></td><td></td><td>○</td></tr>
+<tr><td><code>HANDLE</code></td><td>22</td><td></td><td>body h -&gt; r</td><td>Run <code>body</code> (a lambda of arity 0) in a boundary frame. It stops unless <code>h</code> is a function</td><td></td><td>○</td><td></td><td>○</td></tr>
+<tr><td><code>PERFORM</code></td><td>23</td><td></td><td>v -&gt; r</td><td>The rules of Continuations and handlers in the execution model. The value becomes the argument of the resumption</td><td></td><td>○</td><td></td><td>○</td></tr>
+<tr><td><code>ADD</code></td><td>24</td><td></td><td>a b -&gt; r</td><td><code>a + b</code></td><td><code>_add</code></td><td>○</td><td></td><td>○</td></tr>
+<tr><td><code>SUB</code></td><td>25</td><td></td><td>a b -&gt; r</td><td><code>a - b</code></td><td><code>_sub</code></td><td>○</td><td></td><td>○</td></tr>
+<tr><td><code>MUL</code></td><td>26</td><td></td><td>a b -&gt; r</td><td><code>a * b</code></td><td><code>_mul</code></td><td>○</td><td></td><td>○</td></tr>
+<tr><td><code>DIV</code></td><td>27</td><td></td><td>a b -&gt; r</td><td>Two integers give the quotient truncated toward 0, and it stops if <code>b</code> is 0. Otherwise it is a division and does not stop at 0</td><td><code>_div</code></td><td>○</td><td></td><td>○</td></tr>
+<tr><td><code>LT</code></td><td>28</td><td></td><td>a b -&gt; r</td><td><code>a &lt; b</code> as <code>true</code> or <code>false</code>. It stops for a complex number</td><td><code>_lt</code></td><td></td><td></td><td>○</td></tr>
+<tr><td><code>EQ</code></td><td>29</td><td></td><td>a b -&gt; r</td><td>Equality of Values in the execution model, for every value. <code>true</code> or <code>false</code></td><td><code>_eq</code></td><td></td><td></td><td></td></tr>
+<tr><td><code>HEAD</code></td><td>30</td><td></td><td>m -&gt; sym</td><td>The head symbol</td><td><code>head</code></td><td></td><td></td><td>○</td></tr>
+<tr><td><code>ARITY</code></td><td>31</td><td></td><td>m -&gt; n</td><td>The number of arguments</td><td><code>arity</code></td><td></td><td></td><td>○</td></tr>
+<tr><td><code>ARG</code></td><td>32</td><td></td><td>m i -&gt; a</td><td>Argument <code>i</code>, from 0</td><td><code>arg</code></td><td></td><td></td><td>○</td></tr>
+<tr><td><code>PUSH</code></td><td>33</td><td></td><td>m x -&gt; m'</td><td>The M-expression with <code>x</code> added as the last argument. It stops above 64</td><td><code>push</code></td><td>○</td><td></td><td>○</td></tr>
+<tr><td><code>TYPEOF</code></td><td>34</td><td></td><td>v -&gt; sym</td><td>The name in the table of Values</td><td><code>typeof</code></td><td></td><td></td><td></td></tr>
+<tr><td><code>STRLEN</code></td><td>35</td><td></td><td>s -&gt; n</td><td>The number of bytes, 0 bytes included</td><td><code>strlen</code></td><td></td><td></td><td>○</td></tr>
+<tr><td><code>ORD</code></td><td>36</td><td></td><td>s i -&gt; n</td><td>Byte <code>i</code>, or -1 out of range</td><td><code>ord</code></td><td></td><td></td><td>○</td></tr>
+<tr><td><code>AGET</code></td><td>37</td><td></td><td>a i -&gt; v</td><td>An element</td><td><code>array_get</code></td><td></td><td></td><td>○</td></tr>
+<tr><td><code>ASET</code></td><td>38</td><td></td><td>a i v -&gt; v</td><td>Write an element and return <code>v</code></td><td><code>array_set</code></td><td></td><td>○</td><td>○</td></tr>
+<tr><td><code>ALEN</code></td><td>39</td><td></td><td>a -&gt; n</td><td>The length</td><td><code>array_len</code></td><td></td><td></td><td>○</td></tr>
+<tr><td><code>HASH</code></td><td>40</td><td></td><td>v -&gt; n</td><td>A non-negative integer, by the rule of Values</td><td><code>hash</code></td><td></td><td></td><td></td></tr>
+<tr><td><code>PLAINGET</code></td><td>41</td><td></td><td>a i -&gt; v</td><td>An element, as a value of the rule in Plain array types</td><td><code>plain_get</code></td><td></td><td></td><td>○</td></tr>
+<tr><td><code>PLAINSET</code></td><td>42</td><td></td><td>a i v -&gt; v</td><td>Write an element and return <code>v</code>. It stops if it does not fit the type. The conversions are in Writing to a plain array</td><td><code>plain_set</code></td><td></td><td></td><td>○</td></tr>
 </table>
 <p>A program can assign a global function such as <code>_index_get</code>, so <code>a + b</code> cannot be fixed to <code>ADD</code>. <code>CALLP</code> keeps such an override working.</p>
-
-<h2>Functions</h2>
-<table>
-<tr><th>Name</th><th>Operands</th><th>Stack</th><th>Meaning</th></tr>
-<tr><td><code>CLOSURE</code></td><td>k</td><td>-&gt; f</td><td>Make a lambda of the code <code>k</code> and the present environment. S</td></tr>
-<tr><td><code>FUSION</code></td><td></td><td>f g -&gt; h</td><td>Make <code>f | g</code>. If <code>f</code> is <code>none</code> the result is <code>g</code>. T unless both are functions. S</td></tr>
-</table>
-
-<h2>M-expressions</h2>
-<table>
-<tr><th>Name</th><th>Operands</th><th>Stack</th><th>Meaning</th></tr>
-<tr><td><code>BUILD</code></td><td>k n</td><td>a1..an -&gt; m</td><td>Make an M-expression whose head is the symbol of constant <code>k</code>. <code>Tuple</code> and <code>Cons</code> use it too. T if <code>n</code> is above 64. S</td></tr>
-<tr><td><code>ARGI</code></td><td>i</td><td>m -&gt; a</td><td>Argument <code>i</code> of <code>m</code>. T if <code>m</code> is not an M-expression or <code>i</code> is out of range. It is used after a match</td></tr>
-</table>
-
-<h2>Matching at the entry</h2>
 <p>The entry of a function has one instruction sequence for each pattern. When a match fails, the program goes to <code>L</code> and <strong>empties the operand stack</strong>. At <code>L</code> there is a <code>NEXT</code>. When an argument is bound to a variable of the pattern, <code>STORE 0 i</code> and <code>POP</code> write it into the environment. There is no instruction that fuses <code>PARAM</code>, <code>STORE</code> and <code>POP</code>.</p>
-<table>
-<tr><th>Name</th><th>Operands</th><th>Stack</th><th>Meaning</th></tr>
-<tr><td><code>PARAM</code></td><td>a</td><td>-&gt; v</td><td>Push argument <code>a</code> of the call</td></tr>
-<tr><td><code>MATCHEQ</code></td><td>k L</td><td>v -&gt;</td><td>Go on if <code>v</code> is <code>EQ</code> to the constant <code>k</code>, otherwise go to <code>L</code>. For the patterns of an integer, a string and <code>Quote{v}</code></td></tr>
-<tr><td><code>MATCHHEAD</code></td><td>k n L</td><td>v -&gt; v</td><td>Go on if <code>v</code> is an M-expression with the head symbol <code>k</code> and <code>n</code> arguments, otherwise go to <code>L</code></td></tr>
-<tr><td><code>MATCHTYPE</code></td><td>k L</td><td>v -&gt; v</td><td>Go on if the <code>typeof</code> of <code>v</code> is the symbol <code>k</code>, otherwise go to <code>L</code>. For the pattern <code>_TypeOf{p, type}</code></td></tr>
-<tr><td><code>NEXT</code></td><td></td><td></td><td>Drop the current frame and try the remaining alternatives with the same arguments. T when they run out (<code>matching failed</code>). In a frame that <code>PERFORM</code> called, it goes to the outer boundary</td></tr>
-</table>
-<table>
-<tr><th>Pattern</th><th>Instructions (the value is already pushed)</th></tr>
-<tr><td><code>_</code></td><td><code>POP</code></td></tr>
-<tr><td>A variable <code>x</code></td><td><code>STORE 0 i</code> <code>POP</code></td></tr>
-<tr><td>An integer, a string, <code>Quote{v}</code></td><td><code>MATCHEQ k L</code></td></tr>
-<tr><td><code>Head{p1, ..., pn}</code></td><td><code>MATCHHEAD k n L</code>, then for each <code>j</code> a <code>DUP</code>, <code>ARGI j</code> and the instructions of <code>p_j</code>, and a final <code>POP</code></td></tr>
-<tr><td><code>_TypeOf{p, type}</code></td><td><code>MATCHTYPE k L</code>, then the instructions of <code>p</code></td></tr>
-</table>
-
-<h2>Effects</h2>
-<table>
-<tr><th>Name</th><th>Operands</th><th>Stack</th><th>Meaning</th></tr>
-<tr><td><code>HANDLE</code></td><td></td><td>body h -&gt; r</td><td>Run <code>body</code> (a lambda of arity 0) in a boundary frame. T unless <code>h</code> is a function. S</td></tr>
-<tr><td><code>PERFORM</code></td><td></td><td>v -&gt; r</td><td>The rules of Continuations and handlers in the execution model. The value becomes the argument of the resumption. S T</td></tr>
-</table>
 <p>A call in the tail position of the body of a <code>HANDLE</code> is written <code>TCALL</code>, but the boundary frame is not dropped.</p>
-
-<h2>Numbers</h2>
-<p>An argument that is not a number is T (except for <code>EQ</code>). The mixing of types and the result type are in Numbers of the execution model.</p>
-<table>
-<tr><th>Name</th><th>Stack</th><th>Meaning</th><th>Builtin</th></tr>
-<tr><td><code>ADD</code></td><td>a b -&gt; r</td><td><code>a + b</code>. S</td><td><code>_add</code></td></tr>
-<tr><td><code>SUB</code></td><td>a b -&gt; r</td><td><code>a - b</code>. S</td><td><code>_sub</code></td></tr>
-<tr><td><code>MUL</code></td><td>a b -&gt; r</td><td><code>a * b</code>. S</td><td><code>_mul</code></td></tr>
-<tr><td><code>DIV</code></td><td>a b -&gt; r</td><td>Two integers give the quotient truncated toward 0, and T if <code>b</code> is 0. Otherwise it is a division and does not stop at 0. S</td><td><code>_div</code></td></tr>
-<tr><td><code>LT</code></td><td>a b -&gt; r</td><td><code>a &lt; b</code> as <code>true</code> or <code>false</code>. T for a complex number</td><td><code>_lt</code></td></tr>
-<tr><td><code>EQ</code></td><td>a b -&gt; r</td><td>Equality of Values in the execution model, for every value. <code>true</code> or <code>false</code></td><td><code>_eq</code></td></tr>
-</table>
-<p>When the result of two integers fits a small integer, the instruction need not allocate. An allocation happens when digits are added, and when the result is a float or a complex number.</p>
-
-<h2>Bit operations</h2>
-<p>The arguments are integers, treated as infinite-width two's complement, negative numbers included.</p>
-<table>
-<tr><th>Name</th><th>Stack</th><th>Meaning</th><th>Builtin</th></tr>
-<tr><td><code>BAND</code></td><td>a b -&gt; r</td><td>Bitwise and</td><td><code>bit_and</code></td></tr>
-<tr><td><code>BOR</code></td><td>a b -&gt; r</td><td>Bitwise or</td><td><code>bit_or</code></td></tr>
-<tr><td><code>BXOR</code></td><td>a b -&gt; r</td><td>Bitwise exclusive or</td><td><code>bit_xor</code></td></tr>
-<tr><td><code>BSHL</code></td><td>a k -&gt; r</td><td>Shift <code>a</code> left by <code>k</code> bits. It does not wrap around. T if <code>k</code> is negative. S</td><td><code>bit_shl</code></td></tr>
-<tr><td><code>BSAR</code></td><td>a k -&gt; r</td><td>Shift <code>a</code> right by <code>k</code> bits keeping the sign. T if <code>k</code> is negative. S</td><td><code>bit_sar</code></td></tr>
-</table>
-
-<h2>Floats and complex numbers</h2>
-<p>The four operations and the comparisons belong to the instructions of Numbers. The instructions here are the functions, the conversions and the parts of complex numbers. An instruction that takes a float also takes an integer and raises it to a float. A complex number is T. The builtin is the lower case of the instruction name.</p>
-<table>
-<tr><th>Name</th><th>Stack</th><th>Meaning</th></tr>
-<tr><td><code>FSQRT</code></td><td>a -&gt; r</td><td>Square root. NaN for a negative number. S</td></tr>
-<tr><td><code>FFLOOR</code></td><td>a -&gt; r</td><td>Floor, as a float. S</td></tr>
-<tr><td><code>FTOI</code></td><td>a -&gt; n</td><td>The integer truncated toward 0. T for NaN and infinities. S</td></tr>
-<tr><td><code>FTOBITS</code></td><td>a -&gt; n</td><td>The 64 bits as a non-negative integer. S</td></tr>
-<tr><td><code>BITSTOF</code></td><td>n -&gt; r</td><td>The inverse of <code>FTOBITS</code>. T if <code>n</code> does not fit 64 bits. S</td></tr>
-<tr><td><code>FTOS</code></td><td>a -&gt; s</td><td>The shortest decimal string that reads back to the same value. S</td></tr>
-<tr><td><code>STOF</code></td><td>s -&gt; r</td><td>Read a decimal string (an exponent is allowed). <code>none</code> if it cannot be read. S</td></tr>
-<tr><td><code>FEXP</code> <code>FLOG</code> <code>FSIN</code> <code>FCOS</code></td><td>a -&gt; r</td><td>Exponential, natural logarithm, sine and cosine. S</td></tr>
-<tr><td><code>FPOW</code> <code>FATAN2</code></td><td>a b -&gt; r</td><td>Power and arctangent of two arguments. S</td></tr>
-<tr><td><code>COMPLEX</code></td><td>re im -&gt; z</td><td>The complex number with real part <code>re</code> and imaginary part <code>im</code>, each an integer or a float raised to a float. S</td></tr>
-<tr><td><code>REAL</code> <code>IMAG</code></td><td>z -&gt; x</td><td>The real part and the imaginary part (floats). T unless <code>z</code> is a complex number. S</td></tr>
-</table>
-<p>The mathematical functions are exactly these six: <code>FEXP</code> <code>FLOG</code> <code>FSIN</code> <code>FCOS</code> <code>FPOW</code> <code>FATAN2</code>. The addition, subtraction, multiplication, division and equality of complex numbers are written with the instructions of Numbers.</p>
-
-<h2>M-expressions, strings, symbols, arrays, plain arrays, hash</h2>
-<p>An argument of a wrong type or out of range is T in all of them.</p>
-<table>
-<tr><th>Name</th><th>Stack</th><th>Meaning</th><th>Builtin</th></tr>
-<tr><td><code>HEAD</code></td><td>m -&gt; sym</td><td>The head symbol</td><td><code>head</code></td></tr>
-<tr><td><code>ARITY</code></td><td>m -&gt; n</td><td>The number of arguments</td><td><code>arity</code></td></tr>
-<tr><td><code>ARG</code></td><td>m i -&gt; a</td><td>Argument <code>i</code>, from 0</td><td><code>arg</code></td></tr>
-<tr><td><code>MEXPR</code></td><td>h t -&gt; m</td><td>The M-expression with head <code>h</code> (a symbol) and the arguments of the <code>Tuple</code> <code>t</code>. S</td><td><code>mexpr</code></td></tr>
-<tr><td><code>PUSH</code></td><td>m x -&gt; m'</td><td>The M-expression with <code>x</code> added as the last argument. T above 64. S</td><td><code>push</code></td></tr>
-<tr><td><code>TYPEOF</code></td><td>v -&gt; sym</td><td>The name in the table of Values</td><td><code>typeof</code></td></tr>
-<tr><td><code>STRLEN</code></td><td>s -&gt; n</td><td>The number of bytes, 0 bytes included</td><td><code>strlen</code></td></tr>
-<tr><td><code>ORD</code></td><td>s i -&gt; n</td><td>Byte <code>i</code>, or -1 out of range</td><td><code>ord</code></td></tr>
-<tr><td><code>SUBSTR</code></td><td>s i j -&gt; s'</td><td>The bytes from <code>i</code> to <code>j-1</code>. T out of range. S</td><td><code>substr</code></td></tr>
-<tr><td><code>STRCAT</code></td><td>a b -&gt; s</td><td>Concatenation. S</td><td><code>_strcat</code></td></tr>
-<tr><td><code>INTERN</code></td><td>s -&gt; sym</td><td>The symbol named <code>s</code>. S</td><td><code>intern</code></td></tr>
-<tr><td><code>SYMNAME</code></td><td>sym -&gt; s</td><td>The name of the symbol. S</td><td><code>symname</code></td></tr>
-<tr><td><code>ARRAY</code></td><td>n -&gt; a</td><td>An array of <code>n</code> elements filled with <code>none</code>. T if <code>n</code> is negative. S</td><td><code>array</code></td></tr>
-<tr><td><code>AGET</code></td><td>a i -&gt; v</td><td>An element</td><td><code>array_get</code></td></tr>
-<tr><td><code>ASET</code></td><td>a i v -&gt; v</td><td>Write an element and return <code>v</code>. W</td><td><code>array_set</code></td></tr>
-<tr><td><code>ALEN</code></td><td>a -&gt; n</td><td>The length</td><td><code>array_len</code></td></tr>
-<tr><td><code>HASH</code></td><td>v -&gt; n</td><td>A non-negative integer, by the rule of Values</td><td><code>hash</code></td></tr>
-<tr><td><code>PLAINNEW</code></td><td>kind n -&gt; a</td><td>A plain array of <code>n</code> elements of the type <code>kind</code>, filled with 0 of that type (<code>false</code>, <code>0</code>, <code>0.0</code> or <code>0+0j</code>). T if <code>kind</code> is none of the 14 types or <code>n</code> is negative. S</td><td><code>plain_array</code></td></tr>
-<tr><td><code>PLAINLEN</code></td><td>a -&gt; n</td><td>The length</td><td><code>plain_len</code></td></tr>
-<tr><td><code>PLAINKIND</code></td><td>a -&gt; sym</td><td>The symbol of the type</td><td><code>plain_kind</code></td></tr>
-<tr><td><code>PLAINGET</code></td><td>a i -&gt; v</td><td>An element, as a value of the rule in Plain array types</td><td><code>plain_get</code></td></tr>
-<tr><td><code>PLAINSET</code></td><td>a i v -&gt; v</td><td>Write an element and return <code>v</code>. T if it does not fit the type. The conversions are in Writing to a plain array</td><td><code>plain_set</code></td></tr>
-</table>
-
-<h2>Input, output, system, language</h2>
-<table>
-<tr><th>Name</th><th>Stack</th><th>Meaning</th><th>Builtin</th></tr>
-<tr><td><code>PUT</code></td><td>s -&gt; none</td><td>Write all bytes of the string to the standard output, 0 bytes included</td><td><code>put</code></td></tr>
-<tr><td><code>PRINT</code></td><td>v -&gt; none</td><td>Write the text of the value. A function is <code>&lt;lambda:(...)&gt;</code>, <code>&lt;prim:name&gt;</code> or <code>&lt;cont&gt;</code>, and a fusion is <code>f|g</code>. A float is the string of <code>FTOS</code>. S</td><td><code>print</code></td></tr>
-<tr><td><code>PRINTLN</code></td><td>v -&gt; none</td><td><code>PRINT</code> followed by a newline. S</td><td><code>println</code></td></tr>
-<tr><td><code>TRYREADFILE</code></td><td>path -&gt; s</td><td>All bytes of the file (0 included), or <code>none</code> if it cannot be read. S</td><td><code>try_read_file</code></td></tr>
-<tr><td><code>READBYTES</code></td><td>path -&gt; a</td><td>A <code>'u8</code> array of all bytes. T if it cannot be read. S</td><td><code>read_bytes</code></td></tr>
-<tr><td><code>WRITEFILE</code></td><td>path x -&gt; none</td><td>Write all bytes of a string or a <code>'u8</code> array, creating or emptying the file. T if it cannot be written</td><td><code>write_file</code></td></tr>
-<tr><td><code>CHMOD</code></td><td>path mode -&gt; none</td><td>Change the permissions. T on failure</td><td><code>chmod</code></td></tr>
-<tr><td><code>ARGV</code></td><td>-&gt; a</td><td>The array of the command-line strings. S</td><td><code>argv</code></td></tr>
-<tr><td><code>EXIT</code></td><td>n -&gt;</td><td>End with status <code>n</code>. It does not return</td><td><code>exit</code></td></tr>
-<tr><td><code>SETFILE</code></td><td>path -&gt; prev</td><td>Make <code>path</code> the file being loaded and return the previous one (<code>none</code> if there is none). The compiler uses it to decide where a global variable was defined</td><td><code>_set_file</code></td></tr>
-<tr><td><code>EVAL</code></td><td>e -&gt; r</td><td>Turn the M-expression <code>e</code> into a code in the present global environment and run it. The result returns to the caller. A compile error is T (such as <code>undefined variable</code>). S</td><td><code>eval</code></td></tr>
-</table>
-<p><code>EVAL</code> is the only builtin that makes a frame. If a <code>PERFORM</code> happens during it, the frames inside the eval are ordinary frames and can be copied.</p>
+<p><code>ADD</code>, <code>SUB</code>, <code>MUL</code>, <code>DIV</code> and <code>LT</code> stop on an argument that is not a number. The mixing of types and the result type are in Numbers of the execution model. The instructions from <code>HEAD</code> to <code>PLAINSET</code> stop on an argument of a wrong type or out of range (except <code>ORD</code> out of range).</p>
 
 <h2 id="builtins">Builtins and instructions</h2>
-<p>A builtin becomes an instruction when it cannot be written with the other instructions and planck expressions. That is the case for anything that touches the representation of values, the heap, the operating system, the machine operations on numbers, or control. A builtin that can be written in planck is a planck function, and no instruction is added for it. Whether to promote a hot function to an instruction is decided separately, after measuring. An operation that differs by type is one instruction that looks at the type of its value.</p>
+<p>Only what is called at a high frequency is an instruction: the constants, variables, control, calls, matching, effects and operators that every run goes through, and the builtins that are called the most. Everything else is a builtin function, and no instruction is added for it. An operation that differs by type is one instruction that looks at the type of its value.</p>
 
 <h3>Builtins that are not instructions</h3>
-<p>They are planck functions that use the instructions, and are part of the image of the evaluator. The names of the global variables and the behavior are the same as those of the builtins.</p>
+<p>Those of the kind planck are planck functions that use the instructions, and are part of the image of the evaluator. The names of the global variables and the behavior are the same as those of the builtins. Those of the kind machine are builtins of the machine (the Builtin of the table in Calls of the execution model). Both are called with <code>GLOAD c</code>, the arguments and <code>CALL n</code>.</p>
 <table>
-<tr><th>Builtin</th><th>Definition</th></tr>
-<tr><td><code>_ne(a, b)</code></td><td><code>if (a == b) false else true</code></td></tr>
-<tr><td><code>_le(a, b)</code></td><td><code>if (a &lt; b) true else (a == b)</code> (<code>false</code> if NaN is involved)</td></tr>
-<tr><td><code>_gt(a, b)</code></td><td><code>b &lt; a</code></td></tr>
-<tr><td><code>_ge(a, b)</code></td><td><code>_le(b, a)</code></td></tr>
-<tr><td><code>_mod(a, b)</code></td><td><code>a - b * (a / b)</code> (the remainder of integers)</td></tr>
-<tr><td><code>bit_not(a)</code></td><td><code>-1 - a</code></td></tr>
-<tr><td><code>bit_shr(a, k)</code></td><td><code>bit_sar(a, k)</code> if <code>a</code> is not negative, otherwise an error</td></tr>
-<tr><td><code>plain_copy(dst, di, src, si, n)</code></td><td>A repetition of <code>plain_get</code> and <code>plain_set</code>. An error unless the types are the same. For overlapping ranges in one array the direction is chosen</td></tr>
-<tr><td><code>read_file(path)</code></td><td>If <code>try_read_file</code> gives <code>none</code>, print a failure message and <code>exit(1)</code></td></tr>
-<tr><td><code>parse(s)</code></td><td>The reader of M-expressions, written with <code>ORD</code> <code>SUBSTR</code> <code>BUILD</code> <code>PUSH</code> <code>MEXPR</code>. A float literal is read with <code>stof</code></td></tr>
-<tr><td><code>u8_array(n)</code> <code>u16_array(n)</code> <code>i32_array(n)</code></td><td><code>plain_array('u8, n)</code> and so on</td></tr>
-<tr><td><code>bool_array(n)</code> <code>i8_array(n)</code> <code>i16_array(n)</code> <code>i64_array(n)</code> <code>u32_array(n)</code> <code>u64_array(n)</code> <code>f16_array(n)</code> <code>f32_array(n)</code> <code>f64_array(n)</code> <code>c64_array(n)</code> <code>c128_array(n)</code></td><td>The same form: <code>plain_array('i8, n)</code> and so on</td></tr>
-<tr><td><code>itof(n)</code></td><td><code>n + 0.0</code></td></tr>
-<tr><td><code>conj(z)</code></td><td><code>complex(real(z), imag(z) * -1)</code></td></tr>
+<tr><th>Builtin</th><th>Kind</th><th>Definition or action</th></tr>
+<tr><td><code>mexpr(h, t)</code></td><td>machine</td><td>The M-expression with head <code>h</code> (a symbol) and the arguments of the <code>Tuple</code> <code>t</code></td></tr>
+<tr><td><code>substr(s, i, j)</code></td><td>machine</td><td>The bytes from <code>i</code> to <code>j-1</code>. An error out of range</td></tr>
+<tr><td><code>_strcat(a, b)</code></td><td>machine</td><td>Concatenation</td></tr>
+<tr><td><code>intern(s)</code></td><td>machine</td><td>The symbol named <code>s</code></td></tr>
+<tr><td><code>symname(sym)</code></td><td>machine</td><td>The name of the symbol</td></tr>
+<tr><td><code>array(n)</code></td><td>machine</td><td>An array of <code>n</code> elements filled with <code>none</code>. An error if <code>n</code> is negative</td></tr>
+<tr><td><code>plain_array(kind, n)</code></td><td>machine</td><td>A plain array of <code>n</code> elements of the type <code>kind</code>, filled with 0 of that type (<code>false</code>, <code>0</code>, <code>0.0</code> or <code>0+0j</code>). An error if <code>kind</code> is none of the 14 types or <code>n</code> is negative</td></tr>
+<tr><td><code>plain_len(a)</code></td><td>machine</td><td>The length</td></tr>
+<tr><td><code>plain_kind(a)</code></td><td>machine</td><td>The symbol of the type</td></tr>
+<tr><td><code>bit_and(a, b)</code></td><td>machine</td><td>Bitwise and</td></tr>
+<tr><td><code>bit_or(a, b)</code></td><td>machine</td><td>Bitwise or</td></tr>
+<tr><td><code>bit_xor(a, b)</code></td><td>machine</td><td>Bitwise exclusive or</td></tr>
+<tr><td><code>bit_shl(a, k)</code></td><td>machine</td><td>Shift <code>a</code> left by <code>k</code> bits. It does not wrap around. An error if <code>k</code> is negative</td></tr>
+<tr><td><code>bit_sar(a, k)</code></td><td>machine</td><td>Shift <code>a</code> right by <code>k</code> bits keeping the sign. An error if <code>k</code> is negative</td></tr>
+<tr><td><code>fsqrt(a)</code></td><td>machine</td><td>Square root. NaN for a negative number</td></tr>
+<tr><td><code>ffloor(a)</code></td><td>machine</td><td>Floor, as a float</td></tr>
+<tr><td><code>ftoi(a)</code></td><td>machine</td><td>The integer truncated toward 0. An error for NaN and infinities</td></tr>
+<tr><td><code>ftobits(a)</code></td><td>machine</td><td>The 64 bits as a non-negative integer</td></tr>
+<tr><td><code>bitstof(n)</code></td><td>machine</td><td>The inverse of <code>ftobits</code>. An error if <code>n</code> does not fit 64 bits</td></tr>
+<tr><td><code>ftos(a)</code></td><td>machine</td><td>The shortest decimal string that reads back to the same value</td></tr>
+<tr><td><code>stof(s)</code></td><td>machine</td><td>Read a decimal string (an exponent is allowed). <code>none</code> if it cannot be read</td></tr>
+<tr><td><code>fexp(a)</code> <code>flog(a)</code> <code>fsin(a)</code> <code>fcos(a)</code></td><td>machine</td><td>Exponential, natural logarithm, sine and cosine</td></tr>
+<tr><td><code>fpow(a, b)</code> <code>fatan2(a, b)</code></td><td>machine</td><td>Power and arctangent of two arguments</td></tr>
+<tr><td><code>complex(re, im)</code></td><td>machine</td><td>The complex number with real part <code>re</code> and imaginary part <code>im</code>, each an integer or a float raised to a float</td></tr>
+<tr><td><code>real(z)</code> <code>imag(z)</code></td><td>machine</td><td>The real part and the imaginary part (floats). An error unless <code>z</code> is a complex number</td></tr>
+<tr><td><code>put(s)</code></td><td>machine</td><td>Write all bytes of the string to the standard output, 0 bytes included. It returns <code>none</code></td></tr>
+<tr><td><code>print(v)</code></td><td>machine</td><td>Write the text of the value. A function is <code>&lt;lambda:(...)&gt;</code>, <code>&lt;prim:name&gt;</code> or <code>&lt;cont&gt;</code>, and a fusion is <code>f|g</code>. A float is the string of <code>ftos</code>. It returns <code>none</code></td></tr>
+<tr><td><code>println(v)</code></td><td>machine</td><td><code>print</code> followed by a newline. It returns <code>none</code></td></tr>
+<tr><td><code>try_read_file(path)</code></td><td>machine</td><td>All bytes of the file (0 included), or <code>none</code> if it cannot be read</td></tr>
+<tr><td><code>read_bytes(path)</code></td><td>machine</td><td>A <code>'u8</code> array of all bytes. An error if it cannot be read</td></tr>
+<tr><td><code>write_file(path, x)</code></td><td>machine</td><td>Write all bytes of a string or a <code>'u8</code> array, creating or emptying the file. An error if it cannot be written. It returns <code>none</code></td></tr>
+<tr><td><code>chmod(path, mode)</code></td><td>machine</td><td>Change the permissions. An error on failure. It returns <code>none</code></td></tr>
+<tr><td><code>argv()</code></td><td>machine</td><td>The array of the command-line strings</td></tr>
+<tr><td><code>exit(n)</code></td><td>machine</td><td>End with status <code>n</code>. It does not return</td></tr>
+<tr><td><code>_set_file(path)</code></td><td>machine</td><td>Make <code>path</code> the file being loaded and return the previous one (<code>none</code> if there is none). The compiler uses it to decide where a global variable was defined</td></tr>
+<tr><td><code>eval(e)</code></td><td>machine</td><td>Turn the M-expression <code>e</code> into a code in the present global environment and run it. The result returns to the caller. A compile error stops the program as a runtime error does (such as <code>undefined variable</code>)</td></tr>
+<tr><td><code>_ne(a, b)</code></td><td>planck</td><td><code>if (a == b) false else true</code></td></tr>
+<tr><td><code>_le(a, b)</code></td><td>planck</td><td><code>if (a &lt; b) true else (a == b)</code> (<code>false</code> if NaN is involved)</td></tr>
+<tr><td><code>_gt(a, b)</code></td><td>planck</td><td><code>b &lt; a</code></td></tr>
+<tr><td><code>_ge(a, b)</code></td><td>planck</td><td><code>_le(b, a)</code></td></tr>
+<tr><td><code>_mod(a, b)</code></td><td>planck</td><td><code>a - b * (a / b)</code> (the remainder of integers)</td></tr>
+<tr><td><code>bit_not(a)</code></td><td>planck</td><td><code>-1 - a</code></td></tr>
+<tr><td><code>bit_shr(a, k)</code></td><td>planck</td><td><code>bit_sar(a, k)</code> if <code>a</code> is not negative, otherwise an error</td></tr>
+<tr><td><code>plain_copy(dst, di, src, si, n)</code></td><td>planck</td><td>A repetition of <code>plain_get</code> and <code>plain_set</code>. An error unless the types are the same. For overlapping ranges in one array the direction is chosen</td></tr>
+<tr><td><code>read_file(path)</code></td><td>planck</td><td>If <code>try_read_file</code> gives <code>none</code>, print a failure message and <code>exit(1)</code></td></tr>
+<tr><td><code>parse(s)</code></td><td>planck</td><td>The reader of M-expressions, written with <code>ORD</code> <code>BUILD</code> <code>PUSH</code>, <code>substr</code> and <code>mexpr</code>. A float literal is read with <code>stof</code></td></tr>
+<tr><td><code>u8_array(n)</code> <code>u16_array(n)</code> <code>i32_array(n)</code></td><td>planck</td><td><code>plain_array('u8, n)</code> and so on</td></tr>
+<tr><td><code>bool_array(n)</code> <code>i8_array(n)</code> <code>i16_array(n)</code> <code>i64_array(n)</code> <code>u32_array(n)</code> <code>u64_array(n)</code> <code>f16_array(n)</code> <code>f32_array(n)</code> <code>f64_array(n)</code> <code>c64_array(n)</code> <code>c128_array(n)</code></td><td>planck</td><td>The same form: <code>plain_array('i8, n)</code> and so on</td></tr>
+<tr><td><code>itof(n)</code></td><td>planck</td><td><code>n + 0.0</code></td></tr>
+<tr><td><code>conj(z)</code></td><td>planck</td><td><code>complex(real(z), imag(z) * -1)</code></td></tr>
 </table>
+<p>The allocations and errors of a machine builtin are covered by the S and T of the <code>CALL</code> that called it. <code>mexpr</code>, <code>substr</code>, <code>_strcat</code>, <code>intern</code>, <code>symname</code>, <code>array</code>, <code>plain_array</code>, <code>plain_len</code> and <code>plain_kind</code> are also errors for an argument of a wrong type or out of range.</p>
+<p>The arguments of the bit operations are integers, treated as infinite-width two's complement, negative numbers included.</p>
+<p>A builtin that takes a float also takes an integer and raises it to a float. A complex number is an error. The mathematical functions are exactly these six: <code>fexp</code> <code>flog</code> <code>fsin</code> <code>fcos</code> <code>fpow</code> <code>fatan2</code>. The addition, subtraction, multiplication, division and equality of complex numbers are written with <code>ADD</code>, <code>SUB</code>, <code>MUL</code>, <code>DIV</code> and <code>EQ</code>.</p>
+<p><code>eval</code> is the only builtin that makes a frame. If a <code>PERFORM</code> happens during it, the frames inside the eval are ordinary frames and can be copied.</p>
 <p>The name of a function in an error message can differ from the builtin that was called. For example the message for a non-integer argument of <code>_mod</code> names <code>_div</code>.</p>
 
 <h3>Names defined by planck code</h3>
@@ -232,18 +162,28 @@
 <tr><td>A <code>::=</code> declaration</td><td>A call of <code>_define_rule</code></td></tr>
 </table>
 
+<h3>Patterns and instructions</h3>
+<table>
+<tr><th>Pattern</th><th>Instructions (the value is already pushed)</th></tr>
+<tr><td><code>_</code></td><td><code>POP</code></td></tr>
+<tr><td>A variable <code>x</code></td><td><code>STORE 0 i</code> <code>POP</code></td></tr>
+<tr><td>An integer, a string, <code>Quote{v}</code></td><td><code>MATCHEQ k L</code></td></tr>
+<tr><td><code>Head{p1, ..., pn}</code></td><td><code>MATCHHEAD k n L</code>, then for each <code>j</code> a <code>DUP</code>, <code>ARGI j</code> and the instructions of <code>p_j</code>, and a final <code>POP</code></td></tr>
+<tr><td><code>_TypeOf{p, type}</code></td><td><code>MATCHTYPE k L</code>, then the instructions of <code>p</code></td></tr>
+</table>
+
 <h3>Features of the specification</h3>
 <table>
 <tr><th>Section</th><th>What realizes it</th></tr>
-<tr><td>M-expressions</td><td><code>BUILD</code> <code>ARGI</code> <code>HEAD</code> <code>ARITY</code> <code>ARG</code> <code>PUSH</code> <code>MEXPR</code>. A string is a <code>CONST</code></td></tr>
+<tr><td>M-expressions</td><td><code>BUILD</code> <code>ARGI</code> <code>HEAD</code> <code>ARITY</code> <code>ARG</code> <code>PUSH</code> and <code>mexpr</code>. A string is a <code>CONST</code></td></tr>
 <tr><td>Names the sugar calls</td><td>Calls to global variables with <code>CALL</code> and <code>CALLP</code>. A name that starts with <code>_</code> is a builtin or a planck function</td></tr>
-<tr><td>Indexing and rewriting</td><td><code>_index_get</code>, <code>_index_set</code> and <code>subst</code> are planck functions. The elements are handled with <code>AGET</code> <code>ASET</code> <code>PLAINGET</code> <code>PLAINSET</code> <code>ORD</code> <code>SUBSTR</code> <code>ARG</code></td></tr>
+<tr><td>Indexing and rewriting</td><td><code>_index_get</code>, <code>_index_set</code> and <code>subst</code> are planck functions. The elements are handled with <code>AGET</code> <code>ASET</code> <code>PLAINGET</code> <code>PLAINSET</code> <code>ORD</code> <code>ARG</code> and <code>substr</code></td></tr>
 <tr><td>Grammar declarations, Text of a rule</td><td>Planck functions of <code>peg.pk</code>: <code>_define_rule</code> and <code>peg_parse</code>. <code>peg_parse</code> is called while parsing and its result is a <code>CONST</code></td></tr>
 <tr><td>Special forms</td><td><code>Def</code> <code>Set</code> <code>Declare</code> are the instructions of variables. The others are in the table above</td></tr>
 <tr><td>Patterns</td><td>The matching instructions</td></tr>
 <tr><td>Algebraic effects</td><td><code>HANDLE</code>, <code>PERFORM</code> and calls of continuations</td></tr>
-<tr><td>Top level</td><td>The entry of the evaluator. It reads the cells of <code>parse</code> and <code>eval</code> and calls them. <code>EVAL</code> and <code>SETFILE</code></td></tr>
-<tr><td>Libraries, preprocessed libraries</td><td>All planck code. <code>TRYREADFILE</code> and <code>WRITEFILE</code>, <code>parse</code>, and the usual <code>EVAL</code></td></tr>
+<tr><td>Top level</td><td>The entry of the evaluator. It reads the cells of <code>parse</code> and <code>eval</code> and calls them. <code>eval</code> and <code>_set_file</code></td></tr>
+<tr><td>Libraries, preprocessed libraries</td><td>All planck code. <code>try_read_file</code> and <code>write_file</code>, <code>parse</code>, and the usual <code>eval</code></td></tr>
 </table>
 
 <h2>Where the rules depend on the place</h2>
@@ -253,7 +193,7 @@
 <tr><td><code>x := e</code> at the top level, outside a block</td><td>A global variable. A new cell is made</td><td><code>GSET c</code></td></tr>
 <tr><td><code>x := e</code> in the block of an <code>if</code> or <code>while</code> at the top level</td><td>A local variable in the environment of the top-level code</td><td><code>STORE 0 i</code></td></tr>
 <tr><td><code>x := e</code> in a function</td><td>A local variable: a new slot of the same function</td><td><code>STORE 0 i</code></td></tr>
-<tr><td><code>Declare{x}</code> (the first half of <code>f(p) := e</code>)</td><td>Nothing if a variable is at the same place. At the top level, the same place means a global variable defined by the file being loaded; a global variable of another file is made anew and hides it</td><td>A decision at compile time with the file given by <code>SETFILE</code></td></tr>
+<tr><td><code>Declare{x}</code> (the first half of <code>f(p) := e</code>)</td><td>Nothing if a variable is at the same place. At the top level, the same place means a global variable defined by the file being loaded; a global variable of another file is made anew and hides it</td><td>A decision at compile time with the file given by <code>_set_file</code></td></tr>
 <tr><td><code>Declare{x}</code> in a function</td><td>Only a variable of the environment of the same function is at the same place. A variable of an outer function is not</td><td>A decision at compile time</td></tr>
 <tr><td>A tail call</td><td><code>TCALL</code> in every place. The result is the same and only the depth of the stack differs</td><td>The choice of instruction does not depend on the place</td></tr>
 <tr><td>A tail call in the body of a <code>HANDLE</code></td><td>Written <code>TCALL</code>, but the boundary frame is not dropped</td><td>A rule at run time</td></tr>
