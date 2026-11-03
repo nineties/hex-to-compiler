@@ -40,12 +40,12 @@
 ; An object is the part of its chunk after the header, so a pointer to an
 ; object is 4 bytes after the beginning of its chunk. The beginnings of the
 ; chunks of the objects are recorded in a bitmap (one bit for 8 bytes).
-; At first the heap is one free chunk. The free chunks are in lists by size.
+; At first the heap is one free chunk. The free chunks are in a list.
 ; A collector (see "Garbage Collection") frees the objects which cannot be reached.
 (def GC_MARK 1)
 (def GC_FREE 2)
 (def GC_STACK_WORDS 16777216)
-(def GC_INTERVAL 67108864)   ; a collection starts after this many bytes are allocated
+(def GC_INTERVAL 536870912)   ; a collection starts after this many bytes are allocated
 
 (long heap_root)
 (long heap_end)
@@ -53,7 +53,7 @@
 (long gc_stack)      ; stack of the objects which are marked and are not scanned yet
 (long gc_sp)
 (long gc_stack_end)
-(long gc_lists)      ; free chunks: word n (1..32) is the list of the chunks of 8 * n bytes, word 0 is the list of the larger chunks
+(long gc_free)       ; list of the free chunks (the second word of a chunk is the next one)
 (long gc_since)      ; bytes allocated since the last collection
 
 (fun map_zero (bytes)
@@ -74,7 +74,6 @@
     (= gc_stack (map_zero (* 4 GC_STACK_WORDS)))
     (= gc_sp gc_stack)
     (= gc_stack_end (+ gc_stack (* 4 GC_STACK_WORDS)))
-    (= gc_lists (map_zero 4096))
     (free_chunk heap_root (- heap_end heap_root))
     )
 
@@ -90,33 +89,22 @@
     (setb gc_bitmap i (& (getb gc_bitmap i) (^ 255 (<< 1 (& g 7)))))
     )
 
-; put the free chunk c of n bytes (n >= 8) to its list
+; put the free chunk c of n bytes (n >= 8) to the list
 (fun free_chunk (c n)
-    (var idx (>> n 3))
-    (if (u> idx 32) (= idx 0))
     (set c (| n GC_FREE))
-    (set c 1 (get gc_lists idx))
-    (set gc_lists idx c)
+    (set c 1 gc_free)
+    (= gc_free c)
     )
 
-; take a chunk of n bytes from the free chunks (0 if there is none)
+; take a chunk of n bytes from the first free chunk that is large enough (0 if there is none)
 (fun take_chunk (n)
-    (var idx (>> n 3))
-    (var c 0)
+    (var c gc_free)
     (var prev 0)
     (var rest 0)
-    (if (u<= idx 32) (do
-        (= c (get gc_lists idx))
-        (if c (do
-            (set gc_lists idx (get c 1))
-            (return c)
-            ))
-        ))
-    (= c (get gc_lists 0))
     (while c (do
         (= rest (- (& (get c) 0xfffffff8) n))
         (if (>= rest 0) (do
-            (if prev (set prev 1 (get c 1)) (set gc_lists 0 (get c 1)))
+            (if prev (set prev 1 (get c 1)) (= gc_free (get c 1)))
             (if rest (free_chunk (+ c n) rest))
             (return c)
             ))
@@ -126,7 +114,7 @@
     (return 0)
     )
 
-; Memory is allocated from the list of the same size, or by a first fit on the larger chunks. A new object is zero-filled.
+; Memory is allocated by a first fit on the free chunks. A new object is zero-filled.
 (fun allocate (size)
     (var n (align (+ size 4)))
     (var c 0)
@@ -2946,16 +2934,12 @@
     )
 
 (fun gc_sweep ()
-    (var i 0)
     (var c heap_root)
     (var h 0)
     (var n 0)
     (var run 0)
     (var run_size 0)
-    (while (<= i 32) (do
-        (set gc_lists i 0)
-        (+= i 1)
-        ))
+    (= gc_free 0)
     (while (u< c heap_end) (do
         (= h (get c))
         (= n (& h 0xfffffff8))
