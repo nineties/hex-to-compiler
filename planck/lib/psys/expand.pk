@@ -1,8 +1,8 @@
 # psys/expand: turns a module of psys into the Module of vasm
 # Copyright (C) 2026 nineties
 #
-# psys_expand(m) is the Module{[...]} of vasm for the module m = PModule{[...]} that psys{| ... |} reads.
-# psys_expand_all(m) is Tuple{module, errors} with the errors [VasmErr{kind, Pos{d}, msg}, ...], the first of each function.
+# psys_expand.expand(m) is the Module{[...]} of vasm for the module m = PModule{[...]} that psys{| ... |} reads.
+# psys_expand.expand_all(m) is Tuple{module, errors} with the errors [VasmErr{kind, Pos{d}, msg}, ...], the first of each function.
 # The expansion makes the form that vasm_check checks; it does not check ownership, borrows or regions.
 #
 # - A nested expression becomes one statement for each operation, with a temporary variable of the type of the operation.
@@ -19,6 +19,7 @@ use("string")
 use("vasm/check")
 use("psys/syntax")
 
+module psys_expand {
 px_fail(at, kind, msg) := perform PsysFail{at, kind, msg}
 
 # === State of the function being expanded ===
@@ -323,7 +324,7 @@ px_result(at, f, sig, ts, tsub) := {
     else t
 }
 
-px_has_tvar(t) := match t {
+px_has_tvar(t) = match t {
     TVar{_} -> true
   | Own{u} -> px_has_tvar(u)
   | Arr{u} -> px_has_tvar(u)
@@ -360,7 +361,7 @@ px_call(at, f, args) := {
     }
 }
 
-px_rhs(e, want) := if (px_simple(e)) {
+px_rhs(e, want) = if (px_simple(e)) {
     v := px_simple_ex(e, want)
     Tuple{Mov{arg(v, 0)}, arg(v, 1)}
 } else match e {
@@ -421,7 +422,7 @@ px_rhs(e, want) := if (px_simple(e)) {
 }
 
 # a and b (and is true) or a or b: b is computed only when a does not decide the value
-px_short(at, a, b, is_and) := {
+px_short(at, a, b, is_and) = {
     va := px_ex(a, Bool{})
     x := px_declare(at, none, Bool{}, false)
     px_emit(Assign{at, x, Mov{arg(va, 0)}})
@@ -529,7 +530,7 @@ px_for(at, i, lo, hi, body) := {
     table_set(px_env, i, old)
 }
 
-px_stmt(s) := match s {
+px_stmt(s) = match s {
     SLet{at, x, t, e} -> {
         r := px_rhs(e, t)
         ty := if (t != none) t else px_keep(at, arg(r, 1), none)
@@ -612,7 +613,7 @@ px_fn(d) := match d {
     }
 }
 
-psys_expand_all(m) := {
+export expand_all(m) := {
     items := arg(m, 0)
     px_sigs = table()
     px_structs = table()
@@ -636,15 +637,16 @@ psys_expand_all(m) := {
     Tuple{Module{reverse(out)}, reverse(errs)}
 }
 
-psys_expand(m) := {
-    r := psys_expand_all(m)
-    if (arg(r, 1) != []) panic(f"psys_expand: {arg(arg(r, 1)[0], 2)}")
+export expand(m) := {
+    r := expand_all(m)
+    if (arg(r, 1) != []) panic(f"psys_expand.expand: {arg(arg(r, 1)[0], 2)}")
     arg(r, 0)
 }
 
-# the errors of psys_expand_all with the positions in the file: [VasmErr{kind, Loc{file, line, column}, msg}, ...]
-psys_errors(file, errs) := {
+# the errors of expand_all with the positions in the file: [VasmErr{kind, Loc{file, line, column}, msg}, ...]
+export errors(file, errs) := {
     src := read_file(file)
     n := strlen(src)
     map((VasmErr{kind, Pos{d}, msg}) -> VasmErr{kind, loc_at(file, src, n - d), msg}, errs)
+}
 }
