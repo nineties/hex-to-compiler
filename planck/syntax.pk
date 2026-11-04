@@ -26,6 +26,8 @@ Apply{table_set, Tuple{peg_reserved, "return", true}}
 Apply{table_set, Tuple{peg_reserved, "break", true}}
 Apply{table_set, Tuple{peg_reserved, "continue", true}}
 Apply{table_set, Tuple{peg_reserved, "fun", true}}
+Apply{table_set, Tuple{peg_reserved, "module", true}}
+Apply{table_set, Tuple{peg_reserved, "export", true}}
 
 " identifier: [A-Za-z_][A-Za-z0-9_]* except the peg_reserved words and the f of f\"...\" "
 Def{peg_tok_ident, Lambda{Tuple{p}, Do{
@@ -771,26 +773,66 @@ Def{
 
 Def{record_index, Lambda{Tuple{name, field}, Apply{table_get, Tuple{record_slots, Tuple{name, field}, none}}}}
 
+" a module value is Module{Table{...}}: the table holds the names and the values of the fields of this value "
 Def{
-    _record_get,
+    _module,
     Lambda{
-        Tuple{t, name},
+        Tuple{names, vals},
         Do{
-            Def{i, Apply{table_get, Tuple{record_slots, Tuple{Apply{head, Tuple{t}}, name}, none}}},
-            If{
-                Apply{_eq, Tuple{i, none}},
+            Def{t, Apply{table, Tuple{}}},
+            While{
+                Apply{_eq, Tuple{Apply{head, Tuple{names}}, Quote{Cons}}},
                 Do{
-                    Apply{put, Tuple{"no field "}},
-                    Apply{put, Tuple{Apply{symname, Tuple{name}}}},
-                    Apply{put, Tuple{" in "}},
-                    Apply{println, Tuple{t}},
-                    Apply{exit, Tuple{1}}
-                },
-                none
+                    Apply{table_set, Tuple{t, Apply{arg, Tuple{names, 0}}, Apply{arg, Tuple{vals, 0}}}},
+                    Set{names, Apply{arg, Tuple{names, 1}}},
+                    Set{vals, Apply{arg, Tuple{vals, 1}}}
+                }
             },
-            Apply{arg, Tuple{t, i}}
+            Module{t}
         }
     }}
+
+Def{
+    _record_get,
+    Fusion{
+        Lambda{
+            Tuple{Module{Table{a}}, name},
+            Do{
+                Def{e, Apply{table_find, Tuple{a, name, Apply{hash, Tuple{name}}}}},
+                If{
+                    Apply{_eq, Tuple{e, none}},
+                    Do{
+                        Apply{put, Tuple{"no field "}},
+                        Apply{put, Tuple{Apply{symname, Tuple{name}}}},
+                        Apply{put, Tuple{" in "}},
+                        Apply{println, Tuple{Module{}}},
+                        Apply{exit, Tuple{1}}
+                    },
+                    none
+                },
+                Apply{array_get, Tuple{e, 1}}
+            }
+        },
+        Lambda{
+            Tuple{t, name},
+            Do{
+                Def{i, Apply{table_get, Tuple{record_slots, Tuple{Apply{head, Tuple{t}}, name}, none}}},
+                If{
+                    Apply{_eq, Tuple{i, none}},
+                    Do{
+                        Apply{put, Tuple{"no field "}},
+                        Apply{put, Tuple{Apply{symname, Tuple{name}}}},
+                        Apply{put, Tuple{" in "}},
+                        Apply{println, Tuple{t}},
+                        Apply{exit, Tuple{1}}
+                    },
+                    none
+                },
+                Apply{arg, Tuple{t, i}}
+            }
+        }}}
+
+Def{peg_module, none}
 
 Def{
     peg_record,
@@ -1510,6 +1552,23 @@ primary ::= if_expr
 
 idents ::= delimited(ident, ",")
 
+" module m { ... }: export marks the definitions that stand directly in the body, which are the fields (peg_module) "
+module_def ::= &(postfix ":=") f:ident nospace("(") ps:delimited(pattern, ",") ")" ":=" e:expr {
+                   `Do{Declare{!f}, Set{!f, Fusion{!f, !peg_lambda(ps, e)}}}
+               }
+             | x:ident ":=" e:expr { `Def{!x, !e} }
+             | module_expr
+
+module_stmt ::= 'export d:module_def { `Export{!d} }
+              | expr
+
+" the statements of a body, the last one first (a repetition holds at most 64 results) "
+module_stmts ::= xs:module_stmts s:module_stmt ";"? { Cons{s, xs} }
+               | s:module_stmt ";"? { Cons{s, Nil{}} }
+
+module_expr ::= 'module n:ident "{" es:module_stmts "}" { peg_module(n, es) }
+              | 'module n:ident "{" "}" { peg_module(n, Nil{}) }
+
 " f(p, ...) := e adds to f when f is already a variable of the place (Declare) "
 expr ::= syntax_decl
        | &(postfix ":=") f:ident nospace("(") ps:delimited(pattern, ",") ")" ":=" e:expr {
@@ -1524,6 +1583,41 @@ expr ::= syntax_decl
        | a:postfix nospace("[") i:expr "]" "=" !nospace("=") v:expr { `Apply{_index_set, Tuple{!a, !i, !v}} }
        | union
        | 'record n:ident "(" fs:idents ")" { peg_record(n, fs) }
+       | module_expr
 
 " a top-level expression ends with ; or a newline, or another expression follows "
 toplevel ::= e:expr (";" | !same | &expr) { e }
+
+" the name that a definition marked export defines: x for Def{x, e}, f for Do{Declare{f}, ...} "
+peg_export_name(d) := if (head(d) == 'Def) arg(d, 0) else arg(arg(d, 0), 0)
+
+" module n { ... }: rev is the list of the statements of the body, the last one first. The module is "
+" n := (() -> { statements; _module(names, values) })(). An M-expression holds at most 64 arguments, so "
+" the statements are gathered in blocks of 32 (a block does not make a scope). "
+peg_module(n, rev) := {
+    items := Nil{}
+    while (head(rev) == 'Cons) {
+        items = Cons{arg(rev, 0), items}
+        rev = arg(rev, 1)
+    }
+    blocks := Tuple{}
+    cur := Tuple{}
+    names := Nil{}
+    while (head(items) == 'Cons) {
+        s := arg(items, 0)
+        items = arg(items, 1)
+        if (typeof(s) == 'mexpr and head(s) == 'Export) {
+            d := arg(s, 0)
+            names = Cons{peg_export_name(d), names}
+            s = d
+        }
+        cur = push(cur, s)
+        if (arity(cur) == 32) {
+            blocks = push(blocks, mexpr('Do, cur))
+            cur = Tuple{}
+        }
+    }
+    if (arity(cur) > 0) blocks = push(blocks, mexpr('Do, cur))
+    blocks = push(blocks, `Apply{_module, Tuple{Quote{!names}, !names}})
+    `Def{!n, Apply{Lambda{Tuple{}, !mexpr('Do, blocks)}, Tuple{}}}
+}
