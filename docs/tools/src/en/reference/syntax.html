@@ -91,6 +91,31 @@
 <!--ex e_call_before_fill-->
 <p>When the value of <code>f</code> is a function with a guard, as after <code>f = (n) if n &gt; 0 -&gt; 1</code>, a function added by <code>f(p, ...) = e</code> is not called when the guard is false, as <code>h | g</code> below.</p>
 
+<h2 id="module">module</h2>
+<p><code>module m { ... }</code> is an expression that gathers definitions under the name <code>m</code>. It can be read as sugar for <code>m := (() -&gt; { ... })()</code>, except that the value the body returns is a module value, which has the definitions marked <code>export</code> as its fields.</p>
+<!--text module_bitset-->
+<p>The value of this <code>bitset</code> has the fields <code>new</code> and <code>add</code>. The user calls them with <code>.</code>, as in <code>bitset.new(100)</code>.</p>
+<p>Every module value has the same head <code>Module</code>, and the names and values of its fields are held in a table for each module value. Different modules therefore have different fields. The rule of <code>.</code> is the same as that of reading a field of any other <a href="#record">record</a>, and reading a name that is not a field, such as <code>helper</code> that is not marked <code>export</code>, prints a message and stops the program.</p>
+<ul>
+<li>The scope in the body is that of the body of a function with no parameters. A variable in the body is a variable defined before it in the body, or a variable outside. To call a function defined later, declare it with <code>fun f</code> and add cases with <code>f(p, ...) = e</code>.</li>
+<li>The definitions in the body are variables of the body and do not become global variables. They do not hide a variable of the same name outside, and the outside cannot assign to them. <code>f(p, ...) := e</code> in the body defines a new <code>f</code> of the body even if there is an <code>f</code> outside.</li>
+<li>Like <code>m := e</code>, <code>m</code> is defined after the body has been evaluated. The body does not see <code>m</code>, and the functions in the body call each other by their names. Writing <code>module m { ... }</code> again with the same name makes a new variable, as <code>x := e</code> does.</li>
+<li>The body is read as a whole. Replacing <code>parse</code> inside the body does not affect the rest of that body. To replace the grammar, write it outside the <code>module</code>.</li>
+<li><code>module</code> is one top-level expression. The table of global variables is not divided by file, and a file is read one expression at a time as before.</li>
+</ul>
+
+<h3>export</h3>
+<p><code>export</code> can be written only before <code>f(p, ...) := e</code>, <code>x := e</code> and <code>module n { ... }</code> that stand directly in the body of a module. Writing it anywhere else, such as inside a function, in a branch of <code>if</code>, inside a block or at the top level, is a syntax error. The names of the definitions marked <code>export</code> become the fields of the module value, and a definition without it is not visible from outside.</p>
+<p>The value of the field of <code>export x := e</code> is the value of <code>x</code> at the time the body returns. If a function of the body assigns to <code>x</code> later, the field does not change. To show the current value, <code>export</code> a function that reads <code>x</code>. In the following <code>counter</code>, <code>counter.start</code> stays <code>0</code> and <code>counter.current()</code> returns the current value.</p>
+<!--text module_export_value-->
+
+<h3>Nested modules</h3>
+<p>A module can be written inside the body of a module. The inner <code>module n { ... }</code> defines a variable <code>n</code> of the body and is not visible from outside. To show the inner one outside, write <code>export module n { ... }</code>. Then <code>n</code> is a field of the outer module, and its value is a module value too. The body of the inner module sees the variables defined before it in the body of the outer one.</p>
+<!--text module_nested-->
+
+<h3>Adding definitions from outside a module</h3>
+<p>A case cannot be added to a function from outside a module by writing <code>m.f(p, ...) = e</code>. To let the outside add cases, <code>export</code> a function that adds them inside the module.</p>
+
 <h2 id="names">Names the sugar calls</h2>
 <p>The functions a piece of sugar expands to have a name starting with <code>_</code>, and there is no function of the same name without <code>_</code>. A variable named <code>add</code> or <code>index_get</code> in a program therefore does not change the meaning of <code>a + b</code> or <code>a[i]</code>.</p>
 <table>
