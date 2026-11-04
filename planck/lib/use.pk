@@ -1,31 +1,11 @@
-# use(name) loads planck/lib/<name>.pk once and returns the file as a value.
+# use(name) loads planck/lib/<name>.pk once.
 # Copyright (C) 2026 nineties
-#
-# The value of a file has the global variables the file defines as its fields, with the values they have when the file has been loaded.
-# For the file psys/expand, p := use("psys/expand") gives p, and p.expand is the value of expand that the file defines.
-# use gives the same value every time it is called for the same name.
 #
 # When planck/lib/<name>.pkm exists and matches the library and the grammar (see "Preprocessed libraries" in the library reference of docs),
 # the M-expressions in it are evaluated one by one instead of parsing the library.
 # tools/preprocess.pk makes the .pkm files.
 
 used_libs := table()
-file_values := table()
-
-# The value of the file path: a value named by the path, with a field for each global variable the file defines.
-# The fields are in a table, so a file can define any number of variables (see record_tables in planck/syntax.pk).
-file_value(name, path) := {
-    g := _file_globals(path)
-    fields := table()
-    i := 0
-    while (i < array_len(g)) {
-        table_set(fields, g[i], g[i + 1])
-        i = i + 2
-    }
-    head := intern(path)
-    table_set(record_tables, head, true)
-    mexpr(head, Tuple{fields})
-}
 
 # The grammar a library is parsed with is the rules declared so far.
 # grammar_state() is a text which is the same exactly when the same libraries have declared
@@ -68,7 +48,7 @@ read_preprocessed(path, state, text) := {
     reverse_onto(arg(acc, 1), [])
 }
 
-use(name) := if (table_get(used_libs, name, false)) table_get(file_values, name, none) else {
+use(name) := if (table_get(used_libs, name, false)) none else {
     table_set(used_libs, name, true)
     path := f"planck/lib/{name}.pk"
     text := read_file(path)
@@ -85,7 +65,5 @@ use(name) := if (table_get(used_libs, name, false)) table_get(file_values, name,
         }
     }
     if (peg_version != declared) grammar_chain = f"{grammar_chain}:{name}={hash(text)}"
-    value := file_value(name, path)
-    table_set(file_values, name, value)
-    value
+    none
 }
