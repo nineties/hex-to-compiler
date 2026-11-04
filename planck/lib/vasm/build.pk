@@ -6,7 +6,7 @@
 # The module is compiled as a unit (vasm/unit.pk) and the units are joined before the stages of the target. A program of several modules is
 # vasm_build_units(units, path), where the units are made by vasm_unit and may have been saved and read again.
 # vasm_build_for(name, m, path) builds for the target with the name name (backend/target.pk) instead of the default one.
-# The stages up to vasm_lower (vasm/ir.pk) and the runtime (vasm/rt.pk) know the machine only by the width of its word. What follows is the target's: the rewriting of the functions for its
+# The stages up to vasm_ir.lower (vasm/ir.pk) and the runtime (vasm/rt.pk) know the machine only by the width of its word. What follows is the target's: the rewriting of the functions for its
 # registers, the selection of instructions, the allocation of registers and the encoding (backend/x64.pk, with backend/sched.pk and
 # backend/regalloc.pk) and the joining of the objects into the file (backend/link.pk, backend/elf.pk).
 
@@ -29,22 +29,22 @@ vb_calls(code) := concat_map(i -> match i {
   | _ -> []
 }, code)
 
-# the names of the functions of vasm_rt_module
-vb_helper_names := map(d -> symname(arg(d, 1)), arg(vasm_rt_module, 0))
+# the names of the functions of rt.runtime
+vb_helper_names := map(d -> symname(arg(d, 1)), arg(rt.runtime, 0))
 
 # the object for the target t of the merged units: the code of the functions, the runtime and the helpers they call
 vasm_object_for(t, Merged{lowered, strs, syms, ret}) := {
-    w := target.word(t)
-    datas := append(map(vasm_string_data, strs), map(vasm_symbol_data, map(intern, syms)))
-    called := concat_map(f -> vb_calls(ir.code(f)), lowered)
-    fns := append(lowered, append([rt_alloc_fn(w), rt_free_fn(w), rt_start_fn(w, ret)], append(rt_ports(w, called), rt_val_fns(w, called))))
+    w := target_word(t)
+    datas := append(map(vasm_ir.string_data, strs), map(vasm_ir.symbol_data, map(intern, syms)))
+    called := concat_map(f -> vb_calls(ir_code(f)), lowered)
+    fns := append(lowered, append([rt.alloc_fn(w), rt.free_fn(w), rt.start_fn(w, ret)], append(rt.ports(w, called), rt.val_fns(w, called))))
     done := table()
     out := []
     queue := fns
     while (queue != []) {
         f := queue[0]
         queue = drop(queue, 1)
-        g := target.lower(t, f, vasm_rt_helpers)
+        g := target_lower(t, f, rt.helpers)
         out = g :: out
         table_set(done, ir.name(f), true)
         # the helpers that the code calls and that are not made yet
@@ -52,10 +52,10 @@ vasm_object_for(t, Merged{lowered, strs, syms, ret}) := {
         need = reverse(foldl((acc, n) -> if (member(n, acc)) acc else n :: acc, [], need))
         if (need != []) {
             each(n -> table_set(done, n, true), need)
-            queue = append(queue, vasm_lower_only(vasm_rt_module, map(intern, need), w))
+            queue = append(queue, vasm_ir.lower_only(rt.runtime, map(intern, need), w))
         }
     }
-    target.compile(t, "vasm", reverse(out), append(rt_data(w), datas))
+    target_compile(t, "vasm", reverse(out), append(rt.data(w), datas))
 }
 
 # vasm_units_executable_for(t, units) is the file for the target t as a buffer of bytes; the units must be made for the word of t

@@ -9,7 +9,7 @@
 # (brk), each with a header of 8 bytes that holds the size, and a freed block of up to 4080 bytes goes to the list of its size and is used again.
 # A larger block is not used again.
 # The 64-bit operations that 32-bit registers cannot do with a few instructions (a shift by a count in a register, division and remainder)
-# are functions of vasm that the lower of a target (backend/target.pk) may call; vasm_rt_helpers names them.
+# are functions of vasm that the lower of a target (backend/target.pk) may call; rt.helpers names them and rt.runtime holds them.
 
 use("base")
 use("list")
@@ -19,878 +19,881 @@ use("bytes")
 use("backend/ir")
 use("vasm/check")
 
-# the width of a load or a store of an address, and the shift that multiplies by the word
-rt_pw(w) := if (w == 8) 'w64 else 'w32
-rt_shift(w) := if (w == 8) 3 else 2
+module rt {
+    # the width of a load or a store of an address, and the shift that multiplies by the word
+    rt_pw(w) := if (w == 8) 'w64 else 'w32
+    rt_shift(w) := if (w == 8) 3 else 2
 
-# the number of words that the arguments of a function take for a 64-bit value
-rt_w64words(w) := 8 / w
+    # the number of words that the arguments of a function take for a 64-bit value
+    rt_w64words(w) := 8 / w
 
-rt_heap_data(w) := IRData{"__heap", ".bss", w, {
-    b := bytes.new()
-    bytes.zeros(b, 2 * w)
-    b
-}, true}
-rt_freelists_data(w) := IRData{"__freelists", ".bss", w, {
-    b := bytes.new()
-    bytes.zeros(b, 256 * w)
-    b
-}, true}
+    rt_heap_data(w) := IRData{"__heap", ".bss", w, {
+        b := bytes.new()
+        bytes.zeros(b, 2 * w)
+        b
+    }, true}
+    rt_freelists_data(w) := IRData{"__freelists", ".bss", w, {
+        b := bytes.new()
+        bytes.zeros(b, 256 * w)
+        b
+    }, true}
 
-rt_args_data(w) := IRData{"__args", ".bss", w, {
-    b := bytes.new()
-    bytes.zeros(b, w)
-    b
-}, true}
+    rt_args_data(w) := IRData{"__args", ".bss", w, {
+        b := bytes.new()
+        bytes.zeros(b, w)
+        b
+    }, true}
 
-# A value of val is the address of a block: the number of its holders (negative for a block that is never released), the kind, and then
-#   integer: the 64-bit value
-#   string, symbol: the number of bytes, 0 and the bytes, which is the layout of an array of u8
-#   constructed value: the head (a symbol), the number of arguments n and n values
-#   array: the number of elements n, 0 and n values
-#   function: the address of the code, the number of values kept in it n, the number of the other arguments and n values
-# The holders and the kind are 4 bytes each, a count is 4 bytes, and the head, the address of the code and the values are a word each. The offsets of the fields
-# are rt_rc, rt_kind, rt_int_at, rt_arr_n, rt_arr_elems, rt_con_head, rt_con_n(w), rt_con_elems(w), rt_fun_code, rt_fun_n(w), rt_fun_rest(w) and rt_fun_elems(w).
-rt_kind_int := 2
-rt_kind_str := 3
-rt_kind_sym := 4
-rt_kind_con := 5
-rt_kind_arr := 6
-rt_kind_fun := 7
+    # A value of val is the address of a block: the number of its holders (negative for a block that is never released), the kind, and then
+    #   integer: the 64-bit value
+    #   string, symbol: the number of bytes, 0 and the bytes, which is the layout of an array of u8
+    #   constructed value: the head (a symbol), the number of arguments n and n values
+    #   array: the number of elements n, 0 and n values
+    #   function: the address of the code, the number of values kept in it n, the number of the other arguments and n values
+    # The holders and the kind are 4 bytes each, a count is 4 bytes, and the head, the address of the code and the values are a word each. The offsets of the fields
+    # are rc, kind, rt_int_at, rt_arr_n, rt_arr_elems, con_head, con_n(w), con_elems(w), fun_code, fun_n(w), fun_rest(w) and fun_elems(w) of the module,
+    # and the kinds are rt_kind_int, kind_str, kind_sym, kind_con, rt_kind_arr and kind_fun. The module shows the ones that vasm/ir.pk uses.
+    rt_kind_int := 2
+    export kind_str := 3
+    export kind_sym := 4
+    export kind_con := 5
+    rt_kind_arr := 6
+    export kind_fun := 7
 
-rt_rc := 0
-rt_kind := 4
-rt_int_at := 8
-rt_arr_n := 8
-rt_arr_elems := 16
-rt_con_head := 8
-rt_con_n(w) := 8 + w
-rt_con_elems(w) := 8 + 2 * w
-rt_fun_code := 8
-rt_fun_n(w) := 8 + w
-rt_fun_rest(w) := 12 + w
-rt_fun_elems(w) := 16 + w
+    export rc := 0
+    export kind := 4
+    rt_int_at := 8
+    rt_arr_n := 8
+    rt_arr_elems := 16
+    export con_head := 8
+    export con_n(w) := 8 + w
+    export con_elems(w) := 8 + 2 * w
+    export fun_code := 8
+    export fun_n(w) := 8 + w
+    export fun_rest(w) := 12 + w
+    export fun_elems(w) := 16 + w
 
-# the bytes of the block of the symbol with the name s
-rt_symbol_bytes(s) := {
-    b := bytes.new()
-    bytes.u32(b, -1)
-    bytes.u32(b, rt_kind_sym)
-    bytes.u32(b, strlen(s))
-    bytes.u32(b, 0)
-    bytes.str(b, s)
-    b
-}
-
-# the symbols that the functions on values give
-rt_names := [Tuple{"__sym_true", "true"}, Tuple{"__sym_false", "false"}, Tuple{"__sym_int", "int"}, Tuple{"__sym_string", "string"},
-    Tuple{"__sym_symbol", "symbol"}, Tuple{"__sym_mexpr", "mexpr"}, Tuple{"__sym_array", "array"}, Tuple{"__sym_function", "function"}]
-
-rt_data(w) := append([rt_heap_data(w), rt_freelists_data(w), rt_args_data(w)], map((Tuple{n, s}) -> IRData{n, ".rodata", 4, rt_symbol_bytes(s), false}, rt_names))
-
-# rt_fn(name, w, ptrs, wides, specs) is a function from a list of instructions whose registers and labels are named by symbols.
-# The registers named in ptrs have the width of an address, those in wides are 64-bit, and the others are 32-bit.
-rt_fn(name, w, ptrs, wides, specs) := {
-    f := ir.fn(name)
-    regs := table()
-    labs := table()
-    reg := s -> {
-        r := table_get(regs, s, -1)
-        if (r < 0) {
-            r = ir.vreg(f, if (member(s, wides)) 64 else if (member(s, ptrs)) w * 8 else 32)
-            table_set(regs, s, r)
-        }
-        r
+    # the bytes of the block of the symbol with the name s
+    export symbol_bytes(s) := {
+        b := bytes.new()
+        bytes.u32(b, -1)
+        bytes.u32(b, kind_sym)
+        bytes.u32(b, strlen(s))
+        bytes.u32(b, 0)
+        bytes.str(b, s)
+        b
     }
-    lab := s -> {
-        l := table_get(labs, s, -1)
-        if (l < 0) {
-            l = ir.label(f)
-            table_set(labs, s, l)
+
+    # the symbols that the functions on values give
+    rt_names := [Tuple{"__sym_true", "true"}, Tuple{"__sym_false", "false"}, Tuple{"__sym_int", "int"}, Tuple{"__sym_string", "string"},
+        Tuple{"__sym_symbol", "symbol"}, Tuple{"__sym_mexpr", "mexpr"}, Tuple{"__sym_array", "array"}, Tuple{"__sym_function", "function"}]
+
+    export data(w) := append([rt_heap_data(w), rt_freelists_data(w), rt_args_data(w)], map((Tuple{n, s}) -> IRData{n, ".rodata", 4, symbol_bytes(s), false}, rt_names))
+
+    # rt_fn(name, w, ptrs, wides, specs) is a function from a list of instructions whose registers and labels are named by symbols.
+    # The registers named in ptrs have the width of an address, those in wides are 64-bit, and the others are 32-bit.
+    rt_fn(name, w, ptrs, wides, specs) := {
+        f := ir_fn(name)
+        regs := table()
+        labs := table()
+        reg := s -> {
+            r := table_get(regs, s, -1)
+            if (r < 0) {
+                r = ir_vreg(f, if (member(s, wides)) 64 else if (member(s, ptrs)) w * 8 else 32)
+                table_set(regs, s, r)
+            }
+            r
         }
-        l
+        lab := s -> {
+            l := table_get(labs, s, -1)
+            if (l < 0) {
+                l = ir_label(f)
+                table_set(labs, s, l)
+            }
+            l
+        }
+        each(i -> ir_emit(f, ir_map_regs(reg, I{ir_op(i), map(o -> match o {
+            L{s} -> L{lab(s)}
+          | _ -> o
+        }, ir_ops(i))})), specs)
+        f
     }
-    each(i -> ir.emit(f, ir.map_regs(reg, I{ir.op(i), map(o -> match o {
-        L{s} -> L{lab(s)}
-      | _ -> o
-    }, ir.ops(i))})), specs)
-    f
-}
 
-# rt_zx(w, d, s) is Tuple{instructions, register}: the value of the 32-bit register s in a register of the width of an address, which is d
-# (for a word of 4 bytes it is s itself and there is no instruction); rt_tr is the low 32 bits of the register s of the width of an address
-rt_zx(w, d, s) := if (w == 4) Tuple{[], s} else Tuple{[I{'zext64, [D{d}, U{s}]}], d}
-rt_tr(w, d, s) := if (w == 4) Tuple{[], s} else Tuple{[I{'trunc, [D{d}, U{s}]}], d}
+    # rt_zx(w, d, s) is Tuple{instructions, register}: the value of the 32-bit register s in a register of the width of an address, which is d
+    # (for a word of 4 bytes it is s itself and there is no instruction); rt_tr is the low 32 bits of the register s of the width of an address
+    rt_zx(w, d, s) := if (w == 4) Tuple{[], s} else Tuple{[I{'zext64, [D{d}, U{s}]}], d}
+    rt_tr(w, d, s) := if (w == 4) Tuple{[], s} else Tuple{[I{'trunc, [D{d}, U{s}]}], d}
 
-rt_alloc_fn(w) := {
-    pw := rt_pw(w)
-    cz := rt_zx(w, 'cp, 'c4)
-    tz := rt_zx(w, 'tp, 't)
-    rt_fn("__alloc", w, ['fl, 'slot, 'head, 'nxt, 'hp, 'cur, 'z, 'b, 'a, 'en, 'nc, 'want, 'r, 'res, 'cp, 'tp], [], concat([[
-        I{'getarg, [D{'n}, K{0}]},
-        I{'add, [D{'t}, U{'n}, K{23}]},
-        I{'band, [D{'t}, U{'t}, K{-16}]},
-        I{'shr, [D{'c}, U{'t}, K{4}]},
-        I{'br, [Cc{'geu}, U{'c}, K{256}, L{'bump}, L{'list}]},
-        I{'label, [L{'list}]},
-        I{'la, [D{'fl}, S{"__freelists", 0}]},
-        I{'shl, [D{'c4}, U{'c}, K{rt_shift(w)}]}], cz[0], [
-        I{'add, [D{'slot}, U{'fl}, U{cz[1]}]},
-        I{'ld, [W{pw}, D{'head}, M{U{'slot}, 0}]},
-        I{'br, [Cc{'eq}, U{'head}, K{0}, L{'bump}, L{'pop}]},
-        I{'label, [L{'pop}]},
-        I{'ld, [W{pw}, D{'nxt}, M{U{'head}, 0}]},
-        I{'st, [W{pw}, M{U{'slot}, 0}, U{'nxt}]},
-        I{'ret, [Us{['head]}]},
-        I{'label, [L{'bump}]},
-        I{'la, [D{'hp}, S{"__heap", 0}]},
-        I{'ld, [W{pw}, D{'cur}, M{U{'hp}, 0}]},
-        I{'br, [Cc{'ne}, U{'cur}, K{0}, L{'have}, L{'init}]},
-        I{'label, [L{'init}]},
-        I{'li, [D{'z}, K{0}]},
-        I{'os, [N{'grow}, Us{['z]}, D{'b}]},
-        I{'add, [D{'a}, U{'b}, K{15}]},
-        I{'band, [D{'cur}, U{'a}, K{-16}]},
-        I{'st, [W{pw}, M{U{'hp}, w}, U{'b}]},
-        I{'jmp, [L{'have}]},
-        I{'label, [L{'have}]},
-        I{'ld, [W{pw}, D{'en}, M{U{'hp}, w}]}], tz[0], [
-        I{'add, [D{'nc}, U{'cur}, U{tz[1]}]},
-        I{'br, [Cc{'leu}, U{'nc}, U{'en}, L{'ok}, L{'grow}]},
-        I{'label, [L{'grow}]},
-        I{'add, [D{'want}, U{'nc}, K{65536}]},
-        I{'os, [N{'grow}, Us{['want]}, D{'r}]},
-        I{'br, [Cc{'ne}, U{'r}, U{'want}, L{'bad}, L{'set}]},
-        I{'label, [L{'bad}]},
-        I{'trap, []},
-        I{'label, [L{'set}]},
-        I{'st, [W{pw}, M{U{'hp}, w}, U{'want}]},
-        I{'jmp, [L{'ok}]},
-        I{'label, [L{'ok}]},
-        I{'st, [W{pw}, M{U{'hp}, 0}, U{'nc}]},
-        I{'st, [W{'w32}, M{U{'cur}, 0}, U{'t}]},
-        I{'st, [W{'w32}, M{U{'cur}, 4}, K{0}]},
-        I{'add, [D{'res}, U{'cur}, K{8}]},
-        I{'ret, [Us{['res]}]}]]))
-}
+    export alloc_fn(w) := {
+        pw := rt_pw(w)
+        cz := rt_zx(w, 'cp, 'c4)
+        tz := rt_zx(w, 'tp, 't)
+        rt_fn("__alloc", w, ['fl, 'slot, 'head, 'nxt, 'hp, 'cur, 'z, 'b, 'a, 'en, 'nc, 'want, 'r, 'res, 'cp, 'tp], [], concat([[
+            I{'getarg, [D{'n}, K{0}]},
+            I{'add, [D{'t}, U{'n}, K{23}]},
+            I{'band, [D{'t}, U{'t}, K{-16}]},
+            I{'shr, [D{'c}, U{'t}, K{4}]},
+            I{'br, [Cc{'geu}, U{'c}, K{256}, L{'bump}, L{'list}]},
+            I{'label, [L{'list}]},
+            I{'la, [D{'fl}, S{"__freelists", 0}]},
+            I{'shl, [D{'c4}, U{'c}, K{rt_shift(w)}]}], cz[0], [
+            I{'add, [D{'slot}, U{'fl}, U{cz[1]}]},
+            I{'ld, [W{pw}, D{'head}, M{U{'slot}, 0}]},
+            I{'br, [Cc{'eq}, U{'head}, K{0}, L{'bump}, L{'pop}]},
+            I{'label, [L{'pop}]},
+            I{'ld, [W{pw}, D{'nxt}, M{U{'head}, 0}]},
+            I{'st, [W{pw}, M{U{'slot}, 0}, U{'nxt}]},
+            I{'ret, [Us{['head]}]},
+            I{'label, [L{'bump}]},
+            I{'la, [D{'hp}, S{"__heap", 0}]},
+            I{'ld, [W{pw}, D{'cur}, M{U{'hp}, 0}]},
+            I{'br, [Cc{'ne}, U{'cur}, K{0}, L{'have}, L{'init}]},
+            I{'label, [L{'init}]},
+            I{'li, [D{'z}, K{0}]},
+            I{'os, [N{'grow}, Us{['z]}, D{'b}]},
+            I{'add, [D{'a}, U{'b}, K{15}]},
+            I{'band, [D{'cur}, U{'a}, K{-16}]},
+            I{'st, [W{pw}, M{U{'hp}, w}, U{'b}]},
+            I{'jmp, [L{'have}]},
+            I{'label, [L{'have}]},
+            I{'ld, [W{pw}, D{'en}, M{U{'hp}, w}]}], tz[0], [
+            I{'add, [D{'nc}, U{'cur}, U{tz[1]}]},
+            I{'br, [Cc{'leu}, U{'nc}, U{'en}, L{'ok}, L{'grow}]},
+            I{'label, [L{'grow}]},
+            I{'add, [D{'want}, U{'nc}, K{65536}]},
+            I{'os, [N{'grow}, Us{['want]}, D{'r}]},
+            I{'br, [Cc{'ne}, U{'r}, U{'want}, L{'bad}, L{'set}]},
+            I{'label, [L{'bad}]},
+            I{'trap, []},
+            I{'label, [L{'set}]},
+            I{'st, [W{pw}, M{U{'hp}, w}, U{'want}]},
+            I{'jmp, [L{'ok}]},
+            I{'label, [L{'ok}]},
+            I{'st, [W{pw}, M{U{'hp}, 0}, U{'nc}]},
+            I{'st, [W{'w32}, M{U{'cur}, 0}, U{'t}]},
+            I{'st, [W{'w32}, M{U{'cur}, 4}, K{0}]},
+            I{'add, [D{'res}, U{'cur}, K{8}]},
+            I{'ret, [Us{['res]}]}]]))
+    }
 
-rt_free_fn(w) := {
-    pw := rt_pw(w)
-    cz := rt_zx(w, 'cp, 'c4)
-    rt_fn("__free", w, ['p, 'h, 'fl, 'slot, 'head, 'cp], [], concat([[
+    export free_fn(w) := {
+        pw := rt_pw(w)
+        cz := rt_zx(w, 'cp, 'c4)
+        rt_fn("__free", w, ['p, 'h, 'fl, 'slot, 'head, 'cp], [], concat([[
+            I{'getarg, [D{'p}, K{0}]},
+            I{'br, [Cc{'eq}, U{'p}, K{0}, L{'out}, L{'go}]},
+            I{'label, [L{'go}]},
+            I{'sub, [D{'h}, U{'p}, K{8}]},
+            I{'ld, [W{'w32}, D{'t}, M{U{'h}, 0}]},
+            I{'shr, [D{'c}, U{'t}, K{4}]},
+            I{'br, [Cc{'geu}, U{'c}, K{256}, L{'out}, L{'put}]},
+            I{'label, [L{'put}]},
+            I{'la, [D{'fl}, S{"__freelists", 0}]},
+            I{'shl, [D{'c4}, U{'c}, K{rt_shift(w)}]}], cz[0], [
+            I{'add, [D{'slot}, U{'fl}, U{cz[1]}]},
+            I{'ld, [W{pw}, D{'head}, M{U{'slot}, 0}]},
+            I{'st, [W{pw}, M{U{'p}, 0}, U{'head}]},
+            I{'st, [W{pw}, M{U{'slot}, 0}, U{'p}]},
+            I{'label, [L{'out}]},
+            I{'ret, [Us{[]}]}]]))
+    }
+
+    # __argv(i) is the address of a new array (the layout of vasm/ir.pk) that holds the bytes of the i-th argument of the program; it is not freed.
+    # An i that is not less than the number of arguments is trap.
+    rt_argv_fn(w) := {
+        pw := rt_pw(w)
+        iz := rt_zx(w, 'ip, 'i)
+        i4z := rt_zx(w, 'i4p, 'i4)
+        nt := rt_tr(w, 'n32, 'n)
+        rt_fn("__argv", w, ['ap, 'base, 'argc, 'ip, 'i4p, 't, 'p, 'n, 'q, 'a, 'k, 's, 'd], [], concat([[
+            I{'getarg, [D{'i}, K{0}]},
+            I{'la, [D{'ap}, S{"__args", 0}]},
+            I{'ld, [W{pw}, D{'base}, M{U{'ap}, 0}]},
+            I{'ld, [W{pw}, D{'argc}, M{U{'base}, 0}]}], iz[0], [
+            I{'br, [Cc{'ltu}, U{iz[1]}, U{'argc}, L{'ok}, L{'bad}]},
+            I{'label, [L{'bad}]},
+            I{'trap, []},
+            I{'label, [L{'ok}]},
+            I{'shl, [D{'i4}, U{'i}, K{rt_shift(w)}]}], i4z[0], [
+            I{'add, [D{'t}, U{'base}, U{i4z[1]}]},
+            I{'ld, [W{pw}, D{'p}, M{U{'t}, w}]},
+            I{'li, [D{'n}, K{0}]},
+            I{'label, [L{'scan}]},
+            I{'add, [D{'q}, U{'p}, U{'n}]},
+            I{'ld, [W{'u8}, D{'c}, M{U{'q}, 0}]},
+            I{'br, [Cc{'eq}, U{'c}, K{0}, L{'made}, L{'step}]},
+            I{'label, [L{'step}]},
+            I{'add, [D{'n}, U{'n}, K{1}]},
+            I{'jmp, [L{'scan}]},
+            I{'label, [L{'made}]}], nt[0], [
+            I{'add, [D{'sz}, U{nt[1]}, K{8}]},
+            I{'call, [S{"__alloc", 0}, Us{['sz]}, Ds{['a]}]},
+            I{'st, [W{'w32}, M{U{'a}, 0}, U{nt[1]}]},
+            I{'st, [W{'w32}, M{U{'a}, 4}, K{0}]},
+            I{'li, [D{'k}, K{0}]},
+            I{'label, [L{'copy}]},
+            I{'br, [Cc{'ltu}, U{'k}, U{'n}, L{'put}, L{'out}]},
+            I{'label, [L{'put}]},
+            I{'add, [D{'s}, U{'p}, U{'k}]},
+            I{'ld, [W{'u8}, D{'b}, M{U{'s}, 0}]},
+            I{'add, [D{'d}, U{'a}, U{'k}]},
+            I{'st, [W{'w8}, M{U{'d}, 8}, U{'b}]},
+            I{'add, [D{'k}, U{'k}, K{1}]},
+            I{'jmp, [L{'copy}]},
+            I{'label, [L{'out}]},
+            I{'ret, [Us{['a]}]}]]))
+    }
+
+    # __open(a) opens for reading the file whose name is the bytes of the array a (the layout of vasm/ir.pk) and gives the file, or a negative number,
+    # and __create(a) opens it for writing
+    rt_open_fn(w, name, service) := {
+        nz := rt_zx(w, 'np, 'n)
+        rt_fn(name, w, ['a, 'buf, 'np, 'k, 's, 'd, 'e], [], concat([[
+            I{'getarg, [D{'a}, K{0}]},
+            I{'ld, [W{'w32}, D{'n}, M{U{'a}, 0}]},
+            I{'add, [D{'sz}, U{'n}, K{1}]},
+            I{'call, [S{"__alloc", 0}, Us{['sz]}, Ds{['buf]}]}], nz[0], [
+            I{'li, [D{'k}, K{0}]},
+            I{'label, [L{'copy}]},
+            I{'br, [Cc{'ltu}, U{'k}, U{nz[1]}, L{'put}, L{'out}]},
+            I{'label, [L{'put}]},
+            I{'add, [D{'s}, U{'a}, U{'k}]},
+            I{'ld, [W{'u8}, D{'b}, M{U{'s}, 8}]},
+            I{'add, [D{'d}, U{'buf}, U{'k}]},
+            I{'st, [W{'w8}, M{U{'d}, 0}, U{'b}]},
+            I{'add, [D{'k}, U{'k}, K{1}]},
+            I{'jmp, [L{'copy}]},
+            I{'label, [L{'out}]},
+            I{'add, [D{'e}, U{'buf}, U{nz[1]}]},
+            I{'st, [W{'w8}, M{U{'e}, 0}, K{0}]},
+            I{'os, [N{service}, Us{['buf]}, D{'fd}]},
+            I{'call, [S{"__free", 0}, Us{['buf]}, Ds{[]}]},
+            I{'ret, [Us{['fd]}]}]]))
+    }
+
+    # the functions of the ports that the calls to the names called need
+    export ports(w, called) := concat([if (member("__argv", called)) [rt_argv_fn(w)] else [],
+        if (member("__open", called)) [rt_open_fn(w, "__open", 'open)] else [],
+        if (member("__create", called)) [rt_open_fn(w, "__create", 'create)] else []])
+
+    # === Values of val ===
+
+    # a jump to l unless the kind of the block p is the kind k
+    rt_need(p, k, t) := [I{'ld, [W{'w32}, D{'kind}, M{U{p}, kind}]}, I{'br, [Cc{'eq}, U{'kind}, K{k}, L{t}, L{'bad}]}, I{'label, [L{t}]}]
+    rt_bad := [I{'label, [L{'bad}]}, I{'trap, []}]
+
+    rt_val_inc_fn(w) := rt_fn("__val_inc", w, ['p], [], [
         I{'getarg, [D{'p}, K{0}]},
         I{'br, [Cc{'eq}, U{'p}, K{0}, L{'out}, L{'go}]},
         I{'label, [L{'go}]},
-        I{'sub, [D{'h}, U{'p}, K{8}]},
-        I{'ld, [W{'w32}, D{'t}, M{U{'h}, 0}]},
-        I{'shr, [D{'c}, U{'t}, K{4}]},
-        I{'br, [Cc{'geu}, U{'c}, K{256}, L{'out}, L{'put}]},
-        I{'label, [L{'put}]},
-        I{'la, [D{'fl}, S{"__freelists", 0}]},
-        I{'shl, [D{'c4}, U{'c}, K{rt_shift(w)}]}], cz[0], [
-        I{'add, [D{'slot}, U{'fl}, U{cz[1]}]},
-        I{'ld, [W{pw}, D{'head}, M{U{'slot}, 0}]},
-        I{'st, [W{pw}, M{U{'p}, 0}, U{'head}]},
-        I{'st, [W{pw}, M{U{'slot}, 0}, U{'p}]},
+        I{'ld, [W{'w32}, D{'c}, M{U{'p}, rc}]},
+        I{'br, [Cc{'lt}, U{'c}, K{0}, L{'out}, L{'add}]},
+        I{'label, [L{'add}]},
+        I{'add, [D{'c}, U{'c}, K{1}]},
+        I{'st, [W{'w32}, M{U{'p}, rc}, U{'c}]},
         I{'label, [L{'out}]},
-        I{'ret, [Us{[]}]}]]))
-}
+        I{'ret, [Us{[]}]}])
 
-# __argv(i) is the address of a new array (the layout of vasm/ir.pk) that holds the bytes of the i-th argument of the program; it is not freed.
-# An i that is not less than the number of arguments is trap.
-rt_argv_fn(w) := {
-    pw := rt_pw(w)
-    iz := rt_zx(w, 'ip, 'i)
-    i4z := rt_zx(w, 'i4p, 'i4)
-    nt := rt_tr(w, 'n32, 'n)
-    rt_fn("__argv", w, ['ap, 'base, 'argc, 'ip, 'i4p, 't, 'p, 'n, 'q, 'a, 'k, 's, 'd], [], concat([[
-        I{'getarg, [D{'i}, K{0}]},
-        I{'la, [D{'ap}, S{"__args", 0}]},
-        I{'ld, [W{pw}, D{'base}, M{U{'ap}, 0}]},
-        I{'ld, [W{pw}, D{'argc}, M{U{'base}, 0}]}], iz[0], [
-        I{'br, [Cc{'ltu}, U{iz[1]}, U{'argc}, L{'ok}, L{'bad}]},
-        I{'label, [L{'bad}]},
-        I{'trap, []},
-        I{'label, [L{'ok}]},
-        I{'shl, [D{'i4}, U{'i}, K{rt_shift(w)}]}], i4z[0], [
-        I{'add, [D{'t}, U{'base}, U{i4z[1]}]},
-        I{'ld, [W{pw}, D{'p}, M{U{'t}, w}]},
-        I{'li, [D{'n}, K{0}]},
-        I{'label, [L{'scan}]},
-        I{'add, [D{'q}, U{'p}, U{'n}]},
-        I{'ld, [W{'u8}, D{'c}, M{U{'q}, 0}]},
-        I{'br, [Cc{'eq}, U{'c}, K{0}, L{'made}, L{'step}]},
-        I{'label, [L{'step}]},
-        I{'add, [D{'n}, U{'n}, K{1}]},
-        I{'jmp, [L{'scan}]},
-        I{'label, [L{'made}]}], nt[0], [
-        I{'add, [D{'sz}, U{nt[1]}, K{8}]},
-        I{'call, [S{"__alloc", 0}, Us{['sz]}, Ds{['a]}]},
-        I{'st, [W{'w32}, M{U{'a}, 0}, U{nt[1]}]},
-        I{'st, [W{'w32}, M{U{'a}, 4}, K{0}]},
-        I{'li, [D{'k}, K{0}]},
-        I{'label, [L{'copy}]},
-        I{'br, [Cc{'ltu}, U{'k}, U{'n}, L{'put}, L{'out}]},
-        I{'label, [L{'put}]},
-        I{'add, [D{'s}, U{'p}, U{'k}]},
-        I{'ld, [W{'u8}, D{'b}, M{U{'s}, 0}]},
-        I{'add, [D{'d}, U{'a}, U{'k}]},
-        I{'st, [W{'w8}, M{U{'d}, 8}, U{'b}]},
-        I{'add, [D{'k}, U{'k}, K{1}]},
-        I{'jmp, [L{'copy}]},
-        I{'label, [L{'out}]},
-        I{'ret, [Us{['a]}]}]]))
-}
+    # The last of the values in a block is released without a new call, so a long list does not use the stack.
+    rt_val_drop_fn(w) := {
+        pw := rt_pw(w)
+        i4z := rt_zx(w, 'i4p, 'i4)
+        n4z := rt_zx(w, 'n4p, 'n4)
+        rt_fn("__val_drop", w, ['p, 'h, 'base, 'e, 'x, 'q, 'i4p, 'n4p], [], concat([[
+            I{'getarg, [D{'p}, K{0}]},
+            I{'label, [L{'top}]},
+            I{'br, [Cc{'eq}, U{'p}, K{0}, L{'out}, L{'a}]},
+            I{'label, [L{'a}]},
+            I{'ld, [W{'w32}, D{'c}, M{U{'p}, rc}]},
+            I{'br, [Cc{'lt}, U{'c}, K{0}, L{'out}, L{'b}]},
+            I{'label, [L{'b}]},
+            I{'sub, [D{'c}, U{'c}, K{1}]},
+            I{'br, [Cc{'gt}, U{'c}, K{0}, L{'keep}, L{'dead}]},
+            I{'label, [L{'keep}]},
+            I{'st, [W{'w32}, M{U{'p}, rc}, U{'c}]},
+            I{'ret, [Us{[]}]},
+            I{'label, [L{'dead}]},
+            I{'ld, [W{'w32}, D{'k}, M{U{'p}, kind}]},
+            I{'br, [Cc{'eq}, U{'k}, K{kind_con}, L{'con}, L{'k2}]},
+            I{'label, [L{'k2}]},
+            I{'br, [Cc{'eq}, U{'k}, K{rt_kind_arr}, L{'arr}, L{'k3}]},
+            I{'label, [L{'k3}]},
+            I{'br, [Cc{'eq}, U{'k}, K{kind_fun}, L{'func}, L{'leaf}]},
+            I{'label, [L{'con}]},
+            I{'ld, [W{pw}, D{'h}, M{U{'p}, con_head}]},
+            I{'call, [S{"__val_drop", 0}, Us{['h]}, Ds{[]}]},
+            I{'ld, [W{'w32}, D{'n}, M{U{'p}, con_n(w)}]},
+            I{'add, [D{'base}, U{'p}, K{con_elems(w)}]},
+            I{'jmp, [L{'kids}]},
+            I{'label, [L{'arr}]},
+            I{'ld, [W{'w32}, D{'n}, M{U{'p}, rt_arr_n}]},
+            I{'add, [D{'base}, U{'p}, K{rt_arr_elems}]},
+            I{'jmp, [L{'kids}]},
+            I{'label, [L{'func}]},
+            I{'ld, [W{'w32}, D{'n}, M{U{'p}, fun_n(w)}]},
+            I{'add, [D{'base}, U{'p}, K{fun_elems(w)}]},
+            I{'jmp, [L{'kids}]},
+            I{'label, [L{'kids}]},
+            I{'br, [Cc{'eq}, U{'n}, K{0}, L{'leaf}, L{'some}]},
+            I{'label, [L{'some}]},
+            I{'sub, [D{'n}, U{'n}, K{1}]},
+            I{'li, [D{'i}, K{0}]},
+            I{'label, [L{'loop}]},
+            I{'br, [Cc{'ltu}, U{'i}, U{'n}, L{'one}, L{'lastk}]},
+            I{'label, [L{'one}]},
+            I{'shl, [D{'i4}, U{'i}, K{rt_shift(w)}]}], i4z[0], [
+            I{'add, [D{'e}, U{'base}, U{i4z[1]}]},
+            I{'ld, [W{pw}, D{'x}, M{U{'e}, 0}]},
+            I{'call, [S{"__val_drop", 0}, Us{['x]}, Ds{[]}]},
+            I{'add, [D{'i}, U{'i}, K{1}]},
+            I{'jmp, [L{'loop}]},
+            I{'label, [L{'lastk}]},
+            I{'shl, [D{'n4}, U{'n}, K{rt_shift(w)}]}], n4z[0], [
+            I{'add, [D{'e}, U{'base}, U{n4z[1]}]},
+            I{'ld, [W{pw}, D{'q}, M{U{'e}, 0}]},
+            I{'call, [S{"__free", 0}, Us{['p]}, Ds{[]}]},
+            I{'mov, [D{'p}, U{'q}]},
+            I{'jmp, [L{'top}]},
+            I{'label, [L{'leaf}]},
+            I{'call, [S{"__free", 0}, Us{['p]}, Ds{[]}]},
+            I{'label, [L{'out}]},
+            I{'ret, [Us{[]}]}]]))
+    }
 
-# __open(a) opens for reading the file whose name is the bytes of the array a (the layout of vasm/ir.pk) and gives the file, or a negative number,
-# and __create(a) opens it for writing
-rt_open_fn(w, name, service) := {
-    nz := rt_zx(w, 'np, 'n)
-    rt_fn(name, w, ['a, 'buf, 'np, 'k, 's, 'd, 'e], [], concat([[
-        I{'getarg, [D{'a}, K{0}]},
-        I{'ld, [W{'w32}, D{'n}, M{U{'a}, 0}]},
-        I{'add, [D{'sz}, U{'n}, K{1}]},
-        I{'call, [S{"__alloc", 0}, Us{['sz]}, Ds{['buf]}]}], nz[0], [
-        I{'li, [D{'k}, K{0}]},
-        I{'label, [L{'copy}]},
-        I{'br, [Cc{'ltu}, U{'k}, U{nz[1]}, L{'put}, L{'out}]},
-        I{'label, [L{'put}]},
-        I{'add, [D{'s}, U{'a}, U{'k}]},
-        I{'ld, [W{'u8}, D{'b}, M{U{'s}, 8}]},
-        I{'add, [D{'d}, U{'buf}, U{'k}]},
-        I{'st, [W{'w8}, M{U{'d}, 0}, U{'b}]},
-        I{'add, [D{'k}, U{'k}, K{1}]},
-        I{'jmp, [L{'copy}]},
-        I{'label, [L{'out}]},
-        I{'add, [D{'e}, U{'buf}, U{nz[1]}]},
-        I{'st, [W{'w8}, M{U{'e}, 0}, K{0}]},
-        I{'os, [N{service}, Us{['buf]}, D{'fd}]},
-        I{'call, [S{"__free", 0}, Us{['buf]}, Ds{[]}]},
-        I{'ret, [Us{['fd]}]}]]))
-}
-
-# the functions of the ports that the calls to the names called need
-rt_ports(w, called) := concat([if (member("__argv", called)) [rt_argv_fn(w)] else [],
-    if (member("__open", called)) [rt_open_fn(w, "__open", 'open)] else [],
-    if (member("__create", called)) [rt_open_fn(w, "__create", 'create)] else []])
-
-# === Values of val ===
-
-# a jump to l unless the kind of the block p is the kind k
-rt_need(p, k, t) := [I{'ld, [W{'w32}, D{'kind}, M{U{p}, rt_kind}]}, I{'br, [Cc{'eq}, U{'kind}, K{k}, L{t}, L{'bad}]}, I{'label, [L{t}]}]
-rt_bad := [I{'label, [L{'bad}]}, I{'trap, []}]
-
-rt_val_inc_fn(w) := rt_fn("__val_inc", w, ['p], [], [
-    I{'getarg, [D{'p}, K{0}]},
-    I{'br, [Cc{'eq}, U{'p}, K{0}, L{'out}, L{'go}]},
-    I{'label, [L{'go}]},
-    I{'ld, [W{'w32}, D{'c}, M{U{'p}, rt_rc}]},
-    I{'br, [Cc{'lt}, U{'c}, K{0}, L{'out}, L{'add}]},
-    I{'label, [L{'add}]},
-    I{'add, [D{'c}, U{'c}, K{1}]},
-    I{'st, [W{'w32}, M{U{'p}, rt_rc}, U{'c}]},
-    I{'label, [L{'out}]},
-    I{'ret, [Us{[]}]}])
-
-# The last of the values in a block is released without a new call, so a long list does not use the stack.
-rt_val_drop_fn(w) := {
-    pw := rt_pw(w)
-    i4z := rt_zx(w, 'i4p, 'i4)
-    n4z := rt_zx(w, 'n4p, 'n4)
-    rt_fn("__val_drop", w, ['p, 'h, 'base, 'e, 'x, 'q, 'i4p, 'n4p], [], concat([[
-        I{'getarg, [D{'p}, K{0}]},
-        I{'label, [L{'top}]},
-        I{'br, [Cc{'eq}, U{'p}, K{0}, L{'out}, L{'a}]},
-        I{'label, [L{'a}]},
-        I{'ld, [W{'w32}, D{'c}, M{U{'p}, rt_rc}]},
-        I{'br, [Cc{'lt}, U{'c}, K{0}, L{'out}, L{'b}]},
-        I{'label, [L{'b}]},
-        I{'sub, [D{'c}, U{'c}, K{1}]},
-        I{'br, [Cc{'gt}, U{'c}, K{0}, L{'keep}, L{'dead}]},
-        I{'label, [L{'keep}]},
-        I{'st, [W{'w32}, M{U{'p}, rt_rc}, U{'c}]},
-        I{'ret, [Us{[]}]},
-        I{'label, [L{'dead}]},
-        I{'ld, [W{'w32}, D{'k}, M{U{'p}, rt_kind}]},
-        I{'br, [Cc{'eq}, U{'k}, K{rt_kind_con}, L{'con}, L{'k2}]},
-        I{'label, [L{'k2}]},
-        I{'br, [Cc{'eq}, U{'k}, K{rt_kind_arr}, L{'arr}, L{'k3}]},
-        I{'label, [L{'k3}]},
-        I{'br, [Cc{'eq}, U{'k}, K{rt_kind_fun}, L{'func}, L{'leaf}]},
-        I{'label, [L{'con}]},
-        I{'ld, [W{pw}, D{'h}, M{U{'p}, rt_con_head}]},
-        I{'call, [S{"__val_drop", 0}, Us{['h]}, Ds{[]}]},
-        I{'ld, [W{'w32}, D{'n}, M{U{'p}, rt_con_n(w)}]},
-        I{'add, [D{'base}, U{'p}, K{rt_con_elems(w)}]},
-        I{'jmp, [L{'kids}]},
-        I{'label, [L{'arr}]},
-        I{'ld, [W{'w32}, D{'n}, M{U{'p}, rt_arr_n}]},
-        I{'add, [D{'base}, U{'p}, K{rt_arr_elems}]},
-        I{'jmp, [L{'kids}]},
-        I{'label, [L{'func}]},
-        I{'ld, [W{'w32}, D{'n}, M{U{'p}, rt_fun_n(w)}]},
-        I{'add, [D{'base}, U{'p}, K{rt_fun_elems(w)}]},
-        I{'jmp, [L{'kids}]},
-        I{'label, [L{'kids}]},
-        I{'br, [Cc{'eq}, U{'n}, K{0}, L{'leaf}, L{'some}]},
-        I{'label, [L{'some}]},
-        I{'sub, [D{'n}, U{'n}, K{1}]},
-        I{'li, [D{'i}, K{0}]},
-        I{'label, [L{'loop}]},
-        I{'br, [Cc{'ltu}, U{'i}, U{'n}, L{'one}, L{'lastk}]},
-        I{'label, [L{'one}]},
-        I{'shl, [D{'i4}, U{'i}, K{rt_shift(w)}]}], i4z[0], [
-        I{'add, [D{'e}, U{'base}, U{i4z[1]}]},
-        I{'ld, [W{pw}, D{'x}, M{U{'e}, 0}]},
-        I{'call, [S{"__val_drop", 0}, Us{['x]}, Ds{[]}]},
-        I{'add, [D{'i}, U{'i}, K{1}]},
-        I{'jmp, [L{'loop}]},
-        I{'label, [L{'lastk}]},
-        I{'shl, [D{'n4}, U{'n}, K{rt_shift(w)}]}], n4z[0], [
-        I{'add, [D{'e}, U{'base}, U{n4z[1]}]},
-        I{'ld, [W{pw}, D{'q}, M{U{'e}, 0}]},
-        I{'call, [S{"__free", 0}, Us{['p]}, Ds{[]}]},
-        I{'mov, [D{'p}, U{'q}]},
-        I{'jmp, [L{'top}]},
-        I{'label, [L{'leaf}]},
-        I{'call, [S{"__free", 0}, Us{['p]}, Ds{[]}]},
-        I{'label, [L{'out}]},
-        I{'ret, [Us{[]}]}]]))
-}
-
-# __val_int(v) is a new integer
-rt_val_int_fn(w) := rt_fn("__val_int", w, ['p], ['v], [
-    I{'getarg, [D{'v}, K{0}]},
-    I{'li, [D{'sz}, K{rt_int_at + 8}]},
-    I{'call, [S{"__alloc", 0}, Us{['sz]}, Ds{['p]}]},
-    I{'st, [W{'w32}, M{U{'p}, rt_rc}, K{1}]},
-    I{'st, [W{'w32}, M{U{'p}, rt_kind}, K{rt_kind_int}]},
-    I{'st, [W{'w64}, M{U{'p}, rt_int_at}, U{'v}]},
-    I{'ret, [Us{['p]}]}])
-
-# __val_unint(v) gives the 64-bit value of the integer v
-rt_val_unint_fn(w) := rt_fn("__val_unint", w, ['p], ['v], append(append([I{'getarg, [D{'p}, K{0}]}], rt_need('p, rt_kind_int, 'ok)), append([
-    I{'ld, [W{'w64}, D{'v}, M{U{'p}, rt_int_at}]},
-    I{'ret, [Us{['v]}]}], rt_bad)))
-
-# __val_bool(b) is the symbol true or false
-rt_val_bool_fn(w) := rt_fn("__val_bool", w, ['r], [], [
-    I{'getarg, [D{'b}, K{0}]},
-    I{'br, [Cc{'ne}, U{'b}, K{0}, L{'t}, L{'f}]},
-    I{'label, [L{'t}]},
-    I{'la, [D{'r}, S{"__sym_true", 0}]},
-    I{'ret, [Us{['r]}]},
-    I{'label, [L{'f}]},
-    I{'la, [D{'r}, S{"__sym_false", 0}]},
-    I{'ret, [Us{['r]}]}])
-
-# __val_unbool(v) is 1 for the symbol true, 0 for the symbol false
-rt_val_unbool_fn(w) := rt_fn("__val_unbool", w, ['v, 't, 'f], [], append([
-    I{'getarg, [D{'v}, K{0}]},
-    I{'la, [D{'t}, S{"__sym_true", 0}]},
-    I{'call, [S{"__val_eq", 0}, Us{['v, 't]}, Ds{['r]}]},
-    I{'br, [Cc{'ne}, U{'r}, K{0}, L{'yes}, L{'no}]},
-    I{'label, [L{'yes}]},
-    I{'li, [D{'one}, K{1}]},
-    I{'ret, [Us{['one]}]},
-    I{'label, [L{'no}]},
-    I{'la, [D{'f}, S{"__sym_false", 0}]},
-    I{'call, [S{"__val_eq", 0}, Us{['v, 'f]}, Ds{['r]}]},
-    I{'br, [Cc{'ne}, U{'r}, K{0}, L{'zero}, L{'bad}]},
-    I{'label, [L{'zero}]},
-    I{'li, [D{'z}, K{0}]},
-    I{'ret, [Us{['z]}]}], rt_bad))
-
-# copy n bytes from the address s to the address d; the registers d, s and n have the width of an address
-rt_copy(d, s, n) := [
-    I{'li, [D{'k}, K{0}]},
-    I{'label, [L{'copy}]},
-    I{'br, [Cc{'ltu}, U{'k}, U{n}, L{'put}, L{'copied}]},
-    I{'label, [L{'put}]},
-    I{'add, [D{'sa}, U{s}, U{'k}]},
-    I{'ld, [W{'u8}, D{'byte}, M{U{'sa}, 0}]},
-    I{'add, [D{'da}, U{d}, U{'k}]},
-    I{'st, [W{'w8}, M{U{'da}, 0}, U{'byte}]},
-    I{'add, [D{'k}, U{'k}, K{1}]},
-    I{'jmp, [L{'copy}]},
-    I{'label, [L{'copied}]}]
-
-# __val_str(a, kind) is a new string or symbol with the bytes of the array a
-rt_val_str_fn(w) := {
-    nz := rt_zx(w, 'np, 'n)
-    rt_fn("__val_str", w, ['a, 'p, 'np, 'src, 'dst, 'k, 'sa, 'da], [], concat([[
-        I{'getarg, [D{'a}, K{0}]},
-        I{'getarg, [D{'kd}, K{1}]},
-        I{'ld, [W{'w32}, D{'n}, M{U{'a}, 0}]},
-        I{'add, [D{'sz}, U{'n}, K{16}]},
+    # __val_int(v) is a new integer
+    rt_val_int_fn(w) := rt_fn("__val_int", w, ['p], ['v], [
+        I{'getarg, [D{'v}, K{0}]},
+        I{'li, [D{'sz}, K{rt_int_at + 8}]},
         I{'call, [S{"__alloc", 0}, Us{['sz]}, Ds{['p]}]},
-        I{'st, [W{'w32}, M{U{'p}, rt_rc}, K{1}]},
-        I{'st, [W{'w32}, M{U{'p}, rt_kind}, U{'kd}]},
-        I{'st, [W{'w32}, M{U{'p}, 8}, U{'n}]},
-        I{'st, [W{'w32}, M{U{'p}, 12}, K{0}]}], nz[0], [
-        I{'add, [D{'src}, U{'a}, K{8}]},
-        I{'add, [D{'dst}, U{'p}, K{16}]}], rt_copy('dst, 'src, nz[1]), [
-        I{'ret, [Us{['p]}]}]]))
-}
+        I{'st, [W{'w32}, M{U{'p}, rc}, K{1}]},
+        I{'st, [W{'w32}, M{U{'p}, kind}, K{rt_kind_int}]},
+        I{'st, [W{'w64}, M{U{'p}, rt_int_at}, U{'v}]},
+        I{'ret, [Us{['p]}]}])
 
-# __val_bytes(v) is a new array of the bytes of the string v
-rt_val_bytes_fn(w) := {
-    nz := rt_zx(w, 'np, 'n)
-    rt_fn("__val_bytes", w, ['v, 'a, 'np, 'src, 'dst, 'k, 'sa, 'da], [], concat([[I{'getarg, [D{'v}, K{0}]}], rt_need('v, rt_kind_str, 'ok), [
-        I{'ld, [W{'w32}, D{'n}, M{U{'v}, 8}]},
-        I{'add, [D{'sz}, U{'n}, K{8}]},
-        I{'call, [S{"__alloc", 0}, Us{['sz]}, Ds{['a]}]},
-        I{'st, [W{'w32}, M{U{'a}, 0}, U{'n}]},
-        I{'st, [W{'w32}, M{U{'a}, 4}, K{0}]}], nz[0], [
-        I{'add, [D{'src}, U{'v}, K{16}]},
-        I{'add, [D{'dst}, U{'a}, K{8}]}], rt_copy('dst, 'src, nz[1]), [
-        I{'ret, [Us{['a]}]}], rt_bad]))
-}
+    # __val_unint(v) gives the 64-bit value of the integer v
+    rt_val_unint_fn(w) := rt_fn("__val_unint", w, ['p], ['v], append(append([I{'getarg, [D{'p}, K{0}]}], rt_need('p, rt_kind_int, 'ok)), append([
+        I{'ld, [W{'w64}, D{'v}, M{U{'p}, rt_int_at}]},
+        I{'ret, [Us{['v]}]}], rt_bad)))
 
-# __val_retag(v, kind) is a new string or symbol with the bytes of the string or symbol v
-rt_val_retag_fn(w) := rt_fn("__val_retag", w, ['v, 'a, 'r], [], append([
-    I{'getarg, [D{'v}, K{0}]},
-    I{'getarg, [D{'kd}, K{1}]},
-    I{'ld, [W{'w32}, D{'k}, M{U{'v}, rt_kind}]},
-    I{'br, [Cc{'eq}, U{'k}, K{rt_kind_str}, L{'ok}, L{'k2}]},
-    I{'label, [L{'k2}]},
-    I{'br, [Cc{'eq}, U{'k}, K{rt_kind_sym}, L{'ok}, L{'bad}]},
-    I{'label, [L{'ok}]},
-    I{'add, [D{'a}, U{'v}, K{8}]},
-    I{'call, [S{"__val_str", 0}, Us{['a, 'kd]}, Ds{['r]}]},
-    I{'ret, [Us{['r]}]}], rt_bad))
+    # __val_bool(b) is the symbol true or false
+    rt_val_bool_fn(w) := rt_fn("__val_bool", w, ['r], [], [
+        I{'getarg, [D{'b}, K{0}]},
+        I{'br, [Cc{'ne}, U{'b}, K{0}, L{'t}, L{'f}]},
+        I{'label, [L{'t}]},
+        I{'la, [D{'r}, S{"__sym_true", 0}]},
+        I{'ret, [Us{['r]}]},
+        I{'label, [L{'f}]},
+        I{'la, [D{'r}, S{"__sym_false", 0}]},
+        I{'ret, [Us{['r]}]}])
 
-# __val_eq(a, b) is 1 when a == b of planck holds: the same kind and the same contents, and the same block for an array or a function.
-# The last argument of a constructed value is compared without a new call.
-rt_val_eq_fn(w) := {
-    pw := rt_pw(w)
-    iz := rt_zx(w, 'ip, 'i)
-    i4z := rt_zx(w, 'i4p, 'i4)
-    n4z := rt_zx(w, 'n4p, 'n4)
-    rt_fn("__val_eq", w, ['a, 'b, 'pa, 'pb, 'x, 'y, 'ip, 'i4p, 'n4p], [], concat([[
-        I{'getarg, [D{'a}, K{0}]},
-        I{'getarg, [D{'b}, K{1}]},
-        I{'label, [L{'top}]},
-        I{'br, [Cc{'eq}, U{'a}, U{'b}, L{'yes}, L{'diff}]},
-        I{'label, [L{'diff}]},
-        I{'ld, [W{'w32}, D{'ka}, M{U{'a}, rt_kind}]},
-        I{'ld, [W{'w32}, D{'kb}, M{U{'b}, rt_kind}]},
-        I{'br, [Cc{'eq}, U{'ka}, U{'kb}, L{'same}, L{'no}]},
-        I{'label, [L{'same}]},
-        I{'br, [Cc{'eq}, U{'ka}, K{rt_kind_int}, L{'int}, L{'s1}]},
-        I{'label, [L{'s1}]},
-        I{'br, [Cc{'eq}, U{'ka}, K{rt_kind_str}, L{'bytes}, L{'s2}]},
-        I{'label, [L{'s2}]},
-        I{'br, [Cc{'eq}, U{'ka}, K{rt_kind_sym}, L{'bytes}, L{'s3}]},
-        I{'label, [L{'s3}]},
-        I{'br, [Cc{'eq}, U{'ka}, K{rt_kind_con}, L{'con}, L{'no}]},
-        I{'label, [L{'int}]},
-        I{'ld, [W{'w32}, D{'xi}, M{U{'a}, rt_int_at}]},
-        I{'ld, [W{'w32}, D{'yi}, M{U{'b}, rt_int_at}]},
-        I{'br, [Cc{'eq}, U{'xi}, U{'yi}, L{'int2}, L{'no}]},
-        I{'label, [L{'int2}]},
-        I{'ld, [W{'w32}, D{'xi}, M{U{'a}, rt_int_at + 4}]},
-        I{'ld, [W{'w32}, D{'yi}, M{U{'b}, rt_int_at + 4}]},
-        I{'br, [Cc{'eq}, U{'xi}, U{'yi}, L{'yes}, L{'no}]},
-        I{'label, [L{'bytes}]},
-        I{'ld, [W{'w32}, D{'n}, M{U{'a}, 8}]},
-        I{'ld, [W{'w32}, D{'m}, M{U{'b}, 8}]},
-        I{'br, [Cc{'eq}, U{'n}, U{'m}, L{'b0}, L{'no}]},
-        I{'label, [L{'b0}]},
-        I{'li, [D{'i}, K{0}]},
-        I{'label, [L{'bloop}]},
-        I{'br, [Cc{'ltu}, U{'i}, U{'n}, L{'b1}, L{'yes}]},
-        I{'label, [L{'b1}]}], iz[0], [
-        I{'add, [D{'pa}, U{'a}, U{iz[1]}]},
-        I{'add, [D{'pb}, U{'b}, U{iz[1]}]},
-        I{'ld, [W{'u8}, D{'xb}, M{U{'pa}, 16}]},
-        I{'ld, [W{'u8}, D{'yb}, M{U{'pb}, 16}]},
-        I{'add, [D{'i}, U{'i}, K{1}]},
-        I{'br, [Cc{'eq}, U{'xb}, U{'yb}, L{'bloop}, L{'no}]},
-        I{'label, [L{'con}]},
-        I{'ld, [W{'w32}, D{'n}, M{U{'a}, rt_con_n(w)}]},
-        I{'ld, [W{'w32}, D{'m}, M{U{'b}, rt_con_n(w)}]},
-        I{'br, [Cc{'eq}, U{'n}, U{'m}, L{'c0}, L{'no}]},
-        I{'label, [L{'c0}]},
-        I{'ld, [W{pw}, D{'x}, M{U{'a}, rt_con_head}]},
-        I{'ld, [W{pw}, D{'y}, M{U{'b}, rt_con_head}]},
-        I{'call, [S{"__val_eq", 0}, Us{['x, 'y]}, Ds{['r]}]},
-        I{'br, [Cc{'ne}, U{'r}, K{0}, L{'c1}, L{'no}]},
-        I{'label, [L{'c1}]},
-        I{'br, [Cc{'eq}, U{'n}, K{0}, L{'yes}, L{'c2}]},
-        I{'label, [L{'c2}]},
-        I{'sub, [D{'n}, U{'n}, K{1}]},
-        I{'li, [D{'i}, K{0}]},
-        I{'label, [L{'cloop}]},
-        I{'br, [Cc{'ltu}, U{'i}, U{'n}, L{'c3}, L{'clast}]},
-        I{'label, [L{'c3}]},
-        I{'shl, [D{'i4}, U{'i}, K{rt_shift(w)}]}], i4z[0], [
-        I{'add, [D{'pa}, U{'a}, U{i4z[1]}]},
-        I{'add, [D{'pb}, U{'b}, U{i4z[1]}]},
-        I{'ld, [W{pw}, D{'x}, M{U{'pa}, rt_con_elems(w)}]},
-        I{'ld, [W{pw}, D{'y}, M{U{'pb}, rt_con_elems(w)}]},
-        I{'call, [S{"__val_eq", 0}, Us{['x, 'y]}, Ds{['r]}]},
-        I{'add, [D{'i}, U{'i}, K{1}]},
-        I{'br, [Cc{'ne}, U{'r}, K{0}, L{'cloop}, L{'no}]},
-        I{'label, [L{'clast}]},
-        I{'shl, [D{'n4}, U{'n}, K{rt_shift(w)}]}], n4z[0], [
-        I{'add, [D{'pa}, U{'a}, U{n4z[1]}]},
-        I{'add, [D{'pb}, U{'b}, U{n4z[1]}]},
-        I{'ld, [W{pw}, D{'a}, M{U{'pa}, rt_con_elems(w)}]},
-        I{'ld, [W{pw}, D{'b}, M{U{'pb}, rt_con_elems(w)}]},
-        I{'jmp, [L{'top}]},
+    # __val_unbool(v) is 1 for the symbol true, 0 for the symbol false
+    rt_val_unbool_fn(w) := rt_fn("__val_unbool", w, ['v, 't, 'f], [], append([
+        I{'getarg, [D{'v}, K{0}]},
+        I{'la, [D{'t}, S{"__sym_true", 0}]},
+        I{'call, [S{"__val_eq", 0}, Us{['v, 't]}, Ds{['r]}]},
+        I{'br, [Cc{'ne}, U{'r}, K{0}, L{'yes}, L{'no}]},
         I{'label, [L{'yes}]},
         I{'li, [D{'one}, K{1}]},
         I{'ret, [Us{['one]}]},
         I{'label, [L{'no}]},
+        I{'la, [D{'f}, S{"__sym_false", 0}]},
+        I{'call, [S{"__val_eq", 0}, Us{['v, 'f]}, Ds{['r]}]},
+        I{'br, [Cc{'ne}, U{'r}, K{0}, L{'zero}, L{'bad}]},
+        I{'label, [L{'zero}]},
         I{'li, [D{'z}, K{0}]},
-        I{'ret, [Us{['z]}]}]]))
-}
+        I{'ret, [Us{['z]}]}], rt_bad))
 
-# __val_is(v, h, n) is 1 when v is a constructed value with the head h and n arguments
-rt_val_is_fn(w) := {
-    pw := rt_pw(w)
-    rt_fn("__val_is", w, ['v, 'h, 'x], [], [
+    # copy n bytes from the address s to the address d; the registers d, s and n have the width of an address
+    rt_copy(d, s, n) := [
+        I{'li, [D{'k}, K{0}]},
+        I{'label, [L{'copy}]},
+        I{'br, [Cc{'ltu}, U{'k}, U{n}, L{'put}, L{'copied}]},
+        I{'label, [L{'put}]},
+        I{'add, [D{'sa}, U{s}, U{'k}]},
+        I{'ld, [W{'u8}, D{'byte}, M{U{'sa}, 0}]},
+        I{'add, [D{'da}, U{d}, U{'k}]},
+        I{'st, [W{'w8}, M{U{'da}, 0}, U{'byte}]},
+        I{'add, [D{'k}, U{'k}, K{1}]},
+        I{'jmp, [L{'copy}]},
+        I{'label, [L{'copied}]}]
+
+    # __val_str(a, kind) is a new string or symbol with the bytes of the array a
+    rt_val_str_fn(w) := {
+        nz := rt_zx(w, 'np, 'n)
+        rt_fn("__val_str", w, ['a, 'p, 'np, 'src, 'dst, 'k, 'sa, 'da], [], concat([[
+            I{'getarg, [D{'a}, K{0}]},
+            I{'getarg, [D{'kd}, K{1}]},
+            I{'ld, [W{'w32}, D{'n}, M{U{'a}, 0}]},
+            I{'add, [D{'sz}, U{'n}, K{16}]},
+            I{'call, [S{"__alloc", 0}, Us{['sz]}, Ds{['p]}]},
+            I{'st, [W{'w32}, M{U{'p}, rc}, K{1}]},
+            I{'st, [W{'w32}, M{U{'p}, kind}, U{'kd}]},
+            I{'st, [W{'w32}, M{U{'p}, 8}, U{'n}]},
+            I{'st, [W{'w32}, M{U{'p}, 12}, K{0}]}], nz[0], [
+            I{'add, [D{'src}, U{'a}, K{8}]},
+            I{'add, [D{'dst}, U{'p}, K{16}]}], rt_copy('dst, 'src, nz[1]), [
+            I{'ret, [Us{['p]}]}]]))
+    }
+
+    # __val_bytes(v) is a new array of the bytes of the string v
+    rt_val_bytes_fn(w) := {
+        nz := rt_zx(w, 'np, 'n)
+        rt_fn("__val_bytes", w, ['v, 'a, 'np, 'src, 'dst, 'k, 'sa, 'da], [], concat([[I{'getarg, [D{'v}, K{0}]}], rt_need('v, kind_str, 'ok), [
+            I{'ld, [W{'w32}, D{'n}, M{U{'v}, 8}]},
+            I{'add, [D{'sz}, U{'n}, K{8}]},
+            I{'call, [S{"__alloc", 0}, Us{['sz]}, Ds{['a]}]},
+            I{'st, [W{'w32}, M{U{'a}, 0}, U{'n}]},
+            I{'st, [W{'w32}, M{U{'a}, 4}, K{0}]}], nz[0], [
+            I{'add, [D{'src}, U{'v}, K{16}]},
+            I{'add, [D{'dst}, U{'a}, K{8}]}], rt_copy('dst, 'src, nz[1]), [
+            I{'ret, [Us{['a]}]}], rt_bad]))
+    }
+
+    # __val_retag(v, kind) is a new string or symbol with the bytes of the string or symbol v
+    rt_val_retag_fn(w) := rt_fn("__val_retag", w, ['v, 'a, 'r], [], append([
         I{'getarg, [D{'v}, K{0}]},
-        I{'getarg, [D{'h}, K{1}]},
-        I{'getarg, [D{'n}, K{2}]},
-        I{'ld, [W{'w32}, D{'k}, M{U{'v}, rt_kind}]},
-        I{'br, [Cc{'eq}, U{'k}, K{rt_kind_con}, L{'a}, L{'no}]},
-        I{'label, [L{'a}]},
-        I{'ld, [W{'w32}, D{'m}, M{U{'v}, rt_con_n(w)}]},
-        I{'br, [Cc{'eq}, U{'m}, U{'n}, L{'b}, L{'no}]},
-        I{'label, [L{'b}]},
-        I{'ld, [W{pw}, D{'x}, M{U{'v}, rt_con_head}]},
-        I{'call, [S{"__val_eq", 0}, Us{['x, 'h]}, Ds{['r]}]},
-        I{'ret, [Us{['r]}]},
-        I{'label, [L{'no}]},
-        I{'li, [D{'z}, K{0}]},
-        I{'ret, [Us{['z]}]}])
-}
+        I{'getarg, [D{'kd}, K{1}]},
+        I{'ld, [W{'w32}, D{'k}, M{U{'v}, kind}]},
+        I{'br, [Cc{'eq}, U{'k}, K{kind_str}, L{'ok}, L{'k2}]},
+        I{'label, [L{'k2}]},
+        I{'br, [Cc{'eq}, U{'k}, K{kind_sym}, L{'ok}, L{'bad}]},
+        I{'label, [L{'ok}]},
+        I{'add, [D{'a}, U{'v}, K{8}]},
+        I{'call, [S{"__val_str", 0}, Us{['a, 'kd]}, Ds{['r]}]},
+        I{'ret, [Us{['r]}]}], rt_bad))
 
-# the number of elements n and the address of the first element of the constructed value or the array v, in the registers 'n and 'base
-rt_elems(w, v) := [
-    I{'ld, [W{'w32}, D{'k}, M{U{v}, rt_kind}]},
-    I{'br, [Cc{'eq}, U{'k}, K{rt_kind_con}, L{'ec}, L{'e2}]},
-    I{'label, [L{'e2}]},
-    I{'br, [Cc{'eq}, U{'k}, K{rt_kind_arr}, L{'ea}, L{'bad}]},
-    I{'label, [L{'ec}]},
-    I{'ld, [W{'w32}, D{'n}, M{U{v}, rt_con_n(w)}]},
-    I{'add, [D{'base}, U{v}, K{rt_con_elems(w)}]},
-    I{'jmp, [L{'ed}]},
-    I{'label, [L{'ea}]},
-    I{'ld, [W{'w32}, D{'n}, M{U{v}, rt_arr_n}]},
-    I{'add, [D{'base}, U{v}, K{rt_arr_elems}]},
-    I{'jmp, [L{'ed}]},
-    I{'label, [L{'ed}]}]
+    # __val_eq(a, b) is 1 when a == b of planck holds: the same kind and the same contents, and the same block for an array or a function.
+    # The last argument of a constructed value is compared without a new call.
+    rt_val_eq_fn(w) := {
+        pw := rt_pw(w)
+        iz := rt_zx(w, 'ip, 'i)
+        i4z := rt_zx(w, 'i4p, 'i4)
+        n4z := rt_zx(w, 'n4p, 'n4)
+        rt_fn("__val_eq", w, ['a, 'b, 'pa, 'pb, 'x, 'y, 'ip, 'i4p, 'n4p], [], concat([[
+            I{'getarg, [D{'a}, K{0}]},
+            I{'getarg, [D{'b}, K{1}]},
+            I{'label, [L{'top}]},
+            I{'br, [Cc{'eq}, U{'a}, U{'b}, L{'yes}, L{'diff}]},
+            I{'label, [L{'diff}]},
+            I{'ld, [W{'w32}, D{'ka}, M{U{'a}, kind}]},
+            I{'ld, [W{'w32}, D{'kb}, M{U{'b}, kind}]},
+            I{'br, [Cc{'eq}, U{'ka}, U{'kb}, L{'same}, L{'no}]},
+            I{'label, [L{'same}]},
+            I{'br, [Cc{'eq}, U{'ka}, K{rt_kind_int}, L{'int}, L{'s1}]},
+            I{'label, [L{'s1}]},
+            I{'br, [Cc{'eq}, U{'ka}, K{kind_str}, L{'bytes}, L{'s2}]},
+            I{'label, [L{'s2}]},
+            I{'br, [Cc{'eq}, U{'ka}, K{kind_sym}, L{'bytes}, L{'s3}]},
+            I{'label, [L{'s3}]},
+            I{'br, [Cc{'eq}, U{'ka}, K{kind_con}, L{'con}, L{'no}]},
+            I{'label, [L{'int}]},
+            I{'ld, [W{'w32}, D{'xi}, M{U{'a}, rt_int_at}]},
+            I{'ld, [W{'w32}, D{'yi}, M{U{'b}, rt_int_at}]},
+            I{'br, [Cc{'eq}, U{'xi}, U{'yi}, L{'int2}, L{'no}]},
+            I{'label, [L{'int2}]},
+            I{'ld, [W{'w32}, D{'xi}, M{U{'a}, rt_int_at + 4}]},
+            I{'ld, [W{'w32}, D{'yi}, M{U{'b}, rt_int_at + 4}]},
+            I{'br, [Cc{'eq}, U{'xi}, U{'yi}, L{'yes}, L{'no}]},
+            I{'label, [L{'bytes}]},
+            I{'ld, [W{'w32}, D{'n}, M{U{'a}, 8}]},
+            I{'ld, [W{'w32}, D{'m}, M{U{'b}, 8}]},
+            I{'br, [Cc{'eq}, U{'n}, U{'m}, L{'b0}, L{'no}]},
+            I{'label, [L{'b0}]},
+            I{'li, [D{'i}, K{0}]},
+            I{'label, [L{'bloop}]},
+            I{'br, [Cc{'ltu}, U{'i}, U{'n}, L{'b1}, L{'yes}]},
+            I{'label, [L{'b1}]}], iz[0], [
+            I{'add, [D{'pa}, U{'a}, U{iz[1]}]},
+            I{'add, [D{'pb}, U{'b}, U{iz[1]}]},
+            I{'ld, [W{'u8}, D{'xb}, M{U{'pa}, 16}]},
+            I{'ld, [W{'u8}, D{'yb}, M{U{'pb}, 16}]},
+            I{'add, [D{'i}, U{'i}, K{1}]},
+            I{'br, [Cc{'eq}, U{'xb}, U{'yb}, L{'bloop}, L{'no}]},
+            I{'label, [L{'con}]},
+            I{'ld, [W{'w32}, D{'n}, M{U{'a}, con_n(w)}]},
+            I{'ld, [W{'w32}, D{'m}, M{U{'b}, con_n(w)}]},
+            I{'br, [Cc{'eq}, U{'n}, U{'m}, L{'c0}, L{'no}]},
+            I{'label, [L{'c0}]},
+            I{'ld, [W{pw}, D{'x}, M{U{'a}, con_head}]},
+            I{'ld, [W{pw}, D{'y}, M{U{'b}, con_head}]},
+            I{'call, [S{"__val_eq", 0}, Us{['x, 'y]}, Ds{['r]}]},
+            I{'br, [Cc{'ne}, U{'r}, K{0}, L{'c1}, L{'no}]},
+            I{'label, [L{'c1}]},
+            I{'br, [Cc{'eq}, U{'n}, K{0}, L{'yes}, L{'c2}]},
+            I{'label, [L{'c2}]},
+            I{'sub, [D{'n}, U{'n}, K{1}]},
+            I{'li, [D{'i}, K{0}]},
+            I{'label, [L{'cloop}]},
+            I{'br, [Cc{'ltu}, U{'i}, U{'n}, L{'c3}, L{'clast}]},
+            I{'label, [L{'c3}]},
+            I{'shl, [D{'i4}, U{'i}, K{rt_shift(w)}]}], i4z[0], [
+            I{'add, [D{'pa}, U{'a}, U{i4z[1]}]},
+            I{'add, [D{'pb}, U{'b}, U{i4z[1]}]},
+            I{'ld, [W{pw}, D{'x}, M{U{'pa}, con_elems(w)}]},
+            I{'ld, [W{pw}, D{'y}, M{U{'pb}, con_elems(w)}]},
+            I{'call, [S{"__val_eq", 0}, Us{['x, 'y]}, Ds{['r]}]},
+            I{'add, [D{'i}, U{'i}, K{1}]},
+            I{'br, [Cc{'ne}, U{'r}, K{0}, L{'cloop}, L{'no}]},
+            I{'label, [L{'clast}]},
+            I{'shl, [D{'n4}, U{'n}, K{rt_shift(w)}]}], n4z[0], [
+            I{'add, [D{'pa}, U{'a}, U{n4z[1]}]},
+            I{'add, [D{'pb}, U{'b}, U{n4z[1]}]},
+            I{'ld, [W{pw}, D{'a}, M{U{'pa}, con_elems(w)}]},
+            I{'ld, [W{pw}, D{'b}, M{U{'pb}, con_elems(w)}]},
+            I{'jmp, [L{'top}]},
+            I{'label, [L{'yes}]},
+            I{'li, [D{'one}, K{1}]},
+            I{'ret, [Us{['one]}]},
+            I{'label, [L{'no}]},
+            I{'li, [D{'z}, K{0}]},
+            I{'ret, [Us{['z]}]}]]))
+    }
 
-# the check that the 64-bit index ix is less than the 32-bit count n, and the 32-bit i4 that is the offset of the element in bytes
-rt_index(w, v) := [
-    I{'zext64, [D{'nw}, U{'n}]},
-    I{'br, [Cc{'ltu}, U{'ix}, U{'nw}, L{'inrange}, L{'bad}]},
-    I{'label, [L{'inrange}]},
-    I{'trunc, [D{'i32}, U{'ix}]},
-    I{'shl, [D{'i4}, U{'i32}, K{rt_shift(w)}]}]
+    # __val_is(v, h, n) is 1 when v is a constructed value with the head h and n arguments
+    rt_val_is_fn(w) := {
+        pw := rt_pw(w)
+        rt_fn("__val_is", w, ['v, 'h, 'x], [], [
+            I{'getarg, [D{'v}, K{0}]},
+            I{'getarg, [D{'h}, K{1}]},
+            I{'getarg, [D{'n}, K{2}]},
+            I{'ld, [W{'w32}, D{'k}, M{U{'v}, kind}]},
+            I{'br, [Cc{'eq}, U{'k}, K{kind_con}, L{'a}, L{'no}]},
+            I{'label, [L{'a}]},
+            I{'ld, [W{'w32}, D{'m}, M{U{'v}, con_n(w)}]},
+            I{'br, [Cc{'eq}, U{'m}, U{'n}, L{'b}, L{'no}]},
+            I{'label, [L{'b}]},
+            I{'ld, [W{pw}, D{'x}, M{U{'v}, con_head}]},
+            I{'call, [S{"__val_eq", 0}, Us{['x, 'h]}, Ds{['r]}]},
+            I{'ret, [Us{['r]}]},
+            I{'label, [L{'no}]},
+            I{'li, [D{'z}, K{0}]},
+            I{'ret, [Us{['z]}]}])
+    }
 
-# __val_get(v, ix) is the element of the constructed value or the array v at the index, with a new holder
-rt_val_get_fn(w) := {
-    pw := rt_pw(w)
-    i4z := rt_zx(w, 'i4p, 'i4)
-    rt_fn("__val_get", w, ['v, 'base, 'i4p, 'e, 'x], ['ix, 'nw], concat([[
+    # the number of elements n and the address of the first element of the constructed value or the array v, in the registers 'n and 'base
+    rt_elems(w, v) := [
+        I{'ld, [W{'w32}, D{'k}, M{U{v}, kind}]},
+        I{'br, [Cc{'eq}, U{'k}, K{kind_con}, L{'ec}, L{'e2}]},
+        I{'label, [L{'e2}]},
+        I{'br, [Cc{'eq}, U{'k}, K{rt_kind_arr}, L{'ea}, L{'bad}]},
+        I{'label, [L{'ec}]},
+        I{'ld, [W{'w32}, D{'n}, M{U{v}, con_n(w)}]},
+        I{'add, [D{'base}, U{v}, K{con_elems(w)}]},
+        I{'jmp, [L{'ed}]},
+        I{'label, [L{'ea}]},
+        I{'ld, [W{'w32}, D{'n}, M{U{v}, rt_arr_n}]},
+        I{'add, [D{'base}, U{v}, K{rt_arr_elems}]},
+        I{'jmp, [L{'ed}]},
+        I{'label, [L{'ed}]}]
+
+    # the check that the 64-bit index ix is less than the 32-bit count n, and the 32-bit i4 that is the offset of the element in bytes
+    rt_index(w, v) := [
+        I{'zext64, [D{'nw}, U{'n}]},
+        I{'br, [Cc{'ltu}, U{'ix}, U{'nw}, L{'inrange}, L{'bad}]},
+        I{'label, [L{'inrange}]},
+        I{'trunc, [D{'i32}, U{'ix}]},
+        I{'shl, [D{'i4}, U{'i32}, K{rt_shift(w)}]}]
+
+    # __val_get(v, ix) is the element of the constructed value or the array v at the index, with a new holder
+    rt_val_get_fn(w) := {
+        pw := rt_pw(w)
+        i4z := rt_zx(w, 'i4p, 'i4)
+        rt_fn("__val_get", w, ['v, 'base, 'i4p, 'e, 'x], ['ix, 'nw], concat([[
+            I{'getarg, [D{'v}, K{0}]},
+            I{'getarg, [D{'ix}, K{1}]}], rt_elems(w, 'v), rt_index(w, 'v), i4z[0], [
+            I{'add, [D{'e}, U{'base}, U{i4z[1]}]},
+            I{'ld, [W{pw}, D{'x}, M{U{'e}, 0}]},
+            I{'call, [S{"__val_inc", 0}, Us{['x]}, Ds{[]}]},
+            I{'ret, [Us{['x]}]}], rt_bad]))
+    }
+
+    # __val_set(v, ix, x) puts x in the array v at the index; the place holds x and what it held before has one holder less
+    rt_val_set_fn(w) := {
+        pw := rt_pw(w)
+        i4z := rt_zx(w, 'i4p, 'i4)
+        rt_fn("__val_set", w, ['v, 'x, 'i4p, 'e, 'old], ['ix, 'nw], concat([[
+            I{'getarg, [D{'v}, K{0}]},
+            I{'getarg, [D{'ix}, K{1}]},
+            I{'getarg, [D{'x}, K{1 + rt_w64words(w)}]}], rt_need('v, rt_kind_arr, 'isarr), [
+            I{'ld, [W{'w32}, D{'n}, M{U{'v}, rt_arr_n}]}], rt_index(w, 'v), i4z[0], [
+            I{'add, [D{'e}, U{'v}, U{i4z[1]}]},
+            I{'ld, [W{pw}, D{'old}, M{U{'e}, rt_arr_elems}]},
+            I{'st, [W{pw}, M{U{'e}, rt_arr_elems}, U{'x}]},
+            I{'call, [S{"__val_drop", 0}, Us{['old]}, Ds{[]}]},
+            I{'ret, [Us{[]}]}], rt_bad]))
+    }
+
+    rt_val_arity_fn(w) := rt_fn("__val_arity", w, ['v], [], append([
         I{'getarg, [D{'v}, K{0}]},
-        I{'getarg, [D{'ix}, K{1}]}], rt_elems(w, 'v), rt_index(w, 'v), i4z[0], [
-        I{'add, [D{'e}, U{'base}, U{i4z[1]}]},
-        I{'ld, [W{pw}, D{'x}, M{U{'e}, 0}]},
-        I{'call, [S{"__val_inc", 0}, Us{['x]}, Ds{[]}]},
-        I{'ret, [Us{['x]}]}], rt_bad]))
-}
+        I{'ld, [W{'w32}, D{'k}, M{U{'v}, kind}]},
+        I{'br, [Cc{'eq}, U{'k}, K{kind_con}, L{'con}, L{'other}]},
+        I{'label, [L{'con}]},
+        I{'ld, [W{'w32}, D{'n}, M{U{'v}, con_n(w)}]},
+        I{'ret, [Us{['n]}]},
+        I{'label, [L{'other}]},
+        I{'br, [Cc{'geu}, U{'k}, K{kind_str}, L{'o2}, L{'bad}]},
+        I{'label, [L{'o2}]},
+        I{'br, [Cc{'eq}, U{'k}, K{kind_fun}, L{'bad}, L{'o3}]},
+        I{'label, [L{'o3}]},
+        I{'ld, [W{'w32}, D{'n}, M{U{'v}, 8}]},
+        I{'ret, [Us{['n]}]}], rt_bad))
 
-# __val_set(v, ix, x) puts x in the array v at the index; the place holds x and what it held before has one holder less
-rt_val_set_fn(w) := {
-    pw := rt_pw(w)
-    i4z := rt_zx(w, 'i4p, 'i4)
-    rt_fn("__val_set", w, ['v, 'x, 'i4p, 'e, 'old], ['ix, 'nw], concat([[
-        I{'getarg, [D{'v}, K{0}]},
-        I{'getarg, [D{'ix}, K{1}]},
-        I{'getarg, [D{'x}, K{1 + rt_w64words(w)}]}], rt_need('v, rt_kind_arr, 'isarr), [
-        I{'ld, [W{'w32}, D{'n}, M{U{'v}, rt_arr_n}]}], rt_index(w, 'v), i4z[0], [
-        I{'add, [D{'e}, U{'v}, U{i4z[1]}]},
-        I{'ld, [W{pw}, D{'old}, M{U{'e}, rt_arr_elems}]},
-        I{'st, [W{pw}, M{U{'e}, rt_arr_elems}, U{'x}]},
-        I{'call, [S{"__val_drop", 0}, Us{['old]}, Ds{[]}]},
-        I{'ret, [Us{[]}]}], rt_bad]))
-}
-
-rt_val_arity_fn(w) := rt_fn("__val_arity", w, ['v], [], append([
-    I{'getarg, [D{'v}, K{0}]},
-    I{'ld, [W{'w32}, D{'k}, M{U{'v}, rt_kind}]},
-    I{'br, [Cc{'eq}, U{'k}, K{rt_kind_con}, L{'con}, L{'other}]},
-    I{'label, [L{'con}]},
-    I{'ld, [W{'w32}, D{'n}, M{U{'v}, rt_con_n(w)}]},
-    I{'ret, [Us{['n]}]},
-    I{'label, [L{'other}]},
-    I{'br, [Cc{'geu}, U{'k}, K{rt_kind_str}, L{'o2}, L{'bad}]},
-    I{'label, [L{'o2}]},
-    I{'br, [Cc{'eq}, U{'k}, K{rt_kind_fun}, L{'bad}, L{'o3}]},
-    I{'label, [L{'o3}]},
-    I{'ld, [W{'w32}, D{'n}, M{U{'v}, 8}]},
-    I{'ret, [Us{['n]}]}], rt_bad))
-
-rt_val_head_fn(w) := rt_fn("__val_head", w, ['v, 'h], [], append(append(append([I{'getarg, [D{'v}, K{0}]}], rt_need('v, rt_kind_con, 'ok)), [
-    I{'ld, [W{rt_pw(w)}, D{'h}, M{U{'v}, rt_con_head}]},
-    I{'call, [S{"__val_inc", 0}, Us{['h]}, Ds{[]}]},
-    I{'ret, [Us{['h]}]}]), rt_bad))
-
-# one case of __val_typeof
-rt_typeof_case(k, name, next) := [
-    I{'br, [Cc{'eq}, U{'k}, K{k}, L{intern(name)}, L{next}]},
-    I{'label, [L{intern(name)}]},
-    I{'la, [D{'r}, S{name, 0}]},
-    I{'ret, [Us{['r]}]},
-    I{'label, [L{next}]}]
-
-rt_val_typeof_fn(w) := rt_fn("__val_typeof", w, ['v, 'r], [], concat([
-    [I{'getarg, [D{'v}, K{0}]},
-     I{'ld, [W{'w32}, D{'k}, M{U{'v}, rt_kind}]}],
-    rt_typeof_case(rt_kind_int, "__sym_int", 'n1),
-    rt_typeof_case(rt_kind_str, "__sym_string", 'n2),
-    rt_typeof_case(rt_kind_sym, "__sym_symbol", 'n3),
-    rt_typeof_case(rt_kind_con, "__sym_mexpr", 'n4),
-    rt_typeof_case(rt_kind_arr, "__sym_array", 'n5),
-    [I{'la, [D{'r}, S{"__sym_function", 0}]},
-     I{'ret, [Us{['r]}]}]]))
-
-# __val_array(ix, x) is a new array of that many elements x
-rt_val_array_fn(w) := {
-    pw := rt_pw(w)
-    i4z := rt_zx(w, 'i4p, 'i4)
-    rt_fn("__val_array", w, ['x, 'p, 'e, 'i4p], ['ix], concat([[
-        I{'getarg, [D{'ix}, K{0}]},
-        I{'getarg, [D{'x}, K{rt_w64words(w)}]},
-        I{'br, [Cc{'ltu}, U{'ix}, K{134217728}, L{'fits}, L{'bad}]},
-        I{'label, [L{'fits}]},
-        I{'trunc, [D{'lo}, U{'ix}]},
-        I{'shl, [D{'bytes}, U{'lo}, K{rt_shift(w)}]},
-        I{'add, [D{'sz}, U{'bytes}, K{rt_arr_elems}]},
-        I{'call, [S{"__alloc", 0}, Us{['sz]}, Ds{['p]}]},
-        I{'st, [W{'w32}, M{U{'p}, rt_rc}, K{1}]},
-        I{'st, [W{'w32}, M{U{'p}, rt_kind}, K{rt_kind_arr}]},
-        I{'st, [W{'w32}, M{U{'p}, rt_arr_n}, U{'lo}]},
-        I{'st, [W{'w32}, M{U{'p}, 12}, K{0}]},
-        I{'li, [D{'i}, K{0}]},
-        I{'label, [L{'loop}]},
-        I{'br, [Cc{'ltu}, U{'i}, U{'lo}, L{'one}, L{'done}]},
-        I{'label, [L{'one}]},
-        I{'shl, [D{'i4}, U{'i}, K{rt_shift(w)}]}], i4z[0], [
-        I{'add, [D{'e}, U{'p}, U{i4z[1]}]},
-        I{'st, [W{pw}, M{U{'e}, rt_arr_elems}, U{'x}]},
-        I{'call, [S{"__val_inc", 0}, Us{['x]}, Ds{[]}]},
-        I{'add, [D{'i}, U{'i}, K{1}]},
-        I{'jmp, [L{'loop}]},
-        I{'label, [L{'done}]},
-        I{'ret, [Us{['p]}]}], rt_bad]))
-}
-
-# __val_mexpr(h, a) is a new constructed value with the head h and the elements of the array a
-rt_val_mexpr_fn(w) := {
-    pw := rt_pw(w)
-    i4z := rt_zx(w, 'i4p, 'i4)
-    rt_fn("__val_mexpr", w, ['h, 'a, 'p, 'sa, 'da, 'x, 'i4p], [], concat([[
-        I{'getarg, [D{'h}, K{0}]},
-        I{'getarg, [D{'a}, K{1}]}], rt_need('a, rt_kind_arr, 'isarr), [
-        I{'ld, [W{'w32}, D{'n}, M{U{'a}, rt_arr_n}]},
-        I{'shl, [D{'bytes}, U{'n}, K{rt_shift(w)}]},
-        I{'add, [D{'sz}, U{'bytes}, K{rt_con_elems(w)}]},
-        I{'call, [S{"__alloc", 0}, Us{['sz]}, Ds{['p]}]},
-        I{'st, [W{'w32}, M{U{'p}, rt_rc}, K{1}]},
-        I{'st, [W{'w32}, M{U{'p}, rt_kind}, K{rt_kind_con}]},
-        I{'st, [W{pw}, M{U{'p}, rt_con_head}, U{'h}]},
-        I{'st, [W{'w32}, M{U{'p}, rt_con_n(w)}, U{'n}]},
+    rt_val_head_fn(w) := rt_fn("__val_head", w, ['v, 'h], [], append(append(append([I{'getarg, [D{'v}, K{0}]}], rt_need('v, kind_con, 'ok)), [
+        I{'ld, [W{rt_pw(w)}, D{'h}, M{U{'v}, con_head}]},
         I{'call, [S{"__val_inc", 0}, Us{['h]}, Ds{[]}]},
-        I{'li, [D{'i}, K{0}]},
-        I{'label, [L{'loop}]},
-        I{'br, [Cc{'ltu}, U{'i}, U{'n}, L{'one}, L{'done}]},
-        I{'label, [L{'one}]},
-        I{'shl, [D{'i4}, U{'i}, K{rt_shift(w)}]}], i4z[0], [
-        I{'add, [D{'sa}, U{'a}, U{i4z[1]}]},
-        I{'ld, [W{pw}, D{'x}, M{U{'sa}, rt_arr_elems}]},
-        I{'call, [S{"__val_inc", 0}, Us{['x]}, Ds{[]}]},
-        I{'add, [D{'da}, U{'p}, U{i4z[1]}]},
-        I{'st, [W{pw}, M{U{'da}, rt_con_elems(w)}, U{'x}]},
-        I{'add, [D{'i}, U{'i}, K{1}]},
-        I{'jmp, [L{'loop}]},
-        I{'label, [L{'done}]},
-        I{'ret, [Us{['p]}]}], rt_bad]))
-}
+        I{'ret, [Us{['h]}]}]), rt_bad))
 
-# __val_code(f, n) is the address of the code of the function value f, which takes n arguments
-rt_val_code_fn(w) := rt_fn("__val_code", w, ['f, 'c], [], append(append(append([
-    I{'getarg, [D{'f}, K{0}]},
-    I{'getarg, [D{'n}, K{1}]}], rt_need('f, rt_kind_fun, 'isfun)), [
-    I{'ld, [W{'w32}, D{'m}, M{U{'f}, rt_fun_rest(w)}]},
-    I{'br, [Cc{'eq}, U{'m}, U{'n}, L{'fine}, L{'bad}]},
-    I{'label, [L{'fine}]},
-    I{'ld, [W{rt_pw(w)}, D{'c}, M{U{'f}, rt_fun_code}]},
-    I{'ret, [Us{['c]}]}]), rt_bad))
+    # one case of __val_typeof
+    rt_typeof_case(k, name, next) := [
+        I{'br, [Cc{'eq}, U{'k}, K{k}, L{intern(name)}, L{next}]},
+        I{'label, [L{intern(name)}]},
+        I{'la, [D{'r}, S{name, 0}]},
+        I{'ret, [Us{['r]}]},
+        I{'label, [L{next}]}]
 
-# the functions on values of val that the code calls, with the functions that these call; each is a function of the word
-rt_val_makers := [Tuple{"__val_inc", rt_val_inc_fn}, Tuple{"__val_drop", rt_val_drop_fn}, Tuple{"__val_int", rt_val_int_fn}, Tuple{"__val_unint", rt_val_unint_fn},
-    Tuple{"__val_bool", rt_val_bool_fn}, Tuple{"__val_unbool", rt_val_unbool_fn}, Tuple{"__val_str", rt_val_str_fn}, Tuple{"__val_bytes", rt_val_bytes_fn},
-    Tuple{"__val_retag", rt_val_retag_fn}, Tuple{"__val_eq", rt_val_eq_fn}, Tuple{"__val_is", rt_val_is_fn}, Tuple{"__val_get", rt_val_get_fn}, Tuple{"__val_set", rt_val_set_fn},
-    Tuple{"__val_arity", rt_val_arity_fn}, Tuple{"__val_head", rt_val_head_fn}, Tuple{"__val_typeof", rt_val_typeof_fn}, Tuple{"__val_array", rt_val_array_fn},
-    Tuple{"__val_mexpr", rt_val_mexpr_fn}, Tuple{"__val_code", rt_val_code_fn}]
+    rt_val_typeof_fn(w) := rt_fn("__val_typeof", w, ['v, 'r], [], concat([
+        [I{'getarg, [D{'v}, K{0}]},
+         I{'ld, [W{'w32}, D{'k}, M{U{'v}, kind}]}],
+        rt_typeof_case(rt_kind_int, "__sym_int", 'n1),
+        rt_typeof_case(kind_str, "__sym_string", 'n2),
+        rt_typeof_case(kind_sym, "__sym_symbol", 'n3),
+        rt_typeof_case(kind_con, "__sym_mexpr", 'n4),
+        rt_typeof_case(rt_kind_arr, "__sym_array", 'n5),
+        [I{'la, [D{'r}, S{"__sym_function", 0}]},
+         I{'ret, [Us{['r]}]}]]))
 
-rt_call_names(f) := concat_map(i -> match i {
-    I{'call, [S{n, _}, _, _]} -> [n]
-  | _ -> []
-}, ir.code(f))
+    # __val_array(ix, x) is a new array of that many elements x
+    rt_val_array_fn(w) := {
+        pw := rt_pw(w)
+        i4z := rt_zx(w, 'i4p, 'i4)
+        rt_fn("__val_array", w, ['x, 'p, 'e, 'i4p], ['ix], concat([[
+            I{'getarg, [D{'ix}, K{0}]},
+            I{'getarg, [D{'x}, K{rt_w64words(w)}]},
+            I{'br, [Cc{'ltu}, U{'ix}, K{134217728}, L{'fits}, L{'bad}]},
+            I{'label, [L{'fits}]},
+            I{'trunc, [D{'lo}, U{'ix}]},
+            I{'shl, [D{'bytes}, U{'lo}, K{rt_shift(w)}]},
+            I{'add, [D{'sz}, U{'bytes}, K{rt_arr_elems}]},
+            I{'call, [S{"__alloc", 0}, Us{['sz]}, Ds{['p]}]},
+            I{'st, [W{'w32}, M{U{'p}, rc}, K{1}]},
+            I{'st, [W{'w32}, M{U{'p}, kind}, K{rt_kind_arr}]},
+            I{'st, [W{'w32}, M{U{'p}, rt_arr_n}, U{'lo}]},
+            I{'st, [W{'w32}, M{U{'p}, 12}, K{0}]},
+            I{'li, [D{'i}, K{0}]},
+            I{'label, [L{'loop}]},
+            I{'br, [Cc{'ltu}, U{'i}, U{'lo}, L{'one}, L{'done}]},
+            I{'label, [L{'one}]},
+            I{'shl, [D{'i4}, U{'i}, K{rt_shift(w)}]}], i4z[0], [
+            I{'add, [D{'e}, U{'p}, U{i4z[1]}]},
+            I{'st, [W{pw}, M{U{'e}, rt_arr_elems}, U{'x}]},
+            I{'call, [S{"__val_inc", 0}, Us{['x]}, Ds{[]}]},
+            I{'add, [D{'i}, U{'i}, K{1}]},
+            I{'jmp, [L{'loop}]},
+            I{'label, [L{'done}]},
+            I{'ret, [Us{['p]}]}], rt_bad]))
+    }
 
-rt_val_fns(w, called) := {
-    done := table()
-    out := []
-    work := called
-    while (work != []) {
-        n := work[0]
-        work = drop(work, 1)
-        e := find(p -> arg(p, 0) == n, rt_val_makers)
-        if (e != none and not table_has(done, n)) {
-            table_set(done, n, true)
-            f := arg(e, 1)(w)
-            out = f :: out
-            work = append(rt_call_names(f), work)
+    # __val_mexpr(h, a) is a new constructed value with the head h and the elements of the array a
+    rt_val_mexpr_fn(w) := {
+        pw := rt_pw(w)
+        i4z := rt_zx(w, 'i4p, 'i4)
+        rt_fn("__val_mexpr", w, ['h, 'a, 'p, 'sa, 'da, 'x, 'i4p], [], concat([[
+            I{'getarg, [D{'h}, K{0}]},
+            I{'getarg, [D{'a}, K{1}]}], rt_need('a, rt_kind_arr, 'isarr), [
+            I{'ld, [W{'w32}, D{'n}, M{U{'a}, rt_arr_n}]},
+            I{'shl, [D{'bytes}, U{'n}, K{rt_shift(w)}]},
+            I{'add, [D{'sz}, U{'bytes}, K{con_elems(w)}]},
+            I{'call, [S{"__alloc", 0}, Us{['sz]}, Ds{['p]}]},
+            I{'st, [W{'w32}, M{U{'p}, rc}, K{1}]},
+            I{'st, [W{'w32}, M{U{'p}, kind}, K{kind_con}]},
+            I{'st, [W{pw}, M{U{'p}, con_head}, U{'h}]},
+            I{'st, [W{'w32}, M{U{'p}, con_n(w)}, U{'n}]},
+            I{'call, [S{"__val_inc", 0}, Us{['h]}, Ds{[]}]},
+            I{'li, [D{'i}, K{0}]},
+            I{'label, [L{'loop}]},
+            I{'br, [Cc{'ltu}, U{'i}, U{'n}, L{'one}, L{'done}]},
+            I{'label, [L{'one}]},
+            I{'shl, [D{'i4}, U{'i}, K{rt_shift(w)}]}], i4z[0], [
+            I{'add, [D{'sa}, U{'a}, U{i4z[1]}]},
+            I{'ld, [W{pw}, D{'x}, M{U{'sa}, rt_arr_elems}]},
+            I{'call, [S{"__val_inc", 0}, Us{['x]}, Ds{[]}]},
+            I{'add, [D{'da}, U{'p}, U{i4z[1]}]},
+            I{'st, [W{pw}, M{U{'da}, con_elems(w)}, U{'x}]},
+            I{'add, [D{'i}, U{'i}, K{1}]},
+            I{'jmp, [L{'loop}]},
+            I{'label, [L{'done}]},
+            I{'ret, [Us{['p]}]}], rt_bad]))
+    }
+
+    # __val_code(f, n) is the address of the code of the function value f, which takes n arguments
+    rt_val_code_fn(w) := rt_fn("__val_code", w, ['f, 'c], [], append(append(append([
+        I{'getarg, [D{'f}, K{0}]},
+        I{'getarg, [D{'n}, K{1}]}], rt_need('f, kind_fun, 'isfun)), [
+        I{'ld, [W{'w32}, D{'m}, M{U{'f}, fun_rest(w)}]},
+        I{'br, [Cc{'eq}, U{'m}, U{'n}, L{'fine}, L{'bad}]},
+        I{'label, [L{'fine}]},
+        I{'ld, [W{rt_pw(w)}, D{'c}, M{U{'f}, fun_code}]},
+        I{'ret, [Us{['c]}]}]), rt_bad))
+
+    # the functions on values of val that the code calls, with the functions that these call; each is a function of the word
+    rt_val_makers := [Tuple{"__val_inc", rt_val_inc_fn}, Tuple{"__val_drop", rt_val_drop_fn}, Tuple{"__val_int", rt_val_int_fn}, Tuple{"__val_unint", rt_val_unint_fn},
+        Tuple{"__val_bool", rt_val_bool_fn}, Tuple{"__val_unbool", rt_val_unbool_fn}, Tuple{"__val_str", rt_val_str_fn}, Tuple{"__val_bytes", rt_val_bytes_fn},
+        Tuple{"__val_retag", rt_val_retag_fn}, Tuple{"__val_eq", rt_val_eq_fn}, Tuple{"__val_is", rt_val_is_fn}, Tuple{"__val_get", rt_val_get_fn}, Tuple{"__val_set", rt_val_set_fn},
+        Tuple{"__val_arity", rt_val_arity_fn}, Tuple{"__val_head", rt_val_head_fn}, Tuple{"__val_typeof", rt_val_typeof_fn}, Tuple{"__val_array", rt_val_array_fn},
+        Tuple{"__val_mexpr", rt_val_mexpr_fn}, Tuple{"__val_code", rt_val_code_fn}]
+
+    rt_call_names(f) := concat_map(i -> match i {
+        I{'call, [S{n, _}, _, _]} -> [n]
+      | _ -> []
+    }, ir_code(f))
+
+    export val_fns(w, called) := {
+        done := table()
+        out := []
+        work := called
+        while (work != []) {
+            n := work[0]
+            work = drop(work, 1)
+            e := find(p -> arg(p, 0) == n, rt_val_makers)
+            if (e != none and not table_has(done, n)) {
+                table_set(done, n, true)
+                f := arg(e, 1)(w)
+                out = f :: out
+                work = append(rt_call_names(f), work)
+            }
         }
+        reverse(out)
     }
-    reverse(out)
-}
 
-# rt_start_fn(w, ret) is _start for a main that returns the type ret: its value (0 for no value) is the exit status.
-# It keeps the arguments of the program (the service args) in __args first.
-rt_start_fn(w, ret) := {
-    f := ir.fn("_start")
-    e := i -> ir.emit(f, i)
-    st := ir.vreg(f, 32)
-    z := ir.vreg(f, 32)
-    av := ir.vreg(f, w * 8)
-    ap := ir.vreg(f, w * 8)
-    e(I{'os, [N{'args}, Us{[]}, D{av}]})
-    e(I{'la, [D{ap}, S{"__args", 0}]})
-    e(I{'st, [W{rt_pw(w)}, M{U{ap}, 0}, U{av}]})
-    if (ret == Unit{}) e(I{'li, [D{st}, K{0}]})
-    else if (ret == I64{} or ret == U64{}) {
-        r := ir.vreg(f, 64)
-        e(I{'call, [S{"main", 0}, Us{[]}, Ds{[r]}]})
-        e(I{'trunc, [D{st}, U{r}]})
-    } else e(I{'call, [S{"main", 0}, Us{[]}, Ds{[st]}]})
-    e(I{'os, [N{'exit}, Us{[st]}, D{z}]})
-    e(I{'trap, []})
-    f
-}
+    # start_fn(w, ret) is _start for a main that returns the type ret: its value (0 for no value) is the exit status.
+    # It keeps the arguments of the program (the service args) in __args first.
+    export start_fn(w, ret) := {
+        f := ir_fn("_start")
+        e := i -> ir_emit(f, i)
+        st := ir_vreg(f, 32)
+        z := ir_vreg(f, 32)
+        av := ir_vreg(f, w * 8)
+        ap := ir_vreg(f, w * 8)
+        e(I{'os, [N{'args}, Us{[]}, D{av}]})
+        e(I{'la, [D{ap}, S{"__args", 0}]})
+        e(I{'st, [W{rt_pw(w)}, M{U{ap}, 0}, U{av}]})
+        if (ret == Unit{}) e(I{'li, [D{st}, K{0}]})
+        else if (ret == I64{} or ret == U64{}) {
+            r := ir_vreg(f, 64)
+            e(I{'call, [S{"main", 0}, Us{[]}, Ds{[r]}]})
+            e(I{'trunc, [D{st}, U{r}]})
+        } else e(I{'call, [S{"main", 0}, Us{[]}, Ds{[st]}]})
+        e(I{'os, [N{'exit}, Us{[st]}, D{z}]})
+        e(I{'trap, []})
+        f
+    }
 
-vasm_rt_helpers := {
-    t := table()
-    table_set(t, 'shl, "__shl64")
-    table_set(t, 'shr, "__shr64")
-    table_set(t, 'sar, "__sar64")
-    table_set(t, 'divu, "__divu64")
-    table_set(t, 'remu, "__remu64")
-    table_set(t, 'divs, "__divs64")
-    table_set(t, 'rems, "__rems64")
-    t
-}
+    export helpers := {
+        t := table()
+        table_set(t, 'shl, "__shl64")
+        table_set(t, 'shr, "__shr64")
+        table_set(t, 'sar, "__sar64")
+        table_set(t, 'divu, "__divu64")
+        table_set(t, 'remu, "__remu64")
+        table_set(t, 'divs, "__divs64")
+        table_set(t, 'rems, "__rems64")
+        t
+    }
 
-# the functions of vasm that the 64-bit operations call
-vasm_rt_module := vasm{|
-    fn __shl64(x: u64, c: u64) -> u64 {
-        var n: u64
-        n = c & 63
-        while (n > 0) { x = x << 1; n = n - 1 }
-        return x
-    }
-    fn __shr64(x: u64, c: u64) -> u64 {
-        var n: u64
-        n = c & 63
-        while (n > 0) { x = x >> 1; n = n - 1 }
-        return x
-    }
-    fn __sar64(x: i64, c: i64) -> i64 {
-        var n: i64
-        n = c & 63
-        while (n > 0) { x = x >> 1; n = n - 1 }
-        return x
-    }
-    fn __divmod64(a: u64, b: u64, want_rem: bool) -> u64 {
-        var q: u64
-        var r: u64
-        var bit: u64
-        var top: u64
-        var t: u64
-        var go: bool
-        var z: u32
-        var one: u32
-        if (b == 0) { z = 0; one = 1; one = one / z }
-        q = 0
-        r = 0
-        bit = 1
-        bit = bit << 63
-        while (bit != 0) {
-            top = r >> 63
-            r = r << 1
-            t = a & bit
-            if (t != 0) { r = r | 1 }
-            go = r >= b
-            if (top != 0) { go = true }
-            if (go) { r = r - b; q = q | bit }
-            bit = bit >> 1
+    # the functions of vasm that the 64-bit operations call
+    export runtime := vasm{|
+        fn __shl64(x: u64, c: u64) -> u64 {
+            var n: u64
+            n = c & 63
+            while (n > 0) { x = x << 1; n = n - 1 }
+            return x
         }
-        if (want_rem) { return r }
-        return q
-    }
-    fn __divu64(a: u64, b: u64) -> u64 {
-        var q: u64
-        q = __divmod64(a, b, false)
-        return q
-    }
-    fn __remu64(a: u64, b: u64) -> u64 {
-        var q: u64
-        q = __divmod64(a, b, true)
-        return q
-    }
-    fn __divs64(a: i64, b: i64) -> i64 {
-        var x: u64
-        var y: u64
-        var q: u64
-        var na: bool
-        var nb: bool
-        var nq: bool
-        var r: i64
-        na = a < 0
-        nb = b < 0
-        nq = na != nb
-        x = a as u64
-        y = b as u64
-        if (na) { x = 0 - x }
-        if (nb) { y = 0 - y }
-        q = __divmod64(x, y, false)
-        if (nq) { q = 0 - q }
-        r = q as i64
-        return r
-    }
-    fn __rems64(a: i64, b: i64) -> i64 {
-        var x: u64
-        var y: u64
-        var q: u64
-        var na: bool
-        var nb: bool
-        var r: i64
-        na = a < 0
-        nb = b < 0
-        x = a as u64
-        y = b as u64
-        if (na) { x = 0 - x }
-        if (nb) { y = 0 - y }
-        q = __divmod64(x, y, true)
-        if (na) { q = 0 - q }
-        r = q as i64
-        return r
-    }
-|}
+        fn __shr64(x: u64, c: u64) -> u64 {
+            var n: u64
+            n = c & 63
+            while (n > 0) { x = x >> 1; n = n - 1 }
+            return x
+        }
+        fn __sar64(x: i64, c: i64) -> i64 {
+            var n: i64
+            n = c & 63
+            while (n > 0) { x = x >> 1; n = n - 1 }
+            return x
+        }
+        fn __divmod64(a: u64, b: u64, want_rem: bool) -> u64 {
+            var q: u64
+            var r: u64
+            var bit: u64
+            var top: u64
+            var t: u64
+            var go: bool
+            var z: u32
+            var one: u32
+            if (b == 0) { z = 0; one = 1; one = one / z }
+            q = 0
+            r = 0
+            bit = 1
+            bit = bit << 63
+            while (bit != 0) {
+                top = r >> 63
+                r = r << 1
+                t = a & bit
+                if (t != 0) { r = r | 1 }
+                go = r >= b
+                if (top != 0) { go = true }
+                if (go) { r = r - b; q = q | bit }
+                bit = bit >> 1
+            }
+            if (want_rem) { return r }
+            return q
+        }
+        fn __divu64(a: u64, b: u64) -> u64 {
+            var q: u64
+            q = __divmod64(a, b, false)
+            return q
+        }
+        fn __remu64(a: u64, b: u64) -> u64 {
+            var q: u64
+            q = __divmod64(a, b, true)
+            return q
+        }
+        fn __divs64(a: i64, b: i64) -> i64 {
+            var x: u64
+            var y: u64
+            var q: u64
+            var na: bool
+            var nb: bool
+            var nq: bool
+            var r: i64
+            na = a < 0
+            nb = b < 0
+            nq = na != nb
+            x = a as u64
+            y = b as u64
+            if (na) { x = 0 - x }
+            if (nb) { y = 0 - y }
+            q = __divmod64(x, y, false)
+            if (nq) { q = 0 - q }
+            r = q as i64
+            return r
+        }
+        fn __rems64(a: i64, b: i64) -> i64 {
+            var x: u64
+            var y: u64
+            var q: u64
+            var na: bool
+            var nb: bool
+            var r: i64
+            na = a < 0
+            nb = b < 0
+            x = a as u64
+            y = b as u64
+            if (na) { x = 0 - x }
+            if (nb) { y = 0 - y }
+            q = __divmod64(x, y, true)
+            if (na) { q = 0 - q }
+            r = q as i64
+            return r
+        }
+    |}
+}
