@@ -115,6 +115,14 @@ test-planck0: planck0
 		if [ -f $${f%.*}.out ]; then diff -u $${f%.*}.out tmp-vasm.out || exit 1; fi; \
 		echo "$$f ($$t): ok"; \
 	done; done; rm -f tmp-vasm tmp-vasm.out
+	@for t in $(VASM_TARGETS); do \
+		./planck0 planck/vasmc.pk unit planck/examples/units/lib.native tmp-lib.unit $$t || exit 1; \
+		./planck0 planck/vasmc.pk unit planck/examples/units/main.native tmp-main.unit $$t tmp-lib.unit || exit 1; \
+		./planck0 planck/vasmc.pk link tmp-units $$t tmp-lib.unit tmp-main.unit || exit 1; \
+		./tmp-units; s=$$?; \
+		[ "$$s" = "$$(cat planck/examples/units/main.status)" ] || { echo "planck/examples/units ($$t): exit status $$s"; exit 1; }; \
+		echo "planck/examples/units ($$t): ok"; \
+	done; rm -f tmp-lib.unit tmp-main.unit tmp-units
 	@for f in $(PE_EXAMPLES); do \
 		./planck0 $$f tmp-pe > tmp-pe.out || exit 1; \
 		diff -u $${f%.pk}.out tmp-pe.out || exit 1; \

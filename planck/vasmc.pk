@@ -1,46 +1,85 @@
-# vasmc: compiles a vasm source file (.vasm) or a native source file (.native) to an executable file (Linux)
+# vasmc: compiles vasm source files (.vasm) and native source files (.native) to executable files (Linux)
 # Copyright (C) 2026 nineties
 #
 # planck0 planck/vasmc.pk <source> <output> [<target>]
+#     compiles one source file to an executable file.
+# planck0 planck/vasmc.pk unit <source> <output> <target> [<import> ...]
+#     compiles one source file to a unit file, which has no function main. The functions and the structs of the unit files
+#     <import> can be used in the source.
+# planck0 planck/vasmc.pk link <output> <target> <unit> ...
+#     joins unit files into an executable file. Exactly one of them has the function main.
 #
 # The target is the name of a machine of backend/target.pk (x86_64); without it the default target is used.
+# A unit file is made for the word of its target and can be joined only for a target of the same word.
 
 use("vasm/build")
 use("native/expand")
 
-args := argv()
-if (array_len(args) != 3 and array_len(args) != 4) {
+usage() := {
     put("usage: planck0 planck/vasmc.pk <source> <output> [<target>]\n")
+    put("       planck0 planck/vasmc.pk unit <source> <output> <target> [<import> ...]\n")
+    put("       planck0 planck/vasmc.pk link <output> <target> <unit> ...\n")
     exit(2)
 }
-src_path := args[1]
-out_path := args[2]
-machine := if (array_len(args) == 4) intern(args[3]) else target.default
-text := read_file(src_path)
-n := strlen(src_path)
-is_native := n > 7 and substr(src_path, n - 7, n) == ".native"
-parsed := peg_parse(if (is_native) 'native else 'vasm, text)
-m := arg(parsed, 0)
-if (head(m) == 'SyntaxError) {
-    put(f"{src_path}: syntax error: {arg(m, 0)}\n")
-    exit(1)
-}
-if (arg(parsed, 1) != "") {
-    put(f"{src_path}: syntax error: unexpected input\n")
-    exit(1)
-}
-if (is_native) {
-    expanded := native_expand.expand_all(m)
-    perrs := native_expand.errors(src_path, arg(expanded, 1))
-    if (perrs != []) {
-        each((VasmErr{_, loc, msg}) -> put(f"{error.show_loc(loc)}: {msg}\n"), perrs)
+
+# the module of the source file src_path, which may use the interfaces imports: the vasm module that native expands to, checked
+load(src_path, imports) := {
+    text := read_file(src_path)
+    n := strlen(src_path)
+    is_native := n > 7 and substr(src_path, n - 7, n) == ".native"
+    parsed := peg_parse(if (is_native) 'native else 'vasm, text)
+    m := arg(parsed, 0)
+    if (head(m) == 'SyntaxError) {
+        put(f"{src_path}: syntax error: {arg(m, 0)}\n")
         exit(1)
     }
-    m = arg(expanded, 0)
+    if (arg(parsed, 1) != "") {
+        put(f"{src_path}: syntax error: unexpected input\n")
+        exit(1)
+    }
+    if (is_native) {
+        expanded := native_expand.expand_all_with(m, imports)
+        perrs := native_expand.errors(src_path, arg(expanded, 1))
+        if (perrs != []) {
+            each((VasmErr{_, loc, msg}) -> put(f"{error.show_loc(loc)}: {msg}\n"), perrs)
+            exit(1)
+        }
+        m = arg(expanded, 0)
+    }
+    errs := vasm_check.errors_with(src_path, m, imports)
+    if (errs != []) {
+        each((VasmErr{_, loc, msg}) -> put(f"{error.show_loc(loc)}: {msg}\n"), errs)
+        exit(1)
+    }
+    m
 }
-errs := vasm_check.errors(src_path, m)
-if (errs != []) {
-    each((VasmErr{_, loc, msg}) -> put(f"{error.show_loc(loc)}: {msg}\n"), errs)
-    exit(1)
+
+# the arguments from the index i, as a list
+args_from(args, i) := {
+    out := []
+    k := array_len(args) - 1
+    while (k >= i) {
+        out = args[k] :: out
+        k = k - 1
+    }
+    out
 }
-vasm_build.build_for(machine, m, out_path)
+
+args := argv()
+nargs := array_len(args)
+if (nargs >= 2 and args[1] == "unit") {
+    if (nargs < 5) usage()
+    src_path := args[2]
+    machine := intern(args[4])
+    imports := concat_map(p -> vasm_unit.ifaces(vasm_unit.read(p)), args_from(args, 5))
+    m := load(src_path, imports)
+    vasm_unit.write(args[3], vasm_unit.unit(src_path, m, imports, target.word(target.get(machine))))
+} else if (nargs >= 2 and args[1] == "link") {
+    if (nargs < 5) usage()
+    units := map(vasm_unit.read, args_from(args, 4))
+    vasm_build.build_units_for(intern(args[3]), units, args[2])
+} else {
+    if (nargs != 3 and nargs != 4) usage()
+    machine := if (nargs == 4) intern(args[3]) else target.default
+    vasm_build.build_for(machine, load(args[1], []), args[2])
+}
