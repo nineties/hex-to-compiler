@@ -2735,6 +2735,46 @@
     (return noneS)
     )
 
+; _file_globals(path): an array | name1 | value1 | name2 | value2 | ... | of the
+; global variables defined by the file path, as they are now. A variable which
+; no definition has run yet has the value none.
+(fun p_file_globals (path)
+    (var size (get global_table 0))
+    (var i 0)
+    (var n 0)
+    (var ent 0)
+    (var cell 0)
+    (var a 0)
+    (var k 1)
+    (expect StringT path)
+    (while (< i size) (do
+        (= ent (get global_table (+ 3 i)))
+        (while ent (do
+            (= cell (get ent 1))
+            (if (&& (get cell 2) (values_equal (get cell 2) path)) (+= n 1))
+            (= ent (get ent 2))
+            ))
+        (+= i 1)
+        ))
+    (= a (allocate (* 4 (+ (* 2 n) 1))))
+    (set a 0 (make_header ArrayT 1 (* 2 n)))
+    (= i 0)
+    (while (< i size) (do
+        (= ent (get global_table (+ 3 i)))
+        (while ent (do
+            (= cell (get ent 1))
+            (if (&& (get cell 2) (values_equal (get cell 2) path)) (do
+                (set a k (get cell 1))
+                (if (get cell 0) (set a (+ k 1) (get cell 0)) (set a (+ k 1) noneS))
+                (+= k 2)
+                ))
+            (= ent (get ent 2))
+            ))
+        (+= i 1)
+        ))
+    (return a)
+    )
+
 (fun p_exit (n)
     (check_int "exit" n)
     (exit (fixnum_to_int n))
@@ -2806,6 +2846,7 @@
     (defprim "argv" 0 p_argv PRIM_NATIVE)
     (defprim "exit"    1 p_exit    PRIM_NATIVE)
     (defprim "_set_file" 1 p_set_file PRIM_NATIVE)
+    (defprim "_file_globals" 1 p_file_globals PRIM_NATIVE)
     (defprim "eval"    1 0         PRIM_EVAL)
     )
 
