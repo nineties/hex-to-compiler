@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>psys | hex-to-compiler project</title>
+<link rel="alternate" hreflang="ja" href="../../ja/reference/psys.html">
+<link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+<header class="site-header"><div class="inner">
+<a class="logo" href="../index.html"><span class="brand"><b>hex-to-compiler <i>project</i></b><small>A compiler that pulls itself up by its bootstraps.</small></span></a>
+<nav class="site-nav">
+<a href="../index.html">Overview</a>
+<a href="../tutorial/index.html">Tutorial</a>
+<a class="here" href="../reference/index.html">Reference</a>
+<a href="../implementation/index.html">Implementation</a>
+<a href="https://github.com/nineties/hex-to-compiler">GitHub</a>
+<a class="lang-switch" lang="ja" hreflang="ja" href="../../ja/reference/psys.html">日本語</a>
+</nav>
+</div></header>
+<div class="layout">
+<nav class="toc" aria-label="Reference contents"><details open><summary>Reference contents</summary>
+<h2>Reference</h2>
+<ol>
+<li><a href="index.html">Contents</a></li>
+<li><a href="syntax.html">Syntax</a></li>
+<li><a href="values.html">Values, patterns, M-expressions</a></li>
+<li><a href="grammar.html">Grammar declarations</a></li>
+<li><a href="builtins.html">Builtin functions</a></li>
+<li><a href="library.html">Libraries</a></li>
+<li><a href="vasm.html">vasm</a></li>
+<li><a class="here" href="psys.html">psys</a></li>
+</ol></details></nav>
+<main>
+<h1>psys</h1>
+<p class="lead"><code>use("psys/expand")</code> defines a systems language. Its meaning is that of <a href="vasm.html">vasm</a>, with a higher-level notation: expressions nest, and <code>let</code>, <code>for</code>, compound assignments, the short-circuit <code>and</code> and <code>or</code>, and large integer literals are available. <code>psys_expand</code> expands the functions and structs written in <code>psys{| ... |}</code> to a vasm module. Ownership and borrowing are checked on the expanded vasm.</p>
+
+<h2>Programs</h2>
+<p>A program is a list of structs and functions. Types, structs and function declarations are written as in vasm. The body of a function is a list of statements, separated by newlines or <code>;</code>.</p>
+<p>The value of <code>psys{| ... |}</code> is <code>PModule{[...]}</code>. <code>psys_expand(m)</code> is the vasm <code>Module{[...]}</code>, which <code>vasm_check</code> and <code>vasm_build</code> take as it is. <code>psys_expand_all(m)</code> is <code>Tuple{module, errors}</code>. The errors are <code>VasmErr{kind, loc, msg}</code>, the first one of each function. <code>psys_errors(file, errors)</code> gives the positions as <code>Loc</code> of the file.</p>
+
+<h2>Expressions</h2>
+<p>Expressions nest. The precedence grows from the top to the bottom.</p>
+<table>
+<tr><th>Form</th><th>Meaning</th></tr>
+<tr><td><code>a or b</code></td><td><code>b</code> is not computed if <code>a</code> is true</td></tr>
+<tr><td><code>a and b</code></td><td><code>b</code> is not computed if <code>a</code> is false</td></tr>
+<tr><td><code>==</code> <code>!=</code> <code>&lt;</code> <code>&lt;=</code> <code>&gt;</code> <code>&gt;=</code></td><td>Comparison. The result is <code>bool</code></td></tr>
+<tr><td><code>|</code></td><td>Bitwise or</td></tr>
+<tr><td><code>^</code></td><td>Bitwise xor</td></tr>
+<tr><td><code>&amp;</code></td><td>Bitwise and. It binds tighter than a comparison</td></tr>
+<tr><td><code>&lt;&lt;</code> <code>&gt;&gt;</code></td><td>Shifts</td></tr>
+<tr><td><code>+</code> <code>-</code></td><td>Addition and subtraction</td></tr>
+<tr><td><code>*</code> <code>/</code> <code>%</code></td><td>Multiplication and division. A <code>*</code> is on the same line as its left operand</td></tr>
+<tr><td><code>e as T</code></td><td>Changes the integer type</td></tr>
+<tr><td><code>-e</code> <code>not e</code> <code>*p</code> <code>&amp;r y</code> <code>&amp;mut r y</code></td><td>Negation, logical not, the contents of a box, a borrow</td></tr>
+<tr><td><code>a[i]</code> <code>s.f</code> <code>f(a, ...)</code> <code>S{f: a, ...}</code></td><td>An element, a field, a call, a struct value</td></tr>
+<tr><td><code>'name</code> <code>"text"</code> <code>val H(a, ...)</code> <code>fn f(a, ...)</code> <code>true</code> <code>false</code></td><td>Values of val, strings and booleans</td></tr>
+</table>
+<p>Parentheses group. Arguments are computed from left to right. The <code>a</code> of <code>a[i]</code> and the <code>s</code> of <code>s.f</code> are variables. A struct value starts with a field, so it is told from the <code>{</code> that starts the body of an <code>if</code> or a <code>for</code>.</p>
+
+<h2>Statements</h2>
+<table>
+<tr><th>Form</th><th>Meaning</th></tr>
+<tr><td><code>let x = e</code> <code>let x: T = e</code></td><td>Declares a variable and initializes it. Its type is that of <code>e</code>, or the type given after <code>:</code></td></tr>
+<tr><td><code>var x: T</code></td><td>Declares an uninitialized variable</td></tr>
+<tr><td><code>x = e</code> <code>*p = e</code> <code>a[i] = e</code> <code>s.f = e</code></td><td>Assignment. The right-hand side is computed first</td></tr>
+<tr><td><code>x += e</code> and the like</td><td>Compound assignment: <code>+= -= *= /= %= &amp;= |= ^= &lt;&lt;= &gt;&gt;=</code>. The place on the left is read once</td></tr>
+<tr><td><code>f(a, ...)</code></td><td>A call as a statement</td></tr>
+<tr><td><code>if c {...} else {...}</code> <code>else if</code></td><td>The condition needs no parentheses</td></tr>
+<tr><td><code>while c {...}</code></td><td>The condition is computed again at each round</td></tr>
+<tr><td><code>for i in a..b {...}</code></td><td><code>i</code> runs from <code>a</code> up to just before <code>b</code>. <code>b</code> is computed once, at the start. <code>i</code> is visible only in the body</td></tr>
+<tr><td><code>region r {...}</code> <code>return</code> <code>return e</code></td><td>As in vasm</td></tr>
+</table>
+<p>If the last statement of the body of a function that gives a value is an expression, its value is the result.</p>
+<div class="example">
+<p class="file">psys_expand.pk</p>
+<pre class="pk"><span class="tok-name">use</span><span class="tok-op">(</span><span class="tok-str">"psys/expand"</span><span class="tok-op">)</span>
+<span class="tok-name">use</span><span class="tok-op">(</span><span class="tok-str">"vasm/text"</span><span class="tok-op">)</span>
+
+<span class="tok-name">m</span> <span class="tok-op">:=</span> <span class="tok-name">psys</span><span class="tok-op">{</span>|
+    <span class="tok-name">fn</span> <span class="tok-name">gcd</span><span class="tok-op">(</span><span class="tok-name">a</span>: i64, b: i64) -&gt; i64 {
+        <span class="tok-kw">while</span> b != 0 {
+            <span class="tok-name">let</span> <span class="tok-name">t</span> <span class="tok-op">=</span> <span class="tok-name">a</span> <span class="tok-op">%</span> <span class="tok-name">b</span>
+            <span class="tok-name">a</span> <span class="tok-op">=</span> <span class="tok-name">b</span>
+            <span class="tok-name">b</span> <span class="tok-op">=</span> <span class="tok-name">t</span>
+        }
+        <span class="tok-name">a</span>
+    }
+
+    <span class="tok-name">fn</span> <span class="tok-name">bump</span><span class="tok-op">[</span><span class="tok-name">r</span><span class="tok-op">]</span><span class="tok-op">(</span><span class="tok-name">m</span>: &amp;mut r [i32], n: i32) {
+        <span class="tok-kw">for</span> i in 0 as i32..n {
+            <span class="tok-name">m</span><span class="tok-op">[</span><span class="tok-name">i</span><span class="tok-op">]</span> <span class="tok-op">+</span>= 1
+        }
+    }
+|}
+<span class="tok-name">put</span><span class="tok-op">(</span><span class="tok-name">vasm_text</span><span class="tok-op">(</span><span class="tok-name">psys_expand</span><span class="tok-op">(</span><span class="tok-name">m</span><span class="tok-op">)</span><span class="tok-op">)</span><span class="tok-op">)</span></pre>
+<p class="label">Output</p>
+<pre class="out">fn gcd(a: i64, b: i64) -&gt; i64 {
+    while (b != 0) {
+        var t: i64
+        t = a % b
+        a = b
+        b = t
+    }
+    return a
+}
+
+fn bump[r](m: &amp;mut r [i32], n: i32) {
+    var t0: i32
+    t0 = n
+    var i: i32
+    i = 0
+    while (i &lt; t0) {
+        var t1: i64
+        t1 = i as i64
+        var t2: i32
+        t2 = m[t1]
+        t2 = t2 + 1
+        m[t1] = t2
+        i = i + 1
+    }
+}</pre>
+</div>
+
+<h2>How types are fixed</h2>
+<ul>
+<li>The type of an expression comes from the declarations of the variables and functions and from the types of the built-in functions. Types are written only at <code>let</code>, <code>var</code>, parameters, results of functions and <code>as</code>.</li>
+<li>An integer literal alone has no type. The type of the place it is put in, of the parameter, of the other operand or of the result of the function is its type. A literal that has nothing to fix its type, as in <code>let x = 5</code>, is an error. Write <code>let x: i64 = 5</code> or <code>5 as i64</code>.</li>
+<li>The type of the variable of <code>for i in a..b</code> is the type of whichever of <code>a</code> and <code>b</code> is not a literal. If both are literals it is an error; give one of them a type, as in <code>0 as i64..10</code>.</li>
+<li>The type of a call whose result holds a borrow is inferred only when the region of the result is fixed by the arguments to one. Otherwise write <code>let x: T = f(...)</code>.</li>
+<li>The index of an array is <code>i64</code>. An index of another integer type gets <code>as i64</code>.</li>
+<li>A name can be declared again. The earlier variable is hidden.</li>
+</ul>
+
+<h2>Large literals</h2>
+<p>A literal of vasm is from -32768 to 32767. psys accepts an integer literal beyond it. A literal outside the range of its type is an error.</p>
+<div class="example">
+<p class="file">psys_logic.pk</p>
+<pre class="pk"><span class="tok-name">use</span><span class="tok-op">(</span><span class="tok-str">"psys/expand"</span><span class="tok-op">)</span>
+<span class="tok-name">use</span><span class="tok-op">(</span><span class="tok-str">"vasm/text"</span><span class="tok-op">)</span>
+
+<span class="tok-name">m</span> <span class="tok-op">:=</span> <span class="tok-name">psys</span><span class="tok-op">{</span>|
+    <span class="tok-name">fn</span> <span class="tok-name">both</span><span class="tok-op">(</span><span class="tok-name">a</span>: i64, b: i64) -&gt; bool {
+        <span class="tok-name">a</span> <span class="tok-op">&gt;</span> <span class="tok-num">0</span> <span class="tok-kw">and</span> <span class="tok-name">b</span> <span class="tok-op">&gt;</span> <span class="tok-num">0</span>
+    }
+
+    <span class="tok-name">fn</span> <span class="tok-name">mask</span><span class="tok-op">(</span><span class="tok-name">x</span>: i32) -&gt; i32 {
+        <span class="tok-name">x</span> &amp; 0x3FFFFFF
+    }
+|}
+<span class="tok-name">put</span><span class="tok-op">(</span><span class="tok-name">vasm_text</span><span class="tok-op">(</span><span class="tok-name">psys_expand</span><span class="tok-op">(</span><span class="tok-name">m</span><span class="tok-op">)</span><span class="tok-op">)</span><span class="tok-op">)</span></pre>
+<p class="label">Output</p>
+<pre class="out">fn both(a: i64, b: i64) -&gt; bool {
+    var t0: bool
+    t0 = a &gt; 0
+    var t1: bool
+    t1 = t0
+    if (t1) {
+        var t2: bool
+        t2 = b &gt; 0
+        t1 = t2
+    }
+    return t1
+}
+
+fn mask(x: i32) -&gt; i32 {
+    var t0: i32
+    t0 = 2047
+    t0 = t0 &lt;&lt; 15
+    t0 = t0 | 32767
+    var t1: i32
+    t1 = x &amp; t0
+    return t1
+}</pre>
+</div>
+<p>The expansion makes the value from parts of 15 bits, the greatest first, joined by <code>&lt;&lt;</code> and <code>|</code>. A negative value is subtracted from 0 at the end.</p>
+
+<h2>Errors</h2>
+<p>The <code>kind</code> of an error of the expansion is <code>'type</code> (the type is not known, a literal is outside the range of its type, a statement that is an expression is not a call) or <code>'undefined</code> (a variable, function or struct that is not declared). Ownership, borrowing and initialization are not checked by the expansion; <code>vasm_check</code> checks the expanded vasm. The positions of the errors are those of the psys source.</p>
+<div class="example">
+<p class="file">psys_errors.pk</p>
+<pre class="pk"><span class="tok-name">use</span><span class="tok-op">(</span><span class="tok-str">"psys/expand"</span><span class="tok-op">)</span>
+
+<span class="tok-name">m</span> <span class="tok-op">:=</span> <span class="tok-name">psys</span><span class="tok-op">{</span>|
+    <span class="tok-name">fn</span> <span class="tok-name">f</span><span class="tok-op">(</span><span class="tok-name">n</span>: i64) {
+        <span class="tok-name">let</span> <span class="tok-name">x</span> <span class="tok-op">=</span> <span class="tok-num">5</span>
+    }
+    <span class="tok-name">fn</span> <span class="tok-name">g</span><span class="tok-op">(</span><span class="tok-name">n</span>: i64) {
+        <span class="tok-kw">for</span> i in 0..10 {
+            <span class="tok-name">n</span> <span class="tok-op">+</span>= 1
+        }
+    }
+    <span class="tok-name">fn</span> <span class="tok-name">h</span><span class="tok-op">(</span><span class="tok-name">n</span>: i64) -&gt; i64 {
+        <span class="tok-name">n</span> <span class="tok-op">+</span> <span class="tok-name">k</span>
+    }
+|}
+<span class="tok-name">file</span> <span class="tok-op">:=</span> <span class="tok-name">argv</span><span class="tok-op">(</span><span class="tok-op">)</span><span class="tok-op">[</span><span class="tok-num">0</span><span class="tok-op">]</span>
+<span class="tok-name">each</span><span class="tok-op">(</span><span class="tok-op">(</span><span class="tok-name">VasmErr</span><span class="tok-op">{</span><span class="tok-name">_</span><span class="tok-op">,</span> <span class="tok-name">Loc</span><span class="tok-op">{</span><span class="tok-name">_</span><span class="tok-op">,</span> <span class="tok-name">l</span><span class="tok-op">,</span> <span class="tok-name">c</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">msg</span><span class="tok-op">}</span><span class="tok-op">)</span> <span class="tok-op">-&gt;</span> <span class="tok-name">put</span><span class="tok-op">(</span><span class="tok-str">f"</span><span class="tok-str">line </span><span class="tok-op">{</span><span class="tok-name">l</span><span class="tok-op">}</span><span class="tok-str">: </span><span class="tok-op">{</span><span class="tok-name">msg</span><span class="tok-op">}</span><span class="tok-str">\n</span><span class="tok-str">"</span><span class="tok-op">)</span><span class="tok-op">,</span> <span class="tok-name">psys_errors</span><span class="tok-op">(</span><span class="tok-name">file</span><span class="tok-op">,</span> <span class="tok-name">arg</span><span class="tok-op">(</span><span class="tok-name">psys_expand_all</span><span class="tok-op">(</span><span class="tok-name">m</span><span class="tok-op">)</span><span class="tok-op">,</span> <span class="tok-num">1</span><span class="tok-op">)</span><span class="tok-op">)</span><span class="tok-op">)</span></pre>
+<p class="label">Output</p>
+<pre class="out">line 5: the type of this value is not known; write the type, as in let x: i32 = ... or e as i32
+line 8: the type of the loop variable is not known; write one bound with its type, as in 0 as i64..n
+line 13: k is not declared</pre>
+</div>
+
+<nav class="pager"><a class="prev" href="vasm.html"><small>Previous</small>vasm</a></nav>
+</main>
+</div>
+<footer><div class="inner"><a href="https://github.com/nineties/hex-to-compiler">github.com/nineties/hex-to-compiler</a></div></footer>
+<script src="../../assets/page.js"></script>
+</body>
+</html>
