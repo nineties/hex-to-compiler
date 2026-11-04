@@ -23,7 +23,7 @@ link_second := [".data", ".bss"]
 # the position of each piece: a table from Tuple{object index, section name} to its offset in the joined section,
 # and the joined sections: a table from the name to Tuple{buffer, alignment}
 link_join(objs, names, joined, pieces) := each(name -> {
-    out := bb_new()
+    out := bytes.new()
     al := 1
     k := 0
     each(o -> {
@@ -31,9 +31,9 @@ link_join(objs, names, joined, pieces) := each(name -> {
         if (s != none) {
             a := arg(s, 2)
             if (a > al) al = a
-            bb_align(out, a)
-            table_set(pieces, Tuple{k, name}, bb_len(out))
-            bb_append(out, obj_buf(s))
+            bytes.align(out, a)
+            table_set(pieces, Tuple{k, name}, bytes.len(out))
+            bytes.append(out, obj_buf(s))
         }
         k = k + 1
     }, objs)
@@ -52,7 +52,7 @@ link(objs, entry, base, hdr) := {
         j := table_get(joined, n, none)
         cur = link_align(cur, arg(j, 1))
         table_set(addr, n, cur)
-        cur = cur + bb_len(arg(j, 0))
+        cur = cur + bytes.len(arg(j, 0))
     }, link_first)
     end0 := cur
     # the second segment starts in the file where the first ends, and in memory one page after that
@@ -62,7 +62,7 @@ link(objs, entry, base, hdr) := {
         j := table_get(joined, n, none)
         cur = link_align(cur, arg(j, 1))
         table_set(addr, n, cur)
-        cur = cur + bb_len(arg(j, 0))
+        cur = cur + bytes.len(arg(j, 0))
     }, link_second)
     end1 := cur
     # symbols
@@ -95,30 +95,30 @@ link(objs, entry, base, hdr) := {
               | 'Pc32 -> s + addend - place
               | _ -> panic(f"link: unknown kind of relocation {kind}")
             }
-            bb_set_u32(arg(table_get(joined, sec, none), 0), at, v)
+            bytes.set_u32(arg(table_get(joined, sec, none), 0), at, v)
         }, obj_relocs(o))
         k = k + 1
     }, objs)
     e := table_get(globals, entry, none)
     if (e == none) panic(f"link: the entry {entry} is not defined")
     # segments
-    seg0 := bb_new()
-    bb_zeros(seg0, hdr)
+    seg0 := bytes.new()
+    bytes.zeros(seg0, hdr)
     each(n -> {
         j := table_get(joined, n, none)
-        bb_zeros(seg0, table_get(addr, n, 0) - base - bb_len(seg0))
-        bb_append(seg0, arg(j, 0))
+        bytes.zeros(seg0, table_get(addr, n, 0) - base - bytes.len(seg0))
+        bytes.append(seg0, arg(j, 0))
     }, link_first)
-    seg1 := bb_new()
+    seg1 := bytes.new()
     each(n -> {
         j := table_get(joined, n, none)
         if (n == ".data") {
-            bb_zeros(seg1, table_get(addr, n, 0) - (base + off1 + 4096) - bb_len(seg1))
-            bb_append(seg1, arg(j, 0))
+            bytes.zeros(seg1, table_get(addr, n, 0) - (base + off1 + 4096) - bytes.len(seg1))
+            bytes.append(seg1, arg(j, 0))
         }
     }, link_second)
     memsz1 := end1 - (base + off1 + 4096)
-    segs := [Seg{base, 0, seg0, bb_len(seg0), 5}]
+    segs := [Seg{base, 0, seg0, bytes.len(seg0), 5}]
     if (memsz1 > 0) segs = append(segs, [Seg{base + off1 + 4096, off1, seg1, memsz1, 6}])
     Image{e, segs, globals}
 }

@@ -14,21 +14,21 @@ use("backend/obj")
 # em_new(o, secname) writes to the section secname of the object o, which is made if it is not there
 em_new(o, secname) := {
     s := obj_sec(o, secname, 'code, 16)
-    Em{o, secname, obj_buf(s), table(), vec_new()}
+    Em{o, secname, obj_buf(s), table(), vector.new()}
 }
 
-em_pos(Em{_, _, b, _, _}) := bb_len(b)
-em_u8(Em{_, _, b, _, _}, n) := bb_u8(b, n)
-em_u32(Em{_, _, b, _, _}, n) := bb_u32(b, n)
+em_pos(Em{_, _, b, _, _}) := bytes.len(b)
+em_u8(Em{_, _, b, _, _}, n) := bytes.u8(b, n)
+em_u32(Em{_, _, b, _, _}, n) := bytes.u32(b, n)
 
 em_bytes(em, xs) := each(x -> em_u8(em, x), xs)
 
-em_label(Em{_, _, b, labels, _}, l) := table_set(labels, l, bb_len(b))
+em_label(Em{_, _, b, labels, _}, l) := table_set(labels, l, bytes.len(b))
 
 # a 32-bit field that holds the displacement to the label l from the end of the field
 em_rel32(Em{_, _, b, _, fixups}, l) := {
-    vec_push(fixups, Tuple{bb_len(b), l})
-    bb_u32(b, 0)
+    vector.push(fixups, Tuple{bytes.len(b), l})
+    bytes.u32(b, 0)
 }
 
 # em_finish(em) fills in the displacements to the labels of the function that was written
@@ -36,14 +36,14 @@ em_finish(Em{_, _, b, labels, fixups}) := {
     each((Tuple{at, l}) -> {
         t := table_get(labels, l, -1)
         if (t < 0) panic(f"em_finish: label L{l} is not in the function")
-        bb_set_u32(b, at, t - (at + 4))
-    }, vec_to_list(fixups))
+        bytes.set_u32(b, at, t - (at + 4))
+    }, vector.to_list(fixups))
 }
 
 # a 32-bit field that is the address of the symbol plus off (kind 'Abs32), or the displacement to it (kind 'Pc32)
 em_sym(Em{o, sec, b, _, _}, kind, name, off) := {
-    obj_reloc(o, sec, bb_len(b), kind, name, if (kind == 'Pc32) off - 4 else off)
-    bb_u32(b, 0)
+    obj_reloc(o, sec, bytes.len(b), kind, name, if (kind == 'Pc32) off - 4 else off)
+    bytes.u32(b, 0)
 }
 
 x86_fits8(n) := n >= -128 and n <= 127
