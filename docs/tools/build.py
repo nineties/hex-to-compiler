@@ -11,7 +11,7 @@
                      <!--file F A .. B--> は A の行から B の行の直前まで、<!--file F A ..--> は A の行から終わりまで、<!--file F--> は全体
   [[F A]]            ソース F の A の項目へのリンク（[[F A .. B]] も同じ）。A・B はちょうど1行に合わなければ生成が失敗する
                      （(fun f の ( は書かない。fun f と書く）
-planck のコードは色付きの HTML にして入れる。色付きの HTML は planck の highlight(planck/lib/highlight.pk)が作り、
+planck のコードは色付きの HTML にして入れる。色付きの HTML は planck の highlight.html(planck/lib/highlight.pk)が作り、
 hl/<コードの sha1 の先頭12桁>.html に置く(highlight.sh が GCP で作る)。build.py --texts DIR は、色付けが要るコードを DIR/<同じ名前>.pk に書き出す。
 1行目は <!--title タイトル--> にする。
 src/ja/ が日本語、src/en/ が英語。日本語は docs/ja/ に、英語は docs/en/ に書く。

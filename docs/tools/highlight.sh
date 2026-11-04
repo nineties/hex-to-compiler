@@ -2,7 +2,7 @@
 # 文書の planck のコードを GCP の planck0 で色付けし、hl/*.html に書く
 # 使い方: GCP_HOST=user@host highlight.sh
 # GCP_HOST の ~/$GCP_DIR/hex（既定 tmp/planck-docs）に、planck0 をビルドしたこのリポジトリがあること
-# 色付けは planck/lib/highlight.pk。全部のコードを1回の planck0 で色付けする（コードの中の文法の宣言は highlight が戻す）
+# 色付けは planck/lib/highlight.pk。全部のコードを1回の planck0 で色付けする（コードの中の文法の宣言は highlight.html が戻す）
 set -e
 H=${GCP_HOST:?GCP_HOST=user@host を指定する}
 D=${GCP_DIR:-tmp/planck-docs}

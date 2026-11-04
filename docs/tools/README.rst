@@ -15,7 +15,7 @@ docs/ の HTML（日本語は docs/ja/、英語は docs/en/）は、頁の元 (�
    終了コードが 0 でない例や標準エラーに出力がある例は ``NG`` と表示される。
    名前が ``e_`` で始まる例は止まる例で、標準出力と標準エラー出力を合わせて ``.out`` に書く。終了コードが 0 の例が ``NG`` になる。
 
-3. planck のコードを色付けして ``hl/*.html`` を更新する。色付けは ``planck/lib/highlight.pk`` の ``highlight`` で、全部のコードを1回の planck0 で色付けする。
+3. planck のコードを色付けして ``hl/*.html`` を更新する。色付けは ``planck/lib/highlight.pk`` の ``highlight.html`` で、全部のコードを1回の planck0 で色付けする。
 
    ::
 

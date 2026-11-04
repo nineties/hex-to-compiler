@@ -1,13 +1,13 @@
 # unparse: print a syntax tree as text by reading the grammar that parses it
 # Copyright (C) 2026 nineties
 #
-# unparse(t) is a text that parses back to t with the rule expr.
+# unparse.text(t) is a text that parses back to t with the rule expr.
 # The grammar is read from peg_sources (planck/peg.pk). An alternative of a rule
 #   Act{Seq{e1, e2, ...}, Lambda{Tuple{Tuple{l1, l2, ...}}, body}}
 # can be run backwards when body is a quasi-quotation (`Apply{_add, Tuple{!a, !b}}`),
 # Quote{c}, a label, or Tuple{labels}. Such an alternative is a template that
 # a tree is matched against. The labels bind the subtrees, and the elements of the sequence
-# are printed in order: texts as they are, rules by unparse_as(rule, subtree).
+# are printed in order: texts as they are, rules by text_as(rule, subtree).
 # An alternative of a stronger rule where a weaker rule is wanted is put in the parentheses
 # of the grammar: "(" e ")". Each rule that has such an alternative gives the parentheses for
 # the rules that reach it (primary for expressions, pat_primary for patterns).
@@ -17,6 +17,8 @@ use("list")
 use("string")
 use("table")
 use("pretty")
+
+module unparse {
 
 bad := Bad{}
 is_mx(x) := typeof(x) == 'mexpr
@@ -439,7 +441,7 @@ un_render(ps) := {
     out
 }
 
-# unparse_pp is declared here for the functions that it calls through unparse_as and try_cands
+# unparse_pp is declared here for the functions that it calls through text_as and try_cands
 fun unparse_pp
 
 list_pieces(inner, sep, v) := {
@@ -557,25 +559,25 @@ unparse_pp(r, t) =
         res
     }
 
-# unparse_try(rule, t) is a text that the rule parses to t, or none when t has no such text
-unparse_try(r, t) := {
+# unparse.try_as(rule, t) is a text that the rule parses to t, or none when t has no such text
+export try_as(r, t) := {
     un_ensure()
     unparse_pp(r, t)
 }
 
-# unparse_as(rule, t) is like unparse_try and stops the program when there is no text
-unparse_as(r, t) := {
-    s := unparse_try(r, t)
+# unparse.text_as(rule, t) is like unparse.try_as and stops the program when there is no text
+export text_as(r, t) := {
+    s := try_as(r, t)
     if (s == none) panic(_strcat("unparse: cannot print ", show(t))) else s
 }
 
-unparse(t) := unparse_as('expr, t)
+export text(t) := text_as('expr, t)
 
-# unparse_custom(owner, spec, tail, f) adds an alternative of the rule owner that is not
+# unparse.custom(owner, spec, tail, f) adds an alternative of the rule owner that is not
 # written in the grammar (what cannot be run backwards, or a layout). f(t) is the text of t or none.
 # spec ranks it against the templates of the grammar: the number of the nodes of a template that are not holes.
 # tail is the rule that the text runs on to the right as far as, or none.
-unparse_custom(owner, spec, tail, f) := {
+export custom(owner, spec, tail, f) := {
     ug_extra = append(ug_extra, [Tuple{owner, spec, tail, f}])
     ug_version = -1
 }
@@ -638,8 +640,8 @@ print_if(t) :=
         }
     }
 
-unparse_custom('primary, 3, none, print_do)
-unparse_custom('primary, 3, 'arrow, print_if)
+custom('primary, 3, none, print_do)
+custom('primary, 3, 'arrow, print_if)
 
 # print_do is also used for the arguments of a hole of an f-string: they are parsed as expr.
 
@@ -800,8 +802,10 @@ print_index(f) :=
         if (g == none) none else unparse_pp('expr, g)
     }
 
-unparse_custom('index, 10, none, print_index)
-unparse_custom('primary, 8, none, print_fstr)
-unparse_custom('sugar_primary, 6, 'arrow, print_return0)
-unparse_custom('sugar_primary, 10, none, print_match)
-unparse_custom('union, 12, 'union, print_guard)
+custom('index, 10, none, print_index)
+custom('primary, 8, none, print_fstr)
+custom('sugar_primary, 6, 'arrow, print_return0)
+custom('sugar_primary, 10, none, print_match)
+custom('union, 12, 'union, print_guard)
+
+}
