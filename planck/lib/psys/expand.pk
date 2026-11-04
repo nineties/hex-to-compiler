@@ -1,9 +1,9 @@
 # psys/expand: turns a module of psys into the Module of vasm
 # Copyright (C) 2026 nineties
 #
-# psys_expand(m) is the Module{[...]} of vasm for the module m = PModule{[...]} that psys{| ... |} reads.
-# psys_expand_all(m) is Tuple{module, errors} with the errors [VasmErr{kind, Pos{d}, msg}, ...], the first of each function.
-# The expansion makes the form that vasm_check checks; it does not check ownership, borrows or regions.
+# psys_expand.expand(m) is the Module{[...]} of vasm for the module m = PModule{[...]} that psys{| ... |} reads.
+# psys_expand.expand_all(m) is Tuple{module, errors} with the errors [VasmErr{kind, Pos{d}, msg}, ...], the first of each function.
+# The expansion makes the form that vasm_check.check checks; it does not check ownership, borrows or regions.
 #
 # - A nested expression becomes one statement for each operation, with a temporary variable of the type of the operation.
 # - let x = e declares x with the type of e, or the type written after x.
@@ -19,6 +19,7 @@ use("string")
 use("vasm/check")
 use("psys/syntax")
 
+module psys_expand {
 px_fail(at, kind, msg) := perform PsysFail{at, kind, msg}
 
 # === State of the function being expanded ===
@@ -103,33 +104,33 @@ px_known(t) := not (head(t) == 'Lit or head(t) == 'Unk)
 
 # the type of a value that is kept in a variable. A literal has the type that the context gives.
 px_keep(at, t, want) := match t {
-    Lit{_} -> if (vasm_int(want)) want else px_fail(at, 'type, "the type of this value is not known; write the type, as in let x: i32 = ... or e as i32")
+    Lit{_} -> if (vasm_check.int(want)) want else px_fail(at, 'type, "the type of this value is not known; write the type, as in let x: i32 = ... or e as i32")
   | Unk{msg} -> px_fail(at, 'type, msg)
   | Unit{} -> px_fail(at, 'type, "this call gives no value")
   | _ -> t
 }
 
 # the type to give a literal beside a value of type t
-px_hint(t, want) := if (vasm_int(t)) t else want
+px_hint(t, want) := if (vasm_check.int(t)) t else want
 
 px_elem(at, t) := match t {
     Val{} -> Val{}
   | Own{Arr{u}} -> u
   | Ref{_, _, Arr{u}} -> u
-  | _ -> px_fail(at, 'type, f"{vasm_show_type(t)} is not an array to index")
+  | _ -> px_fail(at, 'type, f"{vasm_check.show_type(t)} is not an array to index")
 }
 
 px_pointee(at, t) := match t {
     Own{u} -> u
   | Ref{_, _, u} -> u
-  | _ -> px_fail(at, 'type, f"{vasm_show_type(t)} is not a pointer")
+  | _ -> px_fail(at, 'type, f"{vasm_check.show_type(t)} is not a pointer")
 }
 
 px_struct_of(at, t) := match t {
     Named{s} -> s
   | Own{Named{s}} -> s
   | Ref{_, _, Named{s}} -> s
-  | _ -> px_fail(at, 'type, f"{vasm_show_type(t)} is not a struct or a pointer to a struct")
+  | _ -> px_fail(at, 'type, f"{vasm_check.show_type(t)} is not a struct or a pointer to a struct")
 }
 
 px_field(at, s, f) := {
@@ -196,7 +197,7 @@ px_big(at, s, t) := {
     pr := px_parts(s)
     neg := arg(pr, 0)
     ps := arg(pr, 1)
-    e := vasm_int_entry(t)
+    e := vasm_check.int_entry(t)
     w := arg(e, 2)
     signed := arg(e, 3)
     nb := px_bits(ps)
@@ -229,7 +230,7 @@ px_var(at, x) := {
 }
 
 px_lit(at, n, want) := if (typeof(n) == 'int) Tuple{Imm{at, n}, Lit{n}}
-    else if (vasm_int(want)) px_big(at, arg(n, 0), want)
+    else if (vasm_check.int(want)) px_big(at, arg(n, 0), want)
     else px_fail(at, 'type, f"the type of {arg(n, 0)} is not known; write it as {arg(n, 0)} as i32 or give the type of the variable")
 
 px_simple_ex(e, want) := match e {
@@ -272,8 +273,8 @@ px_cmp(op) := member(op, ['lt, 'le, 'gt, 'ge, 'eq, 'ne])
 px_index(i) := {
     v := px_ex(i, I64{})
     t := arg(v, 1)
-    if (vasm_int(t) and t != I64{}) {
-        at := vasm_pos(arg(v, 0))
+    if (vasm_check.int(t) and t != I64{}) {
+        at := vasm_check.pos(arg(v, 0))
         x := px_declare(at, none, I64{}, false)
         px_emit(Assign{at, x, Conv{at, arg(v, 0), I64{}}})
         Reg{at, x}
@@ -316,14 +317,14 @@ px_result(at, f, sig, ts, tsub) := {
         }, zip(arg(sig, 1), ts))
         if (length(qs) == 1) table_set(rmap, r, qs[0])
     }, rs)
-    bad := any(r -> vasm_mentions(ret, r) and table_get(rmap, r, none) == none, rs)
-    t := vasm_subst(ret, rmap, tsub)
+    bad := any(r -> vasm_check.mentions(ret, r) and table_get(rmap, r, none) == none, rs)
+    t := vasm_check.subst(ret, rmap, tsub)
     if (bad) Unk{f"the region of the result of {symname(f)} is not known; write the type: let x: T = ..."}
     else if (px_has_tvar(t)) Unk{f"the type of the result of {symname(f)} is not known; write the type: let x: T = ..."}
     else t
 }
 
-px_has_tvar(t) := match t {
+px_has_tvar(t) = match t {
     TVar{_} -> true
   | Own{u} -> px_has_tvar(u)
   | Arr{u} -> px_has_tvar(u)
@@ -337,7 +338,7 @@ px_call(at, f, args) := {
         Tuple{Call{at, arg(b, 0), map(v -> arg(v, 0), px_exs(args, none))}, Val{}}
     } else {
         user := table_get(px_sigs, f, none)
-        sig := if (user == none) table_get(vasm_builtins, f, none) else user
+        sig := if (user == none) table_get(vasm_check.builtins, f, none) else user
         if (sig == none) px_fail(at, 'undefined, f"function {symname(f)} is not defined")
         ps := arg(sig, 1)
         if (length(ps) != length(args)) px_fail(at, 'type, f"{symname(f)} takes {length(ps)} arguments but {length(args)} are given")
@@ -348,7 +349,7 @@ px_call(at, f, args) := {
             p := arg(pa, 0)
             a := arg(pa, 1)
             v := if (head(p) == 'Place) px_place(a) else {
-                want := if (vasm_int(p)) p else if (head(p) == 'TVar) table_get(tsub, arg(p, 0), none) else none
+                want := if (vasm_check.int(p)) p else if (head(p) == 'TVar) table_get(tsub, arg(p, 0), none) else none
                 px_ex(a, want)
             }
             q := if (head(p) == 'Place) arg(p, 0) else p
@@ -360,7 +361,7 @@ px_call(at, f, args) := {
     }
 }
 
-px_rhs(e, want) := if (px_simple(e)) {
+px_rhs(e, want) = if (px_simple(e)) {
     v := px_simple_ex(e, want)
     Tuple{Mov{arg(v, 0)}, arg(v, 1)}
 } else match e {
@@ -385,9 +386,9 @@ px_rhs(e, want) := if (px_simple(e)) {
   | EAnd{at, a, b} -> px_short(at, a, b, true)
   | EOr{at, a, b} -> px_short(at, a, b, false)
   | ECast{at, a, t} -> {
-        v := px_ex(a, if (vasm_int(t)) t else none)
+        v := px_ex(a, if (vasm_check.int(t)) t else none)
         # a literal has the type at once
-        if (px_litlike(a) and vasm_int(t)) Tuple{Mov{arg(v, 0)}, t} else Tuple{Conv{at, arg(v, 0), t}, t}
+        if (px_litlike(a) and vasm_check.int(t)) Tuple{Mov{arg(v, 0)}, t} else Tuple{Conv{at, arg(v, 0), t}, t}
     }
   | EDeref{at, p} -> {
         b := px_var(at, p)
@@ -406,7 +407,7 @@ px_rhs(e, want) := if (px_simple(e)) {
   | EMake{at, s, inits} -> {
         is := map((PInit{iat, f, a}) -> {
             ft := px_field(iat, s, f)
-            v := px_ex(a, if (vasm_int(ft)) ft else none)
+            v := px_ex(a, if (vasm_check.int(ft)) ft else none)
             Init{iat, f, arg(v, 0)}
         }, inits)
         Tuple{Make{at, s, is}, Named{s}}
@@ -421,7 +422,7 @@ px_rhs(e, want) := if (px_simple(e)) {
 }
 
 # a and b (and is true) or a or b: b is computed only when a does not decide the value
-px_short(at, a, b, is_and) := {
+px_short(at, a, b, is_and) = {
     va := px_ex(a, Bool{})
     x := px_declare(at, none, Bool{}, false)
     px_emit(Assign{at, x, Mov{arg(va, 0)}})
@@ -456,7 +457,7 @@ px_target_type(tg) := match tg {
 
 px_set(at, tg, op, e) := {
     ty := px_target_type(tg)
-    want := if (vasm_int(ty)) ty else none
+    want := if (vasm_check.int(ty)) ty else none
     match tg {
         EVar{vat, x} -> {
             b := px_var(vat, x)
@@ -529,7 +530,7 @@ px_for(at, i, lo, hi, body) := {
     table_set(px_env, i, old)
 }
 
-px_stmt(s) := match s {
+px_stmt(s) = match s {
     SLet{at, x, t, e} -> {
         r := px_rhs(e, t)
         ty := if (t != none) t else px_keep(at, arg(r, 1), none)
@@ -550,7 +551,7 @@ px_stmt(s) := match s {
         px_emit(RegionS{at, r, b})
     }
   | SRet{at, e} -> if (e == none) px_emit(Ret{at, none}) else {
-        v := px_ex(e, if (vasm_int(px_ret)) px_ret else none)
+        v := px_ex(e, if (vasm_check.int(px_ret)) px_ret else none)
         px_emit(Ret{at, arg(v, 0)})
     }
   | SSet{at, tg, op, e} -> px_set(at, tg, op, e)
@@ -612,7 +613,7 @@ px_fn(d) := match d {
     }
 }
 
-psys_expand_all(m) := {
+export expand_all(m) := {
     items := arg(m, 0)
     px_sigs = table()
     px_structs = table()
@@ -636,15 +637,16 @@ psys_expand_all(m) := {
     Tuple{Module{reverse(out)}, reverse(errs)}
 }
 
-psys_expand(m) := {
-    r := psys_expand_all(m)
-    if (arg(r, 1) != []) panic(f"psys_expand: {arg(arg(r, 1)[0], 2)}")
+export expand(m) := {
+    r := expand_all(m)
+    if (arg(r, 1) != []) panic(f"psys_expand.expand: {arg(arg(r, 1)[0], 2)}")
     arg(r, 0)
 }
 
-# the errors of psys_expand_all with the positions in the file: [VasmErr{kind, Loc{file, line, column}, msg}, ...]
-psys_errors(file, errs) := {
+# the errors of expand_all with the positions in the file: [VasmErr{kind, Loc{file, line, column}, msg}, ...]
+export errors(file, errs) := {
     src := read_file(file)
     n := strlen(src)
-    map((VasmErr{kind, Pos{d}, msg}) -> VasmErr{kind, loc_at(file, src, n - d), msg}, errs)
+    map((VasmErr{kind, Pos{d}, msg}) -> VasmErr{kind, error.loc_at(file, src, n - d), msg}, errs)
+}
 }

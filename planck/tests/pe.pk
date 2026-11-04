@@ -15,29 +15,29 @@ check(name, got, want) := {
 }
 
 # the text of the i-th function of the module m
-fn_text(m, i) := vasm_text(Module{[arg(m, 0)[i]]})
+fn_text(m, i) := vasm_text.text(Module{[arg(m, 0)[i]]})
 names(m) := map(d -> symname(arg(d, 1)), arg(m, 0))
 
 pow_tree := `({
     pow(x, 0) := 1
     pow(x, n) := x * pow(x, n - 1)
 })
-pow_text(n) := fn_text(specialize(pow_tree, [Dyn{I32{}}, n], I32{}), 0)
+pow_text(n) := fn_text(pe.specialize(pow_tree, [Dyn{I32{}}, n], I32{}), 0)
 
 check("pow, n = 0", pow_text(0), "fn pow_spec(a0: i32) -> i32 {\n    return 1\n}\n")
 check("pow, n = 1", pow_text(1), "fn pow_spec(a0: i32) -> i32 {\n    var t1: i32\n    t1 = a0 * 1\n    return t1\n}\n")
 check("pow, n = 3", pow_text(3), "fn pow_spec(a0: i32) -> i32 {\n    var t1: i32\n    var t2: i32\n    var t3: i32\n    t1 = a0 * 1\n    t2 = a0 * t1\n    t3 = a0 * t2\n    return t3\n}\n")
 
-pow_m := specialize(pow_tree, [Dyn{I32{}}, 3], I32{})
+pow_m := pe.specialize(pow_tree, [Dyn{I32{}}, 3], I32{})
 check("pow, n = 3 is one function", names(pow_m), ["pow_spec"])
-check("pow module is well-typed", vasm_check(pe_with_main(pow_m, [5])), [])
-check("pow module text has no main", pe_vasm_text(pe_with_main(pow_m, [5])), pe_vasm_text(pow_m))
+check("pow module is well-typed", vasm_check.check(pe.with_main(pow_m, [5])), [])
+check("pow module text has no main", pe.vasm_text(pe.with_main(pow_m, [5])), pe.vasm_text(pow_m))
 
 # a dynamic argument that is not used
-check("unused dynamic argument",fn_text(specialize(`(f(x, n) := x), [4, Dyn{I32{}}], I32{}), 0), "fn f_spec(a1: i32) -> i32 {\n    return 4\n}\n")
+check("unused dynamic argument",fn_text(pe.specialize(`(f(x, n) := x), [4, Dyn{I32{}}], I32{}), 0), "fn f_spec(a1: i32) -> i32 {\n    return 4\n}\n")
 
 # all arguments static: only the value is left
-check("pow, both static", fn_text(specialize(pow_tree, [2, 10], I32{}), 0), "fn pow_spec() -> i32 {\n    return 1024\n}\n")
+check("pow, both static", fn_text(pe.specialize(pow_tree, [2, 10], I32{}), 0), "fn pow_spec() -> i32 {\n    return 1024\n}\n")
 
 # the interpreter of a bytecode, with the code static
 interp_tree := `({
@@ -49,85 +49,85 @@ interp_tree := `({
     run(code, x) := exec(code, x, [])
 })
 code := [Arg{}, Push{3}, Mul{}, Push{1}, Add{}]
-run_m := specialize(interp_tree, [code, Dyn{I32{}}], I32{})
+run_m := pe.specialize(interp_tree, [code, Dyn{I32{}}], I32{})
 check("interpreter, x * 3 + 1", fn_text(run_m, 0), "fn run_spec(a1: i32) -> i32 {\n    var t1: i32\n    var t2: i32\n    t1 = 3 * a1\n    t2 = 1 + t1\n    return t2\n}\n")
-check("interpreter module is well-typed", vasm_check(pe_with_main(run_m, [5])), [])
+check("interpreter module is well-typed", vasm_check.check(pe.with_main(run_m, [5])), [])
 
 # a function as a static value is called with dynamic arguments
 twice_tree := `(twice(f, x) := f(f(x)))
-twice_m := specialize(twice_tree, [`(x -> x + 1), Dyn{I32{}}], I32{})
+twice_m := pe.specialize(twice_tree, [`(x -> x + 1), Dyn{I32{}}], I32{})
 check("twice", fn_text(twice_m, 0), "fn twice_spec(a1: i32) -> i32 {\n    var t1: i32\n    var t2: i32\n    t1 = a1 + 1\n    t2 = t1 + 1\n    return t2\n}\n")
-check("twice module is well-typed", vasm_check(pe_with_main(twice_m, [5])), [])
-check("twice, a function in the tree", fn_text(specialize(twice_tree, [`(inc(y) := y + 2), Dyn{I32{}}], I32{}), 0), "fn twice_spec(a1: i32) -> i32 {\n    var t1: i32\n    var t2: i32\n    t1 = a1 + 2\n    t2 = t1 + 2\n    return t2\n}\n")
+check("twice module is well-typed", vasm_check.check(pe.with_main(twice_m, [5])), [])
+check("twice, a function in the tree", fn_text(pe.specialize(twice_tree, [`(inc(y) := y + 2), Dyn{I32{}}], I32{}), 0), "fn twice_spec(a1: i32) -> i32 {\n    var t1: i32\n    var t2: i32\n    t1 = a1 + 2\n    t2 = t1 + 2\n    return t2\n}\n")
 
 # a built-in function with a dynamic argument calls its implementation in vasm
 len_tree := `(plus_len(s, x) := x + strlen(s))
-len_m := specialize(len_tree, [Dyn{Ref{'shr, 'static, Arr{U8{}}}}, Dyn{I32{}}], I32{})
+len_m := pe.specialize(len_tree, [Dyn{Ref{'shr, 'static, Arr{U8{}}}}, Dyn{I32{}}], I32{})
 check("strlen, dynamic", fn_text(len_m, 0), "fn plus_len_spec(a0: &static [u8], a1: i32) -> i32 {\n    var t1: i32\n    var t2: i32\n    t1 = strlen(a0)\n    t2 = a1 + t1\n    return t2\n}\n")
 check("strlen, the functions", names(len_m), ["plus_len_spec", "strlen"])
-check("strlen module is well-typed", vasm_check(pe_with_main(len_m, ["hello", 10])), [])
-check("strlen, static", fn_text(specialize(len_tree, ["hello", Dyn{I32{}}], I32{}), 0), "fn plus_len_spec(a1: i32) -> i32 {\n    var t1: i32\n    t1 = a1 + 5\n    return t1\n}\n")
+check("strlen module is well-typed", vasm_check.check(pe.with_main(len_m, ["hello", 10])), [])
+check("strlen, static", fn_text(pe.specialize(len_tree, ["hello", Dyn{I32{}}], I32{}), 0), "fn plus_len_spec(a1: i32) -> i32 {\n    var t1: i32\n    t1 = a1 + 5\n    return t1\n}\n")
 
 # a recursion under a dynamic condition stays a function
 count_tree := `(count_to(x, k) := if (x == k) x else count_to(x + 1, k))
-count_m := specialize(count_tree, [Dyn{I32{}}, 3], I32{})
+count_m := pe.specialize(count_tree, [Dyn{I32{}}, 3], I32{})
 check("recursion under a dynamic condition", fn_text(count_m, 0), "fn count_to_spec(a0: i32) -> i32 {\n    var t1: bool\n    var t2: i32\n    var t3: i32\n    var t4: i32\n    t1 = a0 == 3\n    if (t1) {\n        t4 = a0\n    } else {\n        t2 = a0 + 1\n        t3 = count_to_spec(t2)\n        t4 = t3\n    }\n    return t4\n}\n")
 check("recursion, one function", names(count_m), ["count_to_spec"])
-check("recursion module is well-typed", vasm_check(pe_with_main(count_m, [0])), [])
+check("recursion module is well-typed", vasm_check.check(pe.with_main(count_m, [0])), [])
 
 # the static argument changes at each call: it is a parameter of the function that is made for the changed call, and the functions do not grow
 down_tree := `(down(x, n) := if (n == 0) x else if (x == 7) 0 else down(x + 1, n - 1))
-down_m := specialize(down_tree, [Dyn{I32{}}, 2], I32{})
+down_m := pe.specialize(down_tree, [Dyn{I32{}}, 2], I32{})
 check("recursion, static argument changes", names(down_m), ["down_spec", "down_spec_1"])
 check("recursion, static argument changes, the first", fn_text(down_m, 0), "fn down_spec(a0: i32) -> i32 {\n    var t1: bool\n    var t2: i32\n    var t3: i32\n    var t4: i32\n    t1 = a0 == 7\n    if (t1) {\n        t4 = 0\n    } else {\n        t2 = a0 + 1\n        t3 = down_spec_1(t2, 1)\n        t4 = t3\n    }\n    return t4\n}\n")
 check("recursion, static argument changes, the one that calls itself", fn_text(down_m, 1), "fn down_spec_1(a0: i32, a1: i32) -> i32 {\n    var t1: bool\n    var t2: bool\n    var t3: i32\n    var t4: i32\n    var t5: i32\n    var t6: i32\n    var t7: i32\n    t1 = a1 == 0\n    if (t1) {\n        t7 = a0\n    } else {\n        t2 = a0 == 7\n        if (t2) {\n            t6 = 0\n        } else {\n            t3 = a0 + 1\n            t4 = a1 - 1\n            t5 = down_spec_1(t3, t4)\n            t6 = t5\n        }\n        t7 = t6\n    }\n    return t7\n}\n")
-check("recursion, static argument changes is well-typed", vasm_check(pe_with_main(down_m, [0])), [])
-check("recursion, the same static argument for any n", names(specialize(down_tree, [Dyn{I32{}}, 100], I32{})), ["down_spec", "down_spec_1"])
+check("recursion, static argument changes is well-typed", vasm_check.check(pe.with_main(down_m, [0])), [])
+check("recursion, the same static argument for any n", names(pe.specialize(down_tree, [Dyn{I32{}}, 100], I32{})), ["down_spec", "down_spec_1"])
 
 # a static argument that never gets back to a value is a parameter
-grow_m := specialize(`(grow(x, n) := if (x == 0) n else grow(x - 1, n + 1)), [Dyn{I32{}}, 0], I32{})
+grow_m := pe.specialize(`(grow(x, n) := if (x == 0) n else grow(x - 1, n + 1)), [Dyn{I32{}}, 0], I32{})
 check("recursion, static argument grows", names(grow_m), ["grow_spec", "grow_spec_1"])
-check("recursion, static argument grows is well-typed", vasm_check(pe_with_main(grow_m, [4])), [])
+check("recursion, static argument grows is well-typed", vasm_check.check(pe.with_main(grow_m, [4])), [])
 
 # a bool that changes is a parameter of the type bool, though it takes two values only
-flip_m := specialize(`(flip(x, b) := if (x == 0) b else flip(x - 1, not b)), [Dyn{I32{}}, true], Bool{})
+flip_m := pe.specialize(`(flip(x, b) := if (x == 0) b else flip(x - 1, not b)), [Dyn{I32{}}, true], Bool{})
 check("recursion, bool changes", fn_text(flip_m, 1), "fn flip_spec_1(a0: i32, a1: bool) -> bool {\n    var t1: bool\n    var t2: i32\n    var t3: bool\n    var t4: bool\n    var t5: bool\n    t1 = a0 == 0\n    if (t1) {\n        t5 = a1\n    } else {\n        t2 = a0 - 1\n        t3 = a1 == false\n        t4 = flip_spec_1(t2, t3)\n        t5 = t4\n    }\n    return t5\n}\n")
-check("recursion, bool changes is well-typed", vasm_check(pe_with_main(flip_m, [3])), [])
+check("recursion, bool changes is well-typed", vasm_check.check(pe.with_main(flip_m, [3])), [])
 # printing and reading stay in the result, in the order of the program
 show_tree := `(show(x) := {
     println("start")
     println(x + 1)
     x * 2
 })
-show_m := specialize(show_tree, [Dyn{I32{}}], I32{})
+show_m := pe.specialize(show_tree, [Dyn{I32{}}], I32{})
 check("println", fn_text(show_m, 0), "fn show_spec(a0: i32) -> i32 {\n    var t1: i32\n    var t2: i64\n    var t3: i32\n    println_str(\"start\")\n    t1 = a0 + 1\n    t2 = t1 as i64\n    println_int(t2)\n    t3 = a0 * 2\n    return t3\n}\n")
 check("println, the functions", names(show_m), ["show_spec", "println_str", "println_int"])
-check("println module is well-typed", vasm_check(pe_with_main(show_m, [5])), [])
+check("println module is well-typed", vasm_check.check(pe.with_main(show_m, [5])), [])
 
 order_tree := `(order(x) := if (x == 1) { println("one"); 1 } else { println("other"); 2 })
-check("println in the branches", fn_text(specialize(order_tree, [Dyn{I32{}}], I32{}), 0), "fn order_spec(a0: i32) -> i32 {\n    var t1: bool\n    var t2: i32\n    t1 = a0 == 1\n    if (t1) {\n        println_str(\"one\")\n        t2 = 1\n    } else {\n        println_str(\"other\")\n        t2 = 2\n    }\n    return t2\n}\n")
+check("println in the branches", fn_text(pe.specialize(order_tree, [Dyn{I32{}}], I32{}), 0), "fn order_spec(a0: i32) -> i32 {\n    var t1: bool\n    var t2: i32\n    t1 = a0 == 1\n    if (t1) {\n        println_str(\"one\")\n        t2 = 1\n    } else {\n        println_str(\"other\")\n        t2 = 2\n    }\n    return t2\n}\n")
 
 read_tree := `(size(x) := x + strlen(read_file("planck/examples/pe/prog.txt")))
-read_m := specialize(read_tree, [Dyn{I32{}}], I32{})
+read_m := pe.specialize(read_tree, [Dyn{I32{}}], I32{})
 check("read_file", fn_text(read_m, 0), "fn size_spec(a0: i32) -> i32 {\n    var t1: val\n    var t2: val\n    var t3: val\n    var t4: i64\n    var t5: i64\n    var t6: i64\n    var t7: i32\n    t1 = \"planck/examples/pe/prog.txt\" as val\n    t2 = v_read_file(t1)\n    t3 = v_strlen(t2)\n    t4 = t3 as i64\n    t5 = a0 as i64\n    t6 = t5 + t4\n    t7 = t6 as i32\n    return t7\n}\n")
-check("read_file module is well-typed", vasm_check(pe_with_main(read_m, [0])), [])
+check("read_file module is well-typed", vasm_check.check(pe.with_main(read_m, [0])), [])
 
 argv_tree := `(arglen(x) := x + strlen(argv()[1]) + array_len(argv()))
-argv_m := specialize(argv_tree, [Dyn{I32{}}], I32{})
+argv_m := pe.specialize(argv_tree, [Dyn{I32{}}], I32{})
 check("argv", fn_text(argv_m, 0), "fn arglen_spec(a0: i32) -> i32 {\n    var t1: &static [u8]\n    var t2: i32\n    var t3: i32\n    var t4: i64\n    var t5: i64\n    var t6: i64\n    var t7: i32\n    t1 = argv(1)\n    t2 = strlen(t1)\n    t3 = a0 + t2\n    t4 = argc()\n    t5 = t3 as i64\n    t6 = t5 + t4\n    t7 = t6 as i32\n    return t7\n}\n")
-check("argv module is well-typed", vasm_check(pe_with_main(argv_m, [0])), [])
+check("argv module is well-typed", vasm_check.check(pe.with_main(argv_m, [0])), [])
 
 # and, a sequence of definitions, and a function without a result
 both_tree := `(both(x, y) := if (x > 1 and y < 2) 1 else 0)
-check("and of dynamic comparisons", fn_text(specialize(both_tree, [Dyn{I32{}}, Dyn{I32{}}], I32{}), 0), "fn both_spec(a0: i32, a1: i32) -> i32 {\n    var t1: bool\n    var t2: bool\n    var t3: bool\n    var t4: i32\n    t1 = a0 > 1\n    if (t1) {\n        t2 = a1 < 2\n        t3 = t2\n    } else {\n        t3 = false\n    }\n    if (t3) {\n        t4 = 1\n    } else {\n        t4 = 0\n    }\n    return t4\n}\n")
-seq_m := specialize(`(seq(x) := { a := x + 1; b := a * 2; b - a }), [Dyn{I32{}}], I32{})
+check("and of dynamic comparisons", fn_text(pe.specialize(both_tree, [Dyn{I32{}}, Dyn{I32{}}], I32{}), 0), "fn both_spec(a0: i32, a1: i32) -> i32 {\n    var t1: bool\n    var t2: bool\n    var t3: bool\n    var t4: i32\n    t1 = a0 > 1\n    if (t1) {\n        t2 = a1 < 2\n        t3 = t2\n    } else {\n        t3 = false\n    }\n    if (t3) {\n        t4 = 1\n    } else {\n        t4 = 0\n    }\n    return t4\n}\n")
+seq_m := pe.specialize(`(seq(x) := { a := x + 1; b := a * 2; b - a }), [Dyn{I32{}}], I32{})
 check("definitions in a function", fn_text(seq_m, 0), "fn seq_spec(a0: i32) -> i32 {\n    var t1: i32\n    var t2: i32\n    var t3: i32\n    t1 = a0 + 1\n    t2 = t1 * 2\n    t3 = t2 - t1\n    return t3\n}\n")
-check("definitions module is well-typed", vasm_check(pe_with_main(seq_m, [3])), [])
-unit_m := specialize(`(say(a) := println(a)), [Dyn{I32{}}], Unit{})
+check("definitions module is well-typed", vasm_check.check(pe.with_main(seq_m, [3])), [])
+unit_m := pe.specialize(`(say(a) := println(a)), [Dyn{I32{}}], Unit{})
 check("no result", fn_text(unit_m, 0), "fn say_spec(a0: i32) {\n    var t1: i64\n    t1 = a0 as i64\n    println_int(t1)\n    return\n}\n")
 
 # the text of a module is read back as the same functions
-check("text is read back", names(arg(peg_parse('vasm, pe_vasm_text(down_m)), 0)), ["down_spec", "down_spec_1"])
+check("text is read back", names(arg(peg_parse('vasm, pe.vasm_text(down_m)), 0)), ["down_spec", "down_spec_1"])
 
 # the writes to an array stay in the result, in the order of the program
 fill_tree := `(fill(x) := {
@@ -136,13 +136,13 @@ fill_tree := `(fill(x) := {
     a[1] = a[0] + 1
     a[1]
 })
-fill_m := specialize(fill_tree, [Dyn{I32{}}], I32{})
+fill_m := pe.specialize(fill_tree, [Dyn{I32{}}], I32{})
 check("array", fn_text(fill_m, 0), "fn fill_spec(a0: i32) -> i32 {\n    var t1: val\n    var t2: val\n    var t3: val\n    var t4: val\n    var t5: i64\n    var t6: i64\n    var t7: val\n    var t8: val\n    var t9: i32\n    t1 = 0 as val\n    t2 = array(2, t1)\n    t3 = a0 as val\n    t2[0] = t3\n    t4 = t2[0]\n    t5 = t4 as i64\n    t6 = t5 + 1\n    t7 = t6 as val\n    t2[1] = t7\n    t8 = t2[1]\n    t9 = t8 as i32\n    return t9\n}\n")
-check("array module is well-typed", vasm_check(pe_with_main(fill_m, [5])), [])
-check("array, static index and value", fn_text(specialize(`(sset(x) := { a := i32_array(2); a[1] = 7; a[1] + x }), [Dyn{I32{}}], I32{}), 0), "fn sset_spec(a0: i32) -> i32 {\n    var t1: val\n    var t2: val\n    var t3: val\n    var t4: val\n    var t5: i64\n    var t6: i64\n    var t7: i64\n    var t8: i32\n    t1 = 0 as val\n    t2 = array(2, t1)\n    t3 = 7 as val\n    t2[1] = t3\n    t4 = t2[1]\n    t5 = t4 as i64\n    t6 = a0 as i64\n    t7 = t5 + t6\n    t8 = t7 as i32\n    return t8\n}\n")
+check("array module is well-typed", vasm_check.check(pe.with_main(fill_m, [5])), [])
+check("array, static index and value", fn_text(pe.specialize(`(sset(x) := { a := i32_array(2); a[1] = 7; a[1] + x }), [Dyn{I32{}}], I32{}), 0), "fn sset_spec(a0: i32) -> i32 {\n    var t1: val\n    var t2: val\n    var t3: val\n    var t4: val\n    var t5: i64\n    var t6: i64\n    var t7: i64\n    var t8: i32\n    t1 = 0 as val\n    t2 = array(2, t1)\n    t3 = 7 as val\n    t2[1] = t3\n    t4 = t2[1]\n    t5 = t4 as i64\n    t6 = a0 as i64\n    t7 = t5 + t6\n    t8 = t7 as i32\n    return t8\n}\n")
 
 # Everything is left in vasm: each of these is a module that passes the check.
-well_typed(name, tree, args, rty, inputs) := check(f"{name} is well-typed", map(e -> arg(e, 2), vasm_check(pe_with_main(specialize(tree, args, rty), inputs))), [])
+well_typed(name, tree, args, rty, inputs) := check(f"{name} is well-typed", map(e -> arg(e, 2), vasm_check.check(pe.with_main(pe.specialize(tree, args, rty), inputs))), [])
 
 well_typed("a dynamic while", `(w(n) := { i := 0; while (i < n) i = i + 1; i }), [Dyn{I32{}}], I32{}, [3])
 well_typed("an assignment under a dynamic condition", `(s(c) := { x := 1; if (c > 0) x = 2; x + 1 }), [Dyn{I32{}}], I32{}, [3])
@@ -161,7 +161,7 @@ well_typed("a handler with its continuation", `(q(c) := handle c + perform Ask{}
 well_typed("put, print, the files and exit", `(o(x) := { put("a"); print(x); write_file("tmp-pe-test", "b"); put(read_file("tmp-pe-test")); if (try_read_file("tmp-pe-test") == none) exit(1); x }), [Dyn{I32{}}], I32{}, [3])
 
 # a value that a place does not hold makes the place a val
-check("a result that does not hold its value", arg(arg(specialize(`({ b(x) := if (x == 0) [1] else b(x - 1); a(x) := if (x == 0) 1 else strlen(f"{length(b(x))}") }), [Dyn{I32{}}], I32{}), 0)[1], 4), Val{})
+check("a result that does not hold its value", arg(arg(pe.specialize(`({ b(x) := if (x == 0) [1] else b(x - 1); a(x) := if (x == 0) 1 else strlen(f"{length(b(x))}") }), [Dyn{I32{}}], I32{}), 0)[1], 4), Val{})
 
 if (failed > 0) {
     println(f"{failed} failed")

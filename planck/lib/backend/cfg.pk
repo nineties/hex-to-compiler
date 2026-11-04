@@ -8,35 +8,37 @@ use("vector")
 use("bitset")
 use("backend/ir")
 
+module cfg {
+
 # A block is Blk{instrs, succs}: its instructions and the numbers of the blocks that may run next.
 # A block starts at a label and at the instruction after a terminator, and ends at a terminator.
-# cfg_blocks(code) is an array of blocks, numbered from 0 in the order of the code.
-cfg_blocks(code) := {
-    groups := vec_new()
+# blocks(code) is an array of blocks, numbered from 0 in the order of the code.
+export blocks(code) := {
+    groups := vector.new()
     cur := []
     labels := table()
     flush := () -> if (cur != []) {
-        vec_push(groups, reverse(cur))
+        vector.push(groups, reverse(cur))
         cur = []
     }
     each(i -> {
-        if (ir_op(i) == 'label) {
+        if (ir.op(i) == 'label) {
             flush()
-            table_set(labels, ir_label_id(i), vec_len(groups))
+            table_set(labels, ir.label_id(i), vector.len(groups))
         }
         cur = i :: cur
-        if (ir_is_term(i)) flush()
+        if (ir.is_term(i)) flush()
     }, code)
     flush()
-    n := vec_len(groups)
+    n := vector.len(groups)
     bs := array(n)
     k := 0
     while (k < n) {
-        xs := vec_get(groups, k)
+        xs := vector.get(groups, k)
         last := last(xs)
-        ts := map(l -> table_get(labels, l, -1), ir_targets(last))
-        if (member(-1, ts)) panic("cfg_blocks: a jump to a label that is not in the code")
-        next := if (ir_falls(last) and k + 1 < n) [k + 1] else []
+        ts := map(l -> table_get(labels, l, -1), ir.targets(last))
+        if (member(-1, ts)) panic("cfg.blocks: a jump to a label that is not in the code")
+        next := if (ir.falls(last) and k + 1 < n) [k + 1] else []
         array_set(bs, k, Blk{xs, append(ts, next)})
         k = k + 1
     }
@@ -53,8 +55,8 @@ cfg_flatten(bs) := {
     r
 }
 
-# cfg_live(bs, nregs) is Tuple{live_in, live_out}: arrays with the set of registers (0 to nregs - 1) live at the start and at the end of each block
-cfg_live(bs, nregs) := {
+# live(bs, nregs) is Tuple{live_in, live_out}: arrays with the set of registers (0 to nregs - 1) live at the start and at the end of each block
+export live(bs, nregs) := {
     n := array_len(bs)
     gen := array(n)
     kill := array(n)
@@ -62,16 +64,16 @@ cfg_live(bs, nregs) := {
     lout := array(n)
     k := 0
     while (k < n) {
-        g := bits_new(nregs)
-        d := bits_new(nregs)
+        g := bitset.new(nregs)
+        d := bitset.new(nregs)
         each(i -> {
-            each(u -> if (not bits_has(d, u)) bits_add(g, u), ir_uses(i))
-            each(x -> bits_add(d, x), ir_defs(i))
+            each(u -> if (not bitset.has(d, u)) bitset.add(g, u), ir.uses(i))
+            each(x -> bitset.add(d, x), ir.defs(i))
         }, arg(array_get(bs, k), 0))
         array_set(gen, k, g)
         array_set(kill, k, d)
-        array_set(lin, k, bits_copy(g))
-        array_set(lout, k, bits_new(nregs))
+        array_set(lin, k, bitset.copy(g))
+        array_set(lout, k, bitset.new(nregs))
         k = k + 1
     }
     changed := true
@@ -80,13 +82,26 @@ cfg_live(bs, nregs) := {
         k = n - 1
         while (k >= 0) {
             o := array_get(lout, k)
-            each(s -> if (bits_union(o, array_get(lin, s))) changed = true, arg(array_get(bs, k), 1))
+            each(s -> if (bitset.union(o, array_get(lin, s))) changed = true, arg(array_get(bs, k), 1))
             # in = gen | (out - kill)
-            t := bits_copy(o)
-            bits_minus(t, array_get(kill, k))
-            if (bits_union(array_get(lin, k), t)) changed = true
+            t := bitset.copy(o)
+            bitset.minus(t, array_get(kill, k))
+            if (bitset.union(array_get(lin, k), t)) changed = true
             k = k - 1
         }
     }
     Tuple{lin, lout}
+}
+
+test {
+    code := [
+        I{'mov, [D{40}, K{0}]},
+        I{'label, [L{0}]},
+        I{'add, [DU{40}, K{1}, ID{8}]},
+        I{'jcc, [Cc{'lt}, L{0}, IU{8}]},
+        I{'mov, [D{0}, U{40}]},
+        I{'ret, [IU{0}]}]
+    assert(cfg_flatten(blocks(code)) == code, "cfg_flatten gives back the code that blocks divided")
+}
+
 }

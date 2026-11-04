@@ -18,6 +18,8 @@ use("backend/obj")
 use("backend/ir")
 use("backend/x86enc")
 
+module x64enc {
+
 fun x64_modrm_base
 fun x64_alu_op
 fun x64_f7
@@ -60,7 +62,7 @@ x64_rm_regs(rm) := match rm {
 # r extends the register of the reg field, x the index and b the base or the register of the rm field
 x64_rex(em, w, r, x, b, force) := {
     v := 64 + (if (w) 8 else 0) + (if (r >= 8) 4 else 0) + (if (x >= 8) 2 else 0) + (if (b >= 8) 1 else 0)
-    if (v != 64 or force) em_u8(em, v)
+    if (v != 64 or force) x86enc.u8(em, v)
 }
 
 x64_scale(s) := if (s == 1) 0 else if (s == 2) 1 else if (s == 4) 2 else if (s == 8) 3 else panic("x64: the scale of an index is 1, 2, 4 or 8")
@@ -68,41 +70,41 @@ x64_scale(s) := if (s == 1) 0 else if (s == 2) 1 else if (s == 4) 2 else if (s =
 # x64_modrm(em, reg, rm, trail) writes the ModRM byte, the SIB byte and the displacement. reg is the number in the reg field; rm is a register number
 # or a memory operand. trail is the number of bytes of integers that follow, which a displacement relative to the next instruction counts.
 x64_modrm(em, reg, rm, trail) := match rm {
-    r @ int -> em_u8(em, 192 + (reg % 8) * 8 + r % 8)
+    r @ int -> x86enc.u8(em, 192 + (reg % 8) * 8 + r % 8)
   | M{U{b}, d} -> x64_modrm_base(em, reg, b, none, 0, d)
   | MX{U{b}, U{x}, s, d} -> x64_modrm_base(em, reg, b, x, s, d)
   | MX{'none, U{x}, s, d} -> {
         if (x == 4) panic("x64: rsp cannot be an index")
-        em_u8(em, (reg % 8) * 8 + 4)
-        em_u8(em, x64_scale(s) * 64 + (x % 8) * 8 + 5)
-        em_u32(em, d)
+        x86enc.u8(em, (reg % 8) * 8 + 4)
+        x86enc.u8(em, x64_scale(s) * 64 + (x % 8) * 8 + 5)
+        x86enc.u32(em, d)
     }
   | MG{name, d} -> {
-        em_u8(em, (reg % 8) * 8 + 5)
-        em_sym(em, 'Pc32, name, d - trail)
+        x86enc.u8(em, (reg % 8) * 8 + 5)
+        x86enc.sym(em, 'Pc32, name, d - trail)
     }
   | _ -> panic("x64: a memory operand is expected")
 }
 
-x64_modrm_base(em, reg, b, x, s, d) := {
+x64_modrm_base(em, reg, b, x, s, d) = {
     bl := b % 8
-    mod := if (d == 0 and bl != 5) 0 else if (x86_fits8(d)) 1 else 2
-    if (x == none and bl != 4) em_u8(em, mod * 64 + (reg % 8) * 8 + bl)
+    mod := if (d == 0 and bl != 5) 0 else if (x86enc.fits8(d)) 1 else 2
+    if (x == none and bl != 4) x86enc.u8(em, mod * 64 + (reg % 8) * 8 + bl)
     else {
         if (x == 4) panic("x64: rsp cannot be an index")
-        em_u8(em, mod * 64 + (reg % 8) * 8 + 4)
-        em_u8(em, (if (x == none) 0 else x64_scale(s)) * 64 + (if (x == none) 4 else x % 8) * 8 + bl)
+        x86enc.u8(em, mod * 64 + (reg % 8) * 8 + 4)
+        x86enc.u8(em, (if (x == none) 0 else x64_scale(s)) * 64 + (if (x == none) 4 else x % 8) * 8 + bl)
     }
-    if (mod == 1) em_u8(em, d) else if (mod == 2) em_u32(em, d)
+    if (mod == 1) x86enc.u8(em, d) else if (mod == 2) x86enc.u32(em, d)
 }
 
 # x64_op(em, pre, w, ops, reg, rm, trail, force) writes an instruction with a ModRM byte: the prefix pre (0 for none), REX, the bytes ops of the opcode
 # and the operands. force is true when REX is needed to name the byte registers 4 to 7.
 x64_op(em, pre, w, ops, reg, rm, trail, force) := {
     xb := x64_rm_regs(rm)
-    if (pre != 0) em_u8(em, pre)
+    if (pre != 0) x86enc.u8(em, pre)
     x64_rex(em, w, reg, xb[0], xb[1], force)
-    em_bytes(em, ops)
+    x86enc.u8s(em, ops)
     x64_modrm(em, reg, rm, trail)
 }
 
@@ -120,35 +122,35 @@ x64_alu_entry(op) := find(e -> arg(e, 0) == op, x64_alu)
 
 x64_shift_digit(op) := if (op == 'shl) 4 else if (op == 'shr) 5 else 7
 
-# x64_emit(em, i) writes the instruction i. A jump to the label that follows is left out by x64_emit_code.
-x64_emit(em, i) := match I{ir_op(i), ir_explicit(i)} {
-    I{'label, [L{l}]} -> em_label(em, l)
+# x64_emit(em, i) writes the instruction i. A jump to the label that follows is left out by emit_code.
+x64_emit(em, i) := match I{ir.op(i), ir.explicit(i)} {
+    I{'label, [L{l}]} -> x86enc.label(em, l)
   | I{'mov, [W{z}, D{d}, U{s}]} -> x64_op(em, 0, z == 'w64, [137], s, d, 0, false)
   | I{'movl, [D{d}, U{s}]} -> x64_op(em, 0, false, [137], s, d, 0, false)
   | I{'mov, [W{z}, D{d}, K{n}]} -> if (z == 'w64) {
         x64_op(em, 0, true, [199], 0, d, 4, false)
-        em_u32(em, n)
+        x86enc.u32(em, n)
     } else {
         x64_rex(em, false, 0, 0, d, false)
-        em_u8(em, 184 + d % 8)
-        em_u32(em, n)
+        x86enc.u8(em, 184 + d % 8)
+        x86enc.u32(em, n)
     }
   | I{'mov, [W{z}, D{d}, m]} -> x64_op(em, 0, z == 'w64, [139], d, m, 0, false)
   | I{'mov, [W{z}, m, U{s}]} -> x64_op(em, 0, z == 'w64, [137], s, m, 0, false)
   | I{'mov, [W{z}, m, K{n}]} -> {
         x64_op(em, 0, z == 'w64, [199], 0, m, 4, false)
-        em_u32(em, n)
+        x86enc.u32(em, n)
     }
   | I{'movb, [m, U{s}]} -> x64_op(em, 0, false, [136], s, m, 0, x64_byte(s))
   | I{'movb, [m, K{n}]} -> {
         x64_op(em, 0, false, [198], 0, m, 1, false)
-        em_u8(em, n)
+        x86enc.u8(em, n)
     }
   | I{'movw, [m, U{s}]} -> x64_op(em, 102, false, [137], s, m, 0, false)
   | I{'movw, [m, K{n}]} -> {
         x64_op(em, 102, false, [199], 0, m, 2, false)
-        em_u8(em, bit_and(n, 255))
-        em_u8(em, bit_sar(n, 8))
+        x86enc.u8(em, bit_and(n, 255))
+        x86enc.u8(em, bit_sar(n, 8))
     }
   | I{'movzxb, [W{z}, D{d}, s]} -> x64_op(em, 0, z == 'w64, [15, 182], d, x64_rm(s), 0, x64_byte_rm(s))
   | I{'movsxb, [W{z}, D{d}, s]} -> x64_op(em, 0, z == 'w64, [15, 190], d, x64_rm(s), 0, x64_byte_rm(s))
@@ -162,70 +164,70 @@ x64_emit(em, i) := match I{ir_op(i), ir_explicit(i)} {
   | I{'mul, [W{z}, U{s}]} -> x64_f7(em, z, 4, s)
   | I{'div, [W{z}, U{s}]} -> x64_f7(em, z, 6, s)
   | I{'idiv, [W{z}, U{s}]} -> x64_f7(em, z, 7, s)
-  | I{'cdq, []} -> em_u8(em, 153)
-  | I{'cqo, []} -> em_bytes(em, [72, 153])
+  | I{'cdq, []} -> x86enc.u8(em, 153)
+  | I{'cqo, []} -> x86enc.u8s(em, [72, 153])
   | I{'test, [W{z}, U{a}, U{b}]} -> x64_op(em, 0, z == 'w64, [133], b, a, 0, false)
   | I{op, [W{z}, DU{d}]} if op == 'shl or op == 'shr or op == 'sar -> x64_op(em, 0, z == 'w64, [211], x64_shift_digit(op), d, 0, false)
   | I{op, [W{z}, DU{d}, K{n}]} if op == 'shl or op == 'shr or op == 'sar -> {
         x64_op(em, 0, z == 'w64, [193], x64_shift_digit(op), d, 1, false)
-        em_u8(em, n)
+        x86enc.u8(em, n)
     }
   | I{'push, [U{r}]} -> {
         x64_rex(em, false, 0, 0, r, false)
-        em_u8(em, 80 + r % 8)
+        x86enc.u8(em, 80 + r % 8)
     }
-  | I{'push, [K{n}]} -> if (x86_fits8(n)) em_bytes(em, [106, bit_and(n, 255)]) else {
-        em_u8(em, 104)
-        em_u32(em, n)
+  | I{'push, [K{n}]} -> if (x86enc.fits8(n)) x86enc.u8s(em, [106, bit_and(n, 255)]) else {
+        x86enc.u8(em, 104)
+        x86enc.u32(em, n)
     }
   | I{'push, [m]} -> x64_op(em, 0, false, [255], 6, m, 0, false)
   | I{'pop, [D{r}]} -> {
         x64_rex(em, false, 0, 0, r, false)
-        em_u8(em, 88 + r % 8)
+        x86enc.u8(em, 88 + r % 8)
     }
   | I{'call, [S{name, _}]} -> {
-        em_u8(em, 232)
-        em_sym(em, 'Pc32, name, 0)
+        x86enc.u8(em, 232)
+        x86enc.sym(em, 'Pc32, name, 0)
     }
   | I{'call, [U{r}]} -> x64_op(em, 0, false, [255], 2, r, 0, false)
-  | I{'ret, []} -> em_u8(em, 195)
+  | I{'ret, []} -> x86enc.u8(em, 195)
   | I{'jmp, [L{l}]} -> {
-        em_u8(em, 233)
-        em_rel32(em, l)
+        x86enc.u8(em, 233)
+        x86enc.rel32(em, l)
     }
   | I{'jcc, [Cc{c}, L{l}]} -> {
-        em_u8(em, 15)
-        em_u8(em, 128 + x86_cc_code(c))
-        em_rel32(em, l)
+        x86enc.u8(em, 15)
+        x86enc.u8(em, 128 + x86enc.cc_code(c))
+        x86enc.rel32(em, l)
     }
-  | I{'setcc, [Cc{c}, D{d}]} -> x64_op(em, 0, false, [15, 144 + x86_cc_code(c)], 0, d, 0, x64_byte(d))
-  | I{'syscall, []} -> em_bytes(em, [15, 5])
-  | I{'ud2, []} -> em_bytes(em, [15, 11])
+  | I{'setcc, [Cc{c}, D{d}]} -> x64_op(em, 0, false, [15, 144 + x86enc.cc_code(c)], 0, d, 0, x64_byte(d))
+  | I{'syscall, []} -> x86enc.u8s(em, [15, 5])
+  | I{'ud2, []} -> x86enc.u8s(em, [15, 11])
   | I{op, [W{z}, DU{d}, s]} if x64_alu_entry(op) != none -> x64_alu_op(em, z, op, d, s)
   | I{'cmp, [W{z}, U{a}, s]} -> x64_alu_op(em, z, 'cmp, a, s)
-  | _ -> panic(f"x64: cannot encode {ir_show(i)}")
+  | _ -> panic(f"x64: cannot encode {ir.show(i)}")
 }
 
 # op d, s where s is a register or an integer
-x64_alu_op(em, z, op, d, s) := {
+x64_alu_op(em, z, op, d, s) = {
     e := x64_alu_entry(op)
     match s {
         U{r} -> x64_op(em, 0, z == 'w64, [e[1]], r, d, 0, false)
-      | K{n} -> if (x86_fits8(n)) {
+      | K{n} -> if (x86enc.fits8(n)) {
             x64_op(em, 0, z == 'w64, [131], e[2], d, 1, false)
-            em_u8(em, n)
+            x86enc.u8(em, n)
         } else {
             x64_op(em, 0, z == 'w64, [129], e[2], d, 4, false)
-            em_u32(em, n)
+            x86enc.u32(em, n)
         }
       | _ -> panic("x64: the second operand of an arithmetic instruction is a register or an integer")
     }
 }
 
-x64_f7(em, z, digit, r) := x64_op(em, 0, z == 'w64, [247], digit, r, 0, false)
+x64_f7(em, z, digit, r) = x64_op(em, 0, z == 'w64, [247], digit, r, 0, false)
 
-# x64_emit_code(em, code) writes the instructions of a function; a jump to the label that follows is left out
-x64_emit_code(em, code) := {
+# emit_code(em, code) writes the instructions of a function; a jump to the label that follows is left out
+export emit_code(em, code) := {
     xs := code
     while (xs != []) {
         i := xs[0]
@@ -240,5 +242,60 @@ x64_emit_code(em, code) := {
         if (not skip) x64_emit(em, i)
         xs = rest
     }
-    em_finish(em)
+    x86enc.finish(em)
+}
+
+test {
+    code(is) := {
+        o := obj.new("t")
+        e := x86enc.new(o, ".text")
+        each(i -> x64_emit(e, i), is)
+        vector.to_list(obj.buf(obj.sec(o, ".text", 'code, 16)))
+    }
+    w32 := W{'w32}
+    w64 := W{'w64}
+    # push rbp; mov rbp, rsp; sub rsp, 16; pop rbp; ret
+    assert(code([I{'push, [U{5}]}]) == [85], "push rbp")
+    assert(code([I{'mov, [w64, D{5}, U{4}]}]) == [72, 137, 229], "mov rbp, rsp")
+    assert(code([I{'sub, [w64, DU{4}, K{16}]}]) == [72, 131, 236, 16], "sub rsp, 16")
+    assert(code([I{'pop, [D{5}]}, I{'ret, []}]) == [93, 195], "pop rbp; ret")
+    # registers 8 to 15 need the bits of REX
+    assert(code([I{'push, [U{12}]}]) == [65, 84], "push r12")
+    assert(code([I{'mov, [w64, D{8}, U{9}]}]) == [77, 137, 200], "mov r8, r9")
+    assert(code([I{'mov, [w32, D{10}, K{1}]}]) == [65, 186, 1, 0, 0, 0], "mov r10d, 1")
+    assert(code([I{'mov, [w32, D{0}, K{60}]}]) == [184, 60, 0, 0, 0], "mov eax, 60")
+    assert(code([I{'mov, [w64, D{0}, K{-1}]}]) == [72, 199, 192, 255, 255, 255, 255], "mov rax, -1")
+    # memory operands: a displacement, rsp and r12 as the base (SIB), rbp and r13 as the base (a displacement even for 0)
+    assert(code([I{'mov, [w64, D{0}, M{U{5}, -8}]}]) == [72, 139, 69, 248], "rbp base")
+    assert(code([I{'mov, [w64, M{U{5}, -8}, U{12}]}]) == [76, 137, 101, 248], "store with rbp base")
+    assert(code([I{'mov, [w64, D{0}, M{U{4}, 8}]}]) == [72, 139, 68, 36, 8], "rsp base")
+    assert(code([I{'mov, [w64, D{0}, M{U{12}, 0}]}]) == [73, 139, 4, 36], "r12 base")
+    assert(code([I{'mov, [w32, D{0}, M{U{13}, 0}]}]) == [65, 139, 69, 0], "r13 base")
+    assert(code([I{'mov, [w64, D{0}, MX{U{1}, U{2}, 8, 16}]}]) == [72, 139, 68, 209, 16], "index")
+    # arithmetic
+    assert(code([I{'add, [w64, DU{0}, U{1}]}]) == [72, 1, 200], "add")
+    assert(code([I{'add, [w32, DU{0}, K{5}]}]) == [131, 192, 5], "add with an integer")
+    assert(code([I{'sub, [w64, DU{0}, K{1000}]}]) == [72, 129, 232, 232, 3, 0, 0], "sub with a 32-bit integer")
+    assert(code([I{'cmp, [w64, U{0}, K{0}]}]) == [72, 131, 248, 0], "cmp")
+    assert(code([I{'imul, [w64, DU{0}, U{1}]}]) == [72, 15, 175, 193], "imul")
+    assert(code([I{'cqo, []}, I{'idiv, [w64, U{1}]}]) == [72, 153, 72, 247, 249], "cqo; idiv")
+    assert(code([I{'shl, [w64, DU{0}, K{3}]}]) == [72, 193, 224, 3], "shl with an integer")
+    assert(code([I{'shr, [w32, DU{0}]}]) == [211, 232], "shr by cl")
+    # widths of the moves
+    assert(code([I{'movzxb, [w32, D{0}, U{1}]}]) == [15, 182, 193], "movzxb")
+    assert(code([I{'movzxb, [w32, D{0}, U{6}]}]) == [64, 15, 182, 198], "movzxb of sil")
+    assert(code([I{'movsxd, [D{0}, U{1}]}]) == [72, 99, 193], "movsxd")
+    assert(code([I{'movl, [D{0}, U{1}]}]) == [137, 200], "movl")
+    assert(code([I{'movb, [M{U{0}, 0}, U{6}]}]) == [64, 136, 48], "movb of sil")
+    assert(code([I{'setcc, [Cc{'eq}, D{0}]}]) == [15, 148, 192], "setcc")
+    assert(code([I{'call, [U{0}]}]) == [255, 208], "call a register")
+    assert(code([I{'syscall, []}, I{'ud2, []}]) == [15, 5, 15, 11], "syscall; ud2")
+    # the address of a symbol is relative to the next instruction
+    o2 := obj.new("r")
+    e2 := x86enc.new(o2, ".text")
+    x64_emit(e2, I{'lea, [w64, D{7}, MG{"s", 0}]})
+    assert(vector.to_list(obj.buf(obj.sec(o2, ".text", 'code, 16))) == [72, 141, 61, 0, 0, 0, 0], "lea of a symbol")
+    assert(map((Rel{_, off, kind, sym, addend}) -> Tuple{off, kind, sym, addend}, obj.relocs(o2)) == [Tuple{3, 'Pc32, "s", -4}], "the relocation of a symbol")
+}
+
 }
