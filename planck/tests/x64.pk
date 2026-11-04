@@ -1,0 +1,94 @@
+# tests for backend/x64enc.pk and backend/x64.pk: the bytes of the instructions of x86-64 and the selection of instructions
+# Copyright (C) 2026 nineties
+
+passed := 0
+failed := 0
+
+check(actual, expected) := if (actual == expected) {
+    passed = passed + 1
+} else {
+    failed = failed + 1
+    put("Test failed: expected "); print(expected)
+    put(" but got "); println(actual)
+}
+
+use("backend/x64")
+
+# the bytes of the instructions
+code(is) := {
+    o := obj_new("t")
+    e := em_new(o, ".text")
+    each(i -> x64_emit(e, i), is)
+    vec_to_list(obj_buf(obj_sec(o, ".text", 'code, 16)))
+}
+
+w32 := W{'w32}
+w64 := W{'w64}
+
+# push rbp; mov rbp, rsp; sub rsp, 16; pop rbp; ret
+check(code([I{'push, [U{5}]}]), [85])
+check(code([I{'mov, [w64, D{5}, U{4}]}]), [72, 137, 229])
+check(code([I{'sub, [w64, DU{4}, K{16}]}]), [72, 131, 236, 16])
+check(code([I{'pop, [D{5}]}, I{'ret, []}]), [93, 195])
+# registers 8 to 15 need the bits of REX
+check(code([I{'push, [U{12}]}]), [65, 84])
+check(code([I{'mov, [w64, D{8}, U{9}]}]), [77, 137, 200])
+check(code([I{'mov, [w32, D{10}, K{1}]}]), [65, 186, 1, 0, 0, 0])
+check(code([I{'mov, [w32, D{0}, K{60}]}]), [184, 60, 0, 0, 0])
+check(code([I{'mov, [w64, D{0}, K{-1}]}]), [72, 199, 192, 255, 255, 255, 255])
+# memory operands: a displacement, rsp and r12 as the base (SIB), rbp and r13 as the base (a displacement even for 0)
+check(code([I{'mov, [w64, D{0}, M{U{5}, -8}]}]), [72, 139, 69, 248])
+check(code([I{'mov, [w64, M{U{5}, -8}, U{12}]}]), [76, 137, 101, 248])
+check(code([I{'mov, [w64, D{0}, M{U{4}, 8}]}]), [72, 139, 68, 36, 8])
+check(code([I{'mov, [w64, D{0}, M{U{12}, 0}]}]), [73, 139, 4, 36])
+check(code([I{'mov, [w32, D{0}, M{U{13}, 0}]}]), [65, 139, 69, 0])
+check(code([I{'mov, [w64, D{0}, MX{U{1}, U{2}, 8, 16}]}]), [72, 139, 68, 209, 16])
+# arithmetic
+check(code([I{'add, [w64, DU{0}, U{1}]}]), [72, 1, 200])
+check(code([I{'add, [w32, DU{0}, K{5}]}]), [131, 192, 5])
+check(code([I{'sub, [w64, DU{0}, K{1000}]}]), [72, 129, 232, 232, 3, 0, 0])
+check(code([I{'cmp, [w64, U{0}, K{0}]}]), [72, 131, 248, 0])
+check(code([I{'imul, [w64, DU{0}, U{1}]}]), [72, 15, 175, 193])
+check(code([I{'cqo, []}, I{'idiv, [w64, U{1}]}]), [72, 153, 72, 247, 249])
+check(code([I{'shl, [w64, DU{0}, K{3}]}]), [72, 193, 224, 3])
+check(code([I{'shr, [w32, DU{0}]}]), [211, 232])
+# widths of the moves
+check(code([I{'movzxb, [w32, D{0}, U{1}]}]), [15, 182, 193])
+check(code([I{'movzxb, [w32, D{0}, U{6}]}]), [64, 15, 182, 198])
+check(code([I{'movsxd, [D{0}, U{1}]}]), [72, 99, 193])
+check(code([I{'movl, [D{0}, U{1}]}]), [137, 200])
+check(code([I{'movb, [M{U{0}, 0}, U{6}]}]), [64, 136, 48])
+check(code([I{'setcc, [Cc{'eq}, D{0}]}]), [15, 148, 192])
+check(code([I{'call, [U{0}]}]), [255, 208])
+check(code([I{'syscall, []}, I{'ud2, []}]), [15, 5, 15, 11])
+# a jump back to a label is relative to the end of the jump
+o := obj_new("j")
+e := em_new(o, ".text")
+x64_emit_code(e, [I{'label, [L{0}]}, I{'jcc, [Cc{'eq}, L{0}]}])
+check(vec_to_list(obj_buf(obj_sec(o, ".text", 'code, 16))), [15, 132, 250, 255, 255, 255])
+# the address of a symbol is relative to the next instruction
+o2 := obj_new("r")
+e2 := em_new(o2, ".text")
+x64_emit(e2, I{'lea, [w64, D{7}, MG{"s", 0}]})
+check(vec_to_list(obj_buf(obj_sec(o2, ".text", 'code, 16))), [72, 141, 61, 0, 0, 0, 0])
+check(map((Rel{_, off, kind, sym, addend}) -> Tuple{off, kind, sym, addend}, obj_relocs(o2)), [Tuple{3, 'Pc32, "s", -4}])
+
+# === selection ===
+f := ir_fn("t")
+a := ir_vreg(f, 32)
+b := ir_vreg(f, 64)
+sel(is) := x64_select(f, is)
+# a 32-bit move and a 64-bit one; the extensions are moves that stay
+check(sel([I{'mov, [D{a}, U{a + 0}]}]), [I{'mov, [w32, D{a}, U{a}]}])
+check(sel([I{'zext64, [D{b}, U{a}]}]), [I{'movl, [D{b}, U{a}]}])
+check(sel([I{'sext64, [D{b}, U{a}]}]), [I{'movsxd, [D{b}, U{a}]}])
+check(sel([I{'trunc, [D{a}, U{b}]}]), [I{'movl, [D{a}, U{b}]}])
+# a 32-bit value that comes from a physical register is made whole
+check(sel([I{'mov, [D{a}, U{0}]}]), [I{'movl, [D{a}, U{0}]}])
+check(sel([I{'li, [D{b}, K{5}]}]), [I{'mov, [w64, D{b}, K{5}]}])
+check(sel([I{'ld, [W{'w32}, D{a}, M{U{b}, 4}]}]), [I{'mov, [w32, D{a}, M{U{b}, 4}]}])
+check(sel([I{'ld, [W{'w64}, D{b}, M{U{b}, 8}]}]), [I{'mov, [w64, D{b}, M{U{b}, 8}]}])
+check(sel([I{'getarg, [D{b}, K{2}]}]), [I{'mov, [w64, D{b}, MF{'arg, 2, 0}]}])
+
+put("Tests passed "); print(passed); put("/"); println(passed + failed)
+if (failed > 0) exit(1)
