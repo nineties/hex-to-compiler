@@ -276,6 +276,26 @@ not a function: none</pre>
 </div>
 <p>When the value of <code>f</code> is a function with a guard, as after <code>f = (n) if n &gt; 0 -&gt; 1</code>, a function added by <code>f(p, ...) = e</code> is not called when the guard is false, as <code>h | g</code> below.</p>
 
+<h2 id="module">module</h2>
+<p><code>module m { ... }</code> is an expression that gathers definitions under the name <code>m</code>. It can be read as sugar for <code>m := (() -&gt; { ... })()</code>, except that the value the body returns has the names of the definitions marked <code>export</code> as its fields.</p>
+<pre>module bitset {
+    export new(n) := i32_array(n / 30 + 1)
+    helper(i) := i / 30
+    export add(s, i) := {
+        w := helper(i)
+        s[w] = bit_or(s[w], bit_shl(1, i % 30))
+    }
+}</pre>
+<p>The value of this <code>bitset</code> has the fields <code>new</code> and <code>add</code>. The user calls them with <code>.</code>, as in <code>bitset.new(100)</code>. The rule of <code>.</code> is the same as that of reading a field of a <a href="#record">record</a>, and reading a name that is not marked <code>export</code>, such as <code>helper</code>, prints a message and stops the program.</p>
+<ul>
+<li>The scope in the body is that of the body of a function with no parameters. A variable in the body is a variable defined before it in the body, or a variable outside. To call a function defined later, declare it with <code>fun f</code> and add cases with <code>f(p, ...) = e</code>.</li>
+<li>The definitions in the body are variables of the body and do not become global variables. They do not hide a variable of the same name outside, and the outside cannot assign to them. <code>f(p, ...) := e</code> in the body defines a new <code>f</code> of the body even if there is an <code>f</code> outside.</li>
+<li>Like <code>m := e</code>, <code>m</code> is defined after the body has been evaluated. The body does not see <code>m</code>, and the functions in the body call each other by their names.</li>
+<li><code>export</code> is written before a definition in the body and makes the name of the definition a field. A definition without <code>export</code> is not visible from outside.</li>
+<li>The body is read as a whole. Replacing <code>parse</code> inside the body does not affect the rest of that body. To replace the grammar, write it outside the <code>module</code>.</li>
+<li><code>module</code> is one top-level expression. The table of global variables is not divided by file, and a file is read one expression at a time as before.</li>
+</ul>
+
 <h2 id="names">Names the sugar calls</h2>
 <p>The functions a piece of sugar expands to have a name starting with <code>_</code>, and there is no function of the same name without <code>_</code>. A variable named <code>add</code> or <code>index_get</code> in a program therefore does not change the meaning of <code>a + b</code> or <code>a[i]</code>.</p>
 <table>
