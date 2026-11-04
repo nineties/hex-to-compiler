@@ -1,0 +1,95 @@
+# tests for vasm/unit.pk: modules compiled one by one, saved and joined give the executable of the whole program
+# Copyright (C) 2026 nineties
+
+passed := 0
+failed := 0
+
+check(actual, expected) := if (actual == expected) {
+    passed = passed + 1
+} else {
+    failed = failed + 1
+    put("Test failed: expected "); print(expected)
+    put(" but got "); println(actual)
+}
+
+use("vasm/build")
+
+# a library: it has no main
+lib := vasm{|
+    struct Buf { data: own [u8], size: i64 }
+
+    fn make(n: i64) -> Buf {
+        var d: own [u8]
+        var b: Buf
+        d = alloc(n, 7)
+        b = Buf{data: d, size: n}
+        return b
+    }
+
+    fn sum(b: Buf) -> i64 {
+        var d: own [u8]
+        var n: i64
+        var i: i64
+        var s: i64
+        var c: u8
+        var w: i64
+        d = b.data
+        n = b.size
+        s = 0
+        i = 0
+        while (i < n) {
+            c = d[i]
+            w = c as i64
+            s = s + w
+            i = i + 1
+        }
+        return s
+    }
+
+    fn greet() {
+        write(1, "shared\n")
+        write(1, "from the library\n")
+    }
+|}
+
+# a program that uses it
+app := vasm{|
+    fn main() -> i64 {
+        var b: Buf
+        var t: i64
+        greet()
+        write(1, "shared\n")
+        b = make(10)
+        t = sum(b)
+        return t
+    }
+|}
+
+# the same program in one module
+whole := Module{append(arg(lib, 0), arg(app, 0))}
+
+word := 4
+lib_unit := vasm_unit("lib", lib, [], word)
+app_unit := vasm_unit("app", app, vasm_unit_iface(lib), word)
+
+text_before := vasm_unit_text(lib_unit)
+whole_bytes := vasm_executable(whole)
+split_bytes := vasm_units_executable([lib_unit, app_unit])
+check(bb_len(split_bytes) > 0, true)
+check(vec_to_list(split_bytes) == vec_to_list(whole_bytes), true)
+
+# joining does not change the units
+check(vasm_unit_text(lib_unit) == text_before, true)
+
+# a unit that is saved and read again
+saved := vasm_unit_parse(vasm_unit_text(lib_unit))
+check(vasm_unit_text(saved) == vasm_unit_text(lib_unit), true)
+check(vec_to_list(vasm_units_executable([saved, vasm_unit_parse(vasm_unit_text(app_unit))])) == vec_to_list(whole_bytes), true)
+
+# the name and the interface of a unit
+check(vasm_unit_name(lib_unit), "lib")
+check(vasm_unit_ifaces(app_unit), vasm_unit_iface(app))
+
+
+put("Tests passed "); print(passed); put("/"); println(passed + failed)
+if (failed > 0) exit(1)
