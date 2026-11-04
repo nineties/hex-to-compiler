@@ -92,17 +92,29 @@
 <p><code>f</code> の値がガード付きの関数のとき（<code>f = (n) if n &gt; 0 -&gt; 1</code> のあと）は、ガードが偽でも <code>f(p, ...) = e</code> で追加した関数は呼ばれません。下の <code>h | g</code> と同じです。</p>
 
 <h2 id="module">module</h2>
-<p><code>module m { ... }</code> は定義をまとめて名前 <code>m</code> の下に置く式です。<code>m := (() -&gt; { ... })()</code> の糖衣として読めます。ただし本体が返す値は <code>export</code> を付けた定義の名前を欄に持つ値です。</p>
+<p><code>module m { ... }</code> は定義をまとめて名前 <code>m</code> の下に置く式です。<code>m := (() -&gt; { ... })()</code> の糖衣として読めます。ただし本体が返す値は module の値で、<code>export</code> を付けた定義を欄に持ちます。</p>
 <!--text module_bitset-->
-<p>この <code>bitset</code> の値は欄 <code>new</code> と <code>add</code> を持ちます。使う側は <code>bitset.new(100)</code> のように <code>.</code> で呼びます。<code>.</code> の規則は <a href="#record">record</a> の欄の読み出しと同じで、<code>export</code> を付けていない <code>helper</code> のような欄を読むとメッセージを出してプログラムが止まります。</p>
+<p>この <code>bitset</code> の値は欄 <code>new</code> と <code>add</code> を持ちます。使う側は <code>bitset.new(100)</code> のように <code>.</code> で呼びます。</p>
+<p>module の値はどれも同じ頭 <code>Module</code> を持ち、欄の名前と値は module の値ごとの表に持ちます。したがって module ごとに欄が違います。<code>.</code> の読み方は他の <a href="#record">record</a> の欄と同じで、欄にない名前（<code>export</code> を付けていない <code>helper</code> など）を読むとメッセージを出してプログラムが止まります。</p>
 <ul>
 <li>本体の変数の範囲は引数のない関数の本体と同じです。本体の変数は、それより前に本体で定義した変数と外側の変数です。あとで定義するものを前から呼ぶには <code>fun f</code> で宣言し、<code>f(p, ...) = e</code> で場合を足します。</li>
 <li>本体の定義は本体の変数で、大域変数になりません。同じ名前が外にあっても隠さず、外から書き換えることもできません。本体の中の <code>f(p, ...) := e</code> は外に <code>f</code> があっても本体の新しい <code>f</code> を定義します。</li>
-<li><code>m</code> は <code>m := e</code> と同じく本体を評価したあとに定義されます。本体から <code>m</code> は見えず、本体の中の関数どうしは名前でそのまま呼び合います。</li>
-<li><code>export</code> は本体の定義の前に書き、その定義の名前を欄にします。<code>export</code> を付けない定義は外から見えません。</li>
+<li><code>m</code> は <code>m := e</code> と同じく本体を評価したあとに定義されます。本体から <code>m</code> は見えず、本体の中の関数どうしは名前でそのまま呼び合います。<code>module m { ... }</code> を同じ名前でもう一度書くと、<code>x := e</code> と同じく新しい変数になります。</li>
 <li>本体は丸ごと読まれます。本体の中で <code>parse</code> を差し替えてもその本体の残りには効きません。文法を差し替えるときは <code>module</code> の外に書きます。</li>
 <li><code>module</code> はトップレベルの1つの式です。大域変数の表はファイルごとに分けず、ファイルは今までどおり1式ずつ読まれます。</li>
 </ul>
+
+<h3>export</h3>
+<p><code>export</code> を書けるのは、module の本体の直下にある <code>f(p, ...) := e</code> と <code>x := e</code> と <code>module n { ... }</code> の前だけです。関数の中・<code>if</code> の枝・ブロックの中・トップレベルなど、ほかの場所に書くと構文エラーです。<code>export</code> を付けた定義の名前が module の値の欄になり、付けない定義は外から見えません。</p>
+<p><code>export x := e</code> の欄の値は、本体が値を返した時点の <code>x</code> の値です。あとで本体の関数が <code>x</code> に代入しても欄は変わりません。今の値を見せるには、<code>x</code> を読む関数を <code>export</code> します。次の <code>counter</code> では <code>counter.start</code> が <code>0</code> のままで、<code>counter.current()</code> が今の値を返します。</p>
+<!--text module_export_value-->
+
+<h3>module の入れ子</h3>
+<p>module の本体の中に module を書けます。内側の <code>module n { ... }</code> は本体の変数 <code>n</code> を定義し、外からは見えません。内側を外に見せるには <code>export module n { ... }</code> と書きます。このとき <code>n</code> は外側の module の欄で、その値も module の値です。内側の本体からは外側の本体でそれより前に定義した変数が見えます。</p>
+<!--text module_nested-->
+
+<h3>module の外からの定義の追加</h3>
+<p><code>m.f(p, ...) = e</code> と書いて module の外から関数に場合を足すことはできません。外から場合を足せるようにするには、足す関数を module の中で <code>export</code> します。</p>
 
 <h2 id="names">糖衣が呼ぶ名前</h2>
 <p>糖衣の読み替え先の関数は名前が <code>_</code> で始まり、<code>_</code> のない同名の関数はありません。したがってプログラムで <code>add</code> や <code>index_get</code> という変数を定義しても、<code>a + b</code> や <code>a[i]</code> の意味は変わりません。</p>
