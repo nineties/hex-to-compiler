@@ -1,7 +1,7 @@
 # vasm/ir: translates a checked vasm module (planck/lib/vasm/check.pk) to the machine independent form of backend/ir.pk
 # Copyright (C) 2026 nineties
 #
-# vasm_lower(m, word) is the list of functions (ir_fn) of the module m = Module{[...]}, which has passed vasm_check.check, and the functions
+# vasm_lower(m, word) is the list of functions (ir.fn) of the module m = Module{[...]}, which has passed vasm_check.check, and the functions
 # for dropping values that the module needs. The values are 32-bit, 64-bit or the width of an address.
 # The code is made for a word: the number of bytes of an address, 4 or 8 (the word of a target, backend/target.pk). An address, own T, a borrow and
 # a val are one word, in a register of the width of the word. The stages up to here know the machine by the word only.
@@ -114,7 +114,7 @@ module vasm_ir {
     vi_is_ptr(t) := member(head(t), ['Own, 'Ref, 'Val])
 
     # a new register of the width of an address
-    vi_preg() := ir_vreg(vi_f, vi_word * 8)
+    vi_preg() := ir.vreg(vi_f, vi_word * 8)
 
     # the width of a load or a store of an address
     vi_pw() := if (vi_word == 8) 'w64 else 'w32
@@ -192,8 +192,8 @@ module vasm_ir {
     # === Registers and values ===
     # A variable is Var{type, leaves}: leaves are [Tuple{offset, type, register}, ...].
     # A value is a list of Tuple{offset, type, operand}, where the operand is U{register} or K{n}.
-    ve(i) := ir_emit(vi_f, i)
-    vi_reg(t) := ir_vreg(vi_f, if (vi_wide(t)) 64 else if (vi_is_ptr(t)) vi_word * 8 else 32)
+    ve(i) := ir.emit(vi_f, i)
+    vi_reg(t) := ir.vreg(vi_f, if (vi_wide(t)) 64 else if (vi_is_ptr(t)) vi_word * 8 else 32)
 
     # the 32-bit register r as a register of the width of an address; a word of 4 bytes needs no instruction
     vi_zx(r) := if (vi_word == 4) r else {
@@ -204,11 +204,11 @@ module vasm_ir {
 
     # the low 32 bits of the register r, which has the width of an address
     vi_tr(r) := if (vi_word == 4) r else {
-        d := ir_vreg(vi_f, 32)
+        d := ir.vreg(vi_f, 32)
         ve(I{'trunc, [D{d}, U{r}]})
         d
     }
-    vi_label() := ir_label(vi_f)
+    vi_label() := ir.label(vi_f)
     vi_place(l) := ve(I{'label, [L{l}]})
 
     # the register that holds the operand o of type t
@@ -307,7 +307,7 @@ module vasm_ir {
     # the function that drops a block with contents u: the contents that own, and then the block itself
     vi_make_drop(name, u) := {
         saved := vi_f
-        f := ir_fn(name)
+        f := ir.fn(name)
         vi_f = f
         p := vi_preg()
         ve(I{'getarg, [D{p}, K{0}]})
@@ -318,10 +318,10 @@ module vasm_ir {
         if (head(u) == 'Arr) {
             e := arg(u, 0)
             if (vi_owning(e)) {
-                n := ir_vreg(f, 32)
-                i := ir_vreg(f, 32)
+                n := ir.vreg(f, 32)
+                i := ir.vreg(f, 32)
                 a := vi_preg()
-                off := ir_vreg(f, 32)
+                off := ir.vreg(f, 32)
                 ve(I{'ld, [W{'w32}, D{n}, M{U{p}, 0}]})
                 ve(I{'li, [D{i}, K{0}]})
                 top := vi_label()
@@ -458,14 +458,14 @@ module vasm_ir {
     vi_elem(p, i) := {
         base := vi_ptr(p)
         e := arg(vi_contents(p), 0)
-        n := ir_vreg(vi_f, 32)
-        nw := ir_vreg(vi_f, 64)
+        n := ir.vreg(vi_f, 32)
+        nw := ir.vreg(vi_f, 64)
         ve(I{'ld, [W{'w32}, D{n}, M{U{base}, 0}]})
         ve(I{'zext64, [D{nw}, U{n}]})
         ix := vi_ureg(vi_opnd(i, I64{}), I64{})
         vi_check('geu, ix, U{nw})
-        i32 := ir_vreg(vi_f, 32)
-        off := ir_vreg(vi_f, 32)
+        i32 := ir.vreg(vi_f, 32)
+        off := ir.vreg(vi_f, 32)
         a := vi_preg()
         ve(I{'trunc, [D{i32}, U{ix}]})
         ve(I{'mul, [D{off}, U{i32}, K{vi_size(e)}]})
@@ -558,7 +558,7 @@ module vasm_ir {
       | Con{_, h, args} -> {
             vals := map(a -> vi_scalar(vi_use(a, Val{})), args)
             n := length(args)
-            sz := ir_vreg(vi_f, 32)
+            sz := ir.vreg(vi_f, 32)
             p := vi_preg()
             ve(I{'li, [D{sz}, K{rt.con_elems(vi_word) + vi_word * n}]})
             vi_call_fn("__alloc", [sz], [p])
@@ -578,7 +578,7 @@ module vasm_ir {
             n := length(args)
             np := length(arg(table_get(vi_sigs, f, none), 3))
             name := vi_wrapper_name(f, n)
-            sz := ir_vreg(vi_f, 32)
+            sz := ir.vreg(vi_f, 32)
             p := vi_preg()
             c := vi_preg()
             ve(I{'li, [D{sz}, K{rt.fun_elems(vi_word) + vi_word * n}]})
@@ -659,11 +659,11 @@ module vasm_ir {
         else {
             if (t == Bool{}) vi_call_fn("__val_bool", [vi_ureg(vi_opnd(a, Bool{}), Bool{})], [d])
             else if (head(t) == 'Ref) {
-                k := ir_vreg(vi_f, 32)
+                k := ir.vreg(vi_f, 32)
                 ve(I{'li, [D{k}, K{rt.kind_str}]})
                 vi_call_fn("__val_str", [vi_array_ptr(a), k], [d])
             } else {
-                w := ir_vreg(vi_f, 64)
+                w := ir.vreg(vi_f, 64)
                 vi_conv(a, t, I64{}, w)
                 vi_call_fn("__val_int", [w], [d])
             }
@@ -683,7 +683,7 @@ module vasm_ir {
             vi_call_fn("__val_bytes", [p], [d])
             vi_val1(t, U{d})
         } else {
-            w := ir_vreg(vi_f, 64)
+            w := ir.vreg(vi_f, 64)
             vi_call_fn("__val_unint", [p], [w])
             if (vi_wide(t)) vi_val1(t, U{w}) else {
                 d := vi_dst(into, t)
@@ -707,7 +707,7 @@ module vasm_ir {
     # the function that takes the value itself and the other arguments: it gives the arguments kept in the value and the others to f
     vi_make_wrapper(name, f, n) := {
         saved := vi_f
-        w := ir_fn(name)
+        w := ir.fn(name)
         vi_f = w
         np := length(arg(table_get(vi_sigs, f, none), 3))
         self := vi_preg()
@@ -738,7 +738,7 @@ module vasm_ir {
     # v(a, ...) for a register v of val
     vi_val_call(v, args) := {
         self := vi_ptr(v)
-        n := ir_vreg(vi_f, 32)
+        n := ir.vreg(vi_f, 32)
         c := vi_preg()
         d := vi_preg()
         ve(I{'li, [D{n}, K{length(args)}]})
@@ -762,8 +762,8 @@ module vasm_ir {
         else if (sig != none) vi_user_call(sig, args)
         else match f {
             'is -> {
-                n := ir_vreg(vi_f, 32)
-                d := ir_vreg(vi_f, 32)
+                n := ir.vreg(vi_f, 32)
+                d := ir.vreg(vi_f, 32)
                 ve(I{'trunc, [D{n}, U{vi_ureg(vi_opnd(args[2], I64{}), I64{})}]})
                 vi_call_fn("__val_is", [vi_peek(args[0]), vi_peek(args[1]), n], [d])
                 vi_val1(Bool{}, U{d})
@@ -771,8 +771,8 @@ module vasm_ir {
           | 'typeof -> vi_val_fn("__val_typeof", [vi_peek(args[0])])
           | 'head -> vi_val_fn("__val_head", [vi_peek(args[0])])
           | 'arity -> {
-                n := ir_vreg(vi_f, 32)
-                d := ir_vreg(vi_f, 64)
+                n := ir.vreg(vi_f, 32)
+                d := ir.vreg(vi_f, 64)
                 vi_call_fn("__val_arity", [vi_peek(args[0])], [n])
                 ve(I{'zext64, [D{d}, U{n}]})
                 vi_val1(I64{}, U{d})
@@ -780,19 +780,19 @@ module vasm_ir {
           | 'array -> vi_val_fn("__val_array", [vi_ureg(vi_opnd(args[0], I64{}), I64{}), vi_peek(args[1])])
           | 'mexpr -> vi_val_fn("__val_mexpr", [vi_peek(args[0]), vi_peek(args[1])])
           | 'intern -> {
-                k := ir_vreg(vi_f, 32)
+                k := ir.vreg(vi_f, 32)
                 ve(I{'li, [D{k}, K{rt.kind_sym}]})
                 vi_val_fn("__val_retag", [vi_peek(args[0]), k])
             }
           | 'symname -> {
-                k := ir_vreg(vi_f, 32)
+                k := ir.vreg(vi_f, 32)
                 ve(I{'li, [D{k}, K{rt.kind_str}]})
                 vi_val_fn("__val_retag", [vi_peek(args[0]), k])
             }
           | 'create -> {
                 a := vi_array_ptr(args[0])
-                r := ir_vreg(vi_f, 32)
-                d := ir_vreg(vi_f, 64)
+                r := ir.vreg(vi_f, 32)
+                d := ir.vreg(vi_f, 64)
                 vi_call_fn("__create", [a], [r])
                 ve(I{'sext64, [D{d}, U{r}]})
                 vi_val1(I64{}, U{d})
@@ -806,7 +806,7 @@ module vasm_ir {
             'box -> {
                 t := if (expected != none and head(expected) == 'Own) arg(expected, 0) else vi_pair_type(args[0], args[0], I64{})
                 v := vi_use(args[0], t)
-                sz := ir_vreg(vi_f, 32)
+                sz := ir.vreg(vi_f, 32)
                 p := vi_preg()
                 ve(I{'li, [D{sz}, K{vi_size(t)}]})
                 vi_call_fn("__alloc", [sz], [p])
@@ -818,17 +818,17 @@ module vasm_ir {
                 nw := vi_ureg(vi_opnd(args[0], I64{}), I64{})
                 v := vi_use(args[1], e)
                 vi_check('gtu, nw, K{134217727})
-                n := ir_vreg(vi_f, 32)
-                nbytes := ir_vreg(vi_f, 32)
-                sz := ir_vreg(vi_f, 32)
+                n := ir.vreg(vi_f, 32)
+                nbytes := ir.vreg(vi_f, 32)
+                sz := ir.vreg(vi_f, 32)
                 p := vi_preg()
                 ve(I{'trunc, [D{n}, U{nw}]})
                 ve(I{'mul, [D{nbytes}, U{n}, K{vi_size(e)}]})
                 ve(I{'add, [D{sz}, U{nbytes}, K{8}]})
                 vi_call_fn("__alloc", [sz], [p])
                 ve(I{'st, [W{'w32}, M{U{p}, 0}, U{n}]})
-                i := ir_vreg(vi_f, 32)
-                off := ir_vreg(vi_f, 32)
+                i := ir.vreg(vi_f, 32)
+                off := ir.vreg(vi_f, 32)
                 a := vi_preg()
                 top := vi_label()
                 body := vi_label()
@@ -854,8 +854,8 @@ module vasm_ir {
             }
           | 'len -> {
                 a := vi_array_ptr(args[0])
-                n := ir_vreg(vi_f, 32)
-                d := ir_vreg(vi_f, 64)
+                n := ir.vreg(vi_f, 32)
+                d := ir.vreg(vi_f, 64)
                 ve(I{'ld, [W{'w32}, D{n}, M{U{a}, 0}]})
                 ve(I{'zext64, [D{d}, U{n}]})
                 vi_val1(I64{}, U{d})
@@ -863,11 +863,11 @@ module vasm_ir {
           | 'write -> {
                 fdw := vi_ureg(vi_opnd(args[0], I64{}), I64{})
                 a := vi_array_ptr(args[1])
-                fd := ir_vreg(vi_f, 32)
-                n := ir_vreg(vi_f, 32)
+                fd := ir.vreg(vi_f, 32)
+                n := ir.vreg(vi_f, 32)
                 buf := vi_preg()
-                r := ir_vreg(vi_f, 32)
-                d := ir_vreg(vi_f, 64)
+                r := ir.vreg(vi_f, 32)
+                d := ir.vreg(vi_f, 64)
                 ve(I{'trunc, [D{fd}, U{fdw}]})
                 ve(I{'ld, [W{'w32}, D{n}, M{U{a}, 0}]})
                 ve(I{'add, [D{buf}, U{a}, K{8}]})
@@ -877,8 +877,8 @@ module vasm_ir {
             }
           | 'exit -> {
                 sw := vi_ureg(vi_opnd(args[0], I64{}), I64{})
-                st := ir_vreg(vi_f, 32)
-                z := ir_vreg(vi_f, 32)
+                st := ir.vreg(vi_f, 32)
+                z := ir.vreg(vi_f, 32)
                 ve(I{'trunc, [D{st}, U{sw}]})
                 ve(I{'os, [N{'exit}, Us{[st]}, D{z}]})
                 []
@@ -887,7 +887,7 @@ module vasm_ir {
                 ap := vi_preg()
                 base := vi_preg()
                 n := vi_preg()
-                d := ir_vreg(vi_f, 64)
+                d := ir.vreg(vi_f, 64)
                 ve(I{'la, [D{ap}, S{"__args", 0}]})
                 ve(I{'ld, [W{vi_pw()}, D{base}, M{U{ap}, 0}]})
                 ve(I{'ld, [W{vi_pw()}, D{n}, M{U{base}, 0}]})
@@ -897,7 +897,7 @@ module vasm_ir {
           | 'argv -> {
                 iw := vi_ureg(vi_opnd(args[0], I64{}), I64{})
                 vi_check('gtu, iw, K{134217727})
-                i := ir_vreg(vi_f, 32)
+                i := ir.vreg(vi_f, 32)
                 p := vi_preg()
                 ve(I{'trunc, [D{i}, U{iw}]})
                 vi_call_fn("__argv", [i], [p])
@@ -905,8 +905,8 @@ module vasm_ir {
             }
           | 'open -> {
                 a := vi_array_ptr(args[0])
-                r := ir_vreg(vi_f, 32)
-                d := ir_vreg(vi_f, 64)
+                r := ir.vreg(vi_f, 32)
+                d := ir.vreg(vi_f, 64)
                 vi_call_fn("__open", [a], [r])
                 ve(I{'sext64, [D{d}, U{r}]})
                 vi_val1(I64{}, U{d})
@@ -914,11 +914,11 @@ module vasm_ir {
           | 'read -> {
                 fdw := vi_ureg(vi_opnd(args[0], I64{}), I64{})
                 a := vi_array_ptr(args[1])
-                fd := ir_vreg(vi_f, 32)
-                n := ir_vreg(vi_f, 32)
+                fd := ir.vreg(vi_f, 32)
+                n := ir.vreg(vi_f, 32)
                 buf := vi_preg()
-                r := ir_vreg(vi_f, 32)
-                d := ir_vreg(vi_f, 64)
+                r := ir.vreg(vi_f, 32)
+                d := ir.vreg(vi_f, 64)
                 ve(I{'trunc, [D{fd}, U{fdw}]})
                 ve(I{'ld, [W{'w32}, D{n}, M{U{a}, 0}]})
                 ve(I{'add, [D{buf}, U{a}, K{8}]})
@@ -928,8 +928,8 @@ module vasm_ir {
             }
           | 'close -> {
                 fdw := vi_ureg(vi_opnd(args[0], I64{}), I64{})
-                fd := ir_vreg(vi_f, 32)
-                z := ir_vreg(vi_f, 32)
+                fd := ir.vreg(vi_f, 32)
+                z := ir.vreg(vi_f, 32)
                 ve(I{'trunc, [D{fd}, U{fdw}]})
                 ve(I{'os, [N{'close}, Us{[fd]}, D{z}]})
                 []
@@ -989,7 +989,7 @@ module vasm_ir {
         sret := -1
         words := []
         if (head(ret) == 'Named) {
-            slot := ir_slot(vi_f, vi_size(ret), vi_word)
+            slot := ir.slot(vi_f, vi_size(ret), vi_word)
             sret = vi_preg()
             ve(I{'slota, [D{sret}, K{slot}]})
             words = [sret]
@@ -1016,7 +1016,7 @@ module vasm_ir {
     # the code jumps to lt when the condition c holds and to lf otherwise
     vi_cond(c, lt, lf) := match c {
         Bin{op, a, b} -> if (vi_pair_type(a, b, I64{}) == Val{}) {
-            r := ir_vreg(vi_f, 32)
+            r := ir.vreg(vi_f, 32)
             vi_val_eq(op, a, b, r)
             ve(I{'br, [Cc{'ne}, U{r}, K{0}, L{lt}, L{lf}]})
         } else {
@@ -1146,7 +1146,7 @@ module vasm_ir {
 
     vi_fn(d) := match d {
         Fn{_, name, _, ps, ret, body} -> {
-            f := ir_fn(symname(name))
+            f := ir.fn(symname(name))
             vi_f = f
             vi_vars = table()
             vi_scopes = [[]]
@@ -1175,7 +1175,7 @@ module vasm_ir {
         }
     }
 
-    # lower_part(imports, m, names, word) is lower_only for a module that calls the functions and uses the structs of imports (see vasm_check_with)
+    # lower_part(imports, m, names, word) is lower_only for a module that calls the functions and uses the structs of imports (see vasm_check.check_with)
     export lower_part(imports, Module{items}, names, word) := {
         if (word != 4 and word != 8) panic(f"vasm_ir.lower: the word is 4 or 8 bytes, not {word}")
         vi_word = word
@@ -1213,11 +1213,11 @@ module vasm_ir {
     # lower_only(m, names, word) lowers the functions of m named in the list names (all of them when names is none) and the drop functions they need
     export lower_only(m, names, word) := lower_part([], m, names, word)
 
-    # lower(m, word) is the functions (ir_fn) for the functions of the module m and for dropping the values the module owns, for the word of the machine
+    # lower(m, word) is the functions (ir.fn) for the functions of the module m and for dropping the values the module owns, for the word of the machine
     export lower(m, word) := lower_only(m, none, word)
 }
 
-# vasm_lower(m, word) is the functions (ir_fn) for the functions of the module m and for dropping the values the module owns, for the word of the machine
+# vasm_lower(m, word) is the functions (ir.fn) for the functions of the module m and for dropping the values the module owns, for the word of the machine
 
 # vasm_lower_only(m, names, word) lowers the functions of m named in the list names (all of them when names is none) and the drop functions they need
 fun vasm_lower_part
