@@ -17,54 +17,56 @@ use("table")
 use("vector")
 use("string")
 
+module ir {
+
 ir_vbase := 32
 
-ir_is_vreg(r) := r >= ir_vbase
+export is_vreg(r) := r >= ir_vbase
 
 # === Functions ===
-ir_fn(name) := {
+export fn(name) := {
     meta := table()
     table_set(meta, 'nv, ir_vbase)
     table_set(meta, 'nl, 0)
     table_set(meta, 'slots, vec_new())
     table_set(meta, 'width, table())
     table_set(meta, 'class, table())
-    table_set(meta, 'export, true)
+    table_set(meta, 'exported, true)
     IRFn{name, vec_new(), meta}
 }
 
-ir_name(IRFn{n, _, _}) := n
-ir_meta(IRFn{_, _, m}) := m
-ir_emit(IRFn{_, c, _}, i) := vec_push(c, i)
-ir_code(IRFn{_, c, _}) := vec_to_list(c)
-ir_set_code(IRFn{n, _, m}, xs) := IRFn{n, vec_from_list(xs), m}
+export name(IRFn{n, _, _}) := n
+export meta(IRFn{_, _, m}) := m
+export emit(IRFn{_, c, _}, i) := vec_push(c, i)
+export code(IRFn{_, c, _}) := vec_to_list(c)
+export set_code(IRFn{n, _, m}, xs) := IRFn{n, vec_from_list(xs), m}
 
-# ir_vreg(f, w) is a new virtual register that holds a w-bit value
-ir_vreg(f, w) := {
-    m := ir_meta(f)
+# vreg(f, w) is a new virtual register that holds a w-bit value
+export vreg(f, w) := {
+    m := meta(f)
     r := table_get(m, 'nv, 0)
     table_set(m, 'nv, r + 1)
     if (w != 32) table_set(table_get(m, 'width, none), r, w)
     r
 }
 
-ir_nregs(f) := table_get(ir_meta(f), 'nv, 0)
-ir_width(f, r) := table_get(table_get(ir_meta(f), 'width, none), r, 32)
+export nregs(f) := table_get(meta(f), 'nv, 0)
+export width(f, r) := table_get(table_get(meta(f), 'width, none), r, 32)
 
 # the class of a register limits the physical registers it may take; a register without a class takes any
-ir_set_class(f, r, c) := table_set(table_get(ir_meta(f), 'class, none), r, c)
-ir_class(f, r) := table_get(table_get(ir_meta(f), 'class, none), r, 'any)
+export set_class(f, r, c) := table_set(table_get(meta(f), 'class, none), r, c)
+export class(f, r) := table_get(table_get(meta(f), 'class, none), r, 'any)
 
-ir_label(f) := {
-    m := ir_meta(f)
+export label(f) := {
+    m := meta(f)
     l := table_get(m, 'nl, 0)
     table_set(m, 'nl, l + 1)
     l
 }
 
-# ir_slot(f, size, align) is the number of a new stack slot
-ir_slot(f, size, align) := {
-    v := table_get(ir_meta(f), 'slots, none)
+# slot(f, size, align) is the number of a new stack slot
+export slot(f, size, align) := {
+    v := table_get(meta(f), 'slots, none)
     vec_push(v, Tuple{size, align})
     vec_len(v) - 1
 }
@@ -83,8 +85,8 @@ ir_op_regs(o, role) := match o {
   | _ -> []
 }
 
-ir_defs(I{_, ops}) := concat_map(o -> ir_op_regs(o, 'def), ops)
-ir_uses(I{_, ops}) := concat_map(o -> ir_op_regs(o, 'use), ops)
+export defs(I{_, ops}) := concat_map(o -> ir_op_regs(o, 'def), ops)
+export uses(I{_, ops}) := concat_map(o -> ir_op_regs(o, 'use), ops)
 
 # ir_map_op(f, o) renames every register of the operand o with f
 ir_map_op(f, o) := match o {
@@ -100,28 +102,28 @@ ir_map_op(f, o) := match o {
   | _ -> o
 }
 
-ir_map_regs(f, I{op, ops}) := I{op, map(o -> ir_map_op(f, o), ops)}
+export map_regs(f, I{op, ops}) := I{op, map(o -> ir_map_op(f, o), ops)}
 
 # the operands the instruction names, without the implicit registers
-ir_explicit(I{_, ops}) := filter(o -> head(o) != 'ID and head(o) != 'IU, ops)
+export explicit(I{_, ops}) := filter(o -> head(o) != 'ID and head(o) != 'IU, ops)
 
-ir_op(I{op, _}) := op
-ir_ops(I{_, ops}) := ops
+export op(I{op, _}) := op
+export ops(I{_, ops}) := ops
 
 # the instructions that end a basic block
 ir_terminators := ['jmp, 'jcc, 'br, 'ret, 'trap, 'ud2]
-ir_is_term(i) := member(ir_op(i), ir_terminators)
+export is_term(i) := member(op(i), ir_terminators)
 
 # the labels an instruction jumps to
-ir_targets(I{op, ops}) := concat_map(o -> match o {
+export targets(I{op, ops}) := concat_map(o -> match o {
     L{l} -> [l]
   | _ -> []
 }, if (op == 'label) [] else ops)
 
 # a conditional jump falls through to the next instruction
-ir_falls(i) := not member(ir_op(i), ['jmp, 'br, 'ret, 'trap, 'ud2])
+export falls(i) := not member(op(i), ['jmp, 'br, 'ret, 'trap, 'ud2])
 
-ir_move_pair(i) := match i {
+export move_pair(i) := match i {
     I{'mov, [D{a}, U{b}]} -> Tuple{a, b}
   | I{'mov, [W{_}, D{a}, U{b}]} -> Tuple{a, b}
   | _ -> none
@@ -154,9 +156,11 @@ ir_show_op(o) := match o {
 
 ir_show_ops(ops) := join(", ", map(ir_show_op, ops))
 
-ir_show(I{op, ops}) := if (op == 'label) f"{ir_show_op(ops[0])}:" else f"  {symname(op)} {ir_show_ops(ops)}"
+export show(I{op, ops}) := if (op == 'label) f"{ir_show_op(ops[0])}:" else f"  {symname(op)} {ir_show_ops(ops)}"
 
-ir_show_fn(f) := _strcat(_strcat(ir_name(f), ":\n"), join("\n", map(ir_show, ir_code(f))))
+ir_show_fn(f) := _strcat(_strcat(name(f), ":\n"), join("\n", map(show, code(f))))
 
 # the number of the label that a label instruction defines
-ir_label_id(I{'label, [L{l}]}) := l
+export label_id(I{'label, [L{l}]}) := l
+
+}

@@ -2,7 +2,7 @@
 # the register file, the frame of a function, and compile of a whole module to an object
 # Copyright (C) 2026 nineties
 #
-# The input is a function of the machine independent form (ir_*, see ir.pk), with registers of 32 and 64 bits:
+# The input is a function of the machine independent form (see ir.pk), with registers of 32 and 64 bits:
 #   mov li la slota          [D, U] [D, K] [D, S] [D, K slot]
 #   add sub mul band bor bxor shl shr sar divs divu rems remu mulhu   [D d, U a, U or K b]
 #   neg not sx8 sx16 zx8 zx16                                         [D, U]
@@ -21,7 +21,7 @@
 # register is movl, which is never taken out as a move between equal registers. An address is a 64-bit value.
 # The calling convention: 8 bytes for each argument, the arguments are pushed from the last to the first and removed by the caller,
 # the results are in rax and rdx, rbx and r12 to r15 are kept by the callee (and rbp, the frame pointer).
-# The services of the system and trap are selected by os_select_x64 of os.pk.
+# The services of the system and trap are selected by os.select_x64 of os.pk.
 
 use("base")
 use("list")
@@ -33,8 +33,11 @@ use("backend/cfg")
 use("backend/sched")
 use("backend/regalloc")
 use("backend/obj")
+use("backend/x86enc")
 use("backend/x64enc")
 use("backend/os")
+
+module x64 {
 
 x64_commutative := ['add, 'mul, 'band, 'bor, 'bxor]
 
@@ -51,15 +54,15 @@ x64_select(f, code) := {
 x64_flags_def := ID{16}
 
 # the width of a register: 'w64 for a physical register and a virtual register of 64 bits
-x64_wd(f, r) := if (ir_is_vreg(r) and ir_width(f, r) == 32) 'w32 else 'w64
+x64_wd(f, r) := if (ir.is_vreg(r) and ir.width(f, r) == 32) 'w32 else 'w64
 
-x64_select_one(f, emit, i) := {
-    nv := w -> ir_vreg(f, if (w == 'w64) 64 else 32)
+x64_select_one(f, emit, i) = {
+    nv := w -> ir.vreg(f, if (w == 'w64) 64 else 32)
     wd := r -> x64_wd(f, r)
     # d = s for registers: a 32-bit value that comes from a physical register is made whole by a 32-bit move
     mov := (d, s) -> {
-        if (ir_is_vreg(d)) {
-            if (wd(d) == 'w32 and not ir_is_vreg(s)) emit(I{'movl, [D{d}, U{s}]})
+        if (ir.is_vreg(d)) {
+            if (wd(d) == 'w32 and not ir.is_vreg(s)) emit(I{'movl, [D{d}, U{s}]})
             else emit(I{'mov, [W{wd(d)}, D{d}, U{s}]})
         } else emit(I{'mov, [W{wd(s)}, D{d}, U{s}]})
     }
@@ -99,7 +102,7 @@ x64_select_one(f, emit, i) := {
     # the instructions that os.pk gives, with the widths
     os_emit := j -> match j {
         I{'mov, [D{d}, U{s}]} -> mov(d, s)
-      | I{'mov, [D{d}, K{n}]} -> emit(I{'mov, [W{if (ir_is_vreg(d)) wd(d) else if (n >= 0) 'w32 else 'w64}, D{d}, K{n}]})
+      | I{'mov, [D{d}, K{n}]} -> emit(I{'mov, [W{if (ir.is_vreg(d)) wd(d) else if (n >= 0) 'w32 else 'w64}, D{d}, K{n}]})
       | I{'add, [DU{d}, K{n}, fl]} -> emit(I{'add, [W{wd(d)}, DU{d}, K{n}, fl]})
       | _ -> emit(j)
     }
@@ -163,7 +166,7 @@ x64_select_one(f, emit, i) := {
             if (rets != []) mov(rets[0], 0)
             if (length(rets) > 1) mov(rets[1], 2)
         }
-      | I{'os, [N{name}, Us{args}, D{d}]} -> os_select_x64(os_emit, name, args, d)
+      | I{'os, [N{name}, Us{args}, D{d}]} -> os.select_x64(os_emit, name, args, d)
       | I{'ret, [Us{vals}]} -> {
             if (vals != []) mov(0, vals[0])
             if (length(vals) > 1) mov(2, vals[1])
@@ -175,8 +178,8 @@ x64_select_one(f, emit, i) := {
             emit(I{'jcc, [Cc{c}, L{t}, IU{16}]})
             emit(I{'jmp, [L{e}]})
         }
-      | I{'trap, []} -> os_select_x64(os_emit, 'abort, [], none)
-      | _ -> panic(f"x64_select: cannot select {ir_show(i)}")
+      | I{'trap, []} -> os.select_x64(os_emit, 'abort, [], none)
+      | _ -> panic(f"x64_select: cannot select {ir.show(i)}")
     }
 }
 
@@ -196,7 +199,7 @@ x64_effect(i) := match i {
   | _ -> 'none
 }
 
-x64_latency(i) := match ir_op(i) {
+x64_latency(i) := match ir.op(i) {
     'imul -> 3
   | 'mul -> 4
   | 'div -> 25
@@ -224,7 +227,7 @@ x64_resolve(offs, o) := match o {
 # x64_frame(f, code) adds the prologue and the epilogue to the allocated code and gives an address to each stack slot
 x64_frame(f, code) := {
     defined := table()
-    each(i -> each(r -> table_set(defined, r, true), ir_defs(i)), code)
+    each(i -> each(r -> table_set(defined, r, true), ir.defs(i)), code)
     used := filter(r -> table_has(defined, r), x64_callee_saved)
     offs := table()
     off := 8 * length(used)
@@ -233,7 +236,7 @@ x64_frame(f, code) := {
         off = x64_align(off + size, al)
         table_set(offs, n, off)
         n = n + 1
-    }, vec_to_list(table_get(ir_meta(f), 'slots, none)))
+    }, vec_to_list(table_get(ir.meta(f), 'slots, none)))
     total := x64_align(off, 16)
     save_at := r -> -8 * (index_of(r, used) + 1)
     prologue := append([I{'push, [U{5}, ID{4}, IU{4}]}, I{'mov, [W{'w64}, D{5}, U{4}]}],
@@ -241,25 +244,100 @@ x64_frame(f, code) := {
             map(r -> I{'mov, [W{'w64}, M{U{5}, save_at(r)}, U{r}]}, used)))
     epilogue := append(map(r -> I{'mov, [W{'w64}, D{r}, M{U{5}, save_at(r)}]}, used),
         [I{'mov, [W{'w64}, D{4}, U{5}]}, I{'pop, [D{5}, ID{4}, IU{4}]}, I{'ret, []}])
-    body := concat_map(i -> if (ir_op(i) == 'ret) epilogue else [I{ir_op(i), map(o -> x64_resolve(offs, o), ir_ops(i))}], code)
+    body := concat_map(i -> if (ir.op(i) == 'ret) epilogue else [I{ir.op(i), map(o -> x64_resolve(offs, o), ir.ops(i))}], code)
     append(prologue, body)
 }
 
 # === Functions and modules ===
 x64_compile_fn(f, em) := {
-    code := x64_select(f, ir_code(f))
-    code = sched_code(code, x64_sched_model)
-    g := ir_set_code(f, code)
-    code = ra_allocate(g, x64_ra)
+    code := x64_select(f, ir.code(f))
+    code = sched.code(code, x64_sched_model)
+    g := ir.set_code(f, code)
+    code = regalloc.allocate(g, x64_ra)
     code = x64_frame(g, code)
-    obj_define(arg(em, 0), ir_name(f), ".text", em_pos(em), true)
-    x64_emit_code(em, code)
+    obj.define(arg(em, 0), ir.name(f), ".text", x86enc.pos(em), true)
+    x64enc.emit_code(em, code)
 }
 
-# x64_compile(name, fns, datas) is an object of the functions (ir_fn) and the data (see obj_add_data of obj.pk)
-x64_compile(name, fns, datas) := {
-    o := obj_new(name)
-    each(f -> x64_compile_fn(f, em_new(o, ".text")), fns)
-    obj_add_data(o, datas)
+# compile(name, fns, datas) is an object of the functions (ir.fn) and the data (see obj.add_data of obj.pk)
+export compile(name, fns, datas) := {
+    o := obj.new(name)
+    each(f -> x64_compile_fn(f, x86enc.new(o, ".text")), fns)
+    obj.add_data(o, datas)
     o
+}
+
+# the selection of instructions
+test {
+    w32 := W{'w32}
+    w64 := W{'w64}
+    f := ir.fn("t")
+    a := ir.vreg(f, 32)
+    b := ir.vreg(f, 64)
+    sel(is) := x64_select(f, is)
+    # a 32-bit move and a 64-bit one; the extensions are moves that stay
+    assert(sel([I{'mov, [D{a}, U{a + 0}]}]) == [I{'mov, [w32, D{a}, U{a}]}], "a 32-bit move")
+    assert(sel([I{'zext64, [D{b}, U{a}]}]) == [I{'movl, [D{b}, U{a}]}], "zext64")
+    assert(sel([I{'sext64, [D{b}, U{a}]}]) == [I{'movsxd, [D{b}, U{a}]}], "sext64")
+    assert(sel([I{'trunc, [D{a}, U{b}]}]) == [I{'movl, [D{a}, U{b}]}], "trunc")
+    # a 32-bit value that comes from a physical register is made whole
+    assert(sel([I{'mov, [D{a}, U{0}]}]) == [I{'movl, [D{a}, U{0}]}], "a 32-bit value from a physical register")
+    assert(sel([I{'li, [D{b}, K{5}]}]) == [I{'mov, [w64, D{b}, K{5}]}], "li")
+    assert(sel([I{'ld, [W{'w32}, D{a}, M{U{b}, 4}]}]) == [I{'mov, [w32, D{a}, M{U{b}, 4}]}], "a 32-bit load")
+    assert(sel([I{'ld, [W{'w64}, D{b}, M{U{b}, 8}]}]) == [I{'mov, [w64, D{b}, M{U{b}, 8}]}], "a 64-bit load")
+    assert(sel([I{'getarg, [D{b}, K{2}]}]) == [I{'mov, [w64, D{b}, MF{'arg, 2, 0}]}], "getarg")
+}
+
+# the loads start first so that the additions do not wait
+test {
+    ld1 := I{'mov, [W{'w64}, D{40}, M{U{33}, 0}]}
+    ad1 := I{'add, [W{'w64}, DU{40}, K{1}, x64_flags_def]}
+    ld2 := I{'mov, [W{'w64}, D{41}, M{U{34}, 0}]}
+    ad2 := I{'add, [W{'w64}, DU{41}, K{1}, x64_flags_def]}
+    assert(sched.code([ld1, ad1, ld2, ad2], x64_sched_model) == [ld1, ld2, ad1, ad2], "the loads come first")
+    # a store stays between the loads that it separates
+    st1 := I{'mov, [W{'w64}, M{U{35}, 0}, U{40}]}
+    ld3 := I{'mov, [W{'w64}, D{42}, M{U{36}, 0}]}
+    assert(sched.code([ld1, st1, ld3], x64_sched_model) == [ld1, st1, ld3], "a store stays between loads")
+    # the label and the terminator stay at the ends of a block
+    blk := [I{'label, [L{3}]}, ld1, ad1, ld2, ad2, I{'ret, [IU{0}]}]
+    assert(sched.code(blk, x64_sched_model) == [I{'label, [L{3}]}, ld1, ld2, ad1, ad2, I{'ret, [IU{0}]}], "the label and the terminator stay")
+}
+
+# a straight line code is run to see that the allocation keeps the result: values on the stack are in mem
+test {
+    run(code) := {
+        regs := table()
+        mem := table()
+        val := o -> match o {
+            K{n} -> n
+          | U{r} -> table_get(regs, r, 0)
+          | MF{k, n, d} -> table_get(mem, Tuple{k, n, d}, 0)
+        }
+        each(i -> match i {
+            I{'mov, [D{d}, s]} -> table_set(regs, d, val(s))
+          | I{'mov, [MF{k, n, d}, s]} -> table_set(mem, Tuple{k, n, d}, val(s))
+          | I{'mov, [W{_}, D{d}, s]} -> table_set(regs, d, val(s))
+          | I{'mov, [W{_}, MF{k, n, d}, s]} -> table_set(mem, Tuple{k, n, d}, val(s))
+          | I{'add, [DU{d}, s, _]} -> table_set(regs, d, table_get(regs, d, 0) + val(s))
+          | I{'ret, _} -> none
+        }, code)
+        table_get(regs, 0, 0)
+    }
+    f := ir.fn("t")
+    vs := map(i -> ir.vreg(f, 64), range(0, 16))
+    acc := ir.vreg(f, 64)
+    each((Tuple{v, n}) -> ir.emit(f, I{'mov, [D{v}, K{n}]}), zip(vs, range(1, 17)))
+    ir.emit(f, I{'mov, [D{acc}, K{0}]})
+    each(v -> ir.emit(f, I{'add, [DU{acc}, U{v}, x64_flags_def]}), vs)
+    ir.emit(f, I{'mov, [D{0}, U{acc}]})
+    ir.emit(f, I{'ret, [IU{0}]})
+    allocated := regalloc.allocate(f, x64_ra)
+    assert(not any(i -> any(r -> ir.is_vreg(r), append(ir.uses(i), ir.defs(i))), allocated), "no virtual register is left")
+    assert(run(allocated) == 136, "the allocation keeps the result")
+    # seventeen values do not fit in fourteen registers, so some are kept in stack slots
+    assert(any(i -> any(o -> head(o) == 'MF, ir.explicit(i)), allocated), "some values are in stack slots")
+    assert(length(vec_to_list(table_get(ir.meta(f), 'slots, none))) > 0, "the function has stack slots")
+}
+
 }
