@@ -1,0 +1,45 @@
+# tests for backend/target.pk: the bytes of the executables that vasm/build.pk makes for the default target
+# Copyright (C) 2026 nineties
+
+passed := 0
+failed := 0
+
+check(actual, expected) := if (actual == expected) {
+    passed = passed + 1
+} else {
+    failed = failed + 1
+    put("Test failed: expected "); print(expected)
+    put(" but got "); println(actual)
+}
+
+use("vasm/build")
+
+# the checksum of n bytes: FNV-1a with 32 bits
+fnv(get, n) := {
+    h := 2166136261
+    i := 0
+    while (i < n) {
+        h = bit_and(bit_xor(h, get(i)) * 16777619, 4294967295)
+        i = i + 1
+    }
+    h
+}
+
+# the executable of the vasm example name: Tuple{length, checksum}
+example_sum(name) := {
+    path := f"planck/examples/vasm/{name}.vasm"
+    m := arg(peg_parse('vasm, read_file(path)), 0)
+    check(vasm_errors(path, m), [])
+    b := vasm_executable(m)
+    Tuple{bb_len(b), fnv(i -> bb_get(b, i), bb_len(b))}
+}
+
+check(example_sum("hello"), Tuple{720, -376238484})
+check(example_sum("fib"), Tuple{864, -701926009})
+check(example_sum("control"), Tuple{864, -280551860})
+check(example_sum("array"), Tuple{1392, 371115762})
+check(example_sum("own_struct"), Tuple{1440, 888902627})
+
+
+put("Tests passed "); print(passed); put("/"); println(passed + failed)
+if (failed > 0) exit(1)
