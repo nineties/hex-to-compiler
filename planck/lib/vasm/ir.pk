@@ -58,6 +58,8 @@ vi_wrappers := vec_new()
 
 fun vi_drop_name
 fun vi_string_name
+fun vasm_string_label
+fun vasm_symbol_label
 fun vi_ptr
 fun vi_opnd
 fun vi_stmt
@@ -348,7 +350,7 @@ vi_use(o, t) := match o {
 vi_symbol_reg(s) := {
     n := table_get(vi_symbols, s, none)
     if (n == none) {
-        n = f"__sym{vec_len(vi_symbol_list)}"
+        n = vasm_symbol_label(s)
         table_set(vi_symbols, s, n)
         vec_push(vi_symbol_list, s)
     }
@@ -367,24 +369,33 @@ vi_peek(o) := match o {
 vi_string_name(s) := {
     n := table_get(vi_strings, s, none)
     if (n == none) {
-        n = f"__str{vec_len(vi_string_list)}"
+        n = vasm_string_label(s)
         table_set(vi_strings, s, n)
         vec_push(vi_string_list, s)
     }
     n
 }
 
-# the data of the string literals of the module lowered last: [IRData{...}, ...] for x86_compile
-vasm_strings() := map(s -> {
+# The name of the data of a string literal or a symbol is made from its contents, so that the modules that use the same literal
+# name the same data.
+vasm_string_label(s) := f"__str:{s}"
+vasm_symbol_label(s) := f"__sym:{symname(s)}"
+
+# the data of the string literal s: IRData{...} for the object of a target
+vasm_string_data(s) := {
     b := bb_new()
     bb_u32(b, strlen(s))
     bb_u32(b, 0)
     bb_str(b, s)
-    IRData{table_get(vi_strings, s, none), ".rodata", 4, b, false}
-}, vec_to_list(vi_string_list))
+    IRData{vasm_string_label(s), ".rodata", 4, b, false}
+}
 
-# the data of the symbols of the module lowered last, in the layout of a block of vasm/rt.pk
-vasm_symbols() := map(s -> IRData{table_get(vi_symbols, s, none), ".rodata", 4, rt_symbol_bytes(symname(s)), false}, vec_to_list(vi_symbol_list))
+# the data of the symbol s, in the layout of a block of vasm/rt.pk
+vasm_symbol_data(s) := IRData{vasm_symbol_label(s), ".rodata", 4, rt_symbol_bytes(symname(s)), false}
+
+# the string literals and the symbols of the module lowered last, in the order they were asked for
+vasm_strings() := vec_to_list(vi_string_list)
+vasm_symbols() := vec_to_list(vi_symbol_list)
 
 # the address register of the array operand o, which is a register or a string literal
 vi_array_ptr(o) := match o {
@@ -1137,7 +1148,11 @@ vi_fn(d) := match d {
 # vasm_lower(m) is the functions (ir_fn) for the functions of the module m and for dropping the values the module owns
 
 # vasm_lower_only(m, names) lowers the functions of m named in the list names (all of them when names is none) and the drop functions they need
-vasm_lower_only(Module{items}, names) := {
+fun vasm_lower_part
+vasm_lower_only(m, names) := vasm_lower_part([], m, names)
+
+# vasm_lower_part(imports, m, names) is vasm_lower_only for a module that calls the functions and uses the structs of imports (see vasm_check_with)
+vasm_lower_part(imports, Module{items}, names) := {
     vi_structs = table()
     vi_sigs = table()
     vi_sinfos = table()
@@ -1151,7 +1166,7 @@ vasm_lower_only(Module{items}, names) := {
     each(d -> match d {
         Struct{_, s, fs} -> if (table_get(vi_structs, s, none) == none) table_set(vi_structs, s, fs)
       | Fn{_, name, _, _, _, _} -> table_set(vi_sigs, name, d)
-    }, items)
+    }, append(imports, items))
     fns := map(vi_fn, filter(d -> head(d) == 'Fn and (names == none or member(arg(d, 1), names)), items))
     drops := []
     i := 0

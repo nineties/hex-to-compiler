@@ -920,14 +920,19 @@ vasm_check_struct(d) := match d {
 }
 
 # the errors of the module m: [VasmErr{kind, Pos{d}, msg}, ...], the first error of each struct and function
-vasm_check(m) := {
+fun vasm_check_with
+vasm_check(m) := vasm_check_with(m, [])
+
+# vasm_check_with(m, imports) checks m, whose functions may call the functions and use the structs of imports, a list of
+# structs and functions (the bodies of the functions are not read). Only the items of m are checked.
+vasm_check_with(m, imports) := {
     items := arg(m, 0)
     vasm_sigs = table()
     vasm_structs = table()
     each(d -> match d {
         Fn{_, f, rs, ps, ret, _} -> table_set(vasm_sigs, f, Sig{rs, map(p -> arg(p, 2), ps), ret})
       | Struct{_, s, _} -> if (table_get(vasm_structs, s, none) == none) table_set(vasm_structs, s, d)
-    }, items)
+    }, append(imports, items))
     errs := []
     each(d -> {
         r := handle {
