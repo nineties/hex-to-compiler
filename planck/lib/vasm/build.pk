@@ -1,12 +1,12 @@
 # vasm_build: compiles vasm modules to an executable file
 # Copyright (C) 2026 nineties
 #
-# vasm_build(m, path) checks the module m = Module{[...]} (vasm_check), translates it to the machine instructions of the default target
+# vasm_build.build(m, path) checks the module m = Module{[...]} (vasm_check), translates it to the machine instructions of the default target
 # (backend/target.pk) with the runtime of vasm/rt.pk and writes the executable file path. The function main takes no arguments, and its result is the exit status.
 # The module is compiled as a unit (vasm/unit.pk) and the units are joined before the stages of the target. A program of several modules is
-# vasm_build_units(units, path), where the units are made by vasm_unit and may have been saved and read again.
-# vasm_build_for(name, m, path) builds for the target with the name name (backend/target.pk) instead of the default one.
-# The stages up to vasm_ir.lower (vasm/ir.pk) and the runtime (vasm/rt.pk) know the machine only by the width of its word. What follows is the target's: the rewriting of the functions for its
+# vasm_build.build_units(units, path), where the units are made by vasm_unit.unit and may have been saved and read again.
+# vasm_build.build_for(name, m, path) builds for the target with the name name (backend/target.pk) instead of the default one.
+# The stages up to vasm_lower (vasm/ir.pk) and the runtime (vasm/rt.pk) know the machine only by the width of its word. What follows is the target's: the rewriting of the functions for its
 # registers, the selection of instructions, the allocation of registers and the encoding (backend/x64.pk, with backend/sched.pk and
 # backend/regalloc.pk) and the joining of the objects into the file (backend/link.pk, backend/elf.pk).
 
@@ -23,58 +23,60 @@ use("vasm/ir")
 use("vasm/rt")
 use("vasm/unit")
 
-# the names of the functions that the code calls
-vb_calls(code) := concat_map(i -> match i {
-    I{'call, [S{n, _}, _, _]} -> [n]
-  | _ -> []
-}, code)
+module vasm_build {
+    # the names of the functions that the code calls
+    vb_calls(code) := concat_map(i -> match i {
+        I{'call, [S{n, _}, _, _]} -> [n]
+      | _ -> []
+    }, code)
 
-# the names of the functions of rt.runtime
-vb_helper_names := map(d -> symname(arg(d, 1)), arg(rt.runtime, 0))
+    # the names of the functions of vasm_rt_module
+    vb_helper_names := map(d -> symname(arg(d, 1)), arg(vasm_rt_module, 0))
 
-# the object for the target t of the merged units: the code of the functions, the runtime and the helpers they call
-vasm_object_for(t, Merged{lowered, strs, syms, ret}) := {
-    w := target_word(t)
-    datas := append(map(vasm_ir.string_data, strs), map(vasm_ir.symbol_data, map(intern, syms)))
-    called := concat_map(f -> vb_calls(ir_code(f)), lowered)
-    fns := append(lowered, append([rt.alloc_fn(w), rt.free_fn(w), rt.start_fn(w, ret)], append(rt.ports(w, called), rt.val_fns(w, called))))
-    done := table()
-    out := []
-    queue := fns
-    while (queue != []) {
-        f := queue[0]
-        queue = drop(queue, 1)
-        g := target_lower(t, f, rt.helpers)
-        out = g :: out
-        table_set(done, ir.name(f), true)
-        # the helpers that the code calls and that are not made yet
-        need := filter(n -> member(n, vb_helper_names) and not table_has(done, n), vb_calls(ir.code(g)))
-        need = reverse(foldl((acc, n) -> if (member(n, acc)) acc else n :: acc, [], need))
-        if (need != []) {
-            each(n -> table_set(done, n, true), need)
-            queue = append(queue, vasm_ir.lower_only(rt.runtime, map(intern, need), w))
+    # the object for the target t of the merged units: the code of the functions, the runtime and the helpers they call
+    vasm_object_for(t, Merged{lowered, strs, syms, ret}) := {
+        w := target_word(t)
+        datas := append(map(vasm_string_data, strs), map(vasm_symbol_data, map(intern, syms)))
+        called := concat_map(f -> vb_calls(ir_code(f)), lowered)
+        fns := append(lowered, append([rt_alloc_fn(w), rt_free_fn(w), rt_start_fn(w, ret)], append(rt_ports(w, called), rt_val_fns(w, called))))
+        done := table()
+        out := []
+        queue := fns
+        while (queue != []) {
+            f := queue[0]
+            queue = drop(queue, 1)
+            g := target_lower(t, f, vasm_rt_helpers)
+            out = g :: out
+            table_set(done, ir_name(f), true)
+            # the helpers that the code calls and that are not made yet
+            need := filter(n -> member(n, vb_helper_names) and not table_has(done, n), vb_calls(ir_code(g)))
+            need = reverse(foldl((acc, n) -> if (member(n, acc)) acc else n :: acc, [], need))
+            if (need != []) {
+                each(n -> table_set(done, n, true), need)
+                queue = append(queue, vasm_lower_only(vasm_rt_module, map(intern, need), w))
+            }
         }
+        target_compile(t, "vasm", reverse(out), append(rt_data(w), datas))
     }
-    target_compile(t, "vasm", reverse(out), append(rt.data(w), datas))
+
+    # units_executable_for(t, units) is the file for the target t as a buffer of bytes; the units must be made for the word of t
+    export units_executable_for(t, units) := target_executable(t, [vasm_object_for(t, vasm_unit.units_merge(units, target_word(t)))])
+
+    # executable_for(t, m) is the file of the module m for the target t
+    export executable_for(t, m) := units_executable_for(t, [vasm_unit.unit("main", m, [], target_word(t))])
+
+    # the same for the default target
+    export units_executable(units) := units_executable_for(target_get(target_default), units)
+    export executable(m) := executable_for(target_get(target_default), m)
+
+    write_executable(path, b) := {
+        write_file(path, bytes.to_u8(b))
+        chmod(path, 493)
+    }
+
+    export build(m, path) := write_executable(path, executable(m))
+    export build_units(units, path) := write_executable(path, units_executable(units))
+
+    # build_for(name, m, path) writes the executable file of the module m for the target with the name name
+    export build_for(name, m, path) := write_executable(path, executable_for(target_get(name), m))
 }
-
-# vasm_units_executable_for(t, units) is the file for the target t as a buffer of bytes; the units must be made for the word of t
-vasm_units_executable_for(t, units) := target.executable(t, [vasm_object_for(t, vasm_units_merge(units, target.word(t)))])
-
-# vasm_executable_for(t, m) is the file of the module m for the target t
-vasm_executable_for(t, m) := vasm_units_executable_for(t, [vasm_unit("main", m, [], target.word(t))])
-
-# the same for the default target
-vasm_units_executable(units) := vasm_units_executable_for(target.get(target.default), units)
-vasm_executable(m) := vasm_executable_for(target.get(target.default), m)
-
-write_executable(path, b) := {
-    write_file(path, bytes.to_u8(b))
-    chmod(path, 493)
-}
-
-vasm_build(m, path) := write_executable(path, vasm_executable(m))
-vasm_build_units(units, path) := write_executable(path, vasm_units_executable(units))
-
-# vasm_build_for(name, m, path) writes the executable file of the module m for the target with the name name
-vasm_build_for(name, m, path) := write_executable(path, vasm_executable_for(target.get(name), m))

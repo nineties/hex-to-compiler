@@ -18,11 +18,11 @@ this_file := "planck/tests/vasm.pk"
 this_src := read_file(this_file)
 
 # the module has no error
-ok(m) := check(vasm_errors(this_file, m), [])
+ok(m) := check(vasm_check.errors(this_file, m), [])
 
 # the module has one error of the kind, on the line marked with "# NG"
 ng(m, kind) := {
-    es := vasm_errors(this_file, m)
+    es := vasm_check.errors(this_file, m)
     check(map((VasmErr{k, _, _}) -> k, es), [kind])
     if (length(es) == 1) {
         line := error.line_text(this_src, arg(arg(arg(es, 0), 1), 1))
@@ -50,7 +50,7 @@ body2 := arg(arg(vasm{| fn g() {
     *p = 1
 } |}, 0)[0], 5)
 check(map(head, body2), ['Assign, 'Store])
-check(map(t -> vasm_show_type(t), [I64{}, Own{Bool{}}, Ref{'mut, 'r, I64{}}, Ref{'shr, 'q, I64{}}]),
+check(map(t -> vasm_check.show_type(t), [I64{}, Own{Bool{}}, Ref{'mut, 'r, I64{}}, Ref{'shr, 'q, I64{}}]),
     ["i64", "own bool", "&mut r i64", "&q i64"])
 
 # === modules that pass ===
@@ -507,7 +507,7 @@ ng(vasm{|
 |}, 'undefined)
 
 # one error for each function
-check(map((VasmErr{k, _, _}) -> k, vasm_errors(this_file, vasm{|
+check(map((VasmErr{k, _, _}) -> k, vasm_check.errors(this_file, vasm{|
     fn a1() { var v: i64; v = v }
     fn a2() { var v: i64; v = 1 }
     fn a3() { var p: own i64; p = box(1); free(p); free(p) }
@@ -515,13 +515,13 @@ check(map((VasmErr{k, _, _}) -> k, vasm_errors(this_file, vasm{|
 
 # the message with the position, at the second free
 shown_at := error.line_col(this_src, index_of_str(this_src, "free(p) }", index_of_str(this_src, "fn shown(", 0)))
-check(map((VasmErr{_, loc, msg}) -> f"{error.show_loc(loc)}: {msg}", vasm_errors(this_file, vasm{|
+check(map((VasmErr{_, loc, msg}) -> f"{error.show_loc(loc)}: {msg}", vasm_check.errors(this_file, vasm{|
     fn shown() { var p: own i64; p = box(1); free(p); free(p) }
 |})), [f"planck/tests/vasm.pk:{arg(shown_at, 0)}:{arg(shown_at, 1)}: p is freed twice"])
 
 # === integer types, arrays, structs and built-in functions ===
 
-check(map(t -> vasm_show_type(t), [I8{}, U64{}, Own{Arr{U8{}}}, Ref{'shr, 'r, Arr{Named{'Point}}}]),
+check(map(t -> vasm_check.show_type(t), [I8{}, U64{}, Own{Arr{U8{}}}, Ref{'shr, 'r, Arr{Named{'Point}}}]),
     ["i8", "u64", "own [u8]", "&r [Point]"])
 m2 := vasm{|
     struct Point { x: i64, y: i64 }

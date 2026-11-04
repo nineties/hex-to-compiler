@@ -3,7 +3,7 @@
 #
 # specialize(tree, args, rty) is the Module{[...]} of vasm for the function of the tree called with the arguments args; its result has the
 # type rty. It always gives a module: what cannot be computed when specialize runs is left in the functions of vasm, as it is written.
-# The module can be given to vasm_build; pe_vasm_text(m) is its text and pe_with_main(m, values) adds the function main that calls the first
+# The module can be given to vasm_build.build;pe_vasm_text(m) is its text and pe_with_main(m, values) adds the function main that calls the first
 # function with the values.
 #
 # The tree of a function is what a quasi-quote gives, such as `(pow(x, 0) := 1) or `({ even(n) := ...; odd(n) := ... }). The function that the
@@ -144,11 +144,11 @@ pe_is_mexpr(v) := typeof(v) == 'mexpr and not pe_dyn(v) and not pe_fun(v)
 # v has a dynamic value or a function in it, so it is not a value of planck that a function of planck takes
 pe_opaque(v) := pe_dyn(v) or pe_fun(v) or (typeof(v) == 'mexpr and any(pe_opaque, vasm_tlist(v)))
 pe_is_bool(v) := v == true or v == false
-pe_int_type(t) := vasm_int(t)
+pe_int_type(t) := vasm_check.int(t)
 pe_static_ref := Ref{'shr, 'static, Arr{U8{}}}
 pe_val_dy(v) := pe_dyn(v) and arg(v, 1) == Val{}
 pe_bool_dy(v) := pe_dyn(v) and arg(v, 1) == Bool{}
-pe_int_dy(v) := pe_dyn(v) and vasm_int(arg(v, 1))
+pe_int_dy(v) := pe_dyn(v) and vasm_check.int(arg(v, 1))
 pe_ref_dy(v) := pe_dyn(v) and head(arg(v, 1)) == 'Ref
 
 # the integer v is in the range of i32. The value is divided, so that nothing depends on the size of an integer of planck.
@@ -165,7 +165,7 @@ pe_kind_type(v) := if (pe_dyn(v)) arg(v, 1)
     else Val{}
 
 pe_join(a, b) := if (a == b) a
-    else if (vasm_int(a) and vasm_int(b)) (if (a == I64{} or b == I64{}) I64{} else a)
+    else if (vasm_check.int(a) and vasm_check.int(b)) (if (a == I64{} or b == I64{}) I64{} else a)
     else Val{}
 
 # a place of type t holds v without a check when the program runs
@@ -251,12 +251,12 @@ pe_operand(v) := if (pe_dyn(v)) Reg{pe_at, arg(v, 0)}
     else Reg{pe_at, arg(pe_box(v), 0)}
 
 # the dynamic value v with the type t, converted if it has another integer type
-pe_to(v, t) := if (pe_dyn(v) and arg(v, 1) != t and vasm_int(arg(v, 1)) and vasm_int(t)) pe_assign(t, Conv{pe_at, Reg{pe_at, arg(v, 0)}, t})
-    else if (typeof(v) == 'int and vasm_int(t) and not pe_in_range(v)) pe_big(v, t)
+pe_to(v, t) := if (pe_dyn(v) and arg(v, 1) != t and vasm_check.int(arg(v, 1)) and vasm_check.int(t)) pe_assign(t, Conv{pe_at, Reg{pe_at, arg(v, 0)}, t})
+    else if (typeof(v) == 'int and vasm_check.int(t) and not pe_in_range(v)) pe_big(v, t)
     else v
 
 # the value that a register of type t holds on a path that does not go on
-pe_dummy(t) := if (vasm_int(t)) 0 else if (t == Bool{}) false else if (t == Val{}) none else if (t == pe_static_ref) "" else none
+pe_dummy(t) := if (vasm_check.int(t)) 0 else if (t == Bool{}) false else if (t == Val{}) none else if (t == pe_static_ref) "" else none
 
 # a statement for a place of type t with a value on a path that does not go on
 pe_dummy_op(t) := if (t == Val{}) Sym{pe_at, 'none} else pe_operand(pe_dummy(t))
@@ -317,13 +317,13 @@ pe_has_array(v) := typeof(v) == 'array or typeof(v) == 'plain or (pe_is_mexpr(v)
 # the value v in a place of type t. A val that is to be another type is checked when the program runs.
 pe_coerce(v, t) := if (t == Val{}) pe_box(v)
     else if (pe_val_dy(v)) {
-        if (vasm_int(t) or t == Bool{} or t == Own{Arr{U8{}}}) pe_assign(t, Conv{pe_at, Reg{pe_at, arg(v, 0)}, t})
+        if (vasm_check.int(t) or t == Bool{} or t == Own{Arr{U8{}}}) pe_assign(t, Conv{pe_at, Reg{pe_at, arg(v, 0)}, t})
         else {
             pe_stop("a val is not converted to the type of the result")
             pe_dummy(t)
         }
-    } else if (pe_fits(v, t) or (pe_int_dy(v) and vasm_int(t))) pe_to(v, t)
-    else if (vasm_int(t) or t == Bool{} or t == Own{Arr{U8{}}}) pe_coerce(pe_box(v), t)
+    } else if (pe_fits(v, t) or (pe_int_dy(v) and vasm_check.int(t))) pe_to(v, t)
+    else if (vasm_check.int(t) or t == Bool{} or t == Own{Arr{U8{}}}) pe_coerce(pe_box(v), t)
     else {
         pe_stop("a value is not converted to the type of the result")
         pe_dummy(t)
@@ -604,7 +604,7 @@ pe_primitive(f, vs) := {
 
 # v is of the type shown by typeof: true, false or a dynamic bool
 pe_type_test(v, ty) := if (pe_val_dy(v)) pe_assign(Bool{}, Bin{'eq, Reg{pe_at, arg(pe_assign(Val{}, Call{pe_at, 'typeof, [pe_operand(v)]}), 0)}, Sym{pe_at, ty}})
-    else if (pe_dyn(v)) (if (vasm_int(arg(v, 1))) ty == 'int else if (arg(v, 1) == Bool{}) ty == 'symbol else ty == 'string)
+    else if (pe_dyn(v)) (if (vasm_check.int(arg(v, 1))) ty == 'int else if (arg(v, 1) == Bool{}) ty == 'symbol else ty == 'string)
     else if (pe_fun(v)) ty == 'function
     else if (typeof(v) == 'mexpr) ty == 'mexpr
     else typeof(v) == ty
@@ -1790,7 +1790,7 @@ pe_with_main(m, vs) := {
         i = i + 1
     }
     args := reverse(regs)
-    ints := vasm_int(rty) or rty == Bool{}
+    ints := vasm_check.int(rty) or rty == Bool{}
     body := if (ints) {
         pe_set_reg_call(f, args, rty)
     } else if (rty == Unit{}) {
@@ -1798,7 +1798,7 @@ pe_with_main(m, vs) := {
         pe_emit(Ret{pe_at, none})
     } else {
         r := pe_assign(rty, Call{pe_at, f, args})
-        pe_println(if (rty == Val{} or pe_ref_dy(r) or vasm_int(rty)) r else none)
+        pe_println(if (rty == Val{} or pe_ref_dy(r) or vasm_check.int(rty)) r else none)
         pe_emit(Ret{pe_at, none})
     }
     fns := append(reverse(pe_fns), [Fn{pe_at, 'main, [], [], if (ints) rty else Unit{}, append(reverse(pe_decls), reverse(pe_stmts))}])
@@ -1813,4 +1813,4 @@ pe_set_reg_call(f, args, rty) := {
 }
 
 # the module m as the text of vasm; the function main of pe_with_main is not in it
-pe_vasm_text(m) := vasm_text(Module{filter(d -> arg(d, 1) != 'main, arg(m, 0))})
+pe_vasm_text(m) := vasm_text.text(Module{filter(d -> arg(d, 1) != 'main, arg(m, 0))})

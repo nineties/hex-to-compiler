@@ -1,17 +1,17 @@
 # vasm/unit: compiles vasm modules one by one to the form of ir.pk, saves them, and joins them before the stages of a target
 # Copyright (C) 2026 nineties
 #
-# vasm_unit(name, m, imports) checks the module m, which may call the functions and use the structs of imports (a list of the
-# interfaces of other units), and lowers it with vasm_ir.lower (vasm/ir.pk). The result is a unit:
+# vasm_unit.unit(name, m, imports, word) checks the module m, which may call the functions and use the structs of imports (a list of the
+# interfaces of other units), and lowers it with vasm_lower (vasm/ir.pk). The result is a unit:
 #   Unit{name, word, iface, fns, gens, strs, syms}
-# iface is the structs and the functions of m with the bodies left out (vasm_unit_iface), which other units take as imports.
+# iface is the structs and the functions of m with the bodies left out (vasm_unit.iface), which other units take as imports.
 # fns are the lowered functions of m and gens the functions made for dropping values and for functions as values. word is the
 # number of bytes of an address that the code is laid out for. strs are the string literals and syms the names of the symbols that
 # the code names. A unit does not depend on the machine except by its word, and it needs no function main.
-# vasm_units_merge(units) joins units in the order given: the functions of the units, then the functions of gens (each once, in the order
+# vasm_unit.units_merge(units, word) joins units in the order given: the functions of the units, then the functions of gens (each once, in the order
 # they are first made), and the data of the strings and the symbols (each once, in the order they are first named). The result is the one that the whole of the units as a
 # module gives. The merged form has main and its type, which the start of the program needs.
-# A unit is saved as the text of one M-expression (vasm_unit_text), whose lists are written Lst{...} and whose symbols are written by their names.
+# A unit is saved as the text of one M-expression (vasm_unit.text), whose lists are written Lst{...} and whose symbols are written by their names.
 
 use("base")
 use("list")
@@ -22,206 +22,208 @@ use("backend/ir")
 use("vasm/check")
 use("vasm/ir")
 
-vasm_unit_format := 1
+module vasm_unit {
+    vasm_unit_format := 1
 
-fun vu_copy
+    fun vu_copy
 
-# the structs and the functions of m, without the bodies
-vasm_unit_iface(Module{items}) := map(d -> match d {
-    Fn{at, f, rs, ps, ret, _} -> Fn{at, f, rs, ps, ret, []}
-  | _ -> d
-}, items)
+    # the structs and the functions of m, without the bodies
+    export iface(Module{items}) := map(d -> match d {
+        Fn{at, f, rs, ps, ret, _} -> Fn{at, f, rs, ps, ret, []}
+      | _ -> d
+    }, items)
 
-# the names of the functions and the structs of the items, with the kind
-vu_names(items) := map(d -> match d {
-    Fn{_, f, _, _, _, _} -> Tuple{'fn, f}
-  | Struct{_, s, _} -> Tuple{'struct, s}
-}, items)
+    # the names of the functions and the structs of the items, with the kind
+    vu_names(items) := map(d -> match d {
+        Fn{_, f, _, _, _, _} -> Tuple{'fn, f}
+      | Struct{_, s, _} -> Tuple{'struct, s}
+    }, items)
 
-# vasm_unit(name, m, imports, word) is the unit of the module m, which the code of the width word is made of
-vasm_unit(name, m, imports, word) := {
-    errs := vasm_check_with(m, imports)
-    if (errs != []) panic(f"vasm_unit: {name} has an error: {arg(errs[0], 2)}")
-    own := vu_names(arg(m, 0))
-    each(n -> if (member(n, own)) panic(f"vasm_unit: {symname(arg(n, 1))} of {name} is also in the imports"), vu_names(imports))
-    all := vasm_ir.lower_part(imports, m, none, word)
-    nfns := length(filter(d -> head(d) == 'Fn, arg(m, 0)))
-    Unit{name, word, vasm_unit_iface(m), take(all, nfns), drop(all, nfns), vasm_ir.strings(), map(symname, vasm_ir.symbols())}
-}
-
-vasm_unit_name(Unit{n, _, _, _, _, _, _}) := n
-vasm_unit_word(Unit{_, w, _, _, _, _, _}) := w
-vasm_unit_ifaces(Unit{_, _, i, _, _, _, _}) := i
-
-# === Joining ===
-# the type of main of the interfaces, which stops the program when it is not there once, or takes arguments
-vu_main_type(ifaces) := {
-    ds := filter(d -> head(d) == 'Fn and arg(d, 1) == 'main, ifaces)
-    if (ds == []) panic("vasm: the program has no function main")
-    d := ds[0]
-    if (arg(d, 3) != []) panic("vasm: main takes no arguments")
-    arg(d, 4)
-}
-
-# the names that two units define stop the program
-vu_check_names(units) := {
-    seen := table()
-    each(u -> each(n -> {
-        key := Tuple{arg(n, 0), arg(n, 1)}
-        if (table_has(seen, key)) panic(f"vasm: {symname(arg(n, 1))} is defined in {table_get(seen, key, none)} and in {vasm_unit_name(u)}")
-        table_set(seen, key, vasm_unit_name(u))
-    }, vu_names(vasm_unit_ifaces(u))), units)
-}
-
-# the functions of gens once each, in the order they are first made; a function of the same name in two units must be the same
-vu_gens(units) := {
-    seen := table()
-    out := []
-    each(u -> each(f -> {
-        old := table_get(seen, ir.name(f), none)
-        if (old == none) {
-            table_set(seen, ir.name(f), f)
-            out = f :: out
-        } else if (ir.code(old) != ir.code(f)) panic(f"vasm: {ir.name(f)} is made differently by two units")
-    }, arg(u, 4)), units)
-    reverse(out)
-}
-
-vu_unique(xs) := {
-    seen := table()
-    out := []
-    each(x -> if (not table_has(seen, x)) {
-        table_set(seen, x, true)
-        out = x :: out
-    }, xs)
-    reverse(out)
-}
-
-# vasm_units_merge(units, word) is Merged{fns, strs, syms, main}: the functions, the string literals, the names of the symbols and the type of main
-vasm_units_merge(units, word) := {
-    each(u -> if (vasm_unit_word(u) != word) panic(f"vasm: {vasm_unit_name(u)} is made for the word of {vasm_unit_word(u)} bytes, not {word}"), units)
-    vu_check_names(units)
-    ifaces := concat_map(vasm_unit_ifaces, units)
-    ret := vu_main_type(ifaces)
-    fns := map(vu_copy, append(concat_map(u -> arg(u, 3), units), vu_gens(units)))
-    Merged{fns, vu_unique(concat_map(u -> arg(u, 5), units)), vu_unique(concat_map(u -> arg(u, 6), units)), ret}
-}
-
-# === Saving ===
-# The text of a value: integers, strings, symbols and M-expressions of them. A list is Lst{...}.
-vu_string_text(s) := {
-    out := strbuf.new()
-    strbuf.add(out, "\"")
-    n := strlen(s)
-    i := 0
-    while (i < n) {
-        c := ord(s, i)
-        if (c == 10) strbuf.add(out, "\\n")
-        else if (c == 9) strbuf.add(out, "\\t")
-        else if (c == 13) strbuf.add(out, "\\r")
-        else if (c == 34) strbuf.add(out, "\\\"")
-        else if (c == 92) strbuf.add(out, "\\\\")
-        else if (c < 32) panic("vasm_unit_text: a string has a control character that is not saved")
-        else strbuf.add(out, substr(s, i, i + 1))
-        i = i + 1
+    # unit(name, m, imports, word) is the unit of the module m, which the code of the width word is made of
+    export unit(name, m, imports, word) := {
+        errs := vasm_check.check_with(m, imports)
+        if (errs != []) panic(f"vasm_unit: {name} has an error: {arg(errs[0], 2)}")
+        own := vu_names(arg(m, 0))
+        each(n -> if (member(n, own)) panic(f"vasm_unit: {symname(arg(n, 1))} of {name} is also in the imports"), vu_names(imports))
+        all := vasm_lower_part(imports, m, none, word)
+        nfns := length(filter(d -> head(d) == 'Fn, arg(m, 0)))
+        Unit{name, word, iface(m), take(all, nfns), drop(all, nfns), vasm_strings(), map(symname, vasm_symbols())}
     }
-    strbuf.add(out, "\"")
-    strbuf.str(out)
-}
 
-vu_text(out, v) := {
-    t := typeof(v)
-    if (t == 'int) strbuf.add(out, int_to_str(v))
-    else if (t == 'string) strbuf.add(out, vu_string_text(v))
-    else if (t == 'symbol) strbuf.add(out, symname(v))
-    else if (t == 'mexpr) {
-        if (head(v) == 'Cons or head(v) == 'Nil) {
-            strbuf.add(out, "Lst{")
-            first := true
-            each(x -> {
-                if (not first) strbuf.add(out, ", ")
-                first = false
-                vu_text(out, x)
-            }, v)
-            strbuf.add(out, "}")
-        } else {
-            strbuf.add(out, symname(head(v)))
-            strbuf.add(out, "{")
-            i := 0
-            while (i < arity(v)) {
-                if (i > 0) strbuf.add(out, ", ")
-                vu_text(out, arg(v, i))
-                i = i + 1
+    export name(Unit{n, _, _, _, _, _, _}) := n
+    export word(Unit{_, w, _, _, _, _, _}) := w
+    export ifaces(Unit{_, _, i, _, _, _, _}) := i
+
+    # === Joining ===
+    # the type of main of the interfaces, which stops the program when it is not there once, or takes arguments
+    vu_main_type(ifs) := {
+        ds := filter(d -> head(d) == 'Fn and arg(d, 1) == 'main, ifs)
+        if (ds == []) panic("vasm: the program has no function main")
+        d := ds[0]
+        if (arg(d, 3) != []) panic("vasm: main takes no arguments")
+        arg(d, 4)
+    }
+
+    # the names that two units define stop the program
+    vu_check_names(units) := {
+        seen := table()
+        each(u -> each(n -> {
+            key := Tuple{arg(n, 0), arg(n, 1)}
+            if (table_has(seen, key)) panic(f"vasm: {symname(arg(n, 1))} is defined in {table_get(seen, key, none)} and in {name(u)}")
+            table_set(seen, key, name(u))
+        }, vu_names(ifaces(u))), units)
+    }
+
+    # the functions of gens once each, in the order they are first made; a function of the same name in two units must be the same
+    vu_gens(units) := {
+        seen := table()
+        out := []
+        each(u -> each(f -> {
+            old := table_get(seen, ir_name(f), none)
+            if (old == none) {
+                table_set(seen, ir_name(f), f)
+                out = f :: out
+            } else if (ir_code(old) != ir_code(f)) panic(f"vasm: {ir_name(f)} is made differently by two units")
+        }, arg(u, 4)), units)
+        reverse(out)
+    }
+
+    vu_unique(xs) := {
+        seen := table()
+        out := []
+        each(x -> if (not table_has(seen, x)) {
+            table_set(seen, x, true)
+            out = x :: out
+        }, xs)
+        reverse(out)
+    }
+
+    # units_merge(units, w) is Merged{fns, strs, syms, main}: the functions, the string literals, the names of the symbols and the type of main
+    export units_merge(units, w) := {
+        each(u -> if (word(u) != w) panic(f"vasm: {name(u)} is made for the word of {word(u)} bytes, not {w}"), units)
+        vu_check_names(units)
+        ifs := concat_map(ifaces, units)
+        ret := vu_main_type(ifs)
+        fns := map(vu_copy, append(concat_map(u -> arg(u, 3), units), vu_gens(units)))
+        Merged{fns, vu_unique(concat_map(u -> arg(u, 5), units)), vu_unique(concat_map(u -> arg(u, 6), units)), ret}
+    }
+
+    # === Saving ===
+    # The text of a value: integers, strings, symbols and M-expressions of them. A list is Lst{...}.
+    vu_string_text(s) := {
+        out := strbuf.new()
+        strbuf.add(out, "\"")
+        n := strlen(s)
+        i := 0
+        while (i < n) {
+            c := ord(s, i)
+            if (c == 10) strbuf.add(out, "\\n")
+            else if (c == 9) strbuf.add(out, "\\t")
+            else if (c == 13) strbuf.add(out, "\\r")
+            else if (c == 34) strbuf.add(out, "\\\"")
+            else if (c == 92) strbuf.add(out, "\\\\")
+            else if (c < 32) panic("vasm_unit.text: a string has a control character that is not saved")
+            else strbuf.add(out, substr(s, i, i + 1))
+            i = i + 1
+        }
+        strbuf.add(out, "\"")
+        strbuf.str(out)
+    }
+
+    vu_text(out, v) := {
+        t := typeof(v)
+        if (t == 'int) strbuf.add(out, int_to_str(v))
+        else if (t == 'string) strbuf.add(out, vu_string_text(v))
+        else if (t == 'symbol) strbuf.add(out, symname(v))
+        else if (t == 'mexpr) {
+            if (head(v) == 'Cons or head(v) == 'Nil) {
+                strbuf.add(out, "Lst{")
+                first := true
+                each(x -> {
+                    if (not first) strbuf.add(out, ", ")
+                    first = false
+                    vu_text(out, x)
+                }, v)
+                strbuf.add(out, "}")
+            } else {
+                strbuf.add(out, symname(head(v)))
+                strbuf.add(out, "{")
+                i := 0
+                while (i < arity(v)) {
+                    if (i > 0) strbuf.add(out, ", ")
+                    vu_text(out, arg(v, i))
+                    i = i + 1
+                }
+                strbuf.add(out, "}")
             }
-            strbuf.add(out, "}")
-        }
-    } else panic("vasm_unit_text: a value that is not saved")
-}
+        } else panic("vasm_unit.text: a value that is not saved")
+    }
 
-# the function f (ir.fn) as an M-expression: IRFn does not hold tables and vectors there
-vu_fn_value(IRFn{name, code, meta}) := {
-    items := t -> sort((a, b) -> arg(a, 0) < arg(b, 0), table_items(t))
-    FnV{name, vector.to_list(code), table_get(meta, 'nv, 0), table_get(meta, 'nl, 0), vector.to_list(table_get(meta, 'slots, none)),
-        items(table_get(meta, 'width, none)), items(table_get(meta, 'class, none)), table_get(meta, 'exported, true)}
-}
+    # the function f (ir_fn) as an M-expression: IRFn does not hold tables and vectors there
+    vu_fn_value(IRFn{fname, code, meta}) := {
+        items := t -> sort((a, b) -> arg(a, 0) < arg(b, 0), table_items(t))
+        FnV{fname, vector.to_list(code), table_get(meta, 'nv, 0), table_get(meta, 'nl, 0), vector.to_list(table_get(meta, 'slots, none)),
+            items(table_get(meta, 'width, none)), items(table_get(meta, 'class, none)), table_get(meta, 'exported, true)}
+    }
 
-vu_fn_of(FnV{name, code, nv, nl, slots, widths, classes, export_flag}) := {
-    meta := table()
-    table_set(meta, 'nv, nv)
-    table_set(meta, 'nl, nl)
-    table_set(meta, 'slots, vector.from_list(slots))
-    w := table()
-    each((Tuple{r, x}) -> table_set(w, r, x), widths)
-    table_set(meta, 'width, w)
-    c := table()
-    each((Tuple{r, x}) -> table_set(c, r, x), classes)
-    table_set(meta, 'class, c)
-    table_set(meta, 'exported, export_flag)
-    IRFn{name, vector.from_list(code), meta}
-}
+    vu_fn_of(FnV{fname, code, nv, nl, slots, widths, classes, export_flag}) := {
+        meta := table()
+        table_set(meta, 'nv, nv)
+        table_set(meta, 'nl, nl)
+        table_set(meta, 'slots, vector.from_list(slots))
+        w := table()
+        each((Tuple{r, x}) -> table_set(w, r, x), widths)
+        table_set(meta, 'width, w)
+        c := table()
+        each((Tuple{r, x}) -> table_set(c, r, x), classes)
+        table_set(meta, 'class, c)
+        table_set(meta, 'exported, export_flag)
+        IRFn{fname, vector.from_list(code), meta}
+    }
 
-# the stages of a target rewrite the functions in place, so the merged functions are copies and a unit can be joined again or saved after
-vu_copy(f) := vu_fn_of(vu_fn_value(f))
+    # the stages of a target rewrite the functions in place, so the merged functions are copies and a unit can be joined again or saved after
+    vu_copy(f) = vu_fn_of(vu_fn_value(f))
 
-# vasm_unit_text(u) is the text of the unit u
-vasm_unit_text(Unit{name, word, iface, fns, gens, strs, syms}) := {
-    out := strbuf.new()
-    vu_text(out, VasmUnit{vasm_unit_format, name, word, iface, map(vu_fn_value, fns), map(vu_fn_value, gens), strs, syms})
-    strbuf.add(out, "\n")
-    strbuf.str(out)
-}
+    # text(u) is the text of the unit u
+    export text(Unit{uname, uword, uiface, fns, gens, strs, syms}) := {
+        out := strbuf.new()
+        vu_text(out, VasmUnit{vasm_unit_format, uname, uword, uiface, map(vu_fn_value, fns), map(vu_fn_value, gens), strs, syms})
+        strbuf.add(out, "\n")
+        strbuf.str(out)
+    }
 
-# the value of the M-expression e read from a text: Lst{...} is a list
-vu_value(e) := {
-    t := typeof(e)
-    if (t == 'mexpr) {
-        n := arity(e)
-        xs := []
-        i := n - 1
-        while (i >= 0) {
-            xs = vu_value(arg(e, i)) :: xs
-            i = i - 1
-        }
-        if (head(e) == 'Lst) xs
-        else foldl((acc, x) -> push(acc, x), mexpr(head(e), Tuple{}), xs)
-    } else e
-}
+    # the value of the M-expression e read from a text: Lst{...} is a list
+    vu_value(e) := {
+        t := typeof(e)
+        if (t == 'mexpr) {
+            n := arity(e)
+            xs := []
+            i := n - 1
+            while (i >= 0) {
+                xs = vu_value(arg(e, i)) :: xs
+                i = i - 1
+            }
+            if (head(e) == 'Lst) xs
+            else foldl((acc, x) -> push(acc, x), mexpr(head(e), Tuple{}), xs)
+        } else e
+    }
 
-# vasm_unit_parse(text) is the unit that vasm_unit_text gave the text; it stops the program for a text of another form
-vasm_unit_parse(text) := {
-    r := parse_mexpr(text)
-    e := arg(r, 0)
-    if (typeof(e) != 'mexpr or head(e) != 'VasmUnit or arity(e) != 8 or trim(arg(r, 1)) != "")
-        panic("vasm_unit_parse: not a unit")
-    if (arg(e, 0) != vasm_unit_format) panic("vasm_unit_parse: the form of the unit is not known")
-    v := vu_value(e)
-    Unit{arg(v, 1), arg(v, 2), arg(v, 3), map(vu_fn_of, arg(v, 4)), map(vu_fn_of, arg(v, 5)), arg(v, 6), arg(v, 7)}
-}
+    # parse(src) is the unit that text gave the text src; it stops the program for a text of another form
+    export parse(src) := {
+        r := parse_mexpr(src)
+        e := arg(r, 0)
+        if (typeof(e) != 'mexpr or head(e) != 'VasmUnit or arity(e) != 8 or trim(arg(r, 1)) != "")
+            panic("vasm_unit.parse: not a unit")
+        if (arg(e, 0) != vasm_unit_format) panic("vasm_unit.parse: the form of the unit is not known")
+        v := vu_value(e)
+        Unit{arg(v, 1), arg(v, 2), arg(v, 3), map(vu_fn_of, arg(v, 4)), map(vu_fn_of, arg(v, 5)), arg(v, 6), arg(v, 7)}
+    }
 
-vasm_unit_write(path, u) := write_file(path, vasm_unit_text(u))
+    export write(path, u) := write_file(path, text(u))
 
-vasm_unit_read(path) := {
-    s := try_read_file(path)
-    if (s == none) panic(f"vasm_unit_read: cannot read {path}")
-    vasm_unit_parse(s)
+    export read(path) := {
+        s := try_read_file(path)
+        if (s == none) panic(f"vasm_unit.read: cannot read {path}")
+        parse(s)
+    }
 }
