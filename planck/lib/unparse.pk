@@ -36,12 +36,12 @@ un_spec(p) :=
     else if (is_hole(p)) 0
     else if (head(p) == 'Generic) 1
     else if (is_unwrap(p)) un_spec(arg(p, 0))
-    else foldl((n, a) -> n + un_spec(a), 2, args_of(p))
+    else foldl((n, a) -> n + un_spec(a), 2, pretty.args_of(p))
 
 holes_of(p) :=
     if (not is_mx(p)) []
     else if (is_hole(p)) [arg(p, 0)]
-    else concat_map(holes_of, args_of(p))
+    else concat_map(holes_of, pretty.args_of(p))
 
 args_tuple(t) := {
     r := Tuple{}
@@ -120,7 +120,7 @@ vars_tmpl(h, tup, labels) := {
 # template of the tree it makes. The wrapper that return, break and continue add is looked through.
 call_tmpl(c, labels) :=
     if (not (is_mx(c) and head(c) == 'Apply and arity(c) == 2 and is_mx(arg(c, 1)) and head(arg(c, 1)) == 'Tuple)) bad
-    else if (not all(x -> label_ok(x, labels), args_of(arg(c, 1)))) bad
+    else if (not all(x -> label_ok(x, labels), pretty.args_of(arg(c, 1)))) bad
     else {
         f := arg(c, 0)
         n := arity(arg(c, 1))
@@ -170,7 +170,7 @@ body_tmpl(b, labels) :=
     else if (head(b) == 'Apply) call_tmpl(b, labels)
     else bad
 
-mentions(x, s) := if (is_mx(x)) any(c -> mentions(c, s), args_of(x)) else x == s
+mentions(x, s) := if (is_mx(x)) any(c -> mentions(c, s), pretty.args_of(x)) else x == s
 
 # return takes an optional expression: Option{Seq{same, expr}}. The template has the expression itself.
 unopt(e) :=
@@ -182,7 +182,7 @@ action_of(f, elems, is_seq) := {
     n := length(elems)
     if (is_mx(f) and head(f) == 'Lambda) {
         pat := arg(arg(f, 0), 0)
-        labels := if (is_mx(pat) and head(pat) == 'Tuple and is_seq) args_of(pat)
+        labels := if (is_mx(pat) and head(pat) == 'Tuple and is_seq) pretty.args_of(pat)
                   else if (typeof(pat) == 'symbol and not is_seq) [pat]
                   else bad
         if (is_bad(labels) or length(labels) != n) bad else {
@@ -253,7 +253,7 @@ tail_of(items) :=
 # Alt{owner, order, template, items, tail}
 extract_act(owner, order, e, f) := {
     is_seq := is_mx(e) and head(e) == 'Seq
-    elems0 := if (is_seq) args_of(e) else [e]
+    elems0 := if (is_seq) pretty.args_of(e) else [e]
     elems := if (mentions(f, 'peg_return)) map(unopt, elems0) else elems0
     a := action_of(f, elems, is_seq)
     if (is_bad(a)) bad else {
@@ -277,7 +277,7 @@ find_paren(owner, a) := {
     } else none
 }
 
-un_flat(src) := if (is_mx(src) and head(src) == 'Choice) concat_map(un_flat, args_of(src)) else [src]
+un_flat(src) := if (is_mx(src) and head(src) == 'Choice) concat_map(un_flat, pretty.args_of(src)) else [src]
 
 tok_types := {
     t := table()
@@ -351,8 +351,8 @@ is_custom(tm) := is_mx(tm) and head(tm) == 'Custom
 
 alt_spec(a) := if (is_tok(alt_tmpl(a))) 1 else if (is_custom(alt_tmpl(a))) arg(alt_tmpl(a), 0) else un_spec(alt_tmpl(a))
 
-reach_add(seen, r) := if (not set_has(seen, r)) {
-    set_add(seen, r)
+reach_add(seen, r) := if (not set.has(seen, r)) {
+    set.add(seen, r)
     each(x -> reach_add(seen, x), table_get(ug_links, r, []))
 }
 
@@ -360,7 +360,7 @@ reach_add(seen, r) := if (not set_has(seen, r)) {
 un_reach(r) := {
     c := table_get(ug_reach, r, none)
     if (c != none) c else {
-        seen := set_new()
+        seen := set.new()
         reach_add(seen, r)
         table_set(ug_reach, r, seen)
         seen
@@ -369,7 +369,7 @@ un_reach(r) := {
 
 # an alternative is open when its last element is a rule that is looser than the rule of the alternative
 # (while (c) e ends with expr, which goes on to the right as far as it can)
-is_open(a) := alt_tail(a) != none and set_has(un_reach(alt_tail(a)), alt_owner(a)) and not set_has(un_reach(alt_owner(a)), alt_tail(a))
+is_open(a) := alt_tail(a) != none and set.has(un_reach(alt_tail(a)), alt_owner(a)) and not set.has(un_reach(alt_owner(a)), alt_tail(a))
 
 first_of := (x :: _) -> x
 
@@ -381,16 +381,16 @@ un_cands(r) := {
     c := table_get(ug_cands, r, none)
     if (c != none) c else {
         rr := un_reach(r)
-        ps := filter(x -> set_has(rr, arg(x, 0)), ug_parens)
+        ps := filter(x -> set.has(rr, arg(x, 0)), ug_parens)
         paren := if (ps == []) none else first_of(ps)
         wrap_ok := paren != none
-        uni := if (paren == none) set_new() else un_reach(arg(paren, 1))
+        uni := if (paren == none) set.new() else un_reach(arg(paren, 1))
         out := []
         each(a -> {
             o := alt_owner(a)
             sp := alt_spec(a)
-            if (set_has(rr, o) and (not is_open(a) or set_has(rr, alt_tail(a)))) out = Cand{(sp * 2 + 1) * 100000 - alt_order(a), a, false} :: out
-            else if (wrap_ok and sp > 0 and set_has(uni, o)) out = Cand{sp * 2 * 100000 - alt_order(a), a, paren} :: out
+            if (set.has(rr, o) and (not is_open(a) or set.has(rr, alt_tail(a)))) out = Cand{(sp * 2 + 1) * 100000 - alt_order(a), a, false} :: out
+            else if (wrap_ok and sp > 0 and set.has(uni, o)) out = Cand{sp * 2 * 100000 - alt_order(a), a, paren} :: out
         }, ug_alts)
         res := sort((x, y) -> arg(x, 0) > arg(y, 0), out)
         table_set(ug_cands, r, res)
@@ -413,7 +413,7 @@ ident_ok(name) := {
 print_tok(rule, t) :=
     if (rule == 'ident) (if (ident_ok(symname(t))) symname(t) else none)
     else if (rule == 'integer) int_to_str(t)
-    else quote_str(t)
+    else pretty.quote_str(t)
 
 # pieces are strings, T{s} (sticks to the left) and P{s} (sticks to the right)
 piece_text := (T{s}) -> s
@@ -615,7 +615,7 @@ block_texts(items) := {
 print_do(t) :=
     if (not (is_mx(t) and head(t) == 'Do)) none
     else {
-        ss := block_texts(args_of(t))
+        ss := block_texts(pretty.args_of(t))
         if (ss == none) none
         else if (arity(t) == 0) "{}"
         else _strcat("{\n", _strcat(join("\n", map(indent, ss)), "\n}"))
@@ -625,7 +625,7 @@ print_do(t) :=
 has_open_if(t) :=
     if (not is_mx(t) or head(t) == 'Do) false
     else if (head(t) == 'If and arity(t) == 3 and arg(t, 2) == none) true
-    else any(has_open_if, args_of(t))
+    else any(has_open_if, pretty.args_of(t))
 
 print_if(t) :=
     if (not (is_mx(t) and head(t) == 'If and arity(t) == 3)) none
@@ -667,15 +667,15 @@ fstr_segs(t) :=
 
 # the text of s in f"..." : the escapes of a string, and {{ }} for the braces
 fstr_escape(s) := {
-    q := quote_str(s)
-    b := strbuf_new()
+    q := pretty.quote_str(s)
+    b := strbuf.new()
     i := 1
     while (i < strlen(q) - 1) {
         c := ord(q, i)
-        strbuf_add(b, if (c == 123) "{{" else if (c == 125) "}}" else chr(c))
+        strbuf.add(b, if (c == 123) "{{" else if (c == 125) "}}" else chr(c))
         i = i + 1
     }
-    strbuf_str(b)
+    strbuf.str(b)
 }
 
 print_fstr(t) := {
