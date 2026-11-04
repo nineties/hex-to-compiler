@@ -1,7 +1,7 @@
 # vasm/ir: translates a checked vasm module (planck/lib/vasm/check.pk) to the machine independent form of backend/ir.pk
 # Copyright (C) 2026 nineties
 #
-# vasm_lower(m, word) is the list of functions (ir.fn) of the module m = Module{[...]}, which has passed vasm_check.check, and the functions
+# vasm_ir.lower(m, word) is the list of functions (ir.fn) of the module m = Module{[...]}, which has passed vasm_check.check, and the functions
 # for dropping values that the module needs. The values are 32-bit, 64-bit or the width of an address.
 # The code is made for a word: the number of bytes of an address, 4 or 8 (the word of a target, backend/target.pk). An address, own T, a borrow and
 # a val are one word, in a register of the width of the word. The stages up to here know the machine by the word only.
@@ -1216,46 +1216,3 @@ module vasm_ir {
     # lower(m, word) is the functions (ir.fn) for the functions of the module m and for dropping the values the module owns, for the word of the machine
     export lower(m, word) := lower_only(m, none, word)
 }
-
-# vasm_lower(m, word) is the functions (ir.fn) for the functions of the module m and for dropping the values the module owns, for the word of the machine
-
-# vasm_lower_only(m, names, word) lowers the functions of m named in the list names (all of them when names is none) and the drop functions they need
-fun vasm_lower_part
-vasm_lower_only(m, names, word) := vasm_lower_part([], m, names, word)
-
-# vasm_lower_part(imports, m, names, word) is vasm_lower_only for a module that calls the functions and uses the structs of imports (see vasm_check.check_with)
-vasm_lower_part(imports, Module{items}, names, word) := {
-    if (word != 4 and word != 8) panic(f"vasm_lower: the word is 4 or 8 bytes, not {word}")
-    vi_word = word
-    vi_structs = table()
-    vi_sigs = table()
-    vi_sinfos = table()
-    vi_extra = vector.new()
-    vi_made = table()
-    vi_strings = table()
-    vi_string_list = vector.new()
-    vi_symbols = table()
-    vi_symbol_list = vector.new()
-    vi_wrappers = vector.new()
-    each(d -> match d {
-        Struct{_, s, fs} -> if (table_get(vi_structs, s, none) == none) table_set(vi_structs, s, fs)
-      | Fn{_, name, _, _, _, _} -> table_set(vi_sigs, name, d)
-    }, append(imports, items))
-    fns := map(vi_fn, filter(d -> head(d) == 'Fn and (names == none or member(arg(d, 1), names)), items))
-    drops := []
-    i := 0
-    while (i < vector.len(vi_extra)) {
-        e := vector.get(vi_extra, i)
-        drops = vi_make_drop(e[0], e[1]) :: drops
-        i = i + 1
-    }
-    i = 0
-    while (i < vector.len(vi_wrappers)) {
-        e := vector.get(vi_wrappers, i)
-        drops = vi_make_wrapper(e[0], e[1], e[2]) :: drops
-        i = i + 1
-    }
-    append(fns, reverse(drops))
-}
-
-vasm_lower(m, word) := vasm_lower_only(m, none, word)
