@@ -19,11 +19,11 @@ this_file := "planck/tests/vasm2.pk"
 this_src := read_file(this_file)
 
 # the module has no error
-ok(m) := check(vasm_errors(this_file, m), [])
+ok(m) := check(vasm_check.errors(this_file, m), [])
 
 # the module has one error of the kind, on the line marked with "# NG"
 ng(m, kind) := {
-    es := vasm_errors(this_file, m)
+    es := vasm_check.errors(this_file, m)
     check(map((VasmErr{k, _, _}) -> k, es), [kind])
     if (length(es) == 1) {
         line := line_text(this_src, arg(arg(arg(es, 0), 1), 1))
@@ -36,7 +36,7 @@ ng(m, kind) := {
 # syntax: swap takes a place *p, p[i] or p.f
 body := arg(arg(vasm{| fn g() { x = swap(*p, y); x = swap(a[i], y); x = swap(s.f, y) } |}, 0)[0], 5)
 check(map(s -> map(head, arg(arg(s, 2), 2)), body), [['Load, 'Reg], ['Index, 'Reg], ['Get, 'Reg]])
-check(vasm_show_type(Own{Own{Arr{Own{U8{}}}}}), "own own [own u8]")
+check(vasm_check.show_type(Own{Own{Arr{Own{U8{}}}}}), "own own [own u8]")
 
 # own in own: x = *p moves the contents out, and p is freed or given contents again
 ok(vasm{|
@@ -626,7 +626,7 @@ ng(vasm{|
 |}, 'type)
 # the message with the position of the literal
 shown_at := line_col(this_src, index_of_str(this_src, "65536 }", index_of_str(this_src, "fn shown(", 0)))
-check(map((VasmErr{_, loc, msg}) -> f"{show_loc(loc)}: {msg}", vasm_errors(this_file, vasm{|
+check(map((VasmErr{_, loc, msg}) -> f"{show_loc(loc)}: {msg}", vasm_check.errors(this_file, vasm{|
     fn shown() { var c: u32; c = 65536 }
 |})), [f"planck/tests/vasm2.pk:{arg(shown_at, 0)}:{arg(shown_at, 1)}: 65536 is out of the range of a literal, -32768 to 32767; make it with << and |"])
 
@@ -637,7 +637,7 @@ sbody := arg(arg(vasm{| fn g() { x = "a\tb"; f("c", 1) } |}, 0)[0], 5)
 check(map(head, append([arg(arg(sbody[0], 2), 0)], arg(sbody[1], 2))), ['Str, 'Str, 'Imm])
 check(arg(arg(arg(sbody[0], 2), 0), 1), "a\tb")
 check(map((Param{_, x, t}) -> Tuple{x, t}, arg(arg(vasm{| fn g(s: &static [u8]) {} |}, 0)[0], 3)), [Tuple{'s, Ref{'shr, 'static, Arr{U8{}}}}])
-check(vasm_show_type(Ref{'shr, 'static, Arr{U8{}}}), "&static [u8]")
+check(vasm_check.show_type(Ref{'shr, 'static, Arr{U8{}}}), "&static [u8]")
 
 # a literal is a shared borrow of an array of u8 that lasts to the end of the program
 ok(vasm{|

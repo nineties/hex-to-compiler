@@ -1,7 +1,7 @@
 # vasm/text: the source text of a module of vasm
 # Copyright (C) 2026 nineties
 #
-# vasm_text(m) is the text of the module m = Module{[...]} in the syntax that vasm{| ... |} reads: one item after another, separated by
+# vasm_text.text(m) is the text of the module m = Module{[...]} in the syntax that vasm{| ... |} reads: one item after another, separated by
 # a blank line, with a statement on each line and four spaces for each level of a block.
 
 use("base")
@@ -9,81 +9,83 @@ use("list")
 use("string")
 use("vasm/check")
 
-vt_escape(s) := {
-    out := ""
-    i := 0
-    n := strlen(s)
-    while (i < n) {
-        c := ord(s, i)
-        out = _strcat(out, if (c == 10) "\\n" else if (c == 9) "\\t" else if (c == 34) "\\\"" else if (c == 92) "\\\\" else chr(c))
-        i = i + 1
+module vasm_text {
+    vt_escape(s) := {
+        out := ""
+        i := 0
+        n := strlen(s)
+        while (i < n) {
+            c := ord(s, i)
+            out = _strcat(out, if (c == 10) "\\n" else if (c == 9) "\\t" else if (c == 34) "\\\"" else if (c == 92) "\\\\" else chr(c))
+            i = i + 1
+        }
+        out
     }
-    out
-}
 
-vt_ops := [Tuple{'add, "+"}, Tuple{'sub, "-"}, Tuple{'mul, "*"}, Tuple{'div, "/"}, Tuple{'rem, "%"},
-    Tuple{'shl, "<<"}, Tuple{'shr, ">>"}, Tuple{'bit_and, "&"}, Tuple{'bit_or, "|"}, Tuple{'bit_xor, "^"},
-    Tuple{'eq, "=="}, Tuple{'ne, "!="}, Tuple{'le, "<="}, Tuple{'ge, ">="}, Tuple{'lt, "<"}, Tuple{'gt, ">"}]
+    vt_ops := [Tuple{'add, "+"}, Tuple{'sub, "-"}, Tuple{'mul, "*"}, Tuple{'div, "/"}, Tuple{'rem, "%"},
+        Tuple{'shl, "<<"}, Tuple{'shr, ">>"}, Tuple{'bit_and, "&"}, Tuple{'bit_or, "|"}, Tuple{'bit_xor, "^"},
+        Tuple{'eq, "=="}, Tuple{'ne, "!="}, Tuple{'le, "<="}, Tuple{'ge, ">="}, Tuple{'lt, "<"}, Tuple{'gt, ">"}]
 
-vt_operand(o) := match o {
-    Imm{_, n} -> if (n == true) "true" else if (n == false) "false" else if (typeof(n) == 'int) f"{n}" else arg(n, 0)
-  | Str{_, s} -> f"\"{vt_escape(s)}\""
-  | Sym{_, s} -> f"'{symname(s)}"
-  | Reg{_, x} -> symname(x)
-  | Load{_, p} -> f"*{symname(p)}"
-  | Index{_, a, i} -> f"{symname(a)}[{vt_operand(i)}]"
-  | Get{_, a, f} -> f"{symname(a)}.{symname(f)}"
-}
-
-vt_args(as) := join(", ", map(vt_operand, as))
-
-vt_rhs(r) := match r {
-    Mov{a} -> vt_operand(a)
-  | Bin{op, a, b} -> f"{vt_operand(a)} {arg(find(p -> arg(p, 0) == op, vt_ops), 1)} {vt_operand(b)}"
-  | Load{_, p} -> f"*{symname(p)}"
-  | Index{_, a, i} -> f"{symname(a)}[{vt_operand(i)}]"
-  | Get{_, a, f} -> f"{symname(a)}.{symname(f)}"
-  | Conv{_, a, t} -> f"{vt_operand(a)} as {vasm_show_type(t)}"
-  | Make{_, s, inits} -> f"{symname(s)}{{{join(", ", map((Init{_, f, a}) -> f"{symname(f)}: {vt_operand(a)}", inits))}}}"
-  | Call{_, f, as} -> f"{symname(f)}({vt_args(as)})"
-  | Con{_, h, as} -> f"val {symname(h)}({vt_args(as)})"
-  | Clo{_, f, as} -> f"fn {symname(f)}({vt_args(as)})"
-  | Borrow{_, k, rg, y} -> if (k == 'mut) f"&mut {symname(rg)} {symname(y)}" else f"&{symname(rg)} {symname(y)}"
-}
-
-vt_indent(n) := str_repeat("    ", n)
-
-fun vt_block
-
-# the lines of the statement s at the depth n
-vt_stmt(s, n) := {
-    pad := vt_indent(n)
-    match s {
-        Decl{_, x, t} -> [f"{pad}var {symname(x)}: {vasm_show_type(t)}"]
-      | Assign{_, x, r} -> [f"{pad}{symname(x)} = {vt_rhs(r)}"]
-      | Store{_, p, a} -> [f"{pad}*{symname(p)} = {vt_operand(a)}"]
-      | IStore{_, p, i, a} -> [f"{pad}{symname(p)}[{vt_operand(i)}] = {vt_operand(a)}"]
-      | FStore{_, p, f, a} -> [f"{pad}{symname(p)}.{symname(f)} = {vt_operand(a)}"]
-      | CallS{_, f, as} -> [f"{pad}{symname(f)}({vt_args(as)})"]
-      | IfS{_, c, a, b} -> if (b == []) append(append([f"{pad}if ({vt_rhs(c)}) {{"], vt_block(a, n + 1)), [f"{pad}}}"])
-            else append(append(append([f"{pad}if ({vt_rhs(c)}) {{"], vt_block(a, n + 1)), [f"{pad}}} else {{"]), append(vt_block(b, n + 1), [f"{pad}}}"]))
-      | WhileS{_, c, body} -> append(append([f"{pad}while ({vt_rhs(c)}) {{"], vt_block(body, n + 1)), [f"{pad}}}"])
-      | RegionS{_, r, body} -> append(append([f"{pad}region {symname(r)} {{"], vt_block(body, n + 1)), [f"{pad}}}"])
-      | Ret{_, a} -> [if (a == none) f"{pad}return" else f"{pad}return {vt_operand(a)}"]
+    vt_operand(o) := match o {
+        Imm{_, n} -> if (n == true) "true" else if (n == false) "false" else if (typeof(n) == 'int) f"{n}" else arg(n, 0)
+      | Str{_, s} -> f"\"{vt_escape(s)}\""
+      | Sym{_, s} -> f"'{symname(s)}"
+      | Reg{_, x} -> symname(x)
+      | Load{_, p} -> f"*{symname(p)}"
+      | Index{_, a, i} -> f"{symname(a)}[{vt_operand(i)}]"
+      | Get{_, a, f} -> f"{symname(a)}.{symname(f)}"
     }
-}
 
-vt_block(ss, n) := concat_map(s -> vt_stmt(s, n), ss)
+    vt_args(as) := join(", ", map(vt_operand, as))
 
-vt_param(Param{_, x, t}) := f"{symname(x)}: {vasm_show_type(t)}"
-
-vt_item(d) := match d {
-    Fn{_, f, rs, ps, ret, body} -> {
-        regions := if (rs == []) "" else f"[{join(", ", map(symname, rs))}]"
-        result := if (ret == Unit{}) "" else f" -> {vasm_show_type(ret)}"
-        join("\n", append(append([f"fn {symname(f)}{regions}({join(", ", map(vt_param, ps))}){result} {{"], vt_block(body, 1)), ["}"]))
+    vt_rhs(r) := match r {
+        Mov{a} -> vt_operand(a)
+      | Bin{op, a, b} -> f"{vt_operand(a)} {arg(find(p -> arg(p, 0) == op, vt_ops), 1)} {vt_operand(b)}"
+      | Load{_, p} -> f"*{symname(p)}"
+      | Index{_, a, i} -> f"{symname(a)}[{vt_operand(i)}]"
+      | Get{_, a, f} -> f"{symname(a)}.{symname(f)}"
+      | Conv{_, a, t} -> f"{vt_operand(a)} as {vasm_check.show_type(t)}"
+      | Make{_, s, inits} -> f"{symname(s)}{{{join(", ", map((Init{_, f, a}) -> f"{symname(f)}: {vt_operand(a)}", inits))}}}"
+      | Call{_, f, as} -> f"{symname(f)}({vt_args(as)})"
+      | Con{_, h, as} -> f"val {symname(h)}({vt_args(as)})"
+      | Clo{_, f, as} -> f"fn {symname(f)}({vt_args(as)})"
+      | Borrow{_, k, rg, y} -> if (k == 'mut) f"&mut {symname(rg)} {symname(y)}" else f"&{symname(rg)} {symname(y)}"
     }
-  | Struct{_, s, fs} -> join("\n", append(append([f"struct {symname(s)} {{"], map((Field{_, x, t}) -> f"    {symname(x)}: {vasm_show_type(t)}", fs)), ["}"]))
-}
 
-vasm_text(Module{items}) := _strcat(join("\n\n", map(vt_item, items)), "\n")
+    vt_indent(n) := str_repeat("    ", n)
+
+    fun vt_block
+
+    # the lines of the statement s at the depth n
+    vt_stmt(s, n) := {
+        pad := vt_indent(n)
+        match s {
+            Decl{_, x, t} -> [f"{pad}var {symname(x)}: {vasm_check.show_type(t)}"]
+          | Assign{_, x, r} -> [f"{pad}{symname(x)} = {vt_rhs(r)}"]
+          | Store{_, p, a} -> [f"{pad}*{symname(p)} = {vt_operand(a)}"]
+          | IStore{_, p, i, a} -> [f"{pad}{symname(p)}[{vt_operand(i)}] = {vt_operand(a)}"]
+          | FStore{_, p, f, a} -> [f"{pad}{symname(p)}.{symname(f)} = {vt_operand(a)}"]
+          | CallS{_, f, as} -> [f"{pad}{symname(f)}({vt_args(as)})"]
+          | IfS{_, c, a, b} -> if (b == []) append(append([f"{pad}if ({vt_rhs(c)}) {{"], vt_block(a, n + 1)), [f"{pad}}}"])
+                else append(append(append([f"{pad}if ({vt_rhs(c)}) {{"], vt_block(a, n + 1)), [f"{pad}}} else {{"]), append(vt_block(b, n + 1), [f"{pad}}}"]))
+          | WhileS{_, c, body} -> append(append([f"{pad}while ({vt_rhs(c)}) {{"], vt_block(body, n + 1)), [f"{pad}}}"])
+          | RegionS{_, r, body} -> append(append([f"{pad}region {symname(r)} {{"], vt_block(body, n + 1)), [f"{pad}}}"])
+          | Ret{_, a} -> [if (a == none) f"{pad}return" else f"{pad}return {vt_operand(a)}"]
+        }
+    }
+
+    vt_block(ss, n) = concat_map(s -> vt_stmt(s, n), ss)
+
+    vt_param(Param{_, x, t}) := f"{symname(x)}: {vasm_check.show_type(t)}"
+
+    vt_item(d) := match d {
+        Fn{_, f, rs, ps, ret, body} -> {
+            regions := if (rs == []) "" else f"[{join(", ", map(symname, rs))}]"
+            result := if (ret == Unit{}) "" else f" -> {vasm_check.show_type(ret)}"
+            join("\n", append(append([f"fn {symname(f)}{regions}({join(", ", map(vt_param, ps))}){result} {{"], vt_block(body, 1)), ["}"]))
+        }
+      | Struct{_, s, fs} -> join("\n", append(append([f"struct {symname(s)} {{"], map((Field{_, x, t}) -> f"    {symname(x)}: {vasm_check.show_type(t)}", fs)), ["}"]))
+    }
+
+    export text(Module{items}) := _strcat(join("\n\n", map(vt_item, items)), "\n")
+}
