@@ -14,6 +14,7 @@ check(actual, expected) := if (actual == expected) {
 
 use("psys/expand")
 use("vasm/text")
+use("vasm/unit")
 
 this_file := "planck/tests/psys.pk"
 this_src := read_file(this_file)
@@ -452,6 +453,44 @@ check(map(f -> arg(f, 1), arg(arg(r, 0), 0)), ['h])
 check(map((VasmErr{k, _, _}) -> k, vasm_check(psys_expand(psys{|
     fn f(x: i64) -> i32 { x }
 |}))), ['type])
+
+# the functions and the structs of other units are used through their interfaces, and are not in the expanded module
+lib_iface := vasm_unit_iface(vasm{|
+    struct P { x: i64, y: i64 }
+    fn twice(a: i64) -> i64 {
+        var t: i64
+        t = a + a
+        return t
+    }
+|})
+user := psys{|
+    fn f(a: i64) -> i64 {
+        let p = P{x: twice(a), y: 1}
+        p.x + p.y
+    }
+|}
+check(arg(psys_expand_all_with(user, lib_iface), 1), [])
+same2 := psys_expand_with(user, lib_iface)
+check(map(d -> arg(d, 1), arg(same2, 0)), ['f])
+check(vasm_check_with(same2, lib_iface), [])
+check(vasm_text(same2), vasm_text(vasm{|
+    fn f(a: i64) -> i64 {
+        var t0: i64
+        t0 = twice(a)
+        var p: P
+        p = P{x: t0, y: 1}
+        var t1: i64
+        t1 = p.x
+        var t2: i64
+        t2 = p.y
+        var t3: i64
+        t3 = t1 + t2
+        return t3
+    }
+|}))
+
+# without the interface the function is not defined
+check(map((VasmErr{k, _, _}) -> k, arg(psys_expand_all(user), 1)), ['undefined])
 
 put(f"psys: {passed} passed, {failed} failed\n")
 if (failed > 0) exit(1)

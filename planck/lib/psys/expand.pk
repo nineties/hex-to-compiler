@@ -3,6 +3,8 @@
 #
 # psys_expand(m) is the Module{[...]} of vasm for the module m = PModule{[...]} that psys{| ... |} reads.
 # psys_expand_all(m) is Tuple{module, errors} with the errors [VasmErr{kind, Pos{d}, msg}, ...], the first of each function.
+# psys_expand_with(m, imports) and psys_expand_all_with(m, imports) expand a module whose functions may call the functions and use the
+# structs of imports, the interfaces of other units (vasm_unit_ifaces of vasm/unit.pk): a list of Fn and Struct items, whose bodies are not read.
 # The expansion makes the form that vasm_check checks; it does not check ownership, borrows or regions.
 #
 # - A nested expression becomes one statement for each operation, with a temporary variable of the type of the operation.
@@ -612,14 +614,19 @@ px_fn(d) := match d {
     }
 }
 
-psys_expand_all(m) := {
+fun psys_expand_all_with
+
+psys_expand_all(m) := psys_expand_all_with(m, [])
+
+psys_expand_all_with(m, imports) := {
     items := arg(m, 0)
     px_sigs = table()
     px_structs = table()
     each(d -> match d {
         PFn{_, f, rs, ps, ret, _} -> table_set(px_sigs, f, Sig{rs, map(p -> arg(p, 2), ps), ret})
+      | Fn{_, f, rs, ps, ret, _} -> table_set(px_sigs, f, Sig{rs, map(p -> arg(p, 2), ps), ret})
       | Struct{_, s, _} -> if (table_get(px_structs, s, none) == none) table_set(px_structs, s, d)
-    }, items)
+    }, append(imports, items))
     errs := []
     out := []
     each(d -> match d {
@@ -636,8 +643,12 @@ psys_expand_all(m) := {
     Tuple{Module{reverse(out)}, reverse(errs)}
 }
 
-psys_expand(m) := {
-    r := psys_expand_all(m)
+fun psys_expand_with
+
+psys_expand(m) := psys_expand_with(m, [])
+
+psys_expand_with(m, imports) := {
+    r := psys_expand_all_with(m, imports)
     if (arg(r, 1) != []) panic(f"psys_expand: {arg(arg(r, 1)[0], 2)}")
     arg(r, 0)
 }
