@@ -6,7 +6,7 @@
 #   word                      the number of bytes of an address and of a word of memory that the layout of the code of vasm/ir.pk and vasm/rt.pk is made for
 #   lower(f, helpers)         the function f (ir_fn) rewritten for the registers of the machine; helpers is a table of the functions that
 #                             the rewriting calls (see wide.pk)
-#   compile(name, fns, datas) the object of the functions of lower and the data (see x86.pk)
+#   compile(name, fns, datas) the object of the functions of lower and the data (see x86.pk and x64.pk)
 #   executable(objs)          the file as a buffer of bytes (see bytes.pk) that joins the objects: the format of the file, the address
 #                             where it is loaded and the entry are the machine's
 # target_get(name) is the target with the name name. A machine is added by writing its functions and one line of target_all.
@@ -16,6 +16,7 @@ use("list")
 use("backend/ir")
 use("backend/wide")
 use("backend/x86")
+use("backend/x64")
 use("backend/link")
 use("backend/elf")
 
@@ -25,12 +26,24 @@ target_x86_base := 134512640
 target_x86_lower(f, helpers) := ir_set_code(f, wide_lower(f, helpers))
 
 target_x86_executable(objs) := {
-    img := link(objs, "_start", target_x86_base)
+    img := link(objs, "_start", target_x86_base, elf32_hdr_size(2))
     elf32_image('x86, arg(img, 0), arg(img, 1))
 }
 
+# === x86-64 (Linux) ===
+target_x64_base := 4194304
+
+# the registers are 64-bit: the functions need no rewriting
+target_x64_lower(f, helpers) := f
+
+target_x64_executable(objs) := {
+    img := link(objs, "_start", target_x64_base, elf64_hdr_size(2))
+    elf64_image('x86_64, arg(img, 0), arg(img, 1))
+}
+
 # === All targets ===
-target_all := [Target{'x86, 4, target_x86_lower, x86_compile, target_x86_executable}]
+target_all := [Target{'x86, 4, target_x86_lower, x86_compile, target_x86_executable},
+               Target{'x86_64, 8, target_x64_lower, x64_compile, target_x64_executable}]
 
 target_default := 'x86
 

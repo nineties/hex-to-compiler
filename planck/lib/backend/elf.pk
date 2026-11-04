@@ -1,9 +1,9 @@
-# elf: writes a 32-bit little-endian ELF executable from loadable segments
+# elf: writes a little-endian ELF executable, 32-bit (elf32_image) or 64-bit (elf64_image), from loadable segments
 # Copyright (C) 2026 nineties
 #
 # A segment is Seg{vaddr, off, bytes, memsz, flags}: its bytes are at the file offset off and are loaded at vaddr, and memsz is
 # the size in memory (the rest after the bytes is 0). flags is 4 for read, 2 for write and 1 for execute.
-# The first segment starts at the file offset 0 and its first elf32_hdr_size(n) bytes are the headers: the writer fills them in.
+# The first segment starts at the file offset 0 and its first elf32_hdr_size(n) (elf64_hdr_size(n)) bytes are the headers: the writer fills them in.
 # The file offset of the other segments is congruent to vaddr modulo 4096.
 
 use("base")
@@ -12,7 +12,7 @@ use("bytes")
 
 elf32_hdr_size(nsegs) := 52 + 32 * nsegs
 
-elf_machines := [Tuple{'x86, 3}]
+elf_machines := [Tuple{'x86, 3}, Tuple{'x86_64, 62}]
 
 # elf32_image(machine, entry, segs) is the file as a buffer of bytes
 elf32_image(machine, entry, segs) := {
@@ -73,4 +73,63 @@ elf32_image(machine, entry, segs) := {
 elf32_write(path, machine, entry, segs) := {
     write_file(path, bb_to_u8(elf32_image(machine, entry, segs)))
     chmod(path, 493)
+}
+
+# === 64-bit ===
+# elf64_image(machine, entry, segs) is the file of a 64-bit little-endian executable from segments of the same form;
+# the first elf64_hdr_size(n) bytes of the first segment are the headers
+elf64_hdr_size(nsegs) := 64 + 56 * nsegs
+
+elf64_image(machine, entry, segs) := {
+    n := length(segs)
+    hdr := elf64_hdr_size(n)
+    if (n == 0) panic("elf64_image: no segments")
+    s0 := segs[0]
+    if (arg(s0, 1) != 0 or bb_len(arg(s0, 2)) < hdr) panic("elf64_image: the first segment must start at the file offset 0 and hold the headers")
+    code := find(e -> arg(e, 0) == machine, elf_machines)
+    if (code == none) panic("elf64_image: unknown machine")
+    b := bb_new()
+    # e_ident
+    bb_u8(b, 127)
+    bb_u8(b, 69)
+    bb_u8(b, 76)
+    bb_u8(b, 70)
+    bb_u8(b, 2)
+    bb_u8(b, 1)
+    bb_u8(b, 1)
+    bb_zeros(b, 9)
+    bb_u16(b, 2)
+    bb_u16(b, code[1])
+    bb_u32(b, 1)
+    bb_u64(b, entry)
+    bb_u64(b, 64)
+    bb_u64(b, 0)
+    bb_u32(b, 0)
+    bb_u16(b, 64)
+    bb_u16(b, 56)
+    bb_u16(b, n)
+    bb_u16(b, 64)
+    bb_u16(b, 0)
+    bb_u16(b, 0)
+    each((Seg{vaddr, off, bytes, memsz, flags}) -> {
+        if ((vaddr - off) % 4096 != 0) panic("elf64_image: vaddr and the file offset of a segment differ modulo the page size")
+        bb_u32(b, 1)
+        bb_u32(b, flags)
+        bb_u64(b, off)
+        bb_u64(b, vaddr)
+        bb_u64(b, vaddr)
+        bb_u64(b, bb_len(bytes))
+        bb_u64(b, memsz)
+        bb_u64(b, 4096)
+    }, segs)
+    each((Seg{_, off, bytes, _, _}) -> {
+        if (off > 0 and bb_len(b) > off) panic("elf64_image: segments overlap in the file")
+        bb_zeros(b, off - bb_len(b))
+        i := if (off == 0) hdr else 0
+        while (i < bb_len(bytes)) {
+            bb_u8(b, bb_get(bytes, i))
+            i = i + 1
+        }
+    }, segs)
+    b
 }

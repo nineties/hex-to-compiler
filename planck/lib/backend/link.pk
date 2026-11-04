@@ -3,8 +3,9 @@
 #
 # Sections of the same name are joined in the order of the objects. The sections .text and .rodata make the first segment,
 # which is read and executed and holds the headers of the file in front, and .data and .bss make the second, which is read and written.
-# link(objs, entry, base) is Image{entry, segs, syms}: the address of the symbol entry, the segments of elf.pk, and a table from
-# the global symbols to their addresses. A symbol that is used and not defined, or defined twice as global, stops the program.
+# link(objs, entry, base, hdr) is Image{entry, segs, syms}: the address of the symbol entry, the segments of elf.pk, and a table from
+# the global symbols to their addresses. base is the address where the file is loaded and hdr the size of the headers of the file for
+# two segments (elf32_hdr_size(2) or elf64_hdr_size(2)). A symbol that is used and not defined, or defined twice as global, stops the program.
 
 use("base")
 use("list")
@@ -39,12 +40,11 @@ link_join(objs, names, joined, pieces) := each(name -> {
     table_set(joined, name, Tuple{out, al})
 }, names)
 
-link(objs, entry, base) := {
+link(objs, entry, base, hdr) := {
     each(o -> each(s -> if (not member(arg(s, 0), append(link_first, link_second))) panic(f"link: the section {arg(s, 0)} of {obj_name(o)} is not supported"), obj_sections(o)), objs)
     joined := table()
     pieces := table()
     link_join(objs, append(link_first, link_second), joined, pieces)
-    hdr := elf32_hdr_size(2)
     # addresses of the joined sections
     addr := table()
     cur := base + hdr
