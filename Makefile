@@ -48,7 +48,7 @@ planck0: bootstrap/planck0.sv plisp2 $(SASM_LIBS)
 
 VASM_EXAMPLES := $(wildcard planck/examples/vasm/*.vasm)
 PSYS_EXAMPLES := $(wildcard planck/examples/psys/*.psys)
-VASM_TARGETS := x86 x86_64
+VASM_TARGETS := x86_64
 BACKEND_EXAMPLES := $(wildcard planck/examples/backend/*.pk)
 PE_EXAMPLES := $(wildcard planck/examples/pe/*.pk)
 

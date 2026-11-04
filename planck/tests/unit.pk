@@ -68,14 +68,14 @@ app := vasm{|
 # the same program in one module
 whole := Module{append(arg(lib, 0), arg(app, 0))}
 
-t32 := target_get('x86)
-word := target_word(t32)
+word := target_word(target_get(target_default))
 lib_unit := vasm_unit("lib", lib, [], word)
 app_unit := vasm_unit("app", app, vasm_unit_iface(lib), word)
+check(vasm_unit_word(lib_unit), 8)
 
 text_before := vasm_unit_text(lib_unit)
-whole_bytes := vasm_executable_for(t32, whole)
-split_bytes := vasm_units_executable_for(t32, [lib_unit, app_unit])
+whole_bytes := vasm_executable(whole)
+split_bytes := vasm_units_executable([lib_unit, app_unit])
 check(bb_len(split_bytes) > 0, true)
 check(vec_to_list(split_bytes) == vec_to_list(whole_bytes), true)
 
@@ -85,24 +85,15 @@ check(vasm_unit_text(lib_unit) == text_before, true)
 # a unit that is saved and read again
 saved := vasm_unit_parse(vasm_unit_text(lib_unit))
 check(vasm_unit_text(saved) == vasm_unit_text(lib_unit), true)
-check(vec_to_list(vasm_units_executable_for(t32, [saved, vasm_unit_parse(vasm_unit_text(app_unit))])) == vec_to_list(whole_bytes), true)
+check(vec_to_list(vasm_units_executable([saved, vasm_unit_parse(vasm_unit_text(app_unit))])) == vec_to_list(whole_bytes), true)
 
 # the name and the interface of a unit
 check(vasm_unit_name(lib_unit), "lib")
 check(vasm_unit_ifaces(app_unit), vasm_unit_iface(app))
 
-# the same for the target with the word of 8 bytes: units made for another word do not join
+# the same with the target named
 t64 := target_get('x86_64)
-word64 := target_word(t64)
-lib64 := vasm_unit("lib", lib, [], word64)
-app64 := vasm_unit("app", app, vasm_unit_iface(lib), word64)
-check(vasm_unit_word(lib64), 8)
-check(vec_to_list(vasm_units_executable_for(t64, [lib64, app64])) == vec_to_list(vasm_executable_for(t64, whole)), true)
-check(vec_to_list(vasm_units_executable_for(t64, [lib64, app64])) == vec_to_list(whole_bytes), false)
-
-# the units of the default target (x86_64) join without naming a target
-check(vec_to_list(vasm_units_executable([lib64, app64])) == vec_to_list(vasm_executable(whole)), true)
-check(vec_to_list(vasm_units_executable([lib64, app64])) == vec_to_list(vasm_executable_for(t64, whole)), true)
+check(vec_to_list(vasm_units_executable_for(t64, [lib_unit, app_unit])) == vec_to_list(vasm_executable_for(t64, whole)), true)
 
 
 put("Tests passed "); print(passed); put("/"); println(passed + failed)
