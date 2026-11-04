@@ -1,0 +1,103 @@
+# native/syntax: the syntax of native, the systems language of planck
+# Copyright (C) 2026 nineties
+#
+# native{| struct ... fn ... |} reads structs and functions of the language and is PModule{[Struct{...}, PFn{...}, ...]}.
+# The types, the structs and the parameters are those of vasm (vasm/check). The bodies are written with nested expressions,
+# let, for, compound assignments, the short-circuit and / or and integer literals of any size.
+# native_expand.expand (native/expand) turns the tree into the Module of vasm.
+
+use("list")
+use("vasm/check")
+
+native_kw ::= (vasm_kw | 'let | 'for | 'in | 'and | 'or | 'not)
+native_name ::= !native_kw x:ident { x }
+
+# === Expressions ===
+# precedence, loosest first: or, and, == != < <= > >=, |, ^, &, << >>, + -, * / %, as, unary - not * &, postfix [] . ()
+# A binary * is on the same line as its left operand, so that a statement *p = v on the next line is not a multiplication.
+
+native_expr ::= native_or
+
+native_or ::= a:native_or at:vasm_here 'or b:native_and { EOr{at, a, b} } | native_and
+native_and ::= a:native_and at:vasm_here 'and b:native_cmp { EAnd{at, a, b} } | native_cmp
+
+native_cmpop ::= "==" { 'eq } | "!=" { 'ne } | "<=" { 'le } | ">=" { 'ge } | "<" { 'lt } | ">" { 'gt }
+native_cmp ::= a:native_cmp at:vasm_here op:native_cmpop b:native_bor { EBin{at, op, a, b} } | native_bor
+
+native_bor ::= a:native_bor at:vasm_here "|" b:native_bxor { EBin{at, 'bit_or, a, b} } | native_bxor
+native_bxor ::= a:native_bxor at:vasm_here "^" b:native_band { EBin{at, 'bit_xor, a, b} } | native_band
+native_band ::= a:native_band at:vasm_here "&" b:native_shift { EBin{at, 'bit_and, a, b} } | native_shift
+
+native_shiftop ::= "<<" { 'shl } | ">>" { 'shr }
+native_shift ::= a:native_shift at:vasm_here op:native_shiftop b:native_add { EBin{at, op, a, b} } | native_add
+
+native_addop ::= "+" { 'add } | "-" { 'sub }
+native_add ::= a:native_add at:vasm_here op:native_addop b:native_mul { EBin{at, op, a, b} } | native_mul
+
+native_mulop ::= "*" { 'mul } | "/" { 'div } | "%" { 'rem }
+native_mul ::= a:native_mul same at:vasm_here op:native_mulop b:native_cast { EBin{at, op, a, b} } | native_cast
+
+native_cast ::= a:native_cast at:vasm_here 'as t:vasm_type { ECast{at, a, t} } | native_unary
+
+native_unary ::= at:vasm_here n:vasm_int_lit { ELit{at, n} }
+    | at:vasm_here "-" e:native_unary { ENeg{at, e} }
+    | at:vasm_here 'not e:native_unary { ENot{at, e} }
+    | at:vasm_here "*" p:native_name { EDeref{at, p} }
+    | at:vasm_here "&" 'mut r:native_name y:native_name { EBorrow{at, 'mut, r, y} }
+    | at:vasm_here "&" r:native_name y:native_name { EBorrow{at, 'shr, r, y} }
+    | native_post
+
+native_post ::= e:native_post at:vasm_here "[" i:native_expr "]" { EIndex{at, e, i} }
+    | e:native_post at:vasm_here "." f:native_name { EGet{at, e, f} }
+    | native_primary
+
+native_more_arg ::= "," a:native_expr { a }
+native_args ::= a:native_expr r:native_more_arg* { a :: vasm_tlist(r) }
+
+# a struct value S{f: e, ...} has a field first, so that S { starts the block of if, while or for in the other cases
+native_init ::= at:vasm_here f:native_name ":" e:native_expr { PInit{at, f, e} }
+native_more_init ::= vasm_fsep i:native_init { i }
+native_inits ::= i:native_init r:native_more_init* { i :: vasm_tlist(r) }
+
+native_primary ::= at:vasm_here 'true { EBool{at, true} }
+    | at:vasm_here 'false { EBool{at, false} }
+    | at:vasm_here s:string { EStr{at, s} }
+    | at:vasm_here "'" s:ident { ESym{at, s} }
+    | at:vasm_here 'val h:ident "(" args:native_args? ")" { ECon{at, h, vasm_opt_list(args)} }
+    | at:vasm_here 'fn f:native_name "(" args:native_args? ")" { EClo{at, f, vasm_opt_list(args)} }
+    | at:vasm_here f:native_name "(" args:native_args? ")" { ECall{at, f, vasm_opt_list(args)} }
+    | at:vasm_here s:native_name "{" &(native_name ":") is:native_inits ","? "}" { EMake{at, s, is} }
+    | at:vasm_here x:native_name { EVar{at, x} }
+    | "(" e:native_expr ")" { e }
+
+# === Statements ===
+
+native_asgop ::= "<<=" { 'shl } | ">>=" { 'shr } | "+=" { 'add } | "-=" { 'sub } | "*=" { 'mul } | "/=" { 'div } | "%=" { 'rem }
+    | "&=" { 'bit_and } | "|=" { 'bit_or } | "^=" { 'bit_xor } | "=" !"=" { none }
+
+native_ann ::= ":" t:vasm_type { t }
+
+native_else ::= 'else s:native_if { [s] } | 'else b:native_block { b }
+native_if ::= at:vasm_here 'if c:native_expr a:native_block b:native_else? { SIf{at, c, a, vasm_opt_list(b)} }
+
+native_stmt ::= at:vasm_here 'let x:native_name t:native_ann? "=" e:native_expr { SLet{at, x, if (arity(t) == 0) none else arg(t, 0), e} }
+    | at:vasm_here 'var x:native_name ":" t:vasm_type { SVar{at, x, t} }
+    | native_if
+    | at:vasm_here 'while c:native_expr a:native_block { SWhile{at, c, a} }
+    | at:vasm_here 'for i:native_name 'in lo:native_or ".." hi:native_or a:native_block { SFor{at, i, lo, hi, a} }
+    | at:vasm_here 'region r:native_name a:native_block { SRegion{at, r, a} }
+    | at:vasm_here 'return same e:native_expr { SRet{at, e} }
+    | at:vasm_here 'return { SRet{at, none} }
+    | at:vasm_here t:native_expr op:native_asgop e:native_expr { SSet{at, t, op, e} }
+    | at:vasm_here e:native_expr { SExpr{at, e} }
+
+native_more_stmt ::= vasm_sep s:native_stmt { s }
+native_stmts ::= s:native_stmt r:native_more_stmt* { s :: vasm_tlist(r) }
+native_block ::= "{" ss:native_stmts? ";"? "}" { vasm_opt_list(ss) }
+
+# === Items ===
+
+native_fn ::= at:vasm_here 'fn f:native_name rs:vasm_rparams? "(" ps:vasm_params? ")" rt:vasm_ret? body:native_block { PFn{at, f, vasm_opt_list(rs), vasm_opt_list(ps), if (arity(rt) == 0) Unit{} else arg(rt, 0), body} }
+
+native_item ::= vasm_struct | native_fn
+native ::= fs:native_item* { PModule{vasm_tlist(fs)} }
