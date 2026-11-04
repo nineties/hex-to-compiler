@@ -47,7 +47,7 @@ planck0: bootstrap/planck0.sv plisp2 $(SASM_LIBS)
 
 
 VASM_EXAMPLES := $(wildcard planck/examples/vasm/*.vasm)
-PSYS_EXAMPLES := $(wildcard planck/examples/psys/*.psys)
+NATIVE_EXAMPLES := $(wildcard planck/examples/native/*.native)
 VASM_TARGETS := x86_64
 BACKEND_EXAMPLES := $(wildcard planck/examples/backend/*.pk)
 PE_EXAMPLES := $(wildcard planck/examples/pe/*.pk)
@@ -66,7 +66,7 @@ test: pforth bootstrap/plisp.fs $(shell find bootstrap/plisp -name "*.lisp")
 
 # parse the libraries that planck/vasmc.pk uses in advance (planck/lib/*/*.pkm)
 preprocess: planck0
-	./planck0 tools/preprocess.pk vasm/build psys/expand
+	./planck0 tools/preprocess.pk vasm/build native/expand
 
 # run tests of planck0 and compare outputs of examples with *.out
 test-planck0: planck0
@@ -84,7 +84,7 @@ test-planck0: planck0
 	tools/test_preprocess.sh
 	./planck0 planck/tests/vasm.pk
 	./planck0 planck/tests/vasm2.pk
-	./planck0 planck/tests/psys.pk
+	./planck0 planck/tests/native.pk
 	./planck0 planck/tests/pe.pk
 	@for f in $(PLANCK_EXAMPLES); do \
 		./planck0 $$f > tmp-example.out || exit 1; \
@@ -108,7 +108,7 @@ test-planck0: planck0
 		diff -u $${f%.pk}.out tmp-backend.out || exit 1; \
 		echo "$$f: ok"; \
 	done; rm -f tmp-backend tmp-backend.out
-	@for t in $(VASM_TARGETS); do for f in $(VASM_EXAMPLES) $(PSYS_EXAMPLES); do \
+	@for t in $(VASM_TARGETS); do for f in $(VASM_EXAMPLES) $(NATIVE_EXAMPLES); do \
 		./planck0 planck/vasmc.pk $$f tmp-vasm $$t || exit 1; \
 		./tmp-vasm > tmp-vasm.out; s=$$?; \
 		[ "$$s" = "$$(cat $${f%.*}.status)" ] || { echo "$$f ($$t): exit status $$s"; exit 1; }; \
