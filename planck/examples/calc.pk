@@ -12,43 +12,43 @@ use("pretty")
 
 cur_file := ""
 cur_src := ""
-here(p) := loc_at(cur_file, cur_src, p)
+here(p) := error.loc_at(cur_file, cur_src, p)
 
 record Tok(kind, value, pos)
 
 # === Lexer: the source text to a vector of Tok{kind, value, position} ===
 lex(src) := {
-    toks := vec_new()
+    toks := vector.new()
     n := strlen(src)
     i := 0
     while (i < n) {
         c := ord(src, i)
         match c {
             10 -> {
-                vec_push(toks, Tok{'nl, "\n", i})
+                vector.push(toks, Tok{'nl, "\n", i})
                 i = i + 1
             }
           | c if is_space(c) -> { i = i + 1 }
           | c if is_digit(c) -> {
                 j := i
                 while (j < n and is_digit(ord(src, j))) j = j + 1
-                vec_push(toks, Tok{'num, str_to_int(substr(src, i, j)), i})
+                vector.push(toks, Tok{'num, str_to_int(substr(src, i, j)), i})
                 i = j
             }
           | c if is_ident_start(c) -> {
                 j := i
                 while (j < n and is_ident_char(ord(src, j))) j = j + 1
-                vec_push(toks, Tok{'id, substr(src, i, j), i})
+                vector.push(toks, Tok{'id, substr(src, i, j), i})
                 i = j
             }
           | c if index_of_str("+-*/()=", chr(c), 0) >= 0 -> {
-                vec_push(toks, Tok{'op, chr(c), i})
+                vector.push(toks, Tok{'op, chr(c), i})
                 i = i + 1
             }
-          | _ -> error_at(here(i), f"unexpected character {quote_str(chr(c))}")
+          | _ -> error.at(here(i), f"unexpected character {pretty.quote_str(chr(c))}")
         }
     }
-    vec_push(toks, Tok{'eof, "", n})
+    vector.push(toks, Tok{'eof, "", n})
     toks
 }
 
@@ -56,14 +56,14 @@ lex(src) := {
 # e is Num{n}, Var{name, pos}, Neg{e} or Bin{op, left, right, pos}
 parse_program(toks) := {
     pos := 0
-    peek() := vec_get(toks, pos)
+    peek() := vector.get(toks, pos)
     advance() := {
         t := peek()
         pos = pos + 1
         t
     }
     at(kind, v) := peek().kind == kind and peek().value == v
-    syntax_error(msg) := error_at(here(peek().pos), msg)
+    syntax_error(msg) := error.at(here(peek().pos), msg)
     expect_op(v) := if (at('op, v)) advance() else syntax_error(f"expected \"{v}\"")
 
     # left associative chain: next (op next)*
@@ -120,34 +120,34 @@ parse_program(toks) := {
 # Bin{dst, op, a, b, pos}, Copy{dst, a}, Print{a}. An operand is an integer or a symbol.
 # Temporary variables are %t1, %t2, ... which no source text can name.
 compile(stmts) := {
-    code := vec_new()
-    defined := set_new()
-    gensym_reset()
+    code := vector.new()
+    defined := set.new()
+    symbol.reset()
     fun operand
     operand = (Num{n}) -> n
              | (Var{x, p}) -> {
-                   if (not set_has(defined, intern(x))) error_at(here(p), f"undefined variable {x}")
+                   if (not set.has(defined, intern(x))) error.at(here(p), f"undefined variable {x}")
                    intern(x)
                }
              | (Neg{e}) -> {
                    a := operand(e)
-                   t := gensym("%t")
-                   vec_push(code, Bin{t, "-", 0, a, 0})
+                   t := symbol.gensym("%t")
+                   vector.push(code, Bin{t, "-", 0, a, 0})
                    t
                }
              | (Bin{op, l, r, p}) -> {
                    a := operand(l)
                    b := operand(r)
-                   t := gensym("%t")
-                   vec_push(code, Bin{t, op, a, b, p})
+                   t := symbol.gensym("%t")
+                   vector.push(code, Bin{t, op, a, b, p})
                    t
                }
     each((Let{x, e, p}) -> {
              a := operand(e)
-             set_add(defined, intern(x))
-             vec_push(code, Copy{intern(x), a})
-         } | (Expr{e}) -> vec_push(code, Print{operand(e)}), stmts)
-    vec_to_list(code)
+             set.add(defined, intern(x))
+             vector.push(code, Copy{intern(x), a})
+         } | (Expr{e}) -> vector.push(code, Print{operand(e)}), stmts)
+    vector.to_list(code)
 }
 
 show_operand(o) := if (typeof(o) == 'int) int_to_str(o) else symname(o)
@@ -168,7 +168,7 @@ run_code(code) := {
     val(o) := if (typeof(o) == 'int) o else table_get(vars, o, none)
     each((Bin{d, op, a, b, p}) -> {
              y := val(b)
-             if (op == "/" and y == 0) error_at(here(p), "division by zero")
+             if (op == "/" and y == 0) error.at(here(p), "division by zero")
              table_set(vars, d, table_get(ops, op, none)(val(a), y))
          } | (Copy{d, a}) -> table_set(vars, d, val(a))
            | (Print{a}) -> { put("= "); println(val(a)) }, code)
@@ -177,13 +177,13 @@ run_code(code) := {
 calc(file, src, verbose) := {
     cur_file = file
     cur_src = src
-    r := catch_error(() -> {
+    r := error.catch(() -> {
         toks := lex(src)
-        if (verbose) { put("tokens: "); println(vec_len(toks)) }
+        if (verbose) { put("tokens: "); println(vector.len(toks)) }
         stmts := parse_program(toks)
         if (verbose) {
             put("syntax tree:\n")
-            for (st in stmts) pprint(st)
+            for (st in stmts) pretty.print(st)
         }
         code := compile(stmts)
         if (verbose) {
@@ -195,7 +195,7 @@ calc(file, src, verbose) := {
     })
     if (head(r) == 'Err) {
         put("error: ")
-        put(show_error(src, arg(r, 0), arg(r, 1)))
+        put(error.show(src, arg(r, 0), arg(r, 1)))
         put("\n")
     }
 }

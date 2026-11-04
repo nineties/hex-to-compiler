@@ -4,71 +4,75 @@
 use("list")
 use("string")
 
-quote_str(s) := {
-    b := strbuf_new()
-    strbuf_add(b, "\"")
-    i := 0
-    while (i < strlen(s)) {
-        c := ord(s, i)
-        strbuf_add(b, if (c == 34) "\\\"" else if (c == 92) "\\\\" else if (c == 10) "\\n" else if (c == 9) "\\t" else chr(c))
-        i = i + 1
+module pretty {
+    export quote_str(s) := {
+        b := strbuf.new()
+        strbuf.add(b, "\"")
+        i := 0
+        while (i < strlen(s)) {
+            c := ord(s, i)
+            strbuf.add(b, if (c == 34) "\\\"" else if (c == 92) "\\\\" else if (c == 10) "\\n" else if (c == 9) "\\t" else chr(c))
+            i = i + 1
+        }
+        strbuf.add(b, "\"")
+        strbuf.str(b)
     }
-    strbuf_add(b, "\"")
-    strbuf_str(b)
-}
 
-# is_list(x) is true for [a, b, ...]
-fun is_list
-is_list = (Nil{}) -> true | (_ :: xs) -> is_list(xs) | (_) -> false
+    # is_list(x) is true for [a, b, ...]
+    fun is_list
+    is_list = (Nil{}) -> true | (_ :: xs) -> is_list(xs) | (_) -> false
 
-fun list_elems
-list_elems = (Nil{}) -> [] | (x :: xs) -> x :: list_elems(xs)
+    fun list_elems
+    list_elems = (Nil{}) -> [] | (x :: xs) -> x :: list_elems(xs)
 
-args_of(x) := {
-    r := []
-    i := arity(x) - 1
-    while (i >= 0) {
-        r = arg(x, i) :: r
-        i = i - 1
+    export args_of(x) := {
+        r := []
+        i := arity(x) - 1
+        while (i >= 0) {
+            r = arg(x, i) :: r
+            i = i - 1
+        }
+        r
     }
-    r
-}
 
-# the elements of an m-expr or a list as a list
-elements(x) := if (head(x) == 'Cons and is_list(x)) list_elems(x) else args_of(x)
+    # the elements of an m-expr or a list as a list
+    elements(x) := if (head(x) == 'Cons and is_list(x)) list_elems(x) else args_of(x)
 
-# show(x) is x as one line. It is the text that print writes, with [a, b] for lists.
-show(x) = {
-    t := typeof(x)
-    if (t == 'int) int_to_str(x)
-    else if (t == 'string) quote_str(x)
-    else if (t == 'symbol) symname(x)
-    else if (t == 'mexpr) {
-        if (x == []) "[]"
-        else if (head(x) == 'Cons and is_list(x)) _strcat(_strcat("[", join(", ", map(show, list_elems(x)))), "]")
-        else _strcat(_strcat(_strcat(symname(head(x)), "{"), join(", ", map(show, args_of(x)))), "}")
+    # show(x) is x as one line. It is the text that print writes, with [a, b] for lists.
+    # The global show, which f"{x}" calls, gets this case, and pretty.show is the same function.
+    show(x) = {
+        t := typeof(x)
+        if (t == 'int) int_to_str(x)
+        else if (t == 'string) quote_str(x)
+        else if (t == 'symbol) symname(x)
+        else if (t == 'mexpr) {
+            if (x == []) "[]"
+            else if (head(x) == 'Cons and is_list(x)) _strcat(_strcat("[", join(", ", map(show, list_elems(x)))), "]")
+            else _strcat(_strcat(_strcat(symname(head(x)), "{"), join(", ", map(show, args_of(x)))), "}")
+        }
+        else if (t == 'array) "<array>"
+        else "<function>"
     }
-    else if (t == 'array) "<array>"
-    else "<function>"
-}
+    export show := show
 
-pp(x, indent, width) := {
-    flat := show(x)
-    if (indent + strlen(flat) <= width or typeof(x) != 'mexpr or x == []) flat
-    else {
-        open := if (head(x) == 'Cons and is_list(x)) "[" else _strcat(symname(head(x)), "{")
-        close := if (head(x) == 'Cons and is_list(x)) "]" else "}"
-        pad := str_repeat(" ", indent + 2)
-        parts := map(e -> _strcat(pad, pp(e, indent + 2, width)), elements(x))
-        _strcat(_strcat(_strcat(_strcat(open, "\n"), join(",\n", parts)), _strcat("\n", str_repeat(" ", indent))), close)
+    pp(x, indent, width) := {
+        flat := show(x)
+        if (indent + strlen(flat) <= width or typeof(x) != 'mexpr or x == []) flat
+        else {
+            open := if (head(x) == 'Cons and is_list(x)) "[" else _strcat(symname(head(x)), "{")
+            close := if (head(x) == 'Cons and is_list(x)) "]" else "}"
+            pad := str_repeat(" ", indent + 2)
+            parts := map(e -> _strcat(pad, pp(e, indent + 2, width)), elements(x))
+            _strcat(_strcat(_strcat(_strcat(open, "\n"), join(",\n", parts)), _strcat("\n", str_repeat(" ", indent))), close)
+        }
     }
-}
 
-# pretty(x, width) is x on several lines. A part that fits in width columns stays on one line,
-# and the others put every element on its own line, indented by 2 spaces.
-pretty(x, width) := pp(x, 0, width)
+    # text(x, width) is x on several lines. A part that fits in width columns stays on one line,
+    # and the others put every element on its own line, indented by 2 spaces.
+    export text(x, width) := pp(x, 0, width)
 
-pprint(x) := {
-    put(pretty(x, 60))
-    put("\n")
+    export print(x) := {
+        put(text(x, 60))
+        put("\n")
+    }
 }
