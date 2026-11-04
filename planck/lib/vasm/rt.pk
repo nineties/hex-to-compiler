@@ -91,13 +91,13 @@ rt_data(w) := append([rt_heap_data(w), rt_freelists_data(w), rt_args_data(w)], m
 # rt_fn(name, w, ptrs, wides, specs) is a function from a list of instructions whose registers and labels are named by symbols.
 # The registers named in ptrs have the width of an address, those in wides are 64-bit, and the others are 32-bit.
 rt_fn(name, w, ptrs, wides, specs) := {
-    f := ir_fn(name)
+    f := ir.fn(name)
     regs := table()
     labs := table()
     reg := s -> {
         r := table_get(regs, s, -1)
         if (r < 0) {
-            r = ir_vreg(f, if (member(s, wides)) 64 else if (member(s, ptrs)) w * 8 else 32)
+            r = ir.vreg(f, if (member(s, wides)) 64 else if (member(s, ptrs)) w * 8 else 32)
             table_set(regs, s, r)
         }
         r
@@ -105,15 +105,15 @@ rt_fn(name, w, ptrs, wides, specs) := {
     lab := s -> {
         l := table_get(labs, s, -1)
         if (l < 0) {
-            l = ir_label(f)
+            l = ir.label(f)
             table_set(labs, s, l)
         }
         l
     }
-    each(i -> ir_emit(f, ir_map_regs(reg, I{ir_op(i), map(o -> match o {
+    each(i -> ir.emit(f, ir.map_regs(reg, I{ir.op(i), map(o -> match o {
         L{s} -> L{lab(s)}
       | _ -> o
-    }, ir_ops(i))})), specs)
+    }, ir.ops(i))})), specs)
     f
 }
 
@@ -743,7 +743,7 @@ rt_val_makers := [Tuple{"__val_inc", rt_val_inc_fn}, Tuple{"__val_drop", rt_val_
 rt_call_names(f) := concat_map(i -> match i {
     I{'call, [S{n, _}, _, _]} -> [n]
   | _ -> []
-}, ir_code(f))
+}, ir.code(f))
 
 rt_val_fns(w, called) := {
     done := table()
@@ -766,18 +766,18 @@ rt_val_fns(w, called) := {
 # rt_start_fn(w, ret) is _start for a main that returns the type ret: its value (0 for no value) is the exit status.
 # It keeps the arguments of the program (the service args) in __args first.
 rt_start_fn(w, ret) := {
-    f := ir_fn("_start")
-    e := i -> ir_emit(f, i)
-    st := ir_vreg(f, 32)
-    z := ir_vreg(f, 32)
-    av := ir_vreg(f, w * 8)
-    ap := ir_vreg(f, w * 8)
+    f := ir.fn("_start")
+    e := i -> ir.emit(f, i)
+    st := ir.vreg(f, 32)
+    z := ir.vreg(f, 32)
+    av := ir.vreg(f, w * 8)
+    ap := ir.vreg(f, w * 8)
     e(I{'os, [N{'args}, Us{[]}, D{av}]})
     e(I{'la, [D{ap}, S{"__args", 0}]})
     e(I{'st, [W{rt_pw(w)}, M{U{ap}, 0}, U{av}]})
     if (ret == Unit{}) e(I{'li, [D{st}, K{0}]})
     else if (ret == I64{} or ret == U64{}) {
-        r := ir_vreg(f, 64)
+        r := ir.vreg(f, 64)
         e(I{'call, [S{"main", 0}, Us{[]}, Ds{[r]}]})
         e(I{'trunc, [D{st}, U{r}]})
     } else e(I{'call, [S{"main", 0}, Us{[]}, Ds{[st]}]})

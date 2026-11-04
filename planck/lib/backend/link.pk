@@ -5,7 +5,7 @@
 # which is read and executed and holds the headers of the file in front, and .data and .bss make the second, which is read and written.
 # link(objs, entry, base, hdr) is Image{entry, segs, syms}: the address of the symbol entry, the segments of elf.pk, and a table from
 # the global symbols to their addresses. base is the address where the file is loaded and hdr the size of the headers of the file for
-# two segments (elf32_hdr_size(2) or elf64_hdr_size(2)). A symbol that is used and not defined, or defined twice as global, stops the program.
+# two segments (elf.hdr_size(2)). A symbol that is used and not defined, or defined twice as global, stops the program.
 
 use("base")
 use("list")
@@ -14,6 +14,8 @@ use("vector")
 use("bytes")
 use("backend/obj")
 use("backend/elf")
+
+module linker {
 
 link_align(n, a) := (n + a - 1) / a * a
 
@@ -33,15 +35,15 @@ link_join(objs, names, joined, pieces) := each(name -> {
             if (a > al) al = a
             bytes.align(out, a)
             table_set(pieces, Tuple{k, name}, bytes.len(out))
-            bytes.append(out, obj_buf(s))
+            bytes.append(out, obj.buf(s))
         }
         k = k + 1
     }, objs)
     table_set(joined, name, Tuple{out, al})
 }, names)
 
-link(objs, entry, base, hdr) := {
-    each(o -> each(s -> if (not member(arg(s, 0), append(link_first, link_second))) panic(f"link: the section {arg(s, 0)} of {obj_name(o)} is not supported"), obj_sections(o)), objs)
+export link(objs, entry, base, hdr) := {
+    each(o -> each(s -> if (not member(arg(s, 0), append(link_first, link_second))) panic(f"link: the section {arg(s, 0)} of {obj.name(o)} is not supported"), obj.sections(o)), objs)
     joined := table()
     pieces := table()
     link_join(objs, append(link_first, link_second), joined, pieces)
@@ -79,7 +81,7 @@ link(objs, entry, base, hdr) := {
                 if (table_has(globals, name)) panic(f"link: {name} is defined twice")
                 table_set(globals, name, a)
             } else table_set(loc, name, a)
-        }, obj_symbols(o))
+        }, obj.symbols(o))
         k = k + 1
     }, objs)
     # relocations
@@ -87,7 +89,7 @@ link(objs, entry, base, hdr) := {
     each(o -> {
         each((Rel{sec, off, kind, sym, addend}) -> {
             s := table_get(array_get(locals, k), sym, table_get(globals, sym, none))
-            if (s == none) panic(f"link: {sym} is not defined (used in {obj_name(o)})")
+            if (s == none) panic(f"link: {sym} is not defined (used in {obj.name(o)})")
             at := table_get(pieces, Tuple{k, sec}, 0) + off
             place := table_get(addr, sec, 0) + at
             v := match kind {
@@ -96,7 +98,7 @@ link(objs, entry, base, hdr) := {
               | _ -> panic(f"link: unknown kind of relocation {kind}")
             }
             bytes.set_u32(arg(table_get(joined, sec, none), 0), at, v)
-        }, obj_relocs(o))
+        }, obj.relocs(o))
         k = k + 1
     }, objs)
     e := table_get(globals, entry, none)
@@ -121,4 +123,6 @@ link(objs, entry, base, hdr) := {
     segs := [Seg{base, 0, seg0, bytes.len(seg0), 5}]
     if (memsz1 > 0) segs = append(segs, [Seg{base + off1 + 4096, off1, seg1, memsz1, 6}])
     Image{e, segs, globals}
+}
+
 }

@@ -14,12 +14,14 @@ use("table")
 use("vector")
 use("bytes")
 
-obj_new(name) := Obj{name, table(), vector.new(), vector.new(), vector.new()}
+module obj {
 
-obj_name(Obj{n, _, _, _, _}) := n
+export new(name) := Obj{name, table(), vector.new(), vector.new(), vector.new()}
 
-# obj_sec(o, name, kind, align) is the section name of o, which is made when o has none
-obj_sec(Obj{_, secs, order, _, _}, name, kind, align) := {
+export name(Obj{n, _, _, _, _}) := n
+
+# sec(o, name, kind, align) is the section name of o, which is made when o has none
+export sec(Obj{_, secs, order, _, _}, name, kind, align) := {
     s := table_get(secs, name, none)
     if (s == none) {
         s = Sec{name, kind, align, bytes.new()}
@@ -29,23 +31,25 @@ obj_sec(Obj{_, secs, order, _, _}, name, kind, align) := {
     s
 }
 
-obj_buf(Sec{_, _, _, b}) := b
+export buf(Sec{_, _, _, b}) := b
 
-obj_sections(Obj{_, secs, order, _, _}) := map(n -> table_get(secs, n, none), vector.to_list(order))
+export sections(Obj{_, secs, order, _, _}) := map(n -> table_get(secs, n, none), vector.to_list(order))
 
-obj_define(Obj{_, _, _, syms, _}, name, sec, off, global) := vector.push(syms, Sym{name, sec, off, global})
+export define(Obj{_, _, _, syms, _}, name, sec, off, global) := vector.push(syms, Sym{name, sec, off, global})
 
-obj_reloc(Obj{_, _, _, _, rels}, sec, off, kind, sym, addend) := vector.push(rels, Rel{sec, off, kind, sym, addend})
+export reloc(Obj{_, _, _, _, rels}, sec, off, kind, sym, addend) := vector.push(rels, Rel{sec, off, kind, sym, addend})
 
-obj_symbols(Obj{_, _, _, syms, _}) := vector.to_list(syms)
-obj_relocs(Obj{_, _, _, _, rels}) := vector.to_list(rels)
+export symbols(Obj{_, _, _, syms, _}) := vector.to_list(syms)
+export relocs(Obj{_, _, _, _, rels}) := vector.to_list(rels)
 
-# obj_add_data(o, datas) adds the data IRData{name, sec, align, data, global} to the object o, where sec is ".data", ".rodata" or ".bss"
-# and data a buffer (the size of a .bss object is the length of its buffer of zeros)
-obj_add_data(o, datas) := each((IRData{n, sec, al, data, global}) -> {
-    s := obj_sec(o, sec, if (sec == ".bss") 'bss else 'data, 16)
-    b := obj_buf(s)
+# add_data(o, datas) adds the data IRData{name, sec, align, bytes, global} to the object o, where sec is ".data", ".rodata" or ".bss"
+# and bytes a buffer (the size of a .bss object is the length of its buffer of zeros)
+export add_data(o, datas) := each((IRData{n, secname, al, bytes, global}) -> {
+    s := sec(o, secname, if (secname == ".bss") 'bss else 'data, 16)
+    b := buf(s)
     bytes.align(b, al)
-    obj_define(o, n, sec, bytes.len(b), global)
-    bytes.append(b, data)
+    define(o, n, secname, bytes.len(b), global)
+    bytes.append(b, bytes)
 }, datas)
+
+}

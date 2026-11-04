@@ -4,12 +4,12 @@
 # A target is Target{name, word, lower, compile, executable}. The stages up to the form of ir.pk know the machine by its word only;
 # everything else that depends on one is reached through a target:
 #   word                      the number of bytes of an address and of a word of memory that the layout of the code of vasm/ir.pk and vasm/rt.pk is made for
-#   lower(f, helpers)         the function f (ir_fn) rewritten for the registers of the machine; helpers is a table of the functions that
+#   lower(f, helpers)         the function f (ir.fn) rewritten for the registers of the machine; helpers is a table of the functions that
 #                             the rewriting calls (vasm_rt_helpers of vasm/rt.pk)
 #   compile(name, fns, datas) the object of the functions of lower and the data (see x64.pk)
 #   executable(objs)          the file as a buffer of bytes (see bytes.pk) that joins the objects: the format of the file, the address
 #                             where it is loaded and the entry are the machine's
-# target_get(name) is the target with the name name. A machine is added by writing its functions and one line of target_all.
+# target.get(name) is the target with the name name. A machine is added by writing its functions and one line of target_all.
 
 use("base")
 use("list")
@@ -18,6 +18,8 @@ use("backend/x64")
 use("backend/link")
 use("backend/elf")
 
+module target {
+
 # === x86-64 (Linux) ===
 target_x64_base := 4194304
 
@@ -25,22 +27,28 @@ target_x64_base := 4194304
 target_x64_lower(f, helpers) := f
 
 target_x64_executable(objs) := {
-    img := link(objs, "_start", target_x64_base, elf64_hdr_size(2))
-    elf64_image('x86_64, arg(img, 0), arg(img, 1))
+    img := linker.link(objs, "_start", target_x64_base, elf.hdr_size(2))
+    elf.image('x86_64, arg(img, 0), arg(img, 1))
 }
 
 # === All targets ===
-target_all := [Target{'x86_64, 8, target_x64_lower, x64_compile, target_x64_executable}]
+target_all := [Target{'x86_64, 8, target_x64_lower, x64.compile, target_x64_executable}]
 
-target_default := 'x86_64
+export default := 'x86_64
 
-target_get(name) := {
+export get(name) := {
     t := find(t -> arg(t, 0) == name, target_all)
-    if (t == none) panic(f"target_get: no target {symname(name)}")
+    if (t == none) panic(f"target.get: no target {symname(name)}")
     t
 }
 
-target_word(Target{_, word, _, _, _}) := word
-target_lower(Target{_, _, lower, _, _}, f, helpers) := lower(f, helpers)
-target_compile(Target{_, _, _, compile, _}, name, fns, datas) := compile(name, fns, datas)
-target_executable(Target{_, _, _, _, executable}, objs) := executable(objs)
+export word(Target{_, word, _, _, _}) := word
+export lower(Target{_, _, lower, _, _}, f, helpers) := lower(f, helpers)
+export compile(Target{_, _, _, compile, _}, name, fns, datas) := compile(name, fns, datas)
+export executable(Target{_, _, _, _, executable}, objs) := executable(objs)
+
+test {
+    assert(map(t -> arg(t, 0), target_all) == ['x86_64], "the targets are x86_64 only")
+}
+
+}

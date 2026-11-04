@@ -4,7 +4,7 @@
 # The code is instructions of ir.pk that name virtual registers and physical registers. The result names only physical registers.
 # A target is RATarget{regs, classes, reload, spill, slot}:
 #   regs      the physical registers that may be given out, in the order to try them
-#   classes   a table from the name of a class to the registers of the class; a virtual register may take the registers of its class (ir_set_class)
+#   classes   a table from the name of a class to the registers of the class; a virtual register may take the registers of its class (ir.set_class)
 #   reload    reload(r, slot) is the instruction that loads the register r from the stack slot
 #   spill     spill(r, slot) is the instruction that stores the register r into the stack slot
 #   slot      the size in bytes of a stack slot, which also holds a register whole
@@ -18,16 +18,18 @@ use("bitset")
 use("backend/ir")
 use("backend/cfg")
 
+module regalloc {
+
 ra_allowed(f, ra, v) := {
-    c := ir_class(f, v)
+    c := ir.class(f, v)
     if (c == 'any) arg(ra, 0) else table_get(arg(ra, 1), c, arg(ra, 0))
 }
 
 # the interference of the registers of code: an array of sets (rows for the registers 0 to nregs - 1),
 # and the pairs of registers moved from one to the other
 ra_graph(f, ra, code, nregs) := {
-    bs := cfg_blocks(code)
-    live := cfg_live(bs, nregs)
+    bs := cfg.blocks(code)
+    live := cfg.live(bs, nregs)
     rows := array(nregs)
     k := 0
     while (k < nregs) {
@@ -35,8 +37,8 @@ ra_graph(f, ra, code, nregs) := {
         k = k + 1
     }
     regs := arg(ra, 0)
-    tracked := r -> ir_is_vreg(r) or member(r, regs)
-    edge := (a, b) -> if (a != b and tracked(a) and tracked(b) and (ir_is_vreg(a) or ir_is_vreg(b))) {
+    tracked := r -> ir.is_vreg(r) or member(r, regs)
+    edge := (a, b) -> if (a != b and tracked(a) and tracked(b) and (ir.is_vreg(a) or ir.is_vreg(b))) {
         bitset.add(array_get(rows, a), b)
         bitset.add(array_get(rows, b), a)
     }
@@ -45,9 +47,9 @@ ra_graph(f, ra, code, nregs) := {
     while (k < array_len(bs)) {
         lv := bitset.copy(array_get(live[1], k))
         each(i -> {
-            ds := ir_defs(i)
-            us := ir_uses(i)
-            mv := ir_move_pair(i)
+            ds := ir.defs(i)
+            us := ir.uses(i)
+            mv := ir.move_pair(i)
             if (mv != none) {
                 bitset.del(lv, mv[1])
                 moves = mv :: moves
@@ -80,23 +82,23 @@ ra_distinct(xs) := {
 ra_spill(f, ra, code, spilled, unspillable) := {
     slots := table()
     size := arg(ra, 4)
-    each(v -> table_set(slots, v, ir_slot(f, size, size)), spilled)
+    each(v -> table_set(slots, v, ir.slot(f, size, size)), spilled)
     reload := arg(ra, 2)
     spill := arg(ra, 3)
     r := []
     each(i -> {
-        us := filter(v -> table_has(slots, v), ra_distinct(ir_uses(i)))
-        ds := filter(v -> table_has(slots, v), ra_distinct(ir_defs(i)))
+        us := filter(v -> table_has(slots, v), ra_distinct(ir.uses(i)))
+        ds := filter(v -> table_has(slots, v), ra_distinct(ir.defs(i)))
         if (us == [] and ds == []) r = i :: r else {
             temps := table()
             each(v -> if (not table_has(temps, v)) {
-                t := ir_vreg(f, ir_width(f, v))
-                ir_set_class(f, t, ir_class(f, v))
+                t := ir.vreg(f, ir.width(f, v))
+                ir.set_class(f, t, ir.class(f, v))
                 table_set(unspillable, t, true)
                 table_set(temps, v, t)
             }, append(us, ds))
             each(v -> { r = reload(table_get(temps, v, 0), table_get(slots, v, 0)) :: r }, us)
-            r = ir_map_regs(v -> table_get(temps, v, v), i) :: r
+            r = ir.map_regs(v -> table_get(temps, v, v), i) :: r
             each(v -> { r = spill(table_get(temps, v, 0), table_get(slots, v, 0)) :: r }, ds)
         }
     }, code)
@@ -110,7 +112,7 @@ ra_color(f, ra, code, nregs, unspillable) := {
     rows := g[0]
     regs := arg(ra, 0)
     cost := table()
-    each(i -> each(r -> if (ir_is_vreg(r)) table_set(cost, r, table_get(cost, r, 0) + 1), append(ir_uses(i), ir_defs(i))), code)
+    each(i -> each(r -> if (ir.is_vreg(r)) table_set(cost, r, table_get(cost, r, 0) + 1), append(ir.uses(i), ir.defs(i))), code)
     nodes := table_keys(cost)
     adj := table()
     deg := table()
@@ -152,7 +154,7 @@ ra_color(f, ra, code, nregs, unspillable) := {
         table_set(state, v, 'out)
         stack = v :: stack
         left = left - 1
-        each(w -> if (ir_is_vreg(w) and table_get(state, w, 'out) != 'out) {
+        each(w -> if (ir.is_vreg(w) and table_get(state, w, 'out) != 'out) {
             d := table_get(deg, w, 0) - 1
             table_set(deg, w, d)
             if (table_get(state, w, 'out) == 'rem and d < kof(w)) {
@@ -163,12 +165,12 @@ ra_color(f, ra, code, nregs, unspillable) := {
     }
     partners := table()
     each((Tuple{a, b}) -> {
-        if (ir_is_vreg(a)) table_set(partners, a, b :: table_get(partners, a, []))
-        if (ir_is_vreg(b)) table_set(partners, b, a :: table_get(partners, b, []))
+        if (ir.is_vreg(a)) table_set(partners, a, b :: table_get(partners, a, []))
+        if (ir.is_vreg(b)) table_set(partners, b, a :: table_get(partners, b, []))
     }, g[1])
     colors := table()
     spilled := []
-    colour_of := w -> if (ir_is_vreg(w)) table_get(colors, w, -1) else w
+    colour_of := w -> if (ir.is_vreg(w)) table_get(colors, w, -1) else w
     each(v -> {
         taken := map(colour_of, table_get(adj, v, []))
         ok := filter(c -> not member(c, taken), ra_allowed(f, ra, v))
@@ -180,24 +182,26 @@ ra_color(f, ra, code, nregs, unspillable) := {
     Tuple{colors, reverse(spilled)}
 }
 
-# ra_allocate(f, ra) is the code of the function f with its virtual registers replaced by physical registers.
+# allocate(f, ra) is the code of the function f with its virtual registers replaced by physical registers.
 # Stack slots and virtual registers that the spilling needs are added to f.
-ra_allocate(f, ra) := {
+export allocate(f, ra) := {
     unspillable := table()
-    code := ir_code(f)
+    code := ir.code(f)
     result := none
     rounds := 0
     while (result == none) {
         rounds = rounds + 1
-        if (rounds > 12) panic(f"ra_allocate: {ir_name(f)} still spills after 12 rounds")
-        r := ra_color(f, ra, code, ir_nregs(f), unspillable)
+        if (rounds > 12) panic(f"regalloc.allocate: {ir.name(f)} still spills after 12 rounds")
+        r := ra_color(f, ra, code, ir.nregs(f), unspillable)
         if (r[1] == []) {
             colors := r[0]
-            result = filter(i -> match ir_move_pair(i) {
+            result = filter(i -> match ir.move_pair(i) {
                 Tuple{a, b} -> a != b
               | _ -> true
-            }, map(i -> ir_map_regs(x -> if (ir_is_vreg(x)) table_get(colors, x, x) else x, i), code))
+            }, map(i -> ir.map_regs(x -> if (ir.is_vreg(x)) table_get(colors, x, x) else x, i), code))
         } else code = ra_spill(f, ra, code, r[1], unspillable)
     }
     result
+}
+
 }
