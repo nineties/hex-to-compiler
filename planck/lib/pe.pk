@@ -1,9 +1,9 @@
 # pe: a partial evaluator from a function of planck to functions of vasm
 # Copyright (C) 2026 nineties
 #
-# specialize(tree, args, rty) is the Module{[...]} of vasm for the function of the tree called with the arguments args; its result has the
+# pe.specialize(tree, args, rty) is the Module{[...]} of vasm for the function of the tree called with the arguments args; its result has the
 # type rty. It always gives a module: what cannot be computed when specialize runs is left in the functions of vasm, as it is written.
-# The module can be given to vasm_build; pe_vasm_text(m) is its text and pe_with_main(m, values) adds the function main that calls the first
+# The module can be given to vasm_build; pe.vasm_text(m) is its text and pe.with_main(m, values) adds the function main that calls the first
 # function with the values.
 #
 # The tree of a function is what a quasi-quote gives, such as `(pow(x, 0) := 1) or `({ even(n) := ...; odd(n) := ... }). The function that the
@@ -55,6 +55,10 @@ use("string")
 use("vasm/check")
 use("vasm/builtins")
 use("vasm/text")
+
+module pe {
+
+text_of_vasm := vasm_text
 
 fun pe_eval
 fun pe_values
@@ -1723,7 +1727,7 @@ pe_impl_closure(names) := {
 }
 
 # the module of vasm for the function of the tree called with args (static values and Dyn{type}), whose result has the type rty
-specialize(tree, args, rty) := {
+export specialize(tree, args, rty) := {
     if (not pe_is_fun_tree(tree)) panic("pe: the first argument of specialize is the tree of a function")
     pe_force = table()
     result := none
@@ -1770,7 +1774,7 @@ pe_specialize_once(tree, args, rty) := {
 
 # the module m of specialize with the function main that calls its first function with the values vs (static values of planck).
 # A result of an integer type or bool is the status of main; a result of another type is printed.
-pe_with_main(m, vs) := {
+export with_main(m, vs) := {
     f := arg(arg(m, 0)[0], 1)
     ps := arg(arg(m, 0)[0], 3)
     rty := arg(arg(m, 0)[0], 4)
@@ -1812,5 +1816,7 @@ pe_set_reg_call(f, args, rty) := {
     pe_emit(Ret{pe_at, pe_operand(r)})
 }
 
-# the module m as the text of vasm; the function main of pe_with_main is not in it
-pe_vasm_text(m) := vasm_text(Module{filter(d -> arg(d, 1) != 'main, arg(m, 0))})
+# the module m as the text of vasm; the function main of with_main is not in it. The name vasm_text of the field is also the name of the
+# library outside, so the library is held in text_of_vasm before the body defines its own vasm_text.
+export vasm_text(m) := text_of_vasm(Module{filter(d -> arg(d, 1) != 'main, arg(m, 0))})
+}
