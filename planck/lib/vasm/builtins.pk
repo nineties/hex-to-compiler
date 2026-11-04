@@ -1,7 +1,7 @@
 # vasm/builtins: the functions of vasm that do what built-in functions of planck do
 # Copyright (C) 2026 nineties
 #
-# vasm_planck_builtins is Module{[...]} of these functions. A program that is translated to vasm calls them where the planck program calls
+# vasm_planck.builtins is Module{[...]} of these functions. A program that is translated to vasm calls them where the planck program calls
 # the built-in function of the same name, with a value that is known only when the program runs.
 #   strlen(s) is the number of bytes of the array s
 #   println_str(s) writes the bytes of s between two double quotes, and a new line, to the output (the form println gives a string,
@@ -15,662 +15,664 @@ use("base")
 use("list")
 use("vasm/check")
 
-vasm_planck_builtins := vasm{|
-    fn strlen[r](s: &r [u8]) -> i32 {
-        var n: i64
-        var m: i32
-        n = len(s)
-        m = n as i32
-        return m
-    }
-    fn println_str[r](s: &r [u8]) {
-        var n: i64
-        n = write(1, "\"")
-        n = write(1, s)
-        n = write(1, "\"\n")
-    }
-    fn println_int(v: i64) {
-        var buf: own [u8]
-        var out: own [u8]
-        var i: i64
-        var j: i64
-        var k: i64
-        var n: i64
-        var x: i64
-        var d: i64
-        var c: u8
-        var neg: bool
-        buf = alloc(24, 0)
-        i = 23
-        buf[i] = 10
-        x = v
-        neg = x < 0
-        if (neg) { x = 0 - x }
-        if (x == 0) { i = i - 1; buf[i] = 48 }
-        while (x > 0) {
-            d = x % 10
-            c = d as u8
-            c = c + 48
-            i = i - 1
-            buf[i] = c
-            x = x / 10
+module vasm_planck {
+    export builtins := vasm{|
+        fn strlen[r](s: &r [u8]) -> i32 {
+            var n: i64
+            var m: i32
+            n = len(s)
+            m = n as i32
+            return m
         }
-        if (neg) { i = i - 1; buf[i] = 45 }
-        n = 24 - i
-        out = alloc(n, 0)
-        j = 0
-        while (j < n) {
-            k = i + j
-            c = buf[k]
-            out[j] = c
-            j = j + 1
+        fn println_str[r](s: &r [u8]) {
+            var n: i64
+            n = write(1, "\"")
+            n = write(1, s)
+            n = write(1, "\"\n")
         }
-        region r {
-            var b: &r [u8]
-            b = &r out
-            n = write(1, b)
-        }
-    }
-    fn read_file[r](path: &r [u8]) -> own [u8] {
-        var fd: i64
-        var acc: own [u8]
-        var chunk: own [u8]
-        var next: own [u8]
-        var n: i64
-        var got: i64
-        var total: i64
-        var i: i64
-        var k: i64
-        var c: u8
-        var more: bool
-        fd = open(path)
-        if (fd < 0) { exit(1) }
-        acc = alloc(0, 0)
-        chunk = alloc(4096, 0)
-        n = 0
-        more = true
-        while (more) {
-            region g {
-                var m: &mut g [u8]
-                m = &mut g chunk
-                got = read(fd, m)
+        fn println_int(v: i64) {
+            var buf: own [u8]
+            var out: own [u8]
+            var i: i64
+            var j: i64
+            var k: i64
+            var n: i64
+            var x: i64
+            var d: i64
+            var c: u8
+            var neg: bool
+            buf = alloc(24, 0)
+            i = 23
+            buf[i] = 10
+            x = v
+            neg = x < 0
+            if (neg) { x = 0 - x }
+            if (x == 0) { i = i - 1; buf[i] = 48 }
+            while (x > 0) {
+                d = x % 10
+                c = d as u8
+                c = c + 48
+                i = i - 1
+                buf[i] = c
+                x = x / 10
             }
-            if (got > 0) {
-                total = n + got
-                next = alloc(total, 0)
+            if (neg) { i = i - 1; buf[i] = 45 }
+            n = 24 - i
+            out = alloc(n, 0)
+            j = 0
+            while (j < n) {
+                k = i + j
+                c = buf[k]
+                out[j] = c
+                j = j + 1
+            }
+            region r {
+                var b: &r [u8]
+                b = &r out
+                n = write(1, b)
+            }
+        }
+        fn read_file[r](path: &r [u8]) -> own [u8] {
+            var fd: i64
+            var acc: own [u8]
+            var chunk: own [u8]
+            var next: own [u8]
+            var n: i64
+            var got: i64
+            var total: i64
+            var i: i64
+            var k: i64
+            var c: u8
+            var more: bool
+            fd = open(path)
+            if (fd < 0) { exit(1) }
+            acc = alloc(0, 0)
+            chunk = alloc(4096, 0)
+            n = 0
+            more = true
+            while (more) {
+                region g {
+                    var m: &mut g [u8]
+                    m = &mut g chunk
+                    got = read(fd, m)
+                }
+                if (got > 0) {
+                    total = n + got
+                    next = alloc(total, 0)
+                    i = 0
+                    while (i < n) {
+                        c = acc[i]
+                        next[i] = c
+                        i = i + 1
+                    }
+                    i = 0
+                    while (i < got) {
+                        c = chunk[i]
+                        k = n + i
+                        next[k] = c
+                        i = i + 1
+                    }
+                    acc = next
+                    n = total
+                } else {
+                    more = false
+                }
+            }
+            close(fd)
+            return acc
+        }
+        fn v_write[r](fd: i64, s: &r [u8]) {
+            var n: i64
+            n = write(fd, s)
+        }
+        fn v_bytes_write(fd: i64, v: val) {
+            var b: own [u8]
+            b = v as own [u8]
+            region g {
+                var s: &g [u8]
+                s = &g b
+                v_write(fd, s)
+            }
+        }
+        fn v_digits(v: i64) -> val {
+            var buf: own [u8]
+            var out: own [u8]
+            var i: i64
+            var j: i64
+            var k: i64
+            var n: i64
+            var x: i64
+            var d: i64
+            var c: u8
+            var neg: bool
+            var r: val
+            buf = alloc(24, 0)
+            i = 24
+            x = v
+            neg = x < 0
+            if (neg) { x = 0 - x }
+            if (x == 0) { i = i - 1; buf[i] = 48 }
+            while (x > 0) {
+                d = x % 10
+                c = d as u8
+                c = c + 48
+                i = i - 1
+                buf[i] = c
+                x = x / 10
+            }
+            if (neg) { i = i - 1; buf[i] = 45 }
+            n = 24 - i
+            out = alloc(n, 0)
+            j = 0
+            while (j < n) {
+                k = i + j
+                c = buf[k]
+                out[j] = c
+                j = j + 1
+            }
+            region g {
+                var s: &g [u8]
+                s = &g out
+                r = s as val
+            }
+            return r
+        }
+        fn v_print(v: val) -> val {
+            var t: val
+            var b: bool
+            var n: i64
+            var i: i64
+            var x: val
+            t = typeof(v)
+            b = t == 'int
+            if (b) {
+                n = v as i64
+                x = v_digits(n)
+                v_bytes_write(1, x)
+                return 'none
+            }
+            b = t == 'string
+            if (b) {
+                v_write(1, "\"")
+                v_bytes_write(1, v)
+                v_write(1, "\"")
+                return 'none
+            }
+            b = t == 'symbol
+            if (b) {
+                x = symname(v)
+                v_bytes_write(1, x)
+                return 'none
+            }
+            b = t == 'mexpr
+            if (b) {
+                x = head(v)
+                x = symname(x)
+                v_bytes_write(1, x)
+                v_write(1, "{")
+                n = arity(v)
                 i = 0
                 while (i < n) {
-                    c = acc[i]
-                    next[i] = c
+                    if (i > 0) { v_write(1, ", ") }
+                    x = v[i]
+                    x = v_print(x)
                     i = i + 1
                 }
-                i = 0
-                while (i < got) {
-                    c = chunk[i]
-                    k = n + i
-                    next[k] = c
-                    i = i + 1
-                }
-                acc = next
-                n = total
-            } else {
-                more = false
+                v_write(1, "}")
+                return 'none
             }
-        }
-        close(fd)
-        return acc
-    }
-    fn v_write[r](fd: i64, s: &r [u8]) {
-        var n: i64
-        n = write(fd, s)
-    }
-    fn v_bytes_write(fd: i64, v: val) {
-        var b: own [u8]
-        b = v as own [u8]
-        region g {
-            var s: &g [u8]
-            s = &g b
-            v_write(fd, s)
-        }
-    }
-    fn v_digits(v: i64) -> val {
-        var buf: own [u8]
-        var out: own [u8]
-        var i: i64
-        var j: i64
-        var k: i64
-        var n: i64
-        var x: i64
-        var d: i64
-        var c: u8
-        var neg: bool
-        var r: val
-        buf = alloc(24, 0)
-        i = 24
-        x = v
-        neg = x < 0
-        if (neg) { x = 0 - x }
-        if (x == 0) { i = i - 1; buf[i] = 48 }
-        while (x > 0) {
-            d = x % 10
-            c = d as u8
-            c = c + 48
-            i = i - 1
-            buf[i] = c
-            x = x / 10
-        }
-        if (neg) { i = i - 1; buf[i] = 45 }
-        n = 24 - i
-        out = alloc(n, 0)
-        j = 0
-        while (j < n) {
-            k = i + j
-            c = buf[k]
-            out[j] = c
-            j = j + 1
-        }
-        region g {
-            var s: &g [u8]
-            s = &g out
-            r = s as val
-        }
-        return r
-    }
-    fn v_print(v: val) -> val {
-        var t: val
-        var b: bool
-        var n: i64
-        var i: i64
-        var x: val
-        t = typeof(v)
-        b = t == 'int
-        if (b) {
-            n = v as i64
-            x = v_digits(n)
-            v_bytes_write(1, x)
+            b = t == 'array
+            if (b) {
+                v_write(1, "<array>")
+                return 'none
+            }
+            v_write(1, "<function>")
             return 'none
         }
-        b = t == 'string
-        if (b) {
-            v_write(1, "\"")
+        fn v_println(v: val) -> val {
+            var x: val
+            x = v_print(v)
+            v_write(1, "\n")
+            return 'none
+        }
+        fn v_put(v: val) -> val {
             v_bytes_write(1, v)
-            v_write(1, "\"")
             return 'none
         }
-        b = t == 'symbol
-        if (b) {
-            x = symname(v)
-            v_bytes_write(1, x)
-            return 'none
+        fn v_stop[r](msg: &r [u8]) {
+            v_write(2, msg)
+            v_write(2, "\n")
+            exit(1)
         }
-        b = t == 'mexpr
-        if (b) {
-            x = head(v)
-            x = symname(x)
-            v_bytes_write(1, x)
-            v_write(1, "{")
-            n = arity(v)
-            i = 0
-            while (i < n) {
-                if (i > 0) { v_write(1, ", ") }
-                x = v[i]
-                x = v_print(x)
-                i = i + 1
-            }
-            v_write(1, "}")
-            return 'none
-        }
-        b = t == 'array
-        if (b) {
-            v_write(1, "<array>")
-            return 'none
-        }
-        v_write(1, "<function>")
-        return 'none
-    }
-    fn v_println(v: val) -> val {
-        var x: val
-        x = v_print(v)
-        v_write(1, "\n")
-        return 'none
-    }
-    fn v_put(v: val) -> val {
-        v_bytes_write(1, v)
-        return 'none
-    }
-    fn v_stop[r](msg: &r [u8]) {
-        v_write(2, msg)
-        v_write(2, "\n")
-        exit(1)
-    }
-    fn v_exit(v: val) -> val {
-        var n: i64
-        n = v as i64
-        exit(n)
-        return 'none
-    }
-    fn v_strlen(v: val) -> val {
-        var n: i64
-        var r: val
-        n = arity(v)
-        r = n as val
-        return r
-    }
-    fn v_ord(v: val, iv: val) -> val {
-        var b: own [u8]
-        var i: i64
-        var n: i64
-        var c: u8
-        var d: i64
-        var r: val
-        var ok: bool
-        i = iv as i64
-        b = v as own [u8]
-        n = arity(v)
-        d = 0 - 1
-        ok = i >= 0
-        if (ok) {
-            ok = i < n
-            if (ok) {
-                c = b[i]
-                d = c as i64
-            }
-        }
-        r = d as val
-        return r
-    }
-    fn v_substr(v: val, iv: val, jv: val) -> val {
-        var b: own [u8]
-        var out: own [u8]
-        var i: i64
-        var j: i64
-        var n: i64
-        var k: i64
-        var at: i64
-        var c: u8
-        var r: val
-        i = iv as i64
-        j = jv as i64
-        b = v as own [u8]
-        n = j - i
-        out = alloc(n, 0)
-        k = 0
-        while (k < n) {
-            at = i + k
-            c = b[at]
-            out[k] = c
-            k = k + 1
-        }
-        region g {
-            var s: &g [u8]
-            s = &g out
-            r = s as val
-        }
-        return r
-    }
-    fn v_strcat(x: val, y: val) -> val {
-        var a: own [u8]
-        var b: own [u8]
-        var out: own [u8]
-        var n: i64
-        var m: i64
-        var k: i64
-        var at: i64
-        var c: u8
-        var total: i64
-        var r: val
-        a = x as own [u8]
-        b = y as own [u8]
-        n = arity(x)
-        m = arity(y)
-        total = n + m
-        out = alloc(total, 0)
-        k = 0
-        while (k < n) {
-            c = a[k]
-            out[k] = c
-            k = k + 1
-        }
-        k = 0
-        while (k < m) {
-            c = b[k]
-            at = n + k
-            out[at] = c
-            k = k + 1
-        }
-        region g {
-            var s: &g [u8]
-            s = &g out
-            r = s as val
-        }
-        return r
-    }
-    fn v_to_text(v: val) -> val {
-        var t: val
-        var b: bool
-        var n: i64
-        var x: val
-        t = typeof(v)
-        b = t == 'string
-        if (b) { return v }
-        b = t == 'int
-        if (b) {
+        fn v_exit(v: val) -> val {
+            var n: i64
             n = v as i64
-            x = v_digits(n)
-            return x
+            exit(n)
+            return 'none
         }
-        b = t == 'symbol
-        if (b) {
-            x = symname(v)
-            return x
-        }
-        v_stop("_to_text of a value other than a string, an integer or a symbol is not left in vasm")
-        return 'none
-    }
-    fn v_head(v: val) -> val {
-        var r: val
-        r = head(v)
-        return r
-    }
-    fn v_arity(v: val) -> val {
-        var n: i64
-        var r: val
-        n = arity(v)
-        r = n as val
-        return r
-    }
-    fn v_arg(v: val, iv: val) -> val {
-        var i: i64
-        var r: val
-        i = iv as i64
-        r = v[i]
-        return r
-    }
-    fn v_typeof(v: val) -> val {
-        var r: val
-        r = typeof(v)
-        return r
-    }
-    fn v_intern(v: val) -> val {
-        var r: val
-        r = intern(v)
-        return r
-    }
-    fn v_symname(v: val) -> val {
-        var r: val
-        r = symname(v)
-        return r
-    }
-    fn v_array(nv: val) -> val {
-        var n: i64
-        var r: val
-        n = nv as i64
-        r = array(n, 'none)
-        return r
-    }
-    fn v_plain_array(nv: val) -> val {
-        var n: i64
-        var r: val
-        var z: val
-        n = nv as i64
-        z = 0 as val
-        r = array(n, z)
-        return r
-    }
-    fn v_argv() -> val {
-        var n: i64
-        var i: i64
-        var a: val
-        var s: &static [u8]
-        var e: val
-        n = argc()
-        a = array(n, 'none)
-        i = 0
-        while (i < n) {
-            s = argv(i)
-            e = s as val
-            a[i] = e
-            i = i + 1
-        }
-        return a
-    }
-    fn v_array_set(a: val, iv: val, x: val) -> val {
-        var i: i64
-        i = iv as i64
-        a[i] = x
-        return x
-    }
-    fn v_push(v: val, x: val) -> val {
-        var n: i64
-        var m: i64
-        var i: i64
-        var a: val
-        var e: val
-        var h: val
-        var r: val
-        n = arity(v)
-        m = n + 1
-        a = array(m, 'none)
-        i = 0
-        while (i < n) {
-            e = v[i]
-            a[i] = e
-            i = i + 1
-        }
-        a[n] = x
-        h = head(v)
-        r = mexpr(h, a)
-        return r
-    }
-    fn v_mexpr(h: val, t: val) -> val {
-        var n: i64
-        var i: i64
-        var a: val
-        var e: val
-        var r: val
-        n = arity(t)
-        a = array(n, 'none)
-        i = 0
-        while (i < n) {
-            e = t[i]
-            a[i] = e
-            i = i + 1
-        }
-        r = mexpr(h, a)
-        return r
-    }
-    fn v_index_get(a: val, iv: val) -> val {
-        var t: val
-        var b: bool
-        var i: i64
-        var r: val
-        var j: val
-        t = typeof(a)
-        b = t == 'string
-        if (b) {
-            i = iv as i64
-            i = i + 1
-            r = i as val
-            j = v_substr(a, iv, r)
-            return j
-        }
-        i = iv as i64
-        b = is(a, 'Cons, 2)
-        if (b) {
-            r = a
-            while (i > 0) {
-                r = r[1]
-                i = i - 1
-            }
-            r = r[0]
+        fn v_strlen(v: val) -> val {
+            var n: i64
+            var r: val
+            n = arity(v)
+            r = n as val
             return r
         }
-        r = a[i]
-        return r
-    }
-    fn v_index_set(a: val, iv: val, x: val) -> val {
-        var i: i64
-        i = iv as i64
-        a[i] = x
-        return x
-    }
-    fn v_hash(v: val) -> val {
-        var t: val
-        var b: bool
-        var n: i64
-        var h: i64
-        var i: i64
-        var c: u8
-        var d: i64
-        var e: val
-        var r: val
-        h = 7
-        t = typeof(v)
-        b = t == 'int
-        if (b) {
-            h = v as i64
-            if (h < 0) { h = 0 - h }
-            h = h % 32749
-        }
-        b = t == 'string
-        if (b) {
-            var s: own [u8]
-            s = v as own [u8]
+        fn v_ord(v: val, iv: val) -> val {
+            var b: own [u8]
+            var i: i64
+            var n: i64
+            var c: u8
+            var d: i64
+            var r: val
+            var ok: bool
+            i = iv as i64
+            b = v as own [u8]
             n = arity(v)
+            d = 0 - 1
+            ok = i >= 0
+            if (ok) {
+                ok = i < n
+                if (ok) {
+                    c = b[i]
+                    d = c as i64
+                }
+            }
+            r = d as val
+            return r
+        }
+        fn v_substr(v: val, iv: val, jv: val) -> val {
+            var b: own [u8]
+            var out: own [u8]
+            var i: i64
+            var j: i64
+            var n: i64
+            var k: i64
+            var at: i64
+            var c: u8
+            var r: val
+            i = iv as i64
+            j = jv as i64
+            b = v as own [u8]
+            n = j - i
+            out = alloc(n, 0)
+            k = 0
+            while (k < n) {
+                at = i + k
+                c = b[at]
+                out[k] = c
+                k = k + 1
+            }
+            region g {
+                var s: &g [u8]
+                s = &g out
+                r = s as val
+            }
+            return r
+        }
+        fn v_strcat(x: val, y: val) -> val {
+            var a: own [u8]
+            var b: own [u8]
+            var out: own [u8]
+            var n: i64
+            var m: i64
+            var k: i64
+            var at: i64
+            var c: u8
+            var total: i64
+            var r: val
+            a = x as own [u8]
+            b = y as own [u8]
+            n = arity(x)
+            m = arity(y)
+            total = n + m
+            out = alloc(total, 0)
+            k = 0
+            while (k < n) {
+                c = a[k]
+                out[k] = c
+                k = k + 1
+            }
+            k = 0
+            while (k < m) {
+                c = b[k]
+                at = n + k
+                out[at] = c
+                k = k + 1
+            }
+            region g {
+                var s: &g [u8]
+                s = &g out
+                r = s as val
+            }
+            return r
+        }
+        fn v_to_text(v: val) -> val {
+            var t: val
+            var b: bool
+            var n: i64
+            var x: val
+            t = typeof(v)
+            b = t == 'string
+            if (b) { return v }
+            b = t == 'int
+            if (b) {
+                n = v as i64
+                x = v_digits(n)
+                return x
+            }
+            b = t == 'symbol
+            if (b) {
+                x = symname(v)
+                return x
+            }
+            v_stop("_to_text of a value other than a string, an integer or a symbol is not left in vasm")
+            return 'none
+        }
+        fn v_head(v: val) -> val {
+            var r: val
+            r = head(v)
+            return r
+        }
+        fn v_arity(v: val) -> val {
+            var n: i64
+            var r: val
+            n = arity(v)
+            r = n as val
+            return r
+        }
+        fn v_arg(v: val, iv: val) -> val {
+            var i: i64
+            var r: val
+            i = iv as i64
+            r = v[i]
+            return r
+        }
+        fn v_typeof(v: val) -> val {
+            var r: val
+            r = typeof(v)
+            return r
+        }
+        fn v_intern(v: val) -> val {
+            var r: val
+            r = intern(v)
+            return r
+        }
+        fn v_symname(v: val) -> val {
+            var r: val
+            r = symname(v)
+            return r
+        }
+        fn v_array(nv: val) -> val {
+            var n: i64
+            var r: val
+            n = nv as i64
+            r = array(n, 'none)
+            return r
+        }
+        fn v_plain_array(nv: val) -> val {
+            var n: i64
+            var r: val
+            var z: val
+            n = nv as i64
+            z = 0 as val
+            r = array(n, z)
+            return r
+        }
+        fn v_argv() -> val {
+            var n: i64
+            var i: i64
+            var a: val
+            var s: &static [u8]
+            var e: val
+            n = argc()
+            a = array(n, 'none)
             i = 0
             while (i < n) {
-                c = s[i]
-                d = c as i64
-                h = h * 31
-                h = h + d
-                h = h % 32749
+                s = argv(i)
+                e = s as val
+                a[i] = e
                 i = i + 1
             }
+            return a
         }
-        b = t == 'symbol
-        if (b) {
-            e = symname(v)
-            r = v_hash(e)
-            return r
+        fn v_array_set(a: val, iv: val, x: val) -> val {
+            var i: i64
+            i = iv as i64
+            a[i] = x
+            return x
         }
-        b = t == 'mexpr
-        if (b) {
+        fn v_push(v: val, x: val) -> val {
+            var n: i64
+            var m: i64
+            var i: i64
+            var a: val
+            var e: val
+            var h: val
+            var r: val
             n = arity(v)
+            m = n + 1
+            a = array(m, 'none)
             i = 0
             while (i < n) {
                 e = v[i]
-                r = v_hash(e)
-                d = r as i64
-                h = h * 31
-                h = h + d
-                h = h % 32749
+                a[i] = e
                 i = i + 1
             }
+            a[n] = x
+            h = head(v)
+            r = mexpr(h, a)
+            return r
         }
-        r = h as val
-        return r
-    }
-    fn v_read_file(path: val) -> val {
-        var b: own [u8]
-        var p: own [u8]
-        var r: val
-        p = path as own [u8]
-        region g {
-            var ps: &g [u8]
-            ps = &g p
-            b = read_file(ps)
-        }
-        region h {
-            var s: &h [u8]
-            s = &h b
-            r = s as val
-        }
-        return r
-    }
-    fn v_try_read_file(path: val) -> val {
-        var p: own [u8]
-        var fd: i64
-        var r: val
-        var bad: bool
-        p = path as own [u8]
-        region g {
-            var ps: &g [u8]
-            ps = &g p
-            fd = open(ps)
-        }
-        bad = fd < 0
-        if (bad) { return 'none }
-        close(fd)
-        r = v_read_file(path)
-        return r
-    }
-    fn v_read_bytes(path: val) -> val {
-        var s: val
-        var a: val
-        var b: own [u8]
-        var n: i64
-        var i: i64
-        var c: u8
-        var d: i64
-        var e: val
-        var z: val
-        s = v_read_file(path)
-        b = s as own [u8]
-        n = arity(s)
-        z = 0 as val
-        a = array(n, z)
-        i = 0
-        while (i < n) {
-            c = b[i]
-            d = c as i64
-            e = d as val
-            a[i] = e
-            i = i + 1
-        }
-        return a
-    }
-    fn v_write_file(path: val, x: val) -> val {
-        var p: own [u8]
-        var b: own [u8]
-        var t: val
-        var isarr: bool
-        var fd: i64
-        var n: i64
-        var i: i64
-        var e: val
-        var d: i64
-        var c: u8
-        var bad: bool
-        t = typeof(x)
-        isarr = t == 'array
-        if (isarr) {
-            n = arity(x)
-            b = alloc(n, 0)
+        fn v_mexpr(h: val, t: val) -> val {
+            var n: i64
+            var i: i64
+            var a: val
+            var e: val
+            var r: val
+            n = arity(t)
+            a = array(n, 'none)
             i = 0
             while (i < n) {
-                e = x[i]
-                d = e as i64
-                c = d as u8
-                b[i] = c
+                e = t[i]
+                a[i] = e
                 i = i + 1
             }
-        } else {
-            b = x as own [u8]
+            r = mexpr(h, a)
+            return r
         }
-        p = path as own [u8]
-        region g {
-            var ps: &g [u8]
-            ps = &g p
-            fd = create(ps)
+        fn v_index_get(a: val, iv: val) -> val {
+            var t: val
+            var b: bool
+            var i: i64
+            var r: val
+            var j: val
+            t = typeof(a)
+            b = t == 'string
+            if (b) {
+                i = iv as i64
+                i = i + 1
+                r = i as val
+                j = v_substr(a, iv, r)
+                return j
+            }
+            i = iv as i64
+            b = is(a, 'Cons, 2)
+            if (b) {
+                r = a
+                while (i > 0) {
+                    r = r[1]
+                    i = i - 1
+                }
+                r = r[0]
+                return r
+            }
+            r = a[i]
+            return r
         }
-        bad = fd < 0
-        if (bad) { v_stop("write_file: the file cannot be written") }
-        region h {
-            var s: &h [u8]
-            s = &h b
-            n = write(fd, s)
+        fn v_index_set(a: val, iv: val, x: val) -> val {
+            var i: i64
+            i = iv as i64
+            a[i] = x
+            return x
         }
-        close(fd)
-        return x
-    }
-|}
+        fn v_hash(v: val) -> val {
+            var t: val
+            var b: bool
+            var n: i64
+            var h: i64
+            var i: i64
+            var c: u8
+            var d: i64
+            var e: val
+            var r: val
+            h = 7
+            t = typeof(v)
+            b = t == 'int
+            if (b) {
+                h = v as i64
+                if (h < 0) { h = 0 - h }
+                h = h % 32749
+            }
+            b = t == 'string
+            if (b) {
+                var s: own [u8]
+                s = v as own [u8]
+                n = arity(v)
+                i = 0
+                while (i < n) {
+                    c = s[i]
+                    d = c as i64
+                    h = h * 31
+                    h = h + d
+                    h = h % 32749
+                    i = i + 1
+                }
+            }
+            b = t == 'symbol
+            if (b) {
+                e = symname(v)
+                r = v_hash(e)
+                return r
+            }
+            b = t == 'mexpr
+            if (b) {
+                n = arity(v)
+                i = 0
+                while (i < n) {
+                    e = v[i]
+                    r = v_hash(e)
+                    d = r as i64
+                    h = h * 31
+                    h = h + d
+                    h = h % 32749
+                    i = i + 1
+                }
+            }
+            r = h as val
+            return r
+        }
+        fn v_read_file(path: val) -> val {
+            var b: own [u8]
+            var p: own [u8]
+            var r: val
+            p = path as own [u8]
+            region g {
+                var ps: &g [u8]
+                ps = &g p
+                b = read_file(ps)
+            }
+            region h {
+                var s: &h [u8]
+                s = &h b
+                r = s as val
+            }
+            return r
+        }
+        fn v_try_read_file(path: val) -> val {
+            var p: own [u8]
+            var fd: i64
+            var r: val
+            var bad: bool
+            p = path as own [u8]
+            region g {
+                var ps: &g [u8]
+                ps = &g p
+                fd = open(ps)
+            }
+            bad = fd < 0
+            if (bad) { return 'none }
+            close(fd)
+            r = v_read_file(path)
+            return r
+        }
+        fn v_read_bytes(path: val) -> val {
+            var s: val
+            var a: val
+            var b: own [u8]
+            var n: i64
+            var i: i64
+            var c: u8
+            var d: i64
+            var e: val
+            var z: val
+            s = v_read_file(path)
+            b = s as own [u8]
+            n = arity(s)
+            z = 0 as val
+            a = array(n, z)
+            i = 0
+            while (i < n) {
+                c = b[i]
+                d = c as i64
+                e = d as val
+                a[i] = e
+                i = i + 1
+            }
+            return a
+        }
+        fn v_write_file(path: val, x: val) -> val {
+            var p: own [u8]
+            var b: own [u8]
+            var t: val
+            var isarr: bool
+            var fd: i64
+            var n: i64
+            var i: i64
+            var e: val
+            var d: i64
+            var c: u8
+            var bad: bool
+            t = typeof(x)
+            isarr = t == 'array
+            if (isarr) {
+                n = arity(x)
+                b = alloc(n, 0)
+                i = 0
+                while (i < n) {
+                    e = x[i]
+                    d = e as i64
+                    c = d as u8
+                    b[i] = c
+                    i = i + 1
+                }
+            } else {
+                b = x as own [u8]
+            }
+            p = path as own [u8]
+            region g {
+                var ps: &g [u8]
+                ps = &g p
+                fd = create(ps)
+            }
+            bad = fd < 0
+            if (bad) { v_stop("write_file: the file cannot be written") }
+            region h {
+                var s: &h [u8]
+                s = &h b
+                n = write(fd, s)
+            }
+            close(fd)
+            return x
+        }
+    |}
+}
