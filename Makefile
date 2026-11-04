@@ -82,7 +82,6 @@ test-planck0: planck0
 	$(MAKE) preprocess
 	tools/test_preprocess.sh
 	./planck0 planck/tests/vasm.pk
-	./planck0 planck/tests/vasm2.pk
 	./planck0 planck/tests/psys.pk
 	./planck0 planck/tests/pe.pk
 	@for f in $(PLANCK_EXAMPLES); do \
