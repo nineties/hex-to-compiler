@@ -48,6 +48,7 @@ planck0: bootstrap/planck0.sv plisp2 $(SASM_LIBS)
 
 VASM_EXAMPLES := $(wildcard planck/examples/vasm/*.vasm)
 PSYS_EXAMPLES := $(wildcard planck/examples/psys/*.psys)
+VASM_TARGETS := x86 x86_64
 BACKEND_EXAMPLES := $(wildcard planck/examples/backend/*.pk)
 PE_EXAMPLES := $(wildcard planck/examples/pe/*.pk)
 
@@ -105,13 +106,13 @@ test-planck0: planck0
 		diff -u $${f%.pk}.out tmp-backend.out || exit 1; \
 		echo "$$f: ok"; \
 	done; rm -f tmp-backend tmp-backend.out
-	@for f in $(VASM_EXAMPLES) $(PSYS_EXAMPLES); do \
-		./planck0 planck/vasmc.pk $$f tmp-vasm || exit 1; \
+	@for t in $(VASM_TARGETS); do for f in $(VASM_EXAMPLES) $(PSYS_EXAMPLES); do \
+		./planck0 planck/vasmc.pk $$f tmp-vasm $$t || exit 1; \
 		./tmp-vasm > tmp-vasm.out; s=$$?; \
-		[ "$$s" = "$$(cat $${f%.*}.status)" ] || { echo "$$f: exit status $$s"; exit 1; }; \
+		[ "$$s" = "$$(cat $${f%.*}.status)" ] || { echo "$$f ($$t): exit status $$s"; exit 1; }; \
 		if [ -f $${f%.*}.out ]; then diff -u $${f%.*}.out tmp-vasm.out || exit 1; fi; \
-		echo "$$f: ok"; \
-	done; rm -f tmp-vasm tmp-vasm.out
+		echo "$$f ($$t): ok"; \
+	done; done; rm -f tmp-vasm tmp-vasm.out
 	@for f in $(PE_EXAMPLES); do \
 		./planck0 $$f tmp-pe > tmp-pe.out || exit 1; \
 		diff -u $${f%.pk}.out tmp-pe.out || exit 1; \
