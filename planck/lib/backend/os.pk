@@ -14,8 +14,8 @@
 #                        address of each, which is the bytes of the argument followed by a byte 0. It is used by the start of the program only.
 #   abort []             ends the program as failed (the status os_abort_status); it does not return
 # The names do not depend on the system. os_select(emit, name, args, d) turns one of them into the instructions of the 32-bit x86
-# on Linux: a system call is int 0x80 with the number in eax and the arguments in ebx, ecx, edx, esi and edi. This file is the only
-# place that knows the numbers and the registers; another system replaces it.
+# on Linux: a system call is int 0x80 with the number in eax and the arguments in ebx, ecx, edx, esi and edi. os_select_x64 does the same for
+# x86-64 on Linux (syscall). This file is the only place that knows the numbers and the registers; another system or machine adds its own.
 
 use("base")
 use("list")
@@ -84,4 +84,60 @@ os_select(emit, name, args, d) := match name {
         emit(I{'ud2, []})
     }
   | _ -> panic(f"os_select: the service {symname(name)} is not known")
+}
+
+# === Linux on x86-64 ===
+# A system call is syscall with the number in rax and the arguments in rdi, rsi, rdx, r10, r8 and r9; it keeps every register but rax, rcx and r11.
+# os_select_x64 gives the same services as os_select. An argument is a register or K{n}; the instructions are those of ir.pk, and the target that
+# selects them gives the widths.
+os_x64_read := 0
+os_x64_write := 1
+os_x64_open := 2
+os_x64_close := 3
+os_x64_brk := 12
+os_x64_exit := 60
+os_x64_exit_group := 231
+
+os_x64_reg_number := 0
+os_x64_reg_args := [7, 6, 2, 10, 8, 9]
+os_x64_reg_rcx := 1
+os_x64_reg_r11 := 11
+
+# the frame pointer, which the start of the program has set just under the arguments of the program: the word that holds the number of them is 8 bytes above it
+os_x64_reg_frame := 5
+os_x64_frame_to_args := 8
+
+# the register of the flags that an addition defines (the same as x64_flags_def of x64.pk)
+os_x64_reg_flags := 16
+
+os_x64_call(emit, number, args, d) := {
+    emit(I{'mov, [D{os_x64_reg_number}, K{number}]})
+    k := 0
+    each(a -> {
+        emit(I{'mov, [D{os_x64_reg_args[k]}, os_arg(a)]})
+        k = k + 1
+    }, args)
+    emit(I{'syscall, append([IU{os_x64_reg_number}, ID{os_x64_reg_number}, ID{os_x64_reg_rcx}, ID{os_x64_reg_r11}], map(r -> IU{r}, take(os_x64_reg_args, length(args))))})
+    if (d != none) emit(I{'mov, [D{d}, U{os_x64_reg_number}]})
+}
+
+os_select_x64(emit, name, args, d) := match name {
+    'write -> os_x64_call(emit, os_x64_write, args, d)
+  | 'read -> os_x64_call(emit, os_x64_read, args, d)
+  | 'open -> os_x64_call(emit, os_x64_open, append(args, [K{os_linux_o_rdonly}]), d)
+  | 'create -> os_x64_call(emit, os_x64_open, append(args, [K{os_linux_o_create}, K{os_linux_mode}]), d)
+  | 'close -> os_x64_call(emit, os_x64_close, args, d)
+  | 'exit -> os_x64_call(emit, os_x64_exit, args, d)
+  | 'grow -> os_x64_call(emit, os_x64_brk, args, d)
+  | 'args -> {
+        emit(I{'mov, [D{d}, U{os_x64_reg_frame}]})
+        emit(I{'add, [DU{d}, K{os_x64_frame_to_args}, ID{os_x64_reg_flags}]})
+    }
+  | 'abort -> {
+        emit(I{'mov, [D{os_x64_reg_number}, K{os_x64_exit_group}]})
+        emit(I{'mov, [D{os_x64_reg_args[0]}, K{os_abort_status}]})
+        emit(I{'syscall, [IU{os_x64_reg_number}, IU{os_x64_reg_args[0]}, ID{os_x64_reg_number}, ID{os_x64_reg_rcx}, ID{os_x64_reg_r11}]})
+        emit(I{'ud2, []})
+    }
+  | _ -> panic(f"os_select_x64: the service {symname(name)} is not known")
 }

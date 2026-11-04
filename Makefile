@@ -96,6 +96,7 @@ test-planck0: planck0
 		echo "$$f: stops"; \
 	done; rm -f tmp-error.out tmp-error.err
 	./planck0 planck/tests/backend.pk
+	./planck0 planck/tests/x64.pk
 	./planck0 planck/tests/target.pk
 	./planck0 planck/tests/unit.pk
 	@for f in $(BACKEND_EXAMPLES); do \

@@ -2,11 +2,12 @@
 # Copyright (C) 2026 nineties
 #
 # The code is instructions of ir.pk that name virtual registers and physical registers. The result names only physical registers.
-# A target is RATarget{regs, classes, reload, spill}:
+# A target is RATarget{regs, classes, reload, spill, slot}:
 #   regs      the physical registers that may be given out, in the order to try them
 #   classes   a table from the name of a class to the registers of the class; a virtual register may take the registers of its class (ir_set_class)
 #   reload    reload(r, slot) is the instruction that loads the register r from the stack slot
 #   spill     spill(r, slot) is the instruction that stores the register r into the stack slot
+#   slot      the size in bytes of a stack slot, which also holds a register whole
 # Physical registers that are not in regs (the stack pointer, the flags) are not looked at.
 
 use("base")
@@ -78,7 +79,8 @@ ra_distinct(xs) := {
 # The new registers are put in the table unspillable.
 ra_spill(f, ra, code, spilled, unspillable) := {
     slots := table()
-    each(v -> table_set(slots, v, ir_slot(f, 4, 4)), spilled)
+    size := arg(ra, 4)
+    each(v -> table_set(slots, v, ir_slot(f, size, size)), spilled)
     reload := arg(ra, 2)
     spill := arg(ra, 3)
     r := []
@@ -88,7 +90,7 @@ ra_spill(f, ra, code, spilled, unspillable) := {
         if (us == [] and ds == []) r = i :: r else {
             temps := table()
             each(v -> if (not table_has(temps, v)) {
-                t := ir_vreg(f, 32)
+                t := ir_vreg(f, ir_width(f, v))
                 ir_set_class(f, t, ir_class(f, v))
                 table_set(unspillable, t, true)
                 table_set(temps, v, t)
