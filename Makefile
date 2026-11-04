@@ -101,6 +101,7 @@ test-planck0: planck0
 	./planck0 planck/tests/x64.pk
 	./planck0 planck/tests/target.pk
 	./planck0 planck/tests/unit.pk
+	./planck0 tools/test.pk backend/cfg backend/x64enc backend/x64 backend/target
 	@for f in $(BACKEND_EXAMPLES); do \
 		./planck0 $$f tmp-backend || exit 1; \
 		./tmp-backend > tmp-backend.out || exit 1; \
