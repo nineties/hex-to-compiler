@@ -1,7 +1,7 @@
 # elf: writes a 64-bit little-endian ELF executable (elf.image) from loadable segments
 # Copyright (C) 2026 nineties
 #
-# A segment is Seg{vaddr, off, bytes, memsz, flags}: its bytes are at the file offset off and are loaded at vaddr, and memsz is
+# A segment is Seg{vaddr, off, data, memsz, flags}: its bytes are at the file offset off and are loaded at vaddr, and memsz is
 # the size in memory (the rest after the bytes is 0). flags is 4 for read, 2 for write and 1 for execute.
 # The first segment starts at the file offset 0 and its first elf.hdr_size(n) bytes are the headers: the writer fills them in.
 # The file offset of the other segments is congruent to vaddr modulo 4096.
@@ -48,18 +48,18 @@ export image(machine, entry, segs) := {
     bytes.u16(b, 64)
     bytes.u16(b, 0)
     bytes.u16(b, 0)
-    each((Seg{vaddr, off, bytes, memsz, flags}) -> {
+    each((Seg{vaddr, off, data, memsz, flags}) -> {
         if ((vaddr - off) % 4096 != 0) panic("elf.image: vaddr and the file offset of a segment differ modulo the page size")
         bytes.u32(b, 1)
         bytes.u32(b, flags)
         bytes.u64(b, off)
         bytes.u64(b, vaddr)
         bytes.u64(b, vaddr)
-        bytes.u64(b, bytes.len(bytes))
+        bytes.u64(b, bytes.len(data))
         bytes.u64(b, memsz)
         bytes.u64(b, 4096)
     }, segs)
-    each((Seg{_, off, bytes, _, _}) -> {
+    each((Seg{_, off, data, _, _}) -> {
         if (off > 0 and bytes.len(b) > off) panic("elf.image: segments overlap in the file")
         bytes.zeros(b, off - bytes.len(b))
         i := if (off == 0) hdr else 0
