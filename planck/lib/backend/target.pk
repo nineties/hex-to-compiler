@@ -1,0 +1,44 @@
+# target: the machines that the code generator makes executables for
+# Copyright (C) 2026 nineties
+#
+# A target is Target{name, lower, compile, executable}. The stages up to the machine independent form of ir.pk do not name a machine;
+# everything that depends on one is reached through a target:
+#   lower(f, helpers)         the function f (ir_fn) rewritten for the registers of the machine; helpers is a table of the functions that
+#                             the rewriting calls (see wide.pk)
+#   compile(name, fns, datas) the object of the functions of lower and the data (see x86.pk)
+#   executable(objs)          the file as a buffer of bytes (see bytes.pk) that joins the objects: the format of the file, the address
+#                             where it is loaded and the entry are the machine's
+# target_get(name) is the target with the name name. A machine is added by writing its three functions and one line of target_all.
+
+use("base")
+use("list")
+use("backend/ir")
+use("backend/wide")
+use("backend/x86")
+use("backend/link")
+use("backend/elf")
+
+# === x86 (32-bit, Linux) ===
+target_x86_base := 134512640
+
+target_x86_lower(f, helpers) := ir_set_code(f, wide_lower(f, helpers))
+
+target_x86_executable(objs) := {
+    img := link(objs, "_start", target_x86_base)
+    elf32_image('x86, arg(img, 0), arg(img, 1))
+}
+
+# === All targets ===
+target_all := [Target{'x86, target_x86_lower, x86_compile, target_x86_executable}]
+
+target_default := 'x86
+
+target_get(name) := {
+    t := find(t -> arg(t, 0) == name, target_all)
+    if (t == none) panic(f"target_get: no target {symname(name)}")
+    t
+}
+
+target_lower(Target{_, lower, _, _}, f, helpers) := lower(f, helpers)
+target_compile(Target{_, _, compile, _}, name, fns, datas) := compile(name, fns, datas)
+target_executable(Target{_, _, _, executable}, objs) := executable(objs)

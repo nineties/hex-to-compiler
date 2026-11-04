@@ -1,25 +1,23 @@
 # vasm_build: compiles a vasm module to an executable file
 # Copyright (C) 2026 nineties
 #
-# vasm_build(m, path) checks the module m = Module{[...]} (vasm_check), translates it to the 32-bit x86 instructions with the runtime of
-# vasm/rt.pk and writes the executable file path. The function main takes no arguments, and its result is the exit status.
-# The stages are vasm_lower (vasm/ir.pk), wide_lower (backend/wide.pk), x86_compile (backend/x86.pk, with backend/sched.pk and backend/regalloc.pk) and link (backend/link.pk, backend/elf.pk).
+# vasm_build(m, path) checks the module m = Module{[...]} (vasm_check), translates it to the machine instructions of the default target
+# (backend/target.pk) with the runtime of vasm/rt.pk and writes the executable file path. The function main takes no arguments, and its result is the exit status.
+# The stages up to vasm_lower (vasm/ir.pk) do not depend on the machine. What follows is the target's: the rewriting of the functions for its
+# registers (wide_lower of backend/wide.pk for x86), x86_compile (backend/x86.pk, with backend/sched.pk and backend/regalloc.pk) and the joining of the objects into the
+# file (backend/link.pk, backend/elf.pk).
 
 use("base")
 use("list")
 use("table")
 use("vector")
 use("string")
+use("bytes")
 use("backend/ir")
+use("backend/target")
 use("vasm/check")
 use("vasm/ir")
 use("vasm/rt")
-use("backend/wide")
-use("backend/x86")
-use("backend/link")
-use("backend/elf")
-
-vasm_base_address := 134512640
 
 # the names of the functions that the code calls
 vb_calls(code) := concat_map(i -> match i {
@@ -37,8 +35,8 @@ vb_main_type(m) := {
     arg(d, 4)
 }
 
-# the object of the module: the code of the functions, the runtime and the helpers they call
-vasm_object(m) := {
+# the object of the module for the target t: the code of the functions, the runtime and the helpers they call
+vasm_object_for(t, m) := {
     ret := vb_main_type(m)
     lowered := vasm_lower(m)
     strs := append(vasm_strings(), vasm_symbols())
@@ -50,7 +48,7 @@ vasm_object(m) := {
     while (queue != []) {
         f := queue[0]
         queue = drop(queue, 1)
-        g := ir_set_code(f, wide_lower(f, vasm_rt_helpers))
+        g := target_lower(t, f, vasm_rt_helpers)
         out = g :: out
         table_set(done, ir_name(f), true)
         # the helpers that the code calls and that are not made yet
@@ -61,13 +59,18 @@ vasm_object(m) := {
             queue = append(queue, vasm_lower_only(vasm_rt_module, map(intern, need)))
         }
     }
-    x86_compile("vasm", reverse(out), append(rt_data(), strs))
+    target_compile(t, "vasm", reverse(out), append(rt_data(), strs))
+}
+
+# vasm_executable(m) is the file for the default target as a buffer of bytes
+vasm_executable(m) := {
+    errs := vasm_check(m)
+    if (errs != []) panic(f"vasm_build: the module has an error: {arg(errs[0], 2)}")
+    t := target_get(target_default)
+    target_executable(t, [vasm_object_for(t, m)])
 }
 
 vasm_build(m, path) := {
-    errs := vasm_check(m)
-    if (errs != []) panic(f"vasm_build: the module has an error: {arg(errs[0], 2)}")
-    o := vasm_object(m)
-    img := link([o], "_start", vasm_base_address)
-    elf32_write(path, 'x86, arg(img, 0), arg(img, 1))
+    write_file(path, bb_to_u8(vasm_executable(m)))
+    chmod(path, 493)
 }
