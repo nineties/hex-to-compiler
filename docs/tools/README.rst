@@ -1,7 +1,7 @@
 docs/ の作り直し
 ================
 
-docs/ の HTML（日本語は docs/ja/、英語は docs/en/）は、頁の元 (日本語は ``src/ja/``、英語は ``src/en/``)、例 (``examples/*.pk``)、例の出力 (``examples/*.out``)、色付けしたコード (``hl/*.html``) から ``build.py`` が組む。
+docs/ の HTML（日本語は docs/ja/、英語は docs/en/）は、頁の元 (日本語は ``src/ja/``、英語は ``src/en/``)、例 (``examples/*.pk``)、例の出力 (``examples/*.out``) から ``build.pk`` が組む。
 
 例の出力は planck0 を実際に動かして取る。planck0 のビルドは x86_64 の GCP ノードで行う。
 
@@ -15,18 +15,10 @@ docs/ の HTML（日本語は docs/ja/、英語は docs/en/）は、頁の元 (�
    終了コードが 0 でない例や標準エラーに出力がある例は ``NG`` と表示される。
    名前が ``e_`` で始まる例は止まる例で、標準出力と標準エラー出力を合わせて ``.out`` に書く。終了コードが 0 の例が ``NG`` になる。
 
-3. planck のコードを色付けして ``hl/*.html`` を更新する。色付けは ``planck/lib/highlight.pk`` の ``highlight.html`` で、全部のコードを1回の planck0 で色付けする。
+3. HTML を組む。docs/index.html は言語を選ぶ入口で、docs/tutorial/ などの URL には docs/ja/ への移動の頁が書かれる。planck のコードの色付けは ``build.pk`` が ``planck/lib/highlight.pk`` の ``highlight.html`` で行う。リポジトリの根で、planck0 をビルドしたノードで動かす。
 
    ::
 
-       GCP_HOST=user@host docs/tools/highlight.sh
+       ./planck0 docs/tools/build.pk
 
-   例や抜粋を変えたあとに行う。``hl/`` のファイル名はコードの sha1 の先頭12桁で、使われなくなったファイルは消える。
-
-4. HTML を組む。docs/index.html は言語を選ぶ入口で、docs/tutorial/ などの URL には docs/ja/ への移動の頁が書かれる。
-
-   ::
-
-       python3 docs/tools/build.py
-
-頁の元の書き方は ``build.py`` の先頭にある。
+頁の元の書き方は ``build.pk`` の先頭にある。
