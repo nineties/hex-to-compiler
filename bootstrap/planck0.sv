@@ -1028,10 +1028,10 @@
             )
         )
     (if (is_digit c)
-        (= raw (parse_int ret raw 1073741823))
+        (= raw (parse_int ret raw (- (<< 1 30) 1)))
     (if (&& (== c (char "-")) (is_digit (getb raw 1))) (do
         ; negative integer literal
-        (= raw (parse_int ret (+ raw 1) 1073741824))
+        (= raw (parse_int ret (+ raw 1) (<< 1 30)))
         (if (== (gettag (get ret)) IntT)
             (set ret (- 2 (get ret))) ; fixnum(-n) = 2 - fixnum(n)
             )
@@ -2302,7 +2302,8 @@
     )
 
 (fun fits_fixnum (x)
-    (return (&& (>= x (- 0 1073741824)) (<= x 1073741823)))
+    (if (&& (>= x (- 0 (<< 1 30))) (<= x (- (<< 1 30) 1))) (return 1))
+    (return 0)
     )
 
 (fun p_add (a b)
