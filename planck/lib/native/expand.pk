@@ -31,11 +31,11 @@ px_fail(at, kind, msg) := perform NativeFail{at, kind, msg}
 # px_scope: Scope{source name or none, the binding it hides, name in vasm}, the innermost first
 # px_out: the statements of the block being made, the last first
 
-px_sigs := table()
-px_structs := table()
-px_env := table()
-px_live := table()
-px_used := table()
+px_sigs := table.new()
+px_structs := table.new()
+px_env := table.new()
+px_live := table.new()
+px_used := table.new()
 px_scope := []
 px_out := []
 px_next := 0
@@ -56,7 +56,7 @@ px_fresh(prefix) := {
     while (name == none) {
         s := intern(f"{prefix}{px_next}")
         px_next = px_next + 1
-        if (table_get(px_used, s, none) == none and table_get(px_live, s, none) == none) name = s
+        if (table.get(px_used, s, none) == none and table.get(px_live, s, none) == none) name = s
     }
     name
 }
@@ -72,9 +72,9 @@ px_end(tok) := {
     body := reverse(px_out)
     while (length(px_scope) > arg(tok, 1)) {
         e := px_scope[0]
-        px_scope = drop(px_scope, 1)
-        if (arg(e, 0) != none) table_set(px_env, arg(e, 0), arg(e, 1))
-        table_set(px_live, arg(e, 2), none)
+        px_scope = list.drop(px_scope, 1)
+        if (arg(e, 0) != none) table.set(px_env, arg(e, 0), arg(e, 1))
+        table.set(px_live, arg(e, 2), none)
     }
     px_out = arg(tok, 0)
     body
@@ -89,12 +89,12 @@ px_block(ss) := {
 # declares a variable of type t and gives its name in vasm. The name in the source is src, or none for a temporary.
 # bind is false for a variable that the source name is bound to by the caller.
 px_declare(at, src, t, bind) := {
-    name := if (src != none and table_get(px_live, src, none) == none) src
+    name := if (src != none and table.get(px_live, src, none) == none) src
         else px_fresh(if (src == none) "t" else f"{symname(src)}_")
     px_emit(Decl{at, name, t})
-    table_set(px_live, name, true)
-    old := if (src == none or not bind) none else table_get(px_env, src, none)
-    if (src != none and bind) table_set(px_env, src, Tuple{name, t})
+    table.set(px_live, name, true)
+    old := if (src == none or not bind) none else table.get(px_env, src, none)
+    if (src != none and bind) table.set(px_env, src, Tuple{name, t})
     px_scope = Scope{if (bind) src else none, old, name} :: px_scope
     name
 }
@@ -137,7 +137,7 @@ px_struct_of(at, t) := match t {
 }
 
 px_field(at, s, f) := {
-    sd := table_get(px_structs, s, none)
+    sd := table.get(px_structs, s, none)
     if (sd == none) px_fail(at, 'undefined, f"struct {symname(s)} is not defined")
     fd := find((Field{_, x, _}) -> x == f, arg(sd, 2))
     if (fd == none) px_fail(at, 'type, f"struct {symname(s)} has no field {symname(f)}")
@@ -190,10 +190,10 @@ px_bits_of(n) := {
 }
 
 # the number of bits of the value whose parts are ps, the least first
-px_bits(ps) := if (ps == []) 0 else 15 * (length(ps) - 1) + px_bits_of(last(ps))
+px_bits(ps) := if (ps == []) 0 else 15 * (length(ps) - 1) + px_bits_of(list.last(ps))
 
 # a power of two: the value has one bit, at the position w - 1
-px_is_pow(ps, w) := px_bits(ps) == w and (last(ps) == bit_shl(1, (w - 1) % 15)) and all(p -> p == 0, take(ps, length(ps) - 1))
+px_is_pow(ps, w) := px_bits(ps) == w and (list.last(ps) == bit_shl(1, (w - 1) % 15)) and list.all(p -> p == 0, list.take(ps, length(ps) - 1))
 
 # The literal s of the integer type t, made in a temporary: the parts of 15 bits from the greatest, each after a shift
 px_big(at, s, t) := {
@@ -212,7 +212,7 @@ px_big(at, s, t) := {
     each(c -> {
         px_emit(Assign{at, x, Bin{'shl, Reg{at, x}, Imm{at, 15}}})
         px_emit(Assign{at, x, Bin{'bit_or, Reg{at, x}, Imm{at, c}}})
-    }, drop(parts, 1))
+    }, list.drop(parts, 1))
     if (neg) px_emit(Assign{at, x, Bin{'sub, Imm{at, 0}, Reg{at, x}}})
     Tuple{Reg{at, x}, t}
 }
@@ -227,7 +227,7 @@ px_litlike(e) := head(e) == 'ELit or (head(e) == 'ENeg and head(arg(e, 1)) == 'E
 px_simple(e) := member(head(e), ['ELit, 'EBool, 'EStr, 'ESym, 'EVar]) or (head(e) == 'ENeg and head(arg(e, 1)) == 'ELit)
 
 px_var(at, x) := {
-    b := table_get(px_env, x, none)
+    b := table.get(px_env, x, none)
     if (b == none) px_fail(at, 'undefined, f"{symname(x)} is not declared")
     Tuple{Reg{at, arg(b, 0)}, arg(b, 1)}
 }
@@ -310,17 +310,17 @@ px_place(e) := match e {
 px_result(at, f, sig, ts, tsub) := {
     rs := arg(sig, 0)
     ret := arg(sig, 2)
-    rmap := table()
+    rmap := table.new()
     each(r -> {
         qs := []
         each(pt -> {
             p := arg(pt, 0)
             t := arg(pt, 1)
             if (head(p) == 'Ref and head(t) == 'Ref and arg(p, 1) == r and not member(arg(t, 1), qs)) qs = arg(t, 1) :: qs
-        }, zip(arg(sig, 1), ts))
-        if (length(qs) == 1) table_set(rmap, r, qs[0])
+        }, list.zip(arg(sig, 1), ts))
+        if (length(qs) == 1) table.set(rmap, r, qs[0])
     }, rs)
-    bad := any(r -> vasm_check.mentions(ret, r) and table_get(rmap, r, none) == none, rs)
+    bad := list.any(r -> vasm_check.mentions(ret, r) and table.get(rmap, r, none) == none, rs)
     t := vasm_check.subst(ret, rmap, tsub)
     if (bad) Unk{f"the region of the result of {symname(f)} is not known; write the type: let x: T = ..."}
     else if (px_has_tvar(t)) Unk{f"the type of the result of {symname(f)} is not known; write the type: let x: T = ..."}
@@ -336,30 +336,30 @@ px_has_tvar(t) = match t {
 }
 
 px_call(at, f, args) := {
-    b := table_get(px_env, f, none)
+    b := table.get(px_env, f, none)
     if (b != none and arg(b, 1) == Val{}) {
         Tuple{Call{at, arg(b, 0), map(v -> arg(v, 0), px_exs(args, none))}, Val{}}
     } else {
-        user := table_get(px_sigs, f, none)
-        sig := if (user == none) table_get(vasm_check.builtins, f, none) else user
+        user := table.get(px_sigs, f, none)
+        sig := if (user == none) table.get(vasm_check.builtins, f, none) else user
         if (sig == none) px_fail(at, 'undefined, f"function {symname(f)} is not defined")
         ps := arg(sig, 1)
         if (length(ps) != length(args)) px_fail(at, 'type, f"{symname(f)} takes {length(ps)} arguments but {length(args)} are given")
-        tsub := table()
+        tsub := table.new()
         ts := []
         ops := []
         each(pa -> {
             p := arg(pa, 0)
             a := arg(pa, 1)
             v := if (head(p) == 'Place) px_place(a) else {
-                want := if (vasm_check.int(p)) p else if (head(p) == 'TVar) table_get(tsub, arg(p, 0), none) else none
+                want := if (vasm_check.int(p)) p else if (head(p) == 'TVar) table.get(tsub, arg(p, 0), none) else none
                 px_ex(a, want)
             }
             q := if (head(p) == 'Place) arg(p, 0) else p
-            if (head(q) == 'TVar and px_known(arg(v, 1)) and table_get(tsub, arg(q, 0), none) == none) table_set(tsub, arg(q, 0), arg(v, 1))
+            if (head(q) == 'TVar and px_known(arg(v, 1)) and table.get(tsub, arg(q, 0), none) == none) table.set(tsub, arg(q, 0), arg(v, 1))
             ts = append(ts, [arg(v, 1)])
             ops = append(ops, [arg(v, 0)])
-        }, zip(ps, args))
+        }, list.zip(ps, args))
         Tuple{Call{at, f, ops}, px_result(at, f, sig, ts, tsub)}
     }
 }
@@ -525,12 +525,12 @@ px_for(at, i, lo, hi, body) := {
         Reg{at, x}
     } else arg(vh, 0)
     iv := px_declare(at, i, ty, false)
-    old := table_get(px_env, i, none)
-    table_set(px_env, i, Tuple{iv, ty})
+    old := table.get(px_env, i, none)
+    table.set(px_env, i, Tuple{iv, ty})
     px_emit(Assign{at, iv, Mov{arg(vl, 0)}})
     b := px_block(append(body, [SRaw{Assign{at, iv, Bin{'add, Reg{at, iv}, Imm{at, 1}}}}]))
     px_emit(WhileS{at, Bin{'lt, Reg{at, iv}, h}, b})
-    table_set(px_env, i, old)
+    table.set(px_env, i, old)
 }
 
 px_stmt(s) = match s {
@@ -576,15 +576,15 @@ px_stmt(s) = match s {
 
 # the names that the statements declare
 px_collect(ss) := each(s -> match s {
-    SLet{_, x, _, _} -> table_set(px_used, x, true)
-  | SVar{_, x, _} -> table_set(px_used, x, true)
+    SLet{_, x, _, _} -> table.set(px_used, x, true)
+  | SVar{_, x, _} -> table.set(px_used, x, true)
   | SIf{_, _, a, b} -> {
         px_collect(a)
         px_collect(b)
     }
   | SWhile{_, _, a} -> px_collect(a)
   | SFor{_, i, _, _, a} -> {
-        table_set(px_used, i, true)
+        table.set(px_used, i, true)
         px_collect(a)
     }
   | SRegion{_, _, a} -> px_collect(a)
@@ -592,24 +592,24 @@ px_collect(ss) := each(s -> match s {
 }, ss)
 
 # the last expression of a function that gives a value is the result
-px_tail(ret, body) := if (ret != Unit{} and body != [] and head(last(body)) == 'SExpr) {
-    s := last(body)
-    append(take(body, length(body) - 1), [SRet{arg(s, 0), arg(s, 1)}])
+px_tail(ret, body) := if (ret != Unit{} and body != [] and head(list.last(body)) == 'SExpr) {
+    s := list.last(body)
+    append(list.take(body, length(body) - 1), [SRet{arg(s, 0), arg(s, 1)}])
 } else body
 
 px_fn(d) := match d {
     PFn{at, f, rs, ps, ret, body} -> {
-        px_env = table()
-        px_live = table()
-        px_used = table()
+        px_env = table.new()
+        px_live = table.new()
+        px_used = table.new()
         px_scope = []
         px_out = []
         px_next = 0
         px_ret = ret
         each((Param{_, x, t}) -> {
-            table_set(px_used, x, true)
-            table_set(px_live, x, true)
-            table_set(px_env, x, Tuple{x, t})
+            table.set(px_used, x, true)
+            table.set(px_live, x, true)
+            table.set(px_env, x, Tuple{x, t})
         }, ps)
         px_collect(body)
         Fn{at, f, rs, ps, ret, px_block(px_tail(ret, body))}
@@ -618,12 +618,12 @@ px_fn(d) := match d {
 
 export expand_all_with(m, imports) := {
     items := arg(m, 0)
-    px_sigs = table()
-    px_structs = table()
+    px_sigs = table.new()
+    px_structs = table.new()
     each(d -> match d {
-        PFn{_, f, rs, ps, ret, _} -> table_set(px_sigs, f, Sig{rs, map(p -> arg(p, 2), ps), ret})
-      | Fn{_, f, rs, ps, ret, _} -> table_set(px_sigs, f, Sig{rs, map(p -> arg(p, 2), ps), ret})
-      | Struct{_, s, _} -> if (table_get(px_structs, s, none) == none) table_set(px_structs, s, d)
+        PFn{_, f, rs, ps, ret, _} -> table.set(px_sigs, f, Sig{rs, map(p -> arg(p, 2), ps), ret})
+      | Fn{_, f, rs, ps, ret, _} -> table.set(px_sigs, f, Sig{rs, map(p -> arg(p, 2), ps), ret})
+      | Struct{_, s, _} -> if (table.get(px_structs, s, none) == none) table.set(px_structs, s, d)
     }, append(imports, items))
     errs := []
     out := []

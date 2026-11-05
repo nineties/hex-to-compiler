@@ -42,20 +42,20 @@ use("vasm/rt")
 
 module vasm_ir {
     # === State ===
-    vi_structs := table()
-    vi_sigs := table()
-    vi_sinfos := table()
+    vi_structs := table.new()
+    vi_sigs := table.new()
+    vi_sinfos := table.new()
     vi_f := none
-    vi_vars := table()
+    vi_vars := table.new()
     vi_scopes := []
     vi_dead := false
     vi_ret := Unit{}
     vi_sret := -1
     vi_extra := vector.new()
-    vi_made := table()
-    vi_strings := table()
+    vi_made := table.new()
+    vi_strings := table.new()
     vi_string_list := vector.new()
-    vi_symbols := table()
+    vi_symbols := table.new()
     vi_symbol_list := vector.new()
     vi_wrappers := vector.new()
     vi_word := 4
@@ -121,30 +121,30 @@ module vasm_ir {
 
     # the layout of the struct s: Tuple{table from a field to its offset, size, alignment}
     vi_sinfo(s) = {
-        r := table_get(vi_sinfos, s, none)
+        r := table.get(vi_sinfos, s, none)
         if (r != none) r else {
-            offs := table()
+            offs := table.new()
             off := 0
             al := 1
             each((Field{_, x, t}) -> {
                 a := vi_align(t)
                 off = vi_align_up(off, a)
-                table_set(offs, x, off)
+                table.set(offs, x, off)
                 off = off + vi_size(t)
                 if (a > al) al = a
-            }, table_get(vi_structs, s, []))
+            }, table.get(vi_structs, s, []))
             r = Tuple{offs, vi_align_up(off, al), al}
-            table_set(vi_sinfos, s, r)
+            table.set(vi_sinfos, s, r)
             r
         }
     }
 
-    vi_field_type(s, f) := arg(find((Field{_, x, _}) -> x == f, table_get(vi_structs, s, [])), 2)
-    vi_field_off(s, f) := table_get(vi_sinfo(s)[0], f, 0)
+    vi_field_type(s, f) := arg(find((Field{_, x, _}) -> x == f, table.get(vi_structs, s, [])), 2)
+    vi_field_off(s, f) := table.get(vi_sinfo(s)[0], f, 0)
 
     # the scalar fields of a value of type t at the offset base: [Tuple{offset, type}, ...]
     vi_leaves(t, base) := match t {
-        Named{s} -> concat_map((Field{_, x, ft}) -> vi_leaves(ft, base + vi_field_off(s, x)), table_get(vi_structs, s, []))
+        Named{s} -> concat_map((Field{_, x, ft}) -> vi_leaves(ft, base + vi_field_off(s, x)), table.get(vi_structs, s, []))
       | _ -> [Tuple{base, t}]
     }
 
@@ -152,7 +152,7 @@ module vasm_ir {
         Own{_} -> true
       | Val{} -> true
       | Arr{u} -> vi_owning(u)
-      | Named{s} -> any((Field{_, _, ft}) -> vi_owning(ft), table_get(vi_structs, s, []))
+      | Named{s} -> list.any((Field{_, _, ft}) -> vi_owning(ft), table.get(vi_structs, s, []))
       | _ -> false
     }
 
@@ -224,16 +224,16 @@ module vasm_ir {
     vi_val1(t, o) := [Tuple{0, t, o}]
     vi_scalar(v) := arg(v[0], 2)
 
-    vi_var(x) := table_get(vi_vars, x, none)
+    vi_var(x) := table.get(vi_vars, x, none)
     vi_var_type(x) := arg(vi_var(x), 0)
     vi_var_val(x) := map((Tuple{o, t, r}) -> Tuple{o, t, U{r}}, arg(vi_var(x), 1))
 
     vi_declare(x, t) := {
         leaves := map((Tuple{o, lt}) -> Tuple{o, lt, vi_reg(lt)}, vi_leaves(t, 0))
-        table_set(vi_vars, x, Var{t, leaves})
+        table.set(vi_vars, x, Var{t, leaves})
         # an own value that is not set yet is 0, so that it is not dropped
         each((Tuple{_, lt, r}) -> if (vi_holds(lt)) ve(I{'li, [D{r}, K{0}]}), leaves)
-        if (vi_scopes != []) vi_scopes = (x :: vi_scopes[0]) :: drop(vi_scopes, 1)
+        if (vi_scopes != []) vi_scopes = (x :: vi_scopes[0]) :: list.drop(vi_scopes, 1)
     }
 
     # the value copied to new registers
@@ -246,7 +246,7 @@ module vasm_ir {
     # v is put in the registers of the variable x
     vi_set_var(x, v) := each((Tuple{Tuple{_, _, r}, Tuple{_, _, a}}) -> {
         if (a != U{r}) ve(I{if (head(a) == 'K) 'li else 'mov, [D{r}, a]})
-    }, zip(arg(vi_var(x), 1), v))
+    }, list.zip(arg(vi_var(x), 1), v))
 
     # the registers of x with the owning leaves cleared (a move of the own values of x): the copy of the value
     vi_take(x) := {
@@ -297,8 +297,8 @@ module vasm_ir {
     # the name of the function that drops an own value with contents of type u; it is made when it is first asked for
     vi_drop_name(u) = {
         name := f"__drop_{vi_key(u)}"
-        if (not table_has(vi_made, name)) {
-            table_set(vi_made, name, true)
+        if (not table.has(vi_made, name)) {
+            table.set(vi_made, name, true)
             vector.push(vi_extra, Tuple{name, u})
         }
         name
@@ -378,10 +378,10 @@ module vasm_ir {
 
     # a register that holds the address of the symbol s, which is made when it is first asked for
     vi_symbol_reg(s) = {
-        n := table_get(vi_symbols, s, none)
+        n := table.get(vi_symbols, s, none)
         if (n == none) {
             n = vasm_symbol_label(s)
-            table_set(vi_symbols, s, n)
+            table.set(vi_symbols, s, n)
             vector.push(vi_symbol_list, s)
         }
         r := vi_preg()
@@ -397,10 +397,10 @@ module vasm_ir {
 
     # the name of the data of the string literal s, which is made when it is first asked for
     vi_string_name(s) = {
-        n := table_get(vi_strings, s, none)
+        n := table.get(vi_strings, s, none)
         if (n == none) {
             n = vasm_string_label(s)
-            table_set(vi_strings, s, n)
+            table.set(vi_strings, s, n)
             vector.push(vi_string_list, s)
         }
         n
@@ -576,7 +576,7 @@ module vasm_ir {
       | Clo{_, f, args} -> {
             vals := map(a -> vi_scalar(vi_use(a, Val{})), args)
             n := length(args)
-            np := length(arg(table_get(vi_sigs, f, none), 3))
+            np := length(arg(table.get(vi_sigs, f, none), 3))
             name := vi_wrapper_name(f, n)
             sz := ir.vreg(vi_f, 32)
             p := vi_preg()
@@ -634,7 +634,7 @@ module vasm_ir {
             concat_map((Field{_, x, ft}) -> {
                 off := vi_field_off(s, x)
                 map((Tuple{o, lt, a}) -> Tuple{o + off, lt, a}, table_get_pair(copies, x))
-            }, table_get(vi_structs, s, []))
+            }, table.get(vi_structs, s, []))
         }
       | Borrow{_, k, rg, y} -> vi_val1(Ref{k, rg, arg(vi_var_type(y), 0)}, U{vi_ptr(y)})
       | Call{_, f, args} -> vi_call(f, args, t)
@@ -697,8 +697,8 @@ module vasm_ir {
     # the name of the function that a value made by fn f(a, ...) with n arguments calls, which is made when it is first asked for
     vi_wrapper_name(f, n) = {
         name := f"__clo_{symname(f)}_{n}"
-        if (not table_has(vi_made, name)) {
-            table_set(vi_made, name, true)
+        if (not table.has(vi_made, name)) {
+            table.set(vi_made, name, true)
             vector.push(vi_wrappers, Tuple{name, f, n})
         }
         name
@@ -709,7 +709,7 @@ module vasm_ir {
         saved := vi_f
         w := ir.fn(name)
         vi_f = w
-        np := length(arg(table_get(vi_sigs, f, none), 3))
+        np := length(arg(table.get(vi_sigs, f, none), 3))
         self := vi_preg()
         ve(I{'getarg, [D{self}, K{0}]})
         words := []
@@ -757,7 +757,7 @@ module vasm_ir {
 
     # === Calls ===
     vi_call(f, args, expected) = {
-        sig := table_get(vi_sigs, f, none)
+        sig := table.get(vi_sigs, f, none)
         if (vi_var(f) != none and vi_var_type(f) == Val{}) vi_val_call(f, args)
         else if (sig != none) vi_user_call(sig, args)
         else match f {
@@ -965,7 +965,7 @@ module vasm_ir {
                     v := vi_use(args[1], ft)
                     x := arg(place, 1)
                     each((Tuple{Tuple{_, _, r}, Tuple{_, _, a}}) -> ve(I{if (head(a) == 'K) 'li else 'mov, [D{r}, a]}),
-                        zip(vi_sub_leaves(x, off, vi_size(ft)), v))
+                        list.zip(vi_sub_leaves(x, off, vi_size(ft)), v))
                     old
                 } else {
                     s := arg(vi_contents(p), 0)
@@ -998,7 +998,7 @@ module vasm_ir {
             t := arg(p, 2)
             v := vi_use(a, t)
             words = append(words, map((Tuple{_, lt, o}) -> vi_ureg(o, lt), v))
-        }, zip(ps, args))
+        }, list.zip(ps, args))
         if (ret == Unit{}) {
             vi_call_fn(symname(arg(sig, 1)), words, [])
             []
@@ -1073,7 +1073,7 @@ module vasm_ir {
                 v := vi_use(a, ft)
                 ls := vi_sub_leaves(p, off, vi_size(ft))
                 if (vi_owning(ft)) each((Tuple{_, lt, r}) -> vi_drop_leaf(r, lt), ls)
-                each((Tuple{Tuple{_, _, r}, Tuple{_, _, o}}) -> ve(I{if (head(o) == 'K) 'li else 'mov, [D{r}, o]}), zip(ls, v))
+                each((Tuple{Tuple{_, _, r}, Tuple{_, _, o}}) -> ve(I{if (head(o) == 'K) 'li else 'mov, [D{r}, o]}), list.zip(ls, v))
             } else {
                 sn := arg(vi_contents(p), 0)
                 ft := vi_field_type(sn, f)
@@ -1140,15 +1140,15 @@ module vasm_ir {
         for (s in ss) if (not vi_dead) vi_stmt(s)
         names := vi_scopes[0]
         if (not vi_dead) vi_drop_scope(names)
-        vi_scopes = drop(vi_scopes, 1)
-        each(x -> table_set(vi_vars, x, none), names)
+        vi_scopes = list.drop(vi_scopes, 1)
+        each(x -> table.set(vi_vars, x, none), names)
     }
 
     vi_fn(d) := match d {
         Fn{_, name, _, ps, ret, body} -> {
             f := ir.fn(symname(name))
             vi_f = f
-            vi_vars = table()
+            vi_vars = table.new()
             vi_scopes = [[]]
             vi_dead = false
             vi_ret = ret
@@ -1179,19 +1179,19 @@ module vasm_ir {
     export lower_part(imports, Module{items}, names, word) := {
         if (word != 4 and word != 8) panic(f"vasm_ir.lower: the word is 4 or 8 bytes, not {word}")
         vi_word = word
-        vi_structs = table()
-        vi_sigs = table()
-        vi_sinfos = table()
+        vi_structs = table.new()
+        vi_sigs = table.new()
+        vi_sinfos = table.new()
         vi_extra = vector.new()
-        vi_made = table()
-        vi_strings = table()
+        vi_made = table.new()
+        vi_strings = table.new()
         vi_string_list = vector.new()
-        vi_symbols = table()
+        vi_symbols = table.new()
         vi_symbol_list = vector.new()
         vi_wrappers = vector.new()
         each(d -> match d {
-            Struct{_, s, fs} -> if (table_get(vi_structs, s, none) == none) table_set(vi_structs, s, fs)
-          | Fn{_, name, _, _, _, _} -> table_set(vi_sigs, name, d)
+            Struct{_, s, fs} -> if (table.get(vi_structs, s, none) == none) table.set(vi_structs, s, fs)
+          | Fn{_, name, _, _, _, _} -> table.set(vi_sigs, name, d)
         }, append(imports, items))
         fns := map(vi_fn, filter(d -> head(d) == 'Fn and (names == none or member(arg(d, 1), names)), items))
         drops := []

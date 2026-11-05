@@ -28,24 +28,24 @@ lex(src) := {
                 vector.push(toks, Tok{'nl, "\n", i})
                 i = i + 1
             }
-          | c if is_space(c) -> { i = i + 1 }
-          | c if is_digit(c) -> {
+          | c if string.is_space(c) -> { i = i + 1 }
+          | c if string.is_digit(c) -> {
                 j := i
-                while (j < n and is_digit(ord(src, j))) j = j + 1
-                vector.push(toks, Tok{'num, str_to_int(substr(src, i, j)), i})
+                while (j < n and string.is_digit(ord(src, j))) j = j + 1
+                vector.push(toks, Tok{'num, string.str_to_int(substr(src, i, j)), i})
                 i = j
             }
-          | c if is_ident_start(c) -> {
+          | c if string.is_ident_start(c) -> {
                 j := i
-                while (j < n and is_ident_char(ord(src, j))) j = j + 1
+                while (j < n and string.is_ident_char(ord(src, j))) j = j + 1
                 vector.push(toks, Tok{'id, substr(src, i, j), i})
                 i = j
             }
-          | c if index_of_str("+-*/()=", chr(c), 0) >= 0 -> {
-                vector.push(toks, Tok{'op, chr(c), i})
+          | c if string.index_of_str("+-*/()=", string.chr(c), 0) >= 0 -> {
+                vector.push(toks, Tok{'op, string.chr(c), i})
                 i = i + 1
             }
-          | _ -> error.at(here(i), f"unexpected character {pretty.quote_str(chr(c))}")
+          | _ -> error.at(here(i), f"unexpected character {pretty.quote_str(string.chr(c))}")
         }
     }
     vector.push(toks, Tok{'eof, "", n})
@@ -150,7 +150,7 @@ compile(stmts) := {
     vector.to_list(code)
 }
 
-show_operand(o) := if (typeof(o) == 'int) int_to_str(o) else symname(o)
+show_operand(o) := if (typeof(o) == 'int) string.int_to_str(o) else symname(o)
 show_instr(i) := match i {
     Bin{d, op, a, b, _} -> join(" ", [show_operand(d), "=", show_operand(a), op, show_operand(b)])
   | Copy{d, a}          -> join(" ", [show_operand(d), "=", show_operand(a)])
@@ -159,18 +159,18 @@ show_instr(i) := match i {
 
 # === Virtual machine ===
 run_code(code) := {
-    vars := table()
-    ops := table()
-    table_set(ops, "+", (a, b) -> a + b)
-    table_set(ops, "-", (a, b) -> a - b)
-    table_set(ops, "*", (a, b) -> a * b)
-    table_set(ops, "/", (a, b) -> a / b)
-    val(o) := if (typeof(o) == 'int) o else table_get(vars, o, none)
+    vars := table.new()
+    ops := table.new()
+    table.set(ops, "+", (a, b) -> a + b)
+    table.set(ops, "-", (a, b) -> a - b)
+    table.set(ops, "*", (a, b) -> a * b)
+    table.set(ops, "/", (a, b) -> a / b)
+    val(o) := if (typeof(o) == 'int) o else table.get(vars, o, none)
     each((Bin{d, op, a, b, p}) -> {
              y := val(b)
              if (op == "/" and y == 0) error.at(here(p), "division by zero")
-             table_set(vars, d, table_get(ops, op, none)(val(a), y))
-         } | (Copy{d, a}) -> table_set(vars, d, val(a))
+             table.set(vars, d, table.get(ops, op, none)(val(a), y))
+         } | (Copy{d, a}) -> table.set(vars, d, val(a))
            | (Print{a}) -> { put("= "); println(val(a)) }, code)
 }
 

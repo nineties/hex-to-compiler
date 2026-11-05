@@ -21,9 +21,9 @@ sched_unit_model := SchedModel{i -> 1, i -> 'none}
 # the instructions of a block that are not placed: a label at the start and a terminator at the end
 sched_split(xs) := {
     head_part := if (xs != [] and ir.op(xs[0]) == 'label) [xs[0]] else []
-    rest := drop(xs, length(head_part))
-    tail_part := if (rest != [] and ir.is_term(last(rest))) [last(rest)] else []
-    body := take(rest, length(rest) - length(tail_part))
+    rest := list.drop(xs, length(head_part))
+    tail_part := if (rest != [] and ir.is_term(list.last(rest))) [list.last(rest)] else []
+    body := list.take(rest, length(rest) - length(tail_part))
     Tuple{head_part, body, tail_part}
 }
 
@@ -33,7 +33,7 @@ sched_body(body, model) := {
     if (n < 2) body else {
         lat := arg(model, 0)
         eff := arg(model, 1)
-        ins := list_to_array(body)
+        ins := list.list_to_array(body)
         succs := array(n)
         npred := array(n)
         k := 0
@@ -47,8 +47,8 @@ sched_body(body, model) := {
             array_set(succs, i, Tuple{j, w} :: array_get(succs, i))
             array_set(npred, j, array_get(npred, j) + 1)
         }
-        last_def := table()
-        uses_since := table()
+        last_def := table.new()
+        uses_since := table.new()
         last_store := -1
         loads_since := []
         j := 0
@@ -56,16 +56,16 @@ sched_body(body, model) := {
             i := array_get(ins, j)
             e := eff(i)
             each(r -> {
-                d := table_get(last_def, r, -1)
+                d := table.get(last_def, r, -1)
                 if (d >= 0) edge(d, j, lat(array_get(ins, d)))
-                table_set(uses_since, r, j :: table_get(uses_since, r, []))
+                table.set(uses_since, r, j :: table.get(uses_since, r, []))
             }, ir.uses(i))
             each(r -> {
-                d := table_get(last_def, r, -1)
+                d := table.get(last_def, r, -1)
                 if (d >= 0 and d != j) edge(d, j, 1)
-                each(u -> if (u != j) edge(u, j, 0), table_get(uses_since, r, []))
-                table_set(uses_since, r, [])
-                table_set(last_def, r, j)
+                each(u -> if (u != j) edge(u, j, 0), table.get(uses_since, r, []))
+                table.set(uses_since, r, [])
+                table.set(last_def, r, j)
             }, ir.defs(i))
             if (e == 'load) {
                 if (last_store >= 0) edge(last_store, j, 1)

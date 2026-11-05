@@ -94,21 +94,21 @@ module rt {
     # The registers named in ptrs have the width of an address, those in wides are 64-bit, and the others are 32-bit.
     rt_fn(name, w, ptrs, wides, specs) := {
         f := ir.fn(name)
-        regs := table()
-        labs := table()
+        regs := table.new()
+        labs := table.new()
         reg := s -> {
-            r := table_get(regs, s, -1)
+            r := table.get(regs, s, -1)
             if (r < 0) {
                 r = ir.vreg(f, if (member(s, wides)) 64 else if (member(s, ptrs)) w * 8 else 32)
-                table_set(regs, s, r)
+                table.set(regs, s, r)
             }
             r
         }
         lab := s -> {
-            l := table_get(labs, s, -1)
+            l := table.get(labs, s, -1)
             if (l < 0) {
                 l = ir.label(f)
-                table_set(labs, s, l)
+                table.set(labs, s, l)
             }
             l
         }
@@ -128,7 +128,7 @@ module rt {
         pw := rt_pw(w)
         cz := rt_zx(w, 'cp, 'c4)
         tz := rt_zx(w, 'tp, 't)
-        rt_fn("__alloc", w, ['fl, 'slot, 'head, 'nxt, 'hp, 'cur, 'z, 'b, 'a, 'en, 'nc, 'want, 'r, 'res, 'cp, 'tp], [], concat([[
+        rt_fn("__alloc", w, ['fl, 'slot, 'head, 'nxt, 'hp, 'cur, 'z, 'b, 'a, 'en, 'nc, 'want, 'r, 'res, 'cp, 'tp], [], list.concat([[
             I{'getarg, [D{'n}, K{0}]},
             I{'add, [D{'t}, U{'n}, K{23}]},
             I{'band, [D{'t}, U{'t}, K{-16}]},
@@ -179,7 +179,7 @@ module rt {
     export free_fn(w) := {
         pw := rt_pw(w)
         cz := rt_zx(w, 'cp, 'c4)
-        rt_fn("__free", w, ['p, 'h, 'fl, 'slot, 'head, 'cp], [], concat([[
+        rt_fn("__free", w, ['p, 'h, 'fl, 'slot, 'head, 'cp], [], list.concat([[
             I{'getarg, [D{'p}, K{0}]},
             I{'br, [Cc{'eq}, U{'p}, K{0}, L{'out}, L{'go}]},
             I{'label, [L{'go}]},
@@ -205,7 +205,7 @@ module rt {
         iz := rt_zx(w, 'ip, 'i)
         i4z := rt_zx(w, 'i4p, 'i4)
         nt := rt_tr(w, 'n32, 'n)
-        rt_fn("__argv", w, ['ap, 'base, 'argc, 'ip, 'i4p, 't, 'p, 'n, 'q, 'a, 'k, 's, 'd], [], concat([[
+        rt_fn("__argv", w, ['ap, 'base, 'argc, 'ip, 'i4p, 't, 'p, 'n, 'q, 'a, 'k, 's, 'd], [], list.concat([[
             I{'getarg, [D{'i}, K{0}]},
             I{'la, [D{'ap}, S{"__args", 0}]},
             I{'ld, [W{pw}, D{'base}, M{U{'ap}, 0}]},
@@ -248,7 +248,7 @@ module rt {
     # and __create(a) opens it for writing
     rt_open_fn(w, name, service) := {
         nz := rt_zx(w, 'np, 'n)
-        rt_fn(name, w, ['a, 'buf, 'np, 'k, 's, 'd, 'e], [], concat([[
+        rt_fn(name, w, ['a, 'buf, 'np, 'k, 's, 'd, 'e], [], list.concat([[
             I{'getarg, [D{'a}, K{0}]},
             I{'ld, [W{'w32}, D{'n}, M{U{'a}, 0}]},
             I{'add, [D{'sz}, U{'n}, K{1}]},
@@ -272,7 +272,7 @@ module rt {
     }
 
     # the functions of the ports that the calls to the names called need
-    export ports(w, called) := concat([if (member("__argv", called)) [rt_argv_fn(w)] else [],
+    export ports(w, called) := list.concat([if (member("__argv", called)) [rt_argv_fn(w)] else [],
         if (member("__open", called)) [rt_open_fn(w, "__open", 'open)] else [],
         if (member("__create", called)) [rt_open_fn(w, "__create", 'create)] else []])
 
@@ -299,7 +299,7 @@ module rt {
         pw := rt_pw(w)
         i4z := rt_zx(w, 'i4p, 'i4)
         n4z := rt_zx(w, 'n4p, 'n4)
-        rt_fn("__val_drop", w, ['p, 'h, 'base, 'e, 'x, 'q, 'i4p, 'n4p], [], concat([[
+        rt_fn("__val_drop", w, ['p, 'h, 'base, 'e, 'x, 'q, 'i4p, 'n4p], [], list.concat([[
             I{'getarg, [D{'p}, K{0}]},
             I{'label, [L{'top}]},
             I{'br, [Cc{'eq}, U{'p}, K{0}, L{'out}, L{'a}]},
@@ -420,7 +420,7 @@ module rt {
     # __val_str(a, kind) is a new string or symbol with the bytes of the array a
     rt_val_str_fn(w) := {
         nz := rt_zx(w, 'np, 'n)
-        rt_fn("__val_str", w, ['a, 'p, 'np, 'src, 'dst, 'k, 'sa, 'da], [], concat([[
+        rt_fn("__val_str", w, ['a, 'p, 'np, 'src, 'dst, 'k, 'sa, 'da], [], list.concat([[
             I{'getarg, [D{'a}, K{0}]},
             I{'getarg, [D{'kd}, K{1}]},
             I{'ld, [W{'w32}, D{'n}, M{U{'a}, 0}]},
@@ -438,7 +438,7 @@ module rt {
     # __val_bytes(v) is a new array of the bytes of the string v
     rt_val_bytes_fn(w) := {
         nz := rt_zx(w, 'np, 'n)
-        rt_fn("__val_bytes", w, ['v, 'a, 'np, 'src, 'dst, 'k, 'sa, 'da], [], concat([[I{'getarg, [D{'v}, K{0}]}], rt_need('v, kind_str, 'ok), [
+        rt_fn("__val_bytes", w, ['v, 'a, 'np, 'src, 'dst, 'k, 'sa, 'da], [], list.concat([[I{'getarg, [D{'v}, K{0}]}], rt_need('v, kind_str, 'ok), [
             I{'ld, [W{'w32}, D{'n}, M{U{'v}, 8}]},
             I{'add, [D{'sz}, U{'n}, K{8}]},
             I{'call, [S{"__alloc", 0}, Us{['sz]}, Ds{['a]}]},
@@ -469,7 +469,7 @@ module rt {
         iz := rt_zx(w, 'ip, 'i)
         i4z := rt_zx(w, 'i4p, 'i4)
         n4z := rt_zx(w, 'n4p, 'n4)
-        rt_fn("__val_eq", w, ['a, 'b, 'pa, 'pb, 'x, 'y, 'ip, 'i4p, 'n4p], [], concat([[
+        rt_fn("__val_eq", w, ['a, 'b, 'pa, 'pb, 'x, 'y, 'ip, 'i4p, 'n4p], [], list.concat([[
             I{'getarg, [D{'a}, K{0}]},
             I{'getarg, [D{'b}, K{1}]},
             I{'label, [L{'top}]},
@@ -598,7 +598,7 @@ module rt {
     rt_val_get_fn(w) := {
         pw := rt_pw(w)
         i4z := rt_zx(w, 'i4p, 'i4)
-        rt_fn("__val_get", w, ['v, 'base, 'i4p, 'e, 'x], ['ix, 'nw], concat([[
+        rt_fn("__val_get", w, ['v, 'base, 'i4p, 'e, 'x], ['ix, 'nw], list.concat([[
             I{'getarg, [D{'v}, K{0}]},
             I{'getarg, [D{'ix}, K{1}]}], rt_elems(w, 'v), rt_index(w, 'v), i4z[0], [
             I{'add, [D{'e}, U{'base}, U{i4z[1]}]},
@@ -611,7 +611,7 @@ module rt {
     rt_val_set_fn(w) := {
         pw := rt_pw(w)
         i4z := rt_zx(w, 'i4p, 'i4)
-        rt_fn("__val_set", w, ['v, 'x, 'i4p, 'e, 'old], ['ix, 'nw], concat([[
+        rt_fn("__val_set", w, ['v, 'x, 'i4p, 'e, 'old], ['ix, 'nw], list.concat([[
             I{'getarg, [D{'v}, K{0}]},
             I{'getarg, [D{'ix}, K{1}]},
             I{'getarg, [D{'x}, K{1 + rt_w64words(w)}]}], rt_need('v, rt_kind_arr, 'isarr), [
@@ -651,7 +651,7 @@ module rt {
         I{'ret, [Us{['r]}]},
         I{'label, [L{next}]}]
 
-    rt_val_typeof_fn(w) := rt_fn("__val_typeof", w, ['v, 'r], [], concat([
+    rt_val_typeof_fn(w) := rt_fn("__val_typeof", w, ['v, 'r], [], list.concat([
         [I{'getarg, [D{'v}, K{0}]},
          I{'ld, [W{'w32}, D{'k}, M{U{'v}, kind}]}],
         rt_typeof_case(rt_kind_int, "__sym_int", 'n1),
@@ -666,7 +666,7 @@ module rt {
     rt_val_array_fn(w) := {
         pw := rt_pw(w)
         i4z := rt_zx(w, 'i4p, 'i4)
-        rt_fn("__val_array", w, ['x, 'p, 'e, 'i4p], ['ix], concat([[
+        rt_fn("__val_array", w, ['x, 'p, 'e, 'i4p], ['ix], list.concat([[
             I{'getarg, [D{'ix}, K{0}]},
             I{'getarg, [D{'x}, K{rt_w64words(w)}]},
             I{'br, [Cc{'ltu}, U{'ix}, K{134217728}, L{'fits}, L{'bad}]},
@@ -697,7 +697,7 @@ module rt {
     rt_val_mexpr_fn(w) := {
         pw := rt_pw(w)
         i4z := rt_zx(w, 'i4p, 'i4)
-        rt_fn("__val_mexpr", w, ['h, 'a, 'p, 'sa, 'da, 'x, 'i4p], [], concat([[
+        rt_fn("__val_mexpr", w, ['h, 'a, 'p, 'sa, 'da, 'x, 'i4p], [], list.concat([[
             I{'getarg, [D{'h}, K{0}]},
             I{'getarg, [D{'a}, K{1}]}], rt_need('a, rt_kind_arr, 'isarr), [
             I{'ld, [W{'w32}, D{'n}, M{U{'a}, rt_arr_n}]},
@@ -748,15 +748,15 @@ module rt {
     }, ir.code(f))
 
     export val_fns(w, called) := {
-        done := table()
+        done := table.new()
         out := []
         work := called
         while (work != []) {
             n := work[0]
-            work = drop(work, 1)
+            work = list.drop(work, 1)
             e := find(p -> arg(p, 0) == n, rt_val_makers)
-            if (e != none and not table_has(done, n)) {
-                table_set(done, n, true)
+            if (e != none and not table.has(done, n)) {
+                table.set(done, n, true)
                 f := arg(e, 1)(w)
                 out = f :: out
                 work = append(rt_call_names(f), work)
@@ -789,14 +789,14 @@ module rt {
     }
 
     export helpers := {
-        t := table()
-        table_set(t, 'shl, "__shl64")
-        table_set(t, 'shr, "__shr64")
-        table_set(t, 'sar, "__sar64")
-        table_set(t, 'divu, "__divu64")
-        table_set(t, 'remu, "__remu64")
-        table_set(t, 'divs, "__divs64")
-        table_set(t, 'rems, "__rems64")
+        t := table.new()
+        table.set(t, 'shl, "__shl64")
+        table.set(t, 'shr, "__shr64")
+        table.set(t, 'sar, "__sar64")
+        table.set(t, 'divu, "__divu64")
+        table.set(t, 'remu, "__remu64")
+        table.set(t, 'divs, "__divs64")
+        table.set(t, 'rems, "__rems64")
         t
     }
 

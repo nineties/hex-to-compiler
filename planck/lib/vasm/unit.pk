@@ -47,7 +47,7 @@ module vasm_unit {
         each(n -> if (member(n, own)) panic(f"vasm_unit: {symname(arg(n, 1))} of {name} is also in the imports"), vu_names(imports))
         all := vasm_ir.lower_part(imports, m, none, word)
         nfns := length(filter(d -> head(d) == 'Fn, arg(m, 0)))
-        Unit{name, word, iface(m), take(all, nfns), drop(all, nfns), vasm_ir.strings(), map(symname, vasm_ir.symbols())}
+        Unit{name, word, iface(m), list.take(all, nfns), list.drop(all, nfns), vasm_ir.strings(), map(symname, vasm_ir.symbols())}
     }
 
     export name(Unit{n, _, _, _, _, _, _}) := n
@@ -66,22 +66,22 @@ module vasm_unit {
 
     # the names that two units define stop the program
     vu_check_names(units) := {
-        seen := table()
+        seen := table.new()
         each(u -> each(n -> {
             key := Tuple{arg(n, 0), arg(n, 1)}
-            if (table_has(seen, key)) panic(f"vasm: {symname(arg(n, 1))} is defined in {table_get(seen, key, none)} and in {name(u)}")
-            table_set(seen, key, name(u))
+            if (table.has(seen, key)) panic(f"vasm: {symname(arg(n, 1))} is defined in {table.get(seen, key, none)} and in {name(u)}")
+            table.set(seen, key, name(u))
         }, vu_names(ifaces(u))), units)
     }
 
     # the functions of gens once each, in the order they are first made; a function of the same name in two units must be the same
     vu_gens(units) := {
-        seen := table()
+        seen := table.new()
         out := []
         each(u -> each(f -> {
-            old := table_get(seen, ir.name(f), none)
+            old := table.get(seen, ir.name(f), none)
             if (old == none) {
-                table_set(seen, ir.name(f), f)
+                table.set(seen, ir.name(f), f)
                 out = f :: out
             } else if (ir.code(old) != ir.code(f)) panic(f"vasm: {ir.name(f)} is made differently by two units")
         }, arg(u, 4)), units)
@@ -89,10 +89,10 @@ module vasm_unit {
     }
 
     vu_unique(xs) := {
-        seen := table()
+        seen := table.new()
         out := []
-        each(x -> if (not table_has(seen, x)) {
-            table_set(seen, x, true)
+        each(x -> if (not table.has(seen, x)) {
+            table.set(seen, x, true)
             out = x :: out
         }, xs)
         reverse(out)
@@ -132,7 +132,7 @@ module vasm_unit {
 
     vu_text(out, v) := {
         t := typeof(v)
-        if (t == 'int) strbuf.add(out, int_to_str(v))
+        if (t == 'int) strbuf.add(out, string.int_to_str(v))
         else if (t == 'string) strbuf.add(out, vu_string_text(v))
         else if (t == 'symbol) strbuf.add(out, symname(v))
         else if (t == 'mexpr) {
@@ -161,23 +161,23 @@ module vasm_unit {
 
     # the function f (ir.fn) as an M-expression: IRFn does not hold tables and vectors there
     vu_fn_value(IRFn{fname, code, meta}) := {
-        items := t -> sort((a, b) -> arg(a, 0) < arg(b, 0), table_items(t))
-        FnV{fname, vector.to_list(code), table_get(meta, 'nv, 0), table_get(meta, 'nl, 0), vector.to_list(table_get(meta, 'slots, none)),
-            items(table_get(meta, 'width, none)), items(table_get(meta, 'class, none)), table_get(meta, 'exported, true)}
+        items := t -> list.sort((a, b) -> arg(a, 0) < arg(b, 0), table.items(t))
+        FnV{fname, vector.to_list(code), table.get(meta, 'nv, 0), table.get(meta, 'nl, 0), vector.to_list(table.get(meta, 'slots, none)),
+            items(table.get(meta, 'width, none)), items(table.get(meta, 'class, none)), table.get(meta, 'exported, true)}
     }
 
     vu_fn_of(FnV{fname, code, nv, nl, slots, widths, classes, export_flag}) := {
-        meta := table()
-        table_set(meta, 'nv, nv)
-        table_set(meta, 'nl, nl)
-        table_set(meta, 'slots, vector.from_list(slots))
-        w := table()
-        each((Tuple{r, x}) -> table_set(w, r, x), widths)
-        table_set(meta, 'width, w)
-        c := table()
-        each((Tuple{r, x}) -> table_set(c, r, x), classes)
-        table_set(meta, 'class, c)
-        table_set(meta, 'exported, export_flag)
+        meta := table.new()
+        table.set(meta, 'nv, nv)
+        table.set(meta, 'nl, nl)
+        table.set(meta, 'slots, vector.from_list(slots))
+        w := table.new()
+        each((Tuple{r, x}) -> table.set(w, r, x), widths)
+        table.set(meta, 'width, w)
+        c := table.new()
+        each((Tuple{r, x}) -> table.set(c, r, x), classes)
+        table.set(meta, 'class, c)
+        table.set(meta, 'exported, export_flag)
         IRFn{fname, vector.from_list(code), meta}
     }
 
@@ -212,7 +212,7 @@ module vasm_unit {
     export parse(src) := {
         r := parse_mexpr(src)
         e := arg(r, 0)
-        if (typeof(e) != 'mexpr or head(e) != 'VasmUnit or arity(e) != 8 or trim(arg(r, 1)) != "")
+        if (typeof(e) != 'mexpr or head(e) != 'VasmUnit or arity(e) != 8 or string.trim(arg(r, 1)) != "")
             panic("vasm_unit.parse: not a unit")
         if (arg(e, 0) != vasm_unit_format) panic("vasm_unit.parse: the form of the unit is not known")
         v := vu_value(e)

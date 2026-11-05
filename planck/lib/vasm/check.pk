@@ -200,9 +200,9 @@ export show_type(t) := match t {
 #   or Parts{fields} (a struct value whose fields that own are moved out by x = s.f); loans: [Loan{region, kind}, ...]
 # vasm_regions: the regions in scope, the innermost first, ending with the regions of the function
 
-vasm_sigs := table()
-vasm_structs := table()
-vasm_info := table()
+vasm_sigs := table.new()
+vasm_structs := table.new()
+vasm_info := table.new()
 vasm_regions := []
 vasm_fn_regions := []
 vasm_ret_type := Unit{}
@@ -216,15 +216,15 @@ vasm_owning_in(t, seen) := match t {
   | Val{} -> true
   | Arr{u} -> vasm_owning_in(u, seen)
   | Named{s} -> {
-        sd := table_get(vasm_structs, s, none)
+        sd := table.get(vasm_structs, s, none)
         if (sd == none or member(s, seen)) false
-        else any((Field{_, _, u}) -> vasm_owning_in(u, s :: seen), arg(sd, 2))
+        else list.any((Field{_, _, u}) -> vasm_owning_in(u, s :: seen), arg(sd, 2))
     }
   | _ -> false
 }
 
 # the fields of the struct s that own, in the order of the struct
-vasm_own_fields(s) := map((Field{_, x, _}) -> x, filter((Field{_, _, u}) -> vasm_owning(u), arg(table_get(vasm_structs, s, none), 2)))
+vasm_own_fields(s) := map((Field{_, x, _}) -> x, filter((Field{_, _, u}) -> vasm_owning(u), arg(table.get(vasm_structs, s, none), 2)))
 
 # An integer literal is Lit{n} until it meets an integer type; Lit{none} is the result of an operation on literals.
 # Integers, bool and structs without own are copied. own and a struct with own are linear: they are moved
@@ -236,32 +236,32 @@ vasm_moves(t) := vasm_linear(t) or (head(t) == 'Ref and arg(t, 0) == 'mut)
 # the built-in functions, given as types with the type variable T.
 # free also marks its argument as freed (vasm_call). The contents of own are checked by vasm_type_ok.
 # swap(x, v) puts v in the place x (*p, p[i] or p.f) and gives the value that was there.
-export builtins := table()
-table_set(builtins, 'box, Sig{[], [TVar{'T}], Own{TVar{'T}}})
-table_set(builtins, 'free, Sig{[], [Own{TVar{'T}}], Unit{}})
-table_set(builtins, 'alloc, Sig{[], [I64{}, TVar{'T}], Own{Arr{TVar{'T}}}})
-table_set(builtins, 'len, Sig{['r], [Ref{'shr, 'r, Arr{TVar{'T}}}], I64{}})
-table_set(builtins, 'swap, Sig{[], [Place{TVar{'T}}, TVar{'T}], TVar{'T}})
+export builtins := table.new()
+table.set(builtins, 'box, Sig{[], [TVar{'T}], Own{TVar{'T}}})
+table.set(builtins, 'free, Sig{[], [Own{TVar{'T}}], Unit{}})
+table.set(builtins, 'alloc, Sig{[], [I64{}, TVar{'T}], Own{Arr{TVar{'T}}}})
+table.set(builtins, 'len, Sig{['r], [Ref{'shr, 'r, Arr{TVar{'T}}}], I64{}})
+table.set(builtins, 'swap, Sig{[], [Place{TVar{'T}}, TVar{'T}], TVar{'T}})
 
 vasm_fail(at, kind, msg) := perform VasmFail{at, kind, msg}
 
-vasm_dead(st) := table_get(st, ".dead", false)
-vasm_status(st, x) := arg(table_get(st, x, none), 0)
-vasm_loans(st, x) := arg(table_get(st, x, none), 1)
-vasm_set_status(st, x, s) := table_set(st, x, Vs{s, vasm_loans(st, x)})
-vasm_set_loans(st, x, l) := table_set(st, x, Vs{vasm_status(st, x), l})
+vasm_dead(st) := table.get(st, ".dead", false)
+vasm_status(st, x) := arg(table.get(st, x, none), 0)
+vasm_loans(st, x) := arg(table.get(st, x, none), 1)
+vasm_set_status(st, x, s) := table.set(st, x, Vs{s, vasm_loans(st, x)})
+vasm_set_loans(st, x, l) := table.set(st, x, Vs{vasm_status(st, x), l})
 
 vasm_copy_state(st) := {
-    s := table()
-    each(kv -> table_set(s, arg(kv, 0), arg(kv, 1)), table_items(st))
+    s := table.new()
+    each(kv -> table.set(s, arg(kv, 0), arg(kv, 1)), table.items(st))
     s
 }
 
 # the variables of a state, without the removed ones
-vasm_vars(st) := filter(x -> typeof(x) == 'symbol and table_get(st, x, none) != none, table_keys(st))
+vasm_vars(st) := filter(x -> typeof(x) == 'symbol and table.get(st, x, none) != none, table.keys(st))
 
 vasm_lookup(at, x) := {
-    i := table_get(vasm_info, x, none)
+    i := table.get(vasm_info, x, none)
     if (i == none) vasm_fail(at, 'undefined, f"{symname(x)} is not declared")
     i
 }
@@ -292,7 +292,7 @@ vasm_need_field(at, st, x, f) := match vasm_status(st, x) {
 vasm_owns(t, s) := if (not vasm_linear(t)) false else match s {
     'init -> true
   | Taken{_} -> true
-  | Parts{fs} -> any(f -> not member(f, fs), vasm_own_fields(arg(t, 0)))
+  | Parts{fs} -> list.any(f -> not member(f, fs), vasm_own_fields(arg(t, 0)))
   | _ -> false
 }
 
@@ -304,7 +304,7 @@ vasm_key(t, s) := if (not vasm_linear(t)) s == 'init else if (not vasm_owns(t, s
 }
 
 vasm_no_loans(at, st, x, what) := if (vasm_loans(st, x) != []) vasm_fail(at, 'borrowed, f"{symname(x)} is borrowed and cannot be {what}")
-vasm_no_mut_loan(at, st, x, what) := if (any(l -> arg(l, 1) == 'mut, vasm_loans(st, x))) vasm_fail(at, 'borrowed, f"{symname(x)} is borrowed as mut and cannot be {what}")
+vasm_no_mut_loan(at, st, x, what) := if (list.any(l -> arg(l, 1) == 'mut, vasm_loans(st, x))) vasm_fail(at, 'borrowed, f"{symname(x)} is borrowed as mut and cannot be {what}")
 
 # the contents of own and of a borrow: an integer, bool, a struct or own, or an array of them
 fun vasm_type_ok
@@ -321,22 +321,22 @@ vasm_type_ok(at, t) := match t {
         vasm_contents_ok(at, t, u)
     }
   | Arr{_} -> vasm_fail(at, 'type, f"{show_type(t)}: an array is held by own or a borrow")
-  | Named{s} -> if (table_get(vasm_structs, s, none) == none) vasm_fail(at, 'undefined, f"struct {symname(s)} is not defined")
+  | Named{s} -> if (table.get(vasm_structs, s, none) == none) vasm_fail(at, 'undefined, f"struct {symname(s)} is not defined")
   | _ -> none
 }
 
 vasm_declare(at, st, x, t, init) := {
-    if (table_get(vasm_info, x, none) != none) vasm_fail(at, 'type, f"{symname(x)} is already declared")
+    if (table.get(vasm_info, x, none) != none) vasm_fail(at, 'type, f"{symname(x)} is already declared")
     vasm_type_ok(at, t)
-    table_set(vasm_info, x, Info{t, vasm_regions})
-    table_set(st, x, Vs{if (init) 'init else 'uninit, []})
+    table.set(vasm_info, x, Info{t, vasm_regions})
+    table.set(st, x, Vs{if (init) 'init else 'uninit, []})
 }
 
 # === Regions, integers and the types of values ===
 
 # q outlives r: q is r, or q is static (the region of the string literals, which lasts to the end of the program),
 # or r is a region opened in the function and q was opened before it. The regions of the function are not ordered.
-vasm_outlives(q, r) := q == r or q == 'static or (r != 'static and not member(r, vasm_fn_regions) and index_of(q, vasm_regions) > index_of(r, vasm_regions))
+vasm_outlives(q, r) := q == r or q == 'static or (r != 'static and not member(r, vasm_fn_regions) and list.index_of(q, vasm_regions) > list.index_of(r, vasm_regions))
 
 vasm_lit_range(at, n, t) := if (n != none) {
     e := int_entry(t)
@@ -364,10 +364,10 @@ export mentions(t, r) := match t {
 }
 
 export subst(t, rmap, tsub) := match t {
-    Ref{k, r, u} -> Ref{k, table_get(rmap, r, r), subst(u, rmap, tsub)}
+    Ref{k, r, u} -> Ref{k, table.get(rmap, r, r), subst(u, rmap, tsub)}
   | Own{u} -> Own{subst(u, rmap, tsub)}
   | Arr{u} -> Arr{subst(u, rmap, tsub)}
-  | TVar{n} -> table_get(tsub, n, t)
+  | TVar{n} -> table.get(tsub, n, t)
   | _ -> t
 }
 
@@ -434,7 +434,7 @@ vasm_elem(at, st, p, i, write) := {
 
 # the type of the field f of the struct s
 vasm_field_type(at, s, f) := {
-    fd := find((Field{_, x, _}) -> x == f, arg(table_get(vasm_structs, s, none), 2))
+    fd := find((Field{_, x, _}) -> x == f, arg(table.get(vasm_structs, s, none), 2))
     if (fd == none) vasm_fail(at, 'type, f"struct {symname(s)} has no field {symname(f)}")
     arg(fd, 2)
 }
@@ -503,9 +503,9 @@ vasm_is_place(a) := member(head(a), ['Load, 'Index, 'Get])
 # &mut is given to &.
 vasm_match(at, pt, t, rs, rsub, tsub) := if (head(pt) == 'Place) vasm_match(at, arg(pt, 0), t, rs, rsub, tsub)
 else if (head(pt) == 'TVar) {
-    b := table_get(tsub, arg(pt, 0), none)
+    b := table.get(tsub, arg(pt, 0), none)
     if (b == none or (head(b) == 'Lit and int(t))) {
-        table_set(tsub, arg(pt, 0), t)
+        table.set(tsub, arg(pt, 0), t)
         true
     } else vasm_fits(at, b, t)
 } else if (head(pt) == 'Ref and head(t) == 'Ref) {
@@ -513,7 +513,7 @@ else if (head(pt) == 'TVar) {
     if (arg(pt, 0) != arg(t, 0) and not (arg(pt, 0) == 'shr and arg(t, 0) == 'mut)) false
     else if (not vasm_match(at, arg(pt, 2), arg(t, 2), rs, rsub, tsub)) false
     else if (member(r, rs)) {
-        table_set(rsub, r, arg(t, 1) :: table_get(rsub, r, []))
+        table.set(rsub, r, arg(t, 1) :: table.get(rsub, r, []))
         true
     } else vasm_outlives(arg(t, 1), r)
 } else if (head(pt) == 'Own and head(t) == 'Own) vasm_match(at, arg(pt, 0), arg(t, 0), rs, rsub, tsub)
@@ -522,7 +522,7 @@ else vasm_fits(at, pt, t)
 
 # the region given to r: the innermost of the regions qs of the arguments, which all outlive it
 vasm_pick_region(at, f, r, qs) := {
-    inner := filter(q -> all(q2 -> vasm_outlives(q2, q), qs), qs)
+    inner := filter(q -> list.all(q2 -> vasm_outlives(q2, q), qs), qs)
     names := join(", ", map(q -> symname(q), reverse(qs)))
     if (inner == []) vasm_fail(at, 'type, f"{symname(f)} is given borrows of regions {names} for region {symname(r)}, and none of them is inside the others")
     arg(inner, 0)
@@ -544,15 +544,15 @@ vasm_val_operand(st, a) := {
 
 # v(a, ...) for a register v of val: the arguments and the result are val. That v is a function that takes as many arguments is checked when the program runs.
 vasm_is_val_reg(f) := {
-    i := table_get(vasm_info, f, none)
+    i := table.get(vasm_info, f, none)
     i != none and arg(i, 0) == Val{}
 }
 
 # x = fn f(a, ...): the arguments are the first arguments of f, and all that f takes and gives is val
 vasm_closure(at, st, f, args) := {
-    sig := table_get(vasm_sigs, f, none)
+    sig := table.get(vasm_sigs, f, none)
     if (sig == none) vasm_fail(at, 'undefined, f"function {symname(f)} is not defined")
-    if (arg(sig, 0) != [] or arg(sig, 2) != Val{} or any(p -> p != Val{}, arg(sig, 1))) vasm_fail(at, 'type, f"{symname(f)} is made a value of val, so all that it takes and gives is val")
+    if (arg(sig, 0) != [] or arg(sig, 2) != Val{} or list.any(p -> p != Val{}, arg(sig, 1))) vasm_fail(at, 'type, f"{symname(f)} is made a value of val, so all that it takes and gives is val")
     if (length(args) > length(arg(sig, 1))) vasm_fail(at, 'type, f"{symname(f)} takes {length(arg(sig, 1))} arguments but {length(args)} are given")
     each(a -> vasm_val_operand(st, a), args)
     Val{}
@@ -566,8 +566,8 @@ vasm_call(at, st, f, args) := if (vasm_is_val_reg(f)) {
 } else vasm_call_named(at, st, f, args)
 
 vasm_call_named(at, st, f, args) = {
-    user := table_get(vasm_sigs, f, none)
-    sig := if (user == none) table_get(builtins, f, none) else user
+    user := table.get(vasm_sigs, f, none)
+    sig := if (user == none) table.get(builtins, f, none) else user
     if (sig == none) vasm_fail(at, 'undefined, f"function {symname(f)} is not defined")
     rs := arg(sig, 0)
     ps := arg(sig, 1)
@@ -583,8 +583,8 @@ vasm_call_named(at, st, f, args) = {
         }
         vasm_no_loans(at, st, x, "freed")
     }, args)
-    rsub := table()
-    tsub := table()
+    rsub := table.new()
+    tsub := table.new()
     lent := []
     each(pa -> {
         p := arg(pa, 0)
@@ -598,16 +598,16 @@ vasm_call_named(at, st, f, args) = {
             vasm_type_of(arg(a, 0), arg(a, 1))
         } else vasm_use(st, a)
         if (not vasm_match(arg(a, 0), p, t, rs, rsub, tsub)) vasm_fail(arg(a, 0), 'type, f"the argument is {show_type(t)} but {symname(f)} takes {show_type(p)}")
-    }, zip(ps, args))
+    }, list.zip(ps, args))
     if (freeing) {
         # what is left in the value is freed with it
         vasm_set_status(st, arg(args[0], 1), Freed{at})
     }
-    if (user == none and f == 'alloc and vasm_owning(table_get(tsub, 'T, I64{}))) vasm_fail(at, 'owner, "alloc copies its value to every element, so the value does not own")
-    rmap := table()
+    if (user == none and f == 'alloc and vasm_owning(table.get(tsub, 'T, I64{}))) vasm_fail(at, 'owner, "alloc copies its value to every element, so the value does not own")
+    rmap := table.new()
     each(r -> {
-        qs := table_get(rsub, r, [])
-        if (qs != []) table_set(rmap, r, vasm_pick_region(at, f, r, qs))
+        qs := table.get(rsub, r, [])
+        if (qs != []) table.set(rmap, r, vasm_pick_region(at, f, r, qs))
     }, rs)
     t := subst(ret, rmap, tsub)
     if (user == none) vasm_type_ok(at, t)
@@ -663,7 +663,7 @@ vasm_rhs(st, r) := match r {
     }
   | Clo{at, f, args} -> vasm_closure(at, st, f, args)
   | Make{at, s, inits} -> {
-        sd := table_get(vasm_structs, s, none)
+        sd := table.get(vasm_structs, s, none)
         if (sd == none) vasm_fail(at, 'undefined, f"struct {symname(s)} is not defined")
         given := []
         each((Init{iat, f, a}) -> {
@@ -718,28 +718,28 @@ vasm_leak_all(at, st) := none
 
 # the state after if: both branches must agree on own values
 vasm_merge(at, a, b) := if (vasm_dead(a)) b else if (vasm_dead(b)) a else {
-    m := table()
+    m := table.new()
     each(x -> {
-        t := arg(table_get(vasm_info, x, none), 0)
+        t := arg(table.get(vasm_info, x, none), 0)
         sa := vasm_status(a, x)
         sb := vasm_status(b, x)
         if (vasm_owns(t, sa) != vasm_owns(t, sb)) vasm_fail(at, 'branch, f"{symname(x)} is owned after one branch and not after the other")
         if (vasm_linear(t) and vasm_key(t, sa) != vasm_key(t, sb)) vasm_fail(at, 'branch, f"{symname(x)} has different parts moved out after the two branches")
         s := if (sb == 'init) sa else sb
         la := vasm_loans(a, x)
-        table_set(m, x, Vs{s, append(la, filter(l -> not member(l, la), vasm_loans(b, x)))})
+        table.set(m, x, Vs{s, append(la, filter(l -> not member(l, la), vasm_loans(b, x)))})
     }, vasm_vars(a))
     m
 }
 
 vasm_replace(st, m) := {
-    each(x -> table_set(st, x, table_get(m, x, none)), vasm_vars(st))
-    table_set(st, ".dead", vasm_dead(m))
+    each(x -> table.set(st, x, table.get(m, x, none)), vasm_vars(st))
+    table.set(st, ".dead", vasm_dead(m))
 }
 
 # a loop must give back the own and &mut values it moves
 vasm_loop_same(at, a, b) := each(x -> {
-    t := arg(table_get(vasm_info, x, none), 0)
+    t := arg(table.get(vasm_info, x, none), 0)
     if (vasm_moves(t) and vasm_key(t, vasm_status(a, x)) != vasm_key(t, vasm_status(b, x))) vasm_fail(at, 'loop, f"{symname(x)} is moved or freed in the loop and not given a value again")
 }, vasm_vars(a))
 
@@ -832,20 +832,20 @@ vasm_block(ss, st) := {
                 vasm_fail(at, 'type, f"the result is {show_type(vasm_ret_type)} but the value is {show_type(t)}")
             }
             vasm_leak_all(at, st)
-            table_set(st, ".dead", true)
+            table.set(st, ".dead", true)
         }
     }
     each((Tuple{x, at}) -> {
-        table_set(vasm_info, x, none)
-        table_set(st, x, none)
+        table.set(vasm_info, x, none)
+        table.set(st, x, none)
     }, declared)
 }
 
 # The services of the system are built-in functions too: they take values of vasm and no address, and are checked like any other call.
 # write(fd, a) writes the bytes of the array a, which is only borrowed, to the file fd, and gives the number of bytes written, or
 # a negative number for an error. exit(status) ends the program with the status (the low 8 bits are seen by the system).
-table_set(builtins, 'write, Sig{['r], [I64{}, Ref{'shr, 'r, Arr{U8{}}}], I64{}})
-table_set(builtins, 'exit, Sig{[], [I64{}], Unit{}})
+table.set(builtins, 'write, Sig{['r], [I64{}, Ref{'shr, 'r, Arr{U8{}}}], I64{}})
+table.set(builtins, 'exit, Sig{[], [I64{}], Unit{}})
 
 # The ports to the files and the arguments of the program take and give values of vasm too.
 # argc() is the number of the arguments of the program, and argv(i) is the i-th of them, an array of bytes without a terminator that
@@ -853,42 +853,42 @@ table_set(builtins, 'exit, Sig{[], [I64{}], Unit{}})
 # open(path) opens the file whose name is the bytes of the array path for reading and gives the file, or a negative number for an error.
 # read(fd, a) reads the bytes of the file fd into the array a, as many as it holds at most, and gives the number read (0 at the end of the file),
 # or a negative number for an error. close(fd) closes the file.
-table_set(builtins, 'argc, Sig{[], [], I64{}})
-table_set(builtins, 'argv, Sig{[], [I64{}], Ref{'shr, 'static, Arr{U8{}}}})
-table_set(builtins, 'open, Sig{['r], [Ref{'shr, 'r, Arr{U8{}}}], I64{}})
-table_set(builtins, 'read, Sig{['r], [I64{}, Ref{'mut, 'r, Arr{U8{}}}], I64{}})
-table_set(builtins, 'close, Sig{[], [I64{}], Unit{}})
+table.set(builtins, 'argc, Sig{[], [], I64{}})
+table.set(builtins, 'argv, Sig{[], [I64{}], Ref{'shr, 'static, Arr{U8{}}}})
+table.set(builtins, 'open, Sig{['r], [Ref{'shr, 'r, Arr{U8{}}}], I64{}})
+table.set(builtins, 'read, Sig{['r], [I64{}, Ref{'mut, 'r, Arr{U8{}}}], I64{}})
+table.set(builtins, 'close, Sig{[], [I64{}], Unit{}})
 
 # create(path) opens the file whose name is the bytes of the array path for writing, emptied or made new, and gives the file or a negative number.
-table_set(builtins, 'create, Sig{['r], [Ref{'shr, 'r, Arr{U8{}}}], I64{}})
+table.set(builtins, 'create, Sig{['r], [Ref{'shr, 'r, Arr{U8{}}}], I64{}})
 
 # The functions on values of val. A value that is not of the kind a function takes ends the program as failed, as an index out of range does.
 # is(v, h, n): v is a constructed value with the head h and n arguments. typeof(v): the same symbol as typeof of planck.
 # head(v): the head of a constructed value. arity(v): the number of the arguments, the elements or the bytes (a constructed value, an array, a string or symbol).
 # array(n, v): a new array of n elements v. mexpr(h, a): a constructed value with the head h, and the elements of the array a as its arguments.
 # intern(s): the symbol named by the string s. symname(s): the name of the symbol s as a string.
-table_set(builtins, 'is, Sig{[], [Val{}, Val{}, I64{}], Bool{}})
-table_set(builtins, 'typeof, Sig{[], [Val{}], Val{}})
-table_set(builtins, 'head, Sig{[], [Val{}], Val{}})
-table_set(builtins, 'arity, Sig{[], [Val{}], I64{}})
-table_set(builtins, 'array, Sig{[], [I64{}, Val{}], Val{}})
-table_set(builtins, 'mexpr, Sig{[], [Val{}, Val{}], Val{}})
-table_set(builtins, 'intern, Sig{[], [Val{}], Val{}})
-table_set(builtins, 'symname, Sig{[], [Val{}], Val{}})
+table.set(builtins, 'is, Sig{[], [Val{}, Val{}, I64{}], Bool{}})
+table.set(builtins, 'typeof, Sig{[], [Val{}], Val{}})
+table.set(builtins, 'head, Sig{[], [Val{}], Val{}})
+table.set(builtins, 'arity, Sig{[], [Val{}], I64{}})
+table.set(builtins, 'array, Sig{[], [I64{}, Val{}], Val{}})
+table.set(builtins, 'mexpr, Sig{[], [Val{}, Val{}], Val{}})
+table.set(builtins, 'intern, Sig{[], [Val{}], Val{}})
+table.set(builtins, 'symname, Sig{[], [Val{}], Val{}})
 
 vasm_check_fn(d) := match d {
     Fn{at, f, rs, ps, ret, body} -> {
-        if (table_get(builtins, f, none) != none) vasm_fail(at, 'type, f"{symname(f)} is a built-in function")
-        vasm_info = table()
+        if (table.get(builtins, f, none) != none) vasm_fail(at, 'type, f"{symname(f)} is a built-in function")
+        vasm_info = table.new()
         vasm_regions = rs
         vasm_fn_regions = rs
         vasm_ret_type = ret
         each(r -> {
-            given := any(p -> head(arg(p, 2)) == 'Ref and arg(arg(p, 2), 1) == r, ps)
+            given := list.any(p -> head(arg(p, 2)) == 'Ref and arg(arg(p, 2), 1) == r, ps)
             if (not given) vasm_fail(at, 'region, f"region {symname(r)} is not given by a parameter")
         }, rs)
         vasm_type_ok(at, ret)
-        st := table()
+        st := table.new()
         each((Param{pat, x, t}) -> vasm_declare(pat, st, x, t, true), ps)
         vasm_block(body, st)
         if (not vasm_dead(st)) {
@@ -899,16 +899,16 @@ vasm_check_fn(d) := match d {
 }
 
 # the struct s has a field of the struct target, directly or in a field of a field
-vasm_reaches(target, s, seen) := any((Field{_, _, t}) -> if (head(t) == 'Named) {
+vasm_reaches(target, s, seen) := list.any((Field{_, _, t}) -> if (head(t) == 'Named) {
     n := arg(t, 0)
-    sd := table_get(vasm_structs, n, none)
+    sd := table.get(vasm_structs, n, none)
     n == target or (sd != none and not member(n, seen) and vasm_reaches(target, n, n :: seen))
-} else false, arg(table_get(vasm_structs, s, none), 2))
+} else false, arg(table.get(vasm_structs, s, none), 2))
 
 # a field is an integer, bool, a struct or own, and does not borrow
 vasm_check_struct(d) := match d {
     Struct{at, s, fs} -> {
-        if (arg(table_get(vasm_structs, s, none), 0) != at) vasm_fail(at, 'type, f"struct {symname(s)} is already defined")
+        if (arg(table.get(vasm_structs, s, none), 0) != at) vasm_fail(at, 'type, f"struct {symname(s)} is already defined")
         vasm_regions = []
         vasm_fn_regions = []
         names := []
@@ -926,11 +926,11 @@ vasm_check_struct(d) := match d {
 # structs and functions (the bodies of the functions are not read). Only the items of m are checked.
 export check_with(m, imports) := {
     items := arg(m, 0)
-    vasm_sigs = table()
-    vasm_structs = table()
+    vasm_sigs = table.new()
+    vasm_structs = table.new()
     each(d -> match d {
-        Fn{_, f, rs, ps, ret, _} -> table_set(vasm_sigs, f, Sig{rs, map(p -> arg(p, 2), ps), ret})
-      | Struct{_, s, _} -> if (table_get(vasm_structs, s, none) == none) table_set(vasm_structs, s, d)
+        Fn{_, f, rs, ps, ret, _} -> table.set(vasm_sigs, f, Sig{rs, map(p -> arg(p, 2), ps), ret})
+      | Struct{_, s, _} -> if (table.get(vasm_structs, s, none) == none) table.set(vasm_structs, s, d)
     }, append(imports, items))
     errs := []
     each(d -> {
