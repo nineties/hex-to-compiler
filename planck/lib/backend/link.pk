@@ -17,10 +17,10 @@ use("backend/elf")
 
 module linker {
 
-link_align(n, a) := (n + a - 1) / a * a
+align(n, a) := (n + a - 1) / a * a
 
-link_first := [".text", ".rodata"]
-link_second := [".data", ".bss"]
+first := [".text", ".rodata"]
+second := [".data", ".bss"]
 
 # the position of each piece: a table from Tuple{object index, section name} to its offset in the joined section,
 # and the joined sections: a table from the name to Tuple{buffer, alignment}
@@ -43,29 +43,29 @@ link_join(objs, names, joined, pieces) := each(name -> {
 }, names)
 
 export link(objs, entry, base, hdr) := {
-    each(o -> each(s -> if (not member(arg(s, 0), append(link_first, link_second))) panic(f"link: the section {arg(s, 0)} of {obj.name(o)} is not supported"), obj.sections(o)), objs)
+    each(o -> each(s -> if (not member(arg(s, 0), append(first, second))) panic(f"link: the section {arg(s, 0)} of {obj.name(o)} is not supported"), obj.sections(o)), objs)
     joined := table.new()
     pieces := table.new()
-    link_join(objs, append(link_first, link_second), joined, pieces)
+    link_join(objs, append(first, second), joined, pieces)
     # addresses of the joined sections
     addr := table.new()
     cur := base + hdr
     each(n -> {
         j := table.get(joined, n, none)
-        cur = link_align(cur, arg(j, 1))
+        cur = align(cur, arg(j, 1))
         table.set(addr, n, cur)
         cur = cur + bytes.len(arg(j, 0))
-    }, link_first)
+    }, first)
     end0 := cur
     # the second segment starts in the file where the first ends, and in memory one page after that
-    off1 := link_align(end0 - base, 16)
+    off1 := align(end0 - base, 16)
     cur = base + off1 + 4096
     each(n -> {
         j := table.get(joined, n, none)
-        cur = link_align(cur, arg(j, 1))
+        cur = align(cur, arg(j, 1))
         table.set(addr, n, cur)
         cur = cur + bytes.len(arg(j, 0))
-    }, link_second)
+    }, second)
     end1 := cur
     # symbols
     globals := table.new()
@@ -110,7 +110,7 @@ export link(objs, entry, base, hdr) := {
         j := table.get(joined, n, none)
         bytes.zeros(seg0, table.get(addr, n, 0) - base - bytes.len(seg0))
         bytes.append(seg0, arg(j, 0))
-    }, link_first)
+    }, first)
     seg1 := bytes.new()
     each(n -> {
         j := table.get(joined, n, none)
@@ -118,7 +118,7 @@ export link(objs, entry, base, hdr) := {
             bytes.zeros(seg1, table.get(addr, n, 0) - (base + off1 + 4096) - bytes.len(seg1))
             bytes.append(seg1, arg(j, 0))
         }
-    }, link_second)
+    }, second)
     memsz1 := end1 - (base + off1 + 4096)
     segs := [Seg{base, 0, seg0, bytes.len(seg0), 5}]
     if (memsz1 > 0) segs = append(segs, [Seg{base + off1 + 4096, off1, seg1, memsz1, 6}])

@@ -20,14 +20,14 @@ use("backend/cfg")
 
 module regalloc {
 
-ra_allowed(f, ra, v) := {
+allowed(f, ra, v) := {
     c := ir.class(f, v)
     if (c == 'any) arg(ra, 0) else table.get(arg(ra, 1), c, arg(ra, 0))
 }
 
 # the interference of the registers of code: an array of sets (rows for the registers 0 to nregs - 1),
 # and the pairs of registers moved from one to the other
-ra_graph(f, ra, code, nregs) := {
+graph(f, ra, code, nregs) := {
     bs := cfg.blocks(code)
     live := cfg.live(bs, nregs)
     rows := array(nregs)
@@ -66,7 +66,7 @@ ra_graph(f, ra, code, nregs) := {
     Tuple{rows, moves}
 }
 
-ra_distinct(xs) := {
+distinct(xs) := {
     seen := table.new()
     r := []
     each(x -> if (not table.has(seen, x)) {
@@ -87,8 +87,8 @@ ra_spill(f, ra, code, spilled, unspillable) := {
     spill := arg(ra, 3)
     r := []
     each(i -> {
-        us := filter(v -> table.has(slots, v), ra_distinct(ir.uses(i)))
-        ds := filter(v -> table.has(slots, v), ra_distinct(ir.defs(i)))
+        us := filter(v -> table.has(slots, v), distinct(ir.uses(i)))
+        ds := filter(v -> table.has(slots, v), distinct(ir.defs(i)))
         if (us == [] and ds == []) r = i :: r else {
             temps := table.new()
             each(v -> if (not table.has(temps, v)) {
@@ -105,10 +105,10 @@ ra_spill(f, ra, code, spilled, unspillable) := {
     reverse(r)
 }
 
-# ra_color(f, ra, code, nregs, unspillable) is Tuple{colors, spilled}: a table from each virtual register to its physical register,
+# color(f, ra, code, nregs, unspillable) is Tuple{colors, spilled}: a table from each virtual register to its physical register,
 # and the registers that got none
-ra_color(f, ra, code, nregs, unspillable) := {
-    g := ra_graph(f, ra, code, nregs)
+color(f, ra, code, nregs, unspillable) := {
+    g := graph(f, ra, code, nregs)
     rows := g[0]
     regs := arg(ra, 0)
     cost := table.new()
@@ -121,7 +121,7 @@ ra_color(f, ra, code, nregs, unspillable) := {
         table.set(adj, v, ns)
         table.set(deg, v, length(ns))
     }, nodes)
-    kof := v -> length(ra_allowed(f, ra, v))
+    kof := v -> length(allowed(f, ra, v))
     state := table.new()
     low := []
     each(v -> {
@@ -173,7 +173,7 @@ ra_color(f, ra, code, nregs, unspillable) := {
     colour_of := w -> if (ir.is_vreg(w)) table.get(colors, w, -1) else w
     each(v -> {
         taken := map(colour_of, table.get(adj, v, []))
-        ok := filter(c -> not member(c, taken), ra_allowed(f, ra, v))
+        ok := filter(c -> not member(c, taken), allowed(f, ra, v))
         if (ok == []) spilled = v :: spilled else {
             prefer := filter(c -> member(c, ok), map(colour_of, table.get(partners, v, [])))
             table.set(colors, v, if (prefer != []) prefer[0] else ok[0])
@@ -192,7 +192,7 @@ export allocate(f, ra) := {
     while (result == none) {
         rounds = rounds + 1
         if (rounds > 12) panic(f"regalloc.allocate: {ir.name(f)} still spills after 12 rounds")
-        r := ra_color(f, ra, code, ir.nregs(f), unspillable)
+        r := color(f, ra, code, ir.nregs(f), unspillable)
         if (r[1] == []) {
             colors := r[0]
             result = filter(i -> match ir.move_pair(i) {

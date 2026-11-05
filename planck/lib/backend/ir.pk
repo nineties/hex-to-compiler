@@ -19,14 +19,14 @@ use("string")
 
 module ir {
 
-ir_vbase := 32
+vbase := 32
 
-export is_vreg(r) := r >= ir_vbase
+export is_vreg(r) := r >= vbase
 
 # === Functions ===
 export fn(name) := {
     meta := table.new()
-    table.set(meta, 'nv, ir_vbase)
+    table.set(meta, 'nv, vbase)
     table.set(meta, 'nl, 0)
     table.set(meta, 'slots, vector.new())
     table.set(meta, 'width, table.new())
@@ -72,7 +72,7 @@ export slot(f, size, align) := {
 }
 
 # === Instructions ===
-ir_op_regs(o, role) := match o {
+op_regs(o, role) := match o {
     D{r} -> if (role == 'def) [r] else []
   | ID{r} -> if (role == 'def) [r] else []
   | U{r} -> if (role == 'use) [r] else []
@@ -80,16 +80,16 @@ ir_op_regs(o, role) := match o {
   | DU{r} -> [r]
   | Ds{rs} -> if (role == 'def) rs else []
   | Us{rs} -> if (role == 'use) rs else []
-  | M{b, _} -> ir_op_regs(b, role)
-  | MX{b, x, _, _} -> append(ir_op_regs(b, role), ir_op_regs(x, role))
+  | M{b, _} -> op_regs(b, role)
+  | MX{b, x, _, _} -> append(op_regs(b, role), op_regs(x, role))
   | _ -> []
 }
 
-export defs(I{_, ops}) := concat_map(o -> ir_op_regs(o, 'def), ops)
-export uses(I{_, ops}) := concat_map(o -> ir_op_regs(o, 'use), ops)
+export defs(I{_, ops}) := concat_map(o -> op_regs(o, 'def), ops)
+export uses(I{_, ops}) := concat_map(o -> op_regs(o, 'use), ops)
 
-# ir_map_op(f, o) renames every register of the operand o with f
-ir_map_op(f, o) := match o {
+# map_op(f, o) renames every register of the operand o with f
+map_op(f, o) := match o {
     D{r} -> D{f(r)}
   | U{r} -> U{f(r)}
   | DU{r} -> DU{f(r)}
@@ -97,12 +97,12 @@ ir_map_op(f, o) := match o {
   | IU{r} -> IU{f(r)}
   | Ds{rs} -> Ds{map(f, rs)}
   | Us{rs} -> Us{map(f, rs)}
-  | M{b, d} -> M{ir_map_op(f, b), d}
-  | MX{b, x, s, d} -> MX{ir_map_op(f, b), ir_map_op(f, x), s, d}
+  | M{b, d} -> M{map_op(f, b), d}
+  | MX{b, x, s, d} -> MX{map_op(f, b), map_op(f, x), s, d}
   | _ -> o
 }
 
-export map_regs(f, I{op, ops}) := I{op, map(o -> ir_map_op(f, o), ops)}
+export map_regs(f, I{op, ops}) := I{op, map(o -> map_op(f, o), ops)}
 
 # the operands the instruction names, without the implicit registers
 export explicit(I{_, ops}) := filter(o -> head(o) != 'ID and head(o) != 'IU, ops)
@@ -111,8 +111,8 @@ export op(I{op, _}) := op
 export ops(I{_, ops}) := ops
 
 # the instructions that end a basic block
-ir_terminators := ['jmp, 'jcc, 'br, 'ret, 'trap, 'ud2]
-export is_term(i) := member(op(i), ir_terminators)
+terminators := ['jmp, 'jcc, 'br, 'ret, 'trap, 'ud2]
+export is_term(i) := member(op(i), terminators)
 
 # the labels an instruction jumps to
 export targets(I{op, ops}) := concat_map(o -> match o {
@@ -130,35 +130,35 @@ export move_pair(i) := match i {
 }
 
 # === Text ===
-ir_show_regs(rs) := join(" ", map(r -> string.int_to_str(r), rs))
+show_regs(rs) := join(" ", map(r -> string.int_to_str(r), rs))
 
-ir_show_op(o) := match o {
+show_op(o) := match o {
     D{r} -> f"d{r}"
   | U{r} -> f"u{r}"
   | DU{r} -> f"du{r}"
   | ID{r} -> f"id{r}"
   | IU{r} -> f"iu{r}"
-  | Ds{rs} -> f"d[{ir_show_regs(rs)}]"
-  | Us{rs} -> f"u[{ir_show_regs(rs)}]"
+  | Ds{rs} -> f"d[{show_regs(rs)}]"
+  | Us{rs} -> f"u[{show_regs(rs)}]"
   | K{n} -> string.int_to_str(n)
   | S{n, off} -> if (off == 0) n else f"{n}+{off}"
   | L{l} -> f"L{l}"
   | Cc{c} -> symname(c)
   | W{w} -> f"w{w}"
   | N{n} -> symname(n)
-  | M{b, d} -> f"[{ir_show_op(b)} {d}]"
-  | MX{b, x, s, d} -> f"[{ir_show_op(b)} {ir_show_op(x)}*{s} {d}]"
+  | M{b, d} -> f"[{show_op(b)} {d}]"
+  | MX{b, x, s, d} -> f"[{show_op(b)} {show_op(x)}*{s} {d}]"
   | MG{n, d} -> f"[{n} {d}]"
   | MF{k, n, d} -> f"[{symname(k)}{n} {d}]"
   | 'none -> "-"
   | _ -> "?"
 }
 
-ir_show_ops(ops) := join(", ", map(ir_show_op, ops))
+show_ops(ops) := join(", ", map(show_op, ops))
 
-export show(I{op, ops}) := if (op == 'label) f"{ir_show_op(ops[0])}:" else f"  {symname(op)} {ir_show_ops(ops)}"
+export show(I{op, ops}) := if (op == 'label) f"{show_op(ops[0])}:" else f"  {symname(op)} {show_ops(ops)}"
 
-ir_show_fn(f) := _strcat(_strcat(name(f), ":\n"), join("\n", map(show, code(f))))
+show_fn(f) := _strcat(_strcat(name(f), ":\n"), join("\n", map(show, code(f))))
 
 # the number of the label that a label instruction defines
 export label_id(I{'label, [L{l}]}) := l

@@ -26,7 +26,7 @@ is_mx(x) := typeof(x) == 'mexpr
 is_bad(x) := is_mx(x) and head(x) == 'Bad
 is_hole(p) := is_mx(p) and head(p) == 'Hole
 is_unwrap(p) := is_mx(p) and (head(p) == 'UnwrapReturn or head(p) == 'UnwrapBreak or head(p) == 'UnwrapContinue)
-un_hole(x) := mexpr('Hole, Tuple{x})
+hole(x) := mexpr('Hole, Tuple{x})
 
 # === Templates ===
 
@@ -56,7 +56,7 @@ args_tuple(t) := {
 # UnwrapReturn{q}, UnwrapBreak{q} and UnwrapContinue{q} in a template match q against the tree
 # without the handler that the parser puts around a body that has return, break or continue in it
 # (peg_wrap in syntax.pk). The text of such a body has the word, and parsing it puts the handler back.
-un_strip(h, t) := {
+strip(h, t) := {
     tag := if (h == 'UnwrapReturn) 'Return else if (h == 'UnwrapBreak) 'Break else 'Continue
     hd := if (h == 'UnwrapReturn) peg_ret_handler else if (h == 'UnwrapBreak) peg_break_handler else peg_continue_handler
     if (is_mx(t) and head(t) == 'Handle and arity(t) == 2 and arg(t, 1) == hd and peg_scan(arg(t, 0), tag)) arg(t, 0) else t
@@ -66,13 +66,13 @@ fun un_match
 
 # A body with a return that is not inside the handler of the parser is not what the parser makes
 # from a text with return in it (it would put the handler around the body again). No match.
-un_match_unwrap(p, t, env) := {
-    t2 := un_strip(head(p), t)
+match_unwrap(p, t, env) := {
+    t2 := strip(head(p), t)
     tag := if (head(p) == 'UnwrapReturn) 'Return else if (head(p) == 'UnwrapBreak) 'Break else 'Continue
     if (t2 == t and peg_scan(t, tag)) false else un_match(arg(p, 0), t2, env)
 }
 
-un_match_args(p, t, i, env) := {
+match_args(p, t, i, env) := {
     ok := true
     while (ok and i < arity(p)) {
         ok = un_match(arg(p, i), arg(t, i), env)
@@ -89,7 +89,7 @@ un_match(p, t, env) =
             table.set(env, arg(p, 0), t)
             true
         } else old == t
-    } else if (is_unwrap(p)) un_match_unwrap(p, t, env)
+    } else if (is_unwrap(p)) match_unwrap(p, t, env)
     else if (is_mx(p) and head(p) == 'Generic) {
         if (is_mx(t)) {
             table.set(env, arg(arg(p, 0), 0), head(t))
@@ -97,7 +97,7 @@ un_match(p, t, env) =
             true
         } else false
     } else if (is_mx(p)) {
-        is_mx(t) and head(t) == head(p) and arity(t) == arity(p) and un_match_args(p, t, 0, env)
+        is_mx(t) and head(t) == head(p) and arity(t) == arity(p) and match_args(p, t, 0, env)
     } else p == t
 
 # === Reading the actions of the grammar ===
@@ -110,7 +110,7 @@ vars_tmpl(h, tup, labels) := {
     i := 0
     while (not is_bad(r) and i < arity(tup)) {
         v := arg(tup, i)
-        r = if (label_ok(v, labels)) push(r, un_hole(v)) else bad
+        r = if (label_ok(v, labels)) push(r, hole(v)) else bad
         i = i + 1
     }
     r
@@ -124,9 +124,9 @@ call_tmpl(c, labels) :=
     else {
         f := arg(c, 0)
         n := arity(arg(c, 1))
-        a := un_hole(if (n > 0) arg(arg(c, 1), 0) else '_)
-        b := un_hole(if (n > 1) arg(arg(c, 1), 1) else '_)
-        d := un_hole(if (n > 2) arg(arg(c, 1), 2) else '_)
+        a := hole(if (n > 0) arg(arg(c, 1), 0) else '_)
+        b := hole(if (n > 1) arg(arg(c, 1), 1) else '_)
+        d := hole(if (n > 2) arg(arg(c, 1), 2) else '_)
         if (f == 'peg_lambda and n == 2) `Lambda{!a, UnwrapReturn{!b}}
         else if (f == 'peg_fuse and n == 2) `Fusion{!a, !b}
         else if (f == 'peg_while and n == 2) `UnwrapBreak{While{!a, UnwrapContinue{!b}}}
@@ -141,7 +141,7 @@ call_tmpl(c, labels) :=
 # the template of a quasi-quotation. A hole must be a label.
 quasi(p, labels) :=
     if (not is_mx(p)) p
-    else if (head(p) == 'UnQuote) (if (label_ok(arg(p, 0), labels)) un_hole(arg(p, 0)) else call_tmpl(arg(p, 0), labels))
+    else if (head(p) == 'UnQuote) (if (label_ok(arg(p, 0), labels)) hole(arg(p, 0)) else call_tmpl(arg(p, 0), labels))
     else {
         r := mexpr(head(p), Tuple{})
         i := 0
@@ -156,11 +156,11 @@ quasi(p, labels) :=
 # mexpr(h, args) in an action
 mexpr_tmpl(h, args, labels) :=
     if (is_mx(h) and head(h) == 'Quote and is_mx(args) and head(args) == 'Tuple) vars_tmpl(arg(h, 0), args, labels)
-    else if (label_ok(h, labels) and label_ok(args, labels)) Generic{un_hole(h), un_hole(args)}
+    else if (label_ok(h, labels) and label_ok(args, labels)) Generic{hole(h), hole(args)}
     else bad
 
 body_tmpl(b, labels) :=
-    if (typeof(b) == 'symbol) (if (label_ok(b, labels)) un_hole(b) else bad)
+    if (typeof(b) == 'symbol) (if (label_ok(b, labels)) hole(b) else bad)
     else if (not is_mx(b)) bad
     else if (head(b) == 'QuasiQuote) quasi(arg(b, 0), labels)
     else if (head(b) == 'Quote) arg(b, 0)
@@ -277,7 +277,7 @@ find_paren(owner, a) := {
     } else none
 }
 
-un_flat(src) := if (is_mx(src) and head(src) == 'Choice) concat_map(un_flat, pretty.args_of(src)) else [src]
+flat(src) := if (is_mx(src) and head(src) == 'Choice) concat_map(flat, pretty.args_of(src)) else [src]
 
 tok_types := {
     t := table.new()
@@ -322,7 +322,7 @@ un_build() := {
                     x := extract_act(r, order, arg(a, 0), arg(a, 1))
                     if (not is_bad(x)) alts = x :: alts
                 }
-            }, un_flat(src))
+            }, flat(src))
         }
     }, names)
     i := 0
@@ -338,7 +338,7 @@ un_build() := {
     ug_version = peg_version
 }
 
-un_ensure() := if (ug_version != peg_version) un_build()
+ensure() := if (ug_version != peg_version) un_build()
 
 alt_owner(a) := arg(a, 0)
 alt_order(a) := arg(a, 1)
@@ -357,7 +357,7 @@ reach_add(seen, r) := if (not set.has(seen, r)) {
 }
 
 # the rules that rule r reaches by alternatives that are only a rule name
-un_reach(r) := {
+reach(r) := {
     c := table.get(ug_reach, r, none)
     if (c != none) c else {
         seen := set.new()
@@ -369,7 +369,7 @@ un_reach(r) := {
 
 # an alternative is open when its last element is a rule that is looser than the rule of the alternative
 # (while (c) e ends with expr, which goes on to the right as far as it can)
-is_open(a) := alt_tail(a) != none and set.has(un_reach(alt_tail(a)), alt_owner(a)) and not set.has(un_reach(alt_owner(a)), alt_tail(a))
+is_open(a) := alt_tail(a) != none and set.has(reach(alt_tail(a)), alt_owner(a)) and not set.has(reach(alt_owner(a)), alt_tail(a))
 
 first_of := (x :: _) -> x
 
@@ -377,14 +377,14 @@ rest_of := (_ :: xs) -> xs
 
 # Cand{key, alt, paren or false}, the alternatives that can stand for rule r. The more concrete
 # template comes first. An alternative of a stronger rule needs parentheses.
-un_cands(r) := {
+cands(r) := {
     c := table.get(ug_cands, r, none)
     if (c != none) c else {
-        rr := un_reach(r)
+        rr := reach(r)
         ps := filter(x -> set.has(rr, arg(x, 0)), ug_parens)
         paren := if (ps == []) none else first_of(ps)
         wrap_ok := paren != none
-        uni := if (paren == none) set.new() else un_reach(arg(paren, 1))
+        uni := if (paren == none) set.new() else reach(arg(paren, 1))
         out := []
         each(a -> {
             o := alt_owner(a)
@@ -423,7 +423,7 @@ piece_text := (T{s}) -> s
 is_bracket(s) := s == "(" or s == "[" or s == "{" or s == "."
 no_space_before(s) := s == ")" or s == "]" or s == "}" or s == "," or s == ";"
 
-un_render(ps) := {
+render(ps) := {
     out := ""
     glue := true
     pfx := ""
@@ -441,15 +441,15 @@ un_render(ps) := {
     out
 }
 
-# unparse_pp is declared here for the functions that it calls through text_as and try_cands
-fun unparse_pp
+# pp is declared here for the functions that it calls through text_as and try_cands
+fun pp
 
 list_pieces(inner, sep, v) := {
     acc := []
     ok := true
     i := 0
     while (ok and i < arity(v)) {
-        s := unparse_pp(inner, arg(v, i))
+        s := pp(inner, arg(v, i))
         if (s == none) ok = false
         else {
             if (i > 0 and strlen(sep) > 0) acc = sep :: acc
@@ -469,7 +469,7 @@ is_list_rule(r) := {
 val_pieces(elem, v) :=
     if (typeof(elem) == 'symbol and is_list_rule(elem)) val_pieces(table.get(peg_sources, elem, none), v)
     else if (typeof(elem) == 'symbol) {
-        s := unparse_pp(elem, v)
+        s := pp(elem, v)
         if (s == none) none else [s]
     } else if (not is_mx(elem)) none
     else if (head(elem) == 'Delimited or head(elem) == 'Delimited1 or head(elem) == 'Many) {
@@ -530,8 +530,8 @@ try_fit(a, wrapped, t) := {
     } else if (un_match(tm, t, env)) {
         ps := items_pieces(alt_items(a), env)
         if (ps == none) none
-        else if (wrapped != false) _strcat(arg(wrapped, 2), _strcat(un_render(ps), arg(wrapped, 3)))
-        else un_render(ps)
+        else if (wrapped != false) _strcat(arg(wrapped, 2), _strcat(render(ps), arg(wrapped, 3)))
+        else render(ps)
     } else none
 }
 
@@ -545,8 +545,8 @@ try_cands = (Nil{}, t) -> none
                 if (s == none) try_cands(cs, t) else s
              }
 
-# unparse_pp(rule, t) is the text of t as the rule, or none
-unparse_pp(r, t) =
+# pp(rule, t) is the text of t as the rule, or none
+pp(r, t) =
     if (typeof(table.get(peg_sources, r, none)) == 'function) {
         ty := table.get(tok_types, r, none)
         if (ty != none and typeof(t) == ty) print_tok(r, t) else none
@@ -554,15 +554,15 @@ unparse_pp(r, t) =
     else {
         # a rule that passes its tree on to itself (identity actions) would go round forever
         ug_stack = Tuple{r, t} :: ug_stack
-        res := try_cands(un_cands(r), t)
+        res := try_cands(cands(r), t)
         ug_stack = list.drop(ug_stack, 1)
         res
     }
 
 # unparse.try_as(rule, t) is a text that the rule parses to t, or none when t has no such text
 export try_as(r, t) := {
-    un_ensure()
-    unparse_pp(r, t)
+    ensure()
+    pp(r, t)
 }
 
 # unparse.text_as(rule, t) is like unparse.try_as and stops the program when there is no text
@@ -594,7 +594,7 @@ arg_texts(t) := {
     ok := true
     i := 0
     while (ok and i < arity(t)) {
-        s := unparse_pp('expr, arg(t, i))
+        s := pp('expr, arg(t, i))
         if (s == none) ok = false else acc = s :: acc
         i = i + 1
     }
@@ -606,7 +606,7 @@ block_texts(items) := {
     acc := []
     ok := true
     each(x -> if (ok) {
-        s := unparse_pp('expr, x)
+        s := pp('expr, x)
         if (s == none) ok = false else acc = s :: acc
     }, items)
     if (ok) reverse(acc) else none
@@ -630,9 +630,9 @@ has_open_if(t) :=
 print_if(t) :=
     if (not (is_mx(t) and head(t) == 'If and arity(t) == 3)) none
     else {
-        c := unparse_pp('expr, arg(t, 0))
-        a := unparse_pp('branch, arg(t, 1))
-        b := if (arg(t, 2) == none) "" else unparse_pp('branch, arg(t, 2))
+        c := pp('expr, arg(t, 0))
+        a := pp('branch, arg(t, 1))
+        b := if (arg(t, 2) == none) "" else pp('branch, arg(t, 2))
         if (c == none or a == none or b == none) none
         else {
             a2 := if (b != "" and has_open_if(arg(t, 1))) _strcat("(", _strcat(a, ")")) else a
@@ -687,7 +687,7 @@ print_fstr(t) := {
         each(sg -> if (ok) {
             if (head(sg) == 'S) acc = fstr_escape(arg(sg, 0)) :: acc
             else {
-                e := unparse_pp('expr, arg(sg, 0))
+                e := pp('expr, arg(sg, 0))
                 if (e == none) ok = false
                 else acc = _strcat("{", _strcat(if (string.starts_with(e, "{")) " " else "", _strcat(e, "}"))) :: acc
             }
@@ -706,7 +706,7 @@ print_return0(t) := if (t == 'Perform{Return{none}}) "return" else none
 
 # Guard{params, guard, body, rest} of a function with a guard, or none
 guard_parts := (Apply{Lambda{Tuple{k}, Fusion{Lambda{vs, Apply{Fusion{Lambda{ps, b}, k2}, vs2}}, k3}}, Tuple{g}}) -> {
-                   b2 := un_strip('UnwrapReturn, b)
+                   b2 := strip('UnwrapReturn, b)
                    ok := typeof(k) == 'symbol and symname(k) == "%g" and k2 == k and k3 == k and vs2 == vs
                          and is_mx(b2) and head(b2) == 'If and arity(b2) == 3 and arg(b2, 2) == mexpr('Apply, Tuple{k, vs})
                    if (ok) Guard{ps, arg(b2, 0), arg(b2, 1), g} else none
@@ -716,7 +716,7 @@ guard_parts := (Apply{Lambda{Tuple{k}, Fusion{Lambda{vs, Apply{Fusion{Lambda{ps,
 # the parameters of an arm: p alone, or (p, ...) for other numbers and for a tuple written as (a, b)
 params_text(ps) := {
     xs := list_pieces('pattern, ",", ps)
-    s := if (xs == none) none else un_render(xs)
+    s := if (xs == none) none else render(xs)
     if (s == none) none
     else if (arity(ps) == 1 and not (is_mx(arg(ps, 0)) and head(arg(ps, 0)) == 'Tuple and string.starts_with(s, "("))) s
     else _strcat("(", _strcat(s, ")"))
@@ -724,13 +724,13 @@ params_text(ps) := {
 
 arm_text(ps, c, e) := {
     p := params_text(ps)
-    g := if (c == NoGuard{}) "" else unparse_pp('ternary, c)
-    b := unparse_pp('arrow, e)
+    g := if (c == NoGuard{}) "" else pp('ternary, c)
+    b := pp('arrow, e)
     if (p == none or g == none or b == none) none
     else _strcat(p, _strcat(if (g == "") "" else _strcat(" if ", g), _strcat(" -> ", b)))
 }
 
-plain_arm := (Lambda{ps @ mexpr, e}) -> if (head(ps) == 'Tuple and un_strip('UnwrapReturn, e) == e) arm_text(ps, NoGuard{}, e) else none
+plain_arm := (Lambda{ps @ mexpr, e}) -> if (head(ps) == 'Tuple and strip('UnwrapReturn, e) == e) arm_text(ps, NoGuard{}, e) else none
            | (_) -> none
 
 # the texts of the arms of f in match, or none. A function with a guard is the last of a Fusion.
@@ -756,7 +756,7 @@ is_applied(t) := is_mx(t) and head(t) == 'Apply and arity(t) == 2 and is_mx(arg(
 print_match(t) := {
     f := if (is_applied(t)) arg(t, 0) else none
     arms := if (f != none and (guard_parts(f) != none or (is_mx(f) and head(f) == 'Fusion))) match_arms(f) else none
-    s := if (arms == none) none else unparse_pp('ternary, arg(arg(t, 1), 0))
+    s := if (arms == none) none else pp('ternary, arg(arg(t, 1), 0))
     if (arms == none or s == none) none
     else {
         lines := indent(first_of(arms)) :: map(a -> _strcat("  | ", join("\n    ", string.split(a, "\n"))), rest_of(arms))
@@ -769,8 +769,8 @@ print_guard(t) := {
     gp := guard_parts(t)
     if (gp == none) none
     else {
-        a := arm_text(arg(gp, 0), arg(gp, 1), un_strip('UnwrapReturn, arg(gp, 2)))
-        r := if (arg(gp, 3) == '_nomatch) "" else unparse_pp('union, arg(gp, 3))
+        a := arm_text(arg(gp, 0), arg(gp, 1), strip('UnwrapReturn, arg(gp, 2)))
+        r := if (arg(gp, 3) == '_nomatch) "" else pp('union, arg(gp, 3))
         if (a == none or r == none) none
         else if (r == "") a
         else _strcat(a, _strcat(" | ", r))
@@ -796,10 +796,10 @@ unskip(f) :=
     } else none
 
 print_index(f) :=
-    if (not peg_guarded(f)) unparse_pp('expr, f)
+    if (not peg_guarded(f)) pp('expr, f)
     else {
         g := unskip(f)
-        if (g == none) none else unparse_pp('expr, g)
+        if (g == none) none else pp('expr, g)
     }
 
 custom('index, 10, none, print_index)
