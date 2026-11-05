@@ -11,7 +11,9 @@
 <tr><td><code>f(p, ...) := e</code></td><td><code>Do{Declare{f}, Set{f, Fusion{f, Lambda{Tuple{p, ...}, e}}}}</code></td></tr>
 <tr><td><code>record T(f, ...)</code></td><td><code>Apply{_record_declare, Tuple{Quote{T}, Quote{Tuple{f, ...}}}}</code></td></tr>
 <tr><td><code>x = e</code></td><td><code>Set{x, e}</code></td></tr>
+<tr><td><code>x += e</code> <code>x -= e</code> <code>x *= e</code> <code>x /= e</code> <code>x %= e</code></td><td><code>Set{x, Apply{_add, Tuple{x, e}}}</code>。ほかは <code>_sub</code> <code>_mul</code> <code>_div</code> <code>_mod</code></td></tr>
 <tr><td><code>a[i] = e</code></td><td><code>Apply{_index_set, Tuple{a, i, e}}</code></td></tr>
+<tr><td><code>a[i] += e</code>（<code>-=</code> <code>*=</code> <code>/=</code> <code>%=</code> も同じ）</td><td class="wrap"><code>Do{Def{ta, a}, Def{ti, i}, Apply{_index_set, Tuple{ta, ti, Apply{_add, Tuple{Apply{_index_get, Tuple{ta, ti}}, e}}}}}</code>（<code>ta</code>・<code>ti</code> はほかのどの名前とも重ならない変数）</td></tr>
 <tr><td><code>t with { f = e, ... }</code></td><td class="wrap"><code>Apply{_record_with, Tuple{t, Quote{f}, e}}</code>。欄が2つ以上のときは <code>_record_with</code> の呼び出しを欄の順に入れ子にする</td></tr>
 <tr><td><code>f | g</code></td><td><code>Fusion{f, g}</code></td></tr>
 <tr><td><code>(p, ...) if c -&gt; e | g</code>・<code>p if c -&gt; e | g</code></td><td class="wrap">引数が合わないか <code>c</code> が偽のとき、同じ引数で <code>g</code> を呼ぶ関数</td></tr>
@@ -68,6 +70,10 @@
 
 <p><code>t with { f = e, g = e2 }</code> は <code>t</code> の欄 <code>f</code>・<code>g</code> を <code>e</code>・<code>e2</code> の値に替えた新しい値です。<code>t</code> は変わりません。<code>t</code> は <code>x</code>・<code>f(x)</code>・<code>t.f</code> のような後置の式で、<code>with { ... }</code> は続けて書けます（<code>t with { f = 1 } with { g = 2 }</code>）。欄は左から順に替えるので、<code>e</code> は元の <code>t</code> の欄も参照できます。欄がない値や M式でない値に使うと、メッセージを出してプログラムが止まります。</p>
 <!--ex t1_with-->
+
+<h2 id="compound">複合代入</h2>
+<p><code>x += e</code> は <code>x = x + e</code> と同じです。<code>-=</code>・<code>*=</code>・<code>/=</code>・<code>%=</code> も同じ形で、それぞれ <code>-</code>・<code>*</code>・<code>/</code>・<code>%</code> の演算子を使います。<code>a[i] += e</code> は <code>a[i] = a[i] + e</code> と同じですが、<code>a</code> と <code>i</code> は1回だけ評価します。左辺は変数か <code>a[i]</code> で、<code>t.f += e</code> は書けません。値は代入した値です。</p>
+<!--ex t1_compound-->
 
 <h2 id="destructure">組の分割</h2>
 <p><code>(a, b) := e</code> は組 <code>e</code> の要素で <code>a</code> と <code>b</code> を定義し、<code>(a, b) = e</code> は定義済みの <code>a</code> と <code>b</code> に代入します。左辺は2つ以上の名前を <code>,</code> で区切って括弧で囲んだものです。右辺を先にすべて評価してから代入するので、<code>(a, b) = (b, a)</code> は2つの値を入れ替えます。組の要素の数が名前の数と違う値と、組でない値は、メッセージを出してプログラムが止まります。</p>

@@ -861,6 +861,8 @@ Def{peg_macro, none}
 
 Def{peg_with, none}
 
+Def{peg_names, none}
+
 Def{peg_destruct, none}
 
 Def{peg_compound, none}
@@ -1421,6 +1423,14 @@ minus ::= same "-" !nospace(">")
 
 " the = of an assignment, not == "
 assign_op ::= "=" !nospace("=")
+            | compound_op
+
+" the operator of x += e: the function that the operator calls "
+compound_op ::= "+=" { '_add }
+              | "-=" { '_sub }
+              | "*=" { '_mul }
+              | "/=" { '_div }
+              | "%=" { '_mod }
 
 " the inside of a[...]: an expression. In t[p -> e | q if c -> g] the functions joined by | "
 " end with a function that gives peg_skip (_peg_rewrite) "
@@ -1563,6 +1573,8 @@ branch ::= &(postfix ":=") f:ident nospace("(") ps:delimited(pattern, ",") ")" "
            }
          | ns:destruct_names ":=" e:branch { peg_destruct('Def, ns, e) }
          | ns:destruct_names "=" !nospace("=") e:branch { peg_destruct('Set, ns, e) }
+         | x:ident op:compound_op e:branch { peg_compound(x, op, e) }
+         | a:postfix nospace("[") i:expr "]" op:compound_op v:branch { peg_index_update(a, i, op, v) }
          | x:target ":=" e:branch { `Def{!x, !e} }
          | &(postfix "=" !nospace("=")) f:ident nospace("(") ps:delimited(pattern, ",") ")" "=" !nospace("=") e:branch {
                `Set{!f, Fusion{!f, !peg_lambda(ps, e)}}
@@ -1631,6 +1643,8 @@ expr ::= syntax_decl
          }
        | ns:destruct_names ":=" e:expr { peg_destruct('Def, ns, e) }
        | ns:destruct_names "=" !nospace("=") e:expr { peg_destruct('Set, ns, e) }
+       | x:ident op:compound_op e:expr { peg_compound(x, op, e) }
+       | a:postfix nospace("[") i:expr "]" op:compound_op v:expr { peg_index_update(a, i, op, v) }
        | x:target ":=" e:expr { `Def{!x, !e} }
        | &(postfix "=" !nospace("=")) f:ident nospace("(") ps:delimited(pattern, ",") ")" "=" !nospace("=") e:expr {
              `Set{!f, Fusion{!f, !peg_lambda(ps, e)}}
@@ -1639,7 +1653,7 @@ expr ::= syntax_decl
        | 'fun f:ident !nospace("(") { `Def{!f, none} }
        | 'macro p:pattern ":=" e:expr { peg_macro(p, e) }
        | a:postfix nospace("[") i:expr "]" "=" !nospace("=") v:expr { `Apply{_index_set, Tuple{!a, !i, !v}} }
-       | &(postfix 'with "{") with_expr
+       | &(postfix 'with "{") w:with_expr { w }
        | union
        | 'record n:ident "(" fs:idents ")" { peg_record(n, fs) }
        | module_expr
@@ -1867,4 +1881,18 @@ _destructure(t, i, n) := {
         exit(1)
     }
     arg(t, i)
+}
+
+" x += e is x = x + e, and likewise for the other operators; op is the function of the operator "
+peg_compound(x, op, e) := `Set{!x, Apply{!op, Tuple{!x, !e}}}
+
+" a[i] += e is a[i] = a[i] + e, in which a and i are evaluated once "
+peg_index_update(a, i, op, v) := {
+    ta := peg_fresh()
+    ti := peg_fresh()
+    `Do{
+        Def{!ta, !a},
+        Def{!ti, !i},
+        Apply{_index_set, Tuple{!ta, !ti, Apply{!op, Tuple{Apply{_index_get, Tuple{!ta, !ti}}, !v}}}}
+    }
 }
