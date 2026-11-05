@@ -1,7 +1,8 @@
 # native/syntax: the syntax of native, the systems language of planck
 # Copyright (C) 2026 nineties
 #
-# native{| struct ... fn ... |} reads structs and functions of the language and is PModule{[Struct{...}, PFn{...}, ...]}.
+# native{| import u ... struct ... fn ... |} reads the imports, the structs and the functions of the language and is
+# PModule{[PImport{at, u}, ..., Struct{...}, PFn{...}, ...]}.
 # The types, the structs and the parameters are those of vasm (vasm/check). The bodies are written with nested expressions,
 # let, for, compound assignments, the short-circuit and / or and integer literals of any size.
 # native_expand.expand (native/expand) turns the tree into the Module of vasm.
@@ -9,7 +10,7 @@
 use("list")
 use("vasm/check")
 
-native_kw ::= (vasm_kw | 'let | 'for | 'in | 'and | 'or | 'not)
+native_kw ::= (vasm_kw | 'import | 'let | 'for | 'in | 'and | 'or | 'not)
 native_name ::= !native_kw x:ident { x }
 
 # === Expressions ===
@@ -99,5 +100,8 @@ native_block ::= "{" ss:native_stmts? ";"? "}" { vasm_opt_list(ss) }
 
 native_fn ::= at:vasm_here 'fn f:native_name rs:vasm_rparams? "(" ps:vasm_params? ")" rt:vasm_ret? body:native_block { PFn{at, f, vasm_opt_list(rs), vasm_opt_list(ps), if (arity(rt) == 0) Unit{} else arg(rt, 0), body} }
 
+# import u names the unit u, whose structs and functions the file uses. The imports come first in the file.
+native_import ::= at:vasm_here 'import u:native_name { PImport{at, u} }
+
 native_item ::= vasm_struct | native_fn
-native ::= fs:native_item* { PModule{vasm_tlist(fs)} }
+native ::= is:native_import* fs:native_item* { PModule{append(vasm_tlist(is), vasm_tlist(fs))} }
