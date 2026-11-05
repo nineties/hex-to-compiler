@@ -78,7 +78,6 @@ check(tree("a != b"), 'Apply{_ne, Tuple{a, b}})
 check(tree("not a == b"), 'Apply{_not, Tuple{Apply{_eq, Tuple{a, b}}}})
 check(tree("a and b or c"), 'If{If{a, b, false}, true, c})
 check(tree("a or b and c"), 'If{a, true, If{b, c, false}})
-check(tree("c ? a : b"), 'If{c, a, b})
 check(tree("-x"), 'Apply{_sub, Tuple{0, x}})
 check(tree("+3"), 3)
 check(tree("+x"), 'x)
@@ -157,7 +156,6 @@ check(tree("for (i in 0..3) f(i)"), 'Apply{peg_for, Tuple{Range{0, 3}, Lambda{Tu
 check(tree("s[1..2]"), 'Apply{_index_get, Tuple{s, Range{1, 2}}})
 check(tree("f(a :: b, c)"), 'Apply{f, Tuple{Cons{a, b}, c}})
 check(tree("[a :: b]"), 'Cons{Cons{a, b}, Nil{}})
-check(tree("c ? a :: b : d"), 'If{c, Cons{a, b}, d})
 check(tree("(x :: xs) -> x"), 'Lambda{Tuple{Cons{x, xs}}, x})
 check(tree("x :: xs -> x"), 'Lambda{Tuple{Cons{x, xs}}, x})
 check(tree("(x :: y :: r, n) -> x"), 'Lambda{Tuple{Cons{x, Cons{y, r}}, n}, x})
@@ -739,8 +737,8 @@ check(fun_blk(7), false)
 
 check({
     fun odd
-    even(n) := n == 0 ? true : odd(n - 1)
-    odd(n) = n == 0 ? false : even(n - 1)
+    even(n) := if (n == 0) true else odd(n - 1)
+    odd(n) = if (n == 0) false else even(n - 1)
     Tuple{even(10), odd(10), even(7)}
 }, Tuple{true, false, false})
 # f(p, ...) = e adds a function after the functions of f, which are tried in the order they are written
@@ -798,8 +796,8 @@ check(counter(), 2)
 # a function of a block sees the variables defined before it, and the functions of the block call each other
 fact_sum(n) := {
     base := 1
-    fact(m) := m <= 1 ? base : m * fact(m - 1)
-    sum_to(m) := m == 0 ? 0 : fact(m) + sum_to(m - 1)
+    fact(m) := if (m <= 1) base else m * fact(m - 1)
+    sum_to(m) := if (m == 0) 0 else fact(m) + sum_to(m - 1)
     sum_to(n)
 }
 check(fact_sum(4), 33)
@@ -818,7 +816,7 @@ check(find_in([1, 2, 3], 5), false)
 parse_sum(toks) := {
     pos := 0
     fun sum
-    peek() := pos < length(toks) ? list.nth(toks, pos) : "eof"
+    peek() := if (pos < length(toks)) list.nth(toks, pos) else "eof"
     atom() := {
         t := peek()
         pos = pos + 1
@@ -1067,7 +1065,6 @@ check(tree("Apply{'_add, Tuple{a @ int, b}} -> a"), 'Lambda{Tuple{Apply{Quote{_a
 # a pattern ends before -> and the guard
 check(tree("x - 1 -> x"), 'Lambda{Tuple{Apply{Quote{_sub}, Tuple{x, 1}}}, x})
 check(tree("x->x - 1"), 'Lambda{Tuple{x}, Apply{_sub, Tuple{x, 1}}})
-check(head(tree("a ? b : c -> a")), 'SyntaxError)
 
 # matching
 simp(e) := match e {
