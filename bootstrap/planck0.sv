@@ -2817,6 +2817,12 @@
     (exit (fixnum_to_int n))
     )
 
+; _float(s) is the floating-point number written s; there are none
+(fun p_float (s)
+    (expect StringT s)
+    (runtime_error "not supported: floating-point number " s)
+    )
+
 (fun defprim (name arity fn kind)
     (var prim (allocate 16))
     (var s (sym name))
@@ -2836,6 +2842,7 @@
     (defprim "_mul"     2 p_mul     PRIM_NATIVE)
     (defprim "_div"     2 p_div     PRIM_NATIVE)
     (defprim "_mod"     2 p_mod     PRIM_NATIVE)
+    (defprim "_float"   1 p_float   PRIM_NATIVE)
     (defprim "_lt"      2 p_lt      PRIM_NATIVE)
     (defprim "_le"      2 p_le      PRIM_NATIVE)
     (defprim "_gt"      2 p_gt      PRIM_NATIVE)
