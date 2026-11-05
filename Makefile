@@ -66,7 +66,7 @@ test: pforth bootstrap/plisp.fs $(shell find bootstrap/plisp -name "*.lisp")
 
 # parse the libraries that planck/vasmc.pk uses in advance (planck/lib/*/*.pkm)
 preprocess: planck0
-	./planck0 tools/preprocess.pk vasm/build native/expand
+	./planck0 tools/preprocess.pk vasm/build native/compile
 
 # run tests of planck0 and compare outputs of examples with *.out
 test-planck0: planck0

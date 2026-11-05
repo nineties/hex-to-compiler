@@ -1,11 +1,11 @@
-# native/expand: turns a module of native into the Module of vasm
+# native/compile: turns a module of native into the Module of vasm
 # Copyright (C) 2026 nineties
 #
-# native_expand.expand(m) is the Module{[...]} of vasm for the module m = PModule{[...]} that native{| ... |} reads.
-# native_expand.expand_all(m) is Tuple{module, errors} with the errors [VasmErr{kind, Pos{d}, msg}, ...], the first of each function.
-# native_expand.expand_with(m, imports) and native_expand.expand_all_with(m, imports) expand a module whose functions may call the functions
+# native_compile.compile(m) is the Module{[...]} of vasm for the module m = PModule{[...]} that native{| ... |} reads.
+# native_compile.compile_all(m) is Tuple{module, errors} with the errors [VasmErr{kind, Pos{d}, msg}, ...], the first of each function.
+# native_compile.compile_with(m, imports) and native_compile.compile_all_with(m, imports) compile a module whose functions may call the functions
 # and use the structs of imports, the interfaces of other units (vasm_unit.ifaces of vasm/unit.pk): a list of Fn and Struct items, whose bodies
-# are not read. An import item (PImport{at, u}) of m names a unit; the caller picks the interfaces of the units named (native_expand.import_items(m))
+# are not read. An import item (PImport{at, u}) of m names a unit; the caller picks the interfaces of the units named (native_compile.import_items(m))
 # and the expansion does not use the item.
 # The expansion makes the form that vasm_check.check checks; it does not check ownership, borrows or regions.
 #
@@ -23,7 +23,7 @@ use("string")
 use("vasm/check")
 use("native/syntax")
 
-module native_expand {
+module native_compile {
 fail(at, kind, msg) := perform NativeFail{at, kind, msg}
 
 # === State of the function being expanded ===
@@ -617,7 +617,7 @@ fn(d) := match d {
     }
 }
 
-export expand_all_with(m, imports) := {
+export compile_all_with(m, imports) := {
     items := arg(m, 0)
     sigs = table.new()
     structs = table.new()
@@ -644,20 +644,20 @@ export expand_all_with(m, imports) := {
     Tuple{Module{reverse(out)}, reverse(errs)}
 }
 
-export expand_all(m) := expand_all_with(m, [])
+export compile_all(m) := compile_all_with(m, [])
 
 # the import items of m: [PImport{at, u}, ...]
 export import_items(m) := filter(d -> head(d) == 'PImport, arg(m, 0))
 
-export expand_with(m, imports) := {
-    r := expand_all_with(m, imports)
-    if (arg(r, 1) != []) panic(f"native_expand.expand: {arg(arg(r, 1)[0], 2)}")
+export compile_with(m, imports) := {
+    r := compile_all_with(m, imports)
+    if (arg(r, 1) != []) panic(f"native_compile.compile: {arg(arg(r, 1)[0], 2)}")
     arg(r, 0)
 }
 
-export expand(m) := expand_with(m, [])
+export compile(m) := compile_with(m, [])
 
-# the errors of expand_all with the positions in the file: [VasmErr{kind, Loc{file, line, column}, msg}, ...]
+# the errors of compile_all with the positions in the file: [VasmErr{kind, Loc{file, line, column}, msg}, ...]
 export errors(file, errs) := {
     src := read_file(file)
     n := strlen(src)

@@ -12,7 +12,7 @@ check(actual, expected) := if (actual == expected) {
     put(" but got "); println(actual)
 }
 
-use("native/expand")
+use("native/compile")
 use("vasm/text")
 use("vasm/unit")
 use("string")
@@ -22,7 +22,7 @@ this_src := read_file(this_file)
 
 # the module m of native expands to the module of vasm n, which has no error
 same(m, n) := {
-    r := native_expand.expand_all(m)
+    r := native_compile.compile_all(m)
     check(arg(r, 1), [])
     check(vasm_text.text(arg(r, 0)), vasm_text.text(n))
     check(vasm_check.check(arg(r, 0)), [])
@@ -30,8 +30,8 @@ same(m, n) := {
 
 # the module has one error of the kind in the expansion, on the line marked with "# NG"
 ng(m, kind) := {
-    r := native_expand.expand_all(m)
-    es := native_expand.errors(this_file, arg(r, 1))
+    r := native_compile.compile_all(m)
+    es := native_compile.errors(this_file, arg(r, 1))
     check(map((VasmErr{k, _, _}) -> k, es), [kind])
     if (length(es) == 1) {
         line := error.line_text(this_src, arg(arg(arg(es, 0), 1), 1))
@@ -57,8 +57,8 @@ mi := native{|
     fn f() { }
 |}
 check(map(head, arg(mi, 0)), ['PImport, 'PImport, 'PFn])
-check(map(i -> arg(i, 1), native_expand.import_items(mi)), ['lib, 'other])
-check(map(head, arg(native_expand.expand(mi), 0)), ['Fn])
+check(map(i -> arg(i, 1), native_compile.import_items(mi)), ['lib, 'other])
+check(map(head, arg(native_compile.compile(mi), 0)), ['Fn])
 # the precedence: & binds tighter than ==, == tighter than and, and and tighter than or
 e1 := arg(arg(native{| fn f() { a | b and c == d & e } |}, 0)[0], 5)[0]
 check(head(arg(e1, 1)), 'EAnd)
@@ -451,7 +451,7 @@ ng(native{|
 |}, 'type)
 
 # only the first error of a function is reported, and the other functions are expanded
-r := native_expand.expand_all(native{|
+r := native_compile.compile_all(native{|
     fn f() { x = 1 }
     fn g() { y = 2 }
     fn h() { }
@@ -460,7 +460,7 @@ check(length(arg(r, 1)), 2)
 check(map(f -> arg(f, 1), arg(arg(r, 0), 0)), ['h])
 
 # an error of vasm_check.check on the expanded form is reported by vasm_check.check
-check(map((VasmErr{k, _, _}) -> k, vasm_check.check(native_expand.expand(native{|
+check(map((VasmErr{k, _, _}) -> k, vasm_check.check(native_compile.compile(native{|
     fn f(x: i64) -> i32 { x }
 |}))), ['type])
 
@@ -479,8 +479,8 @@ user := native{|
         p.x + p.y
     }
 |}
-check(arg(native_expand.expand_all_with(user, lib_iface), 1), [])
-same2 := native_expand.expand_with(user, lib_iface)
+check(arg(native_compile.compile_all_with(user, lib_iface), 1), [])
+same2 := native_compile.compile_with(user, lib_iface)
 check(map(d -> arg(d, 1), arg(same2, 0)), ['f])
 check(vasm_check.check_with(same2, lib_iface), [])
 check(vasm_text.text(same2), vasm_text.text(vasm{|
@@ -500,7 +500,7 @@ check(vasm_text.text(same2), vasm_text.text(vasm{|
 |}))
 
 # without the interface the function is not defined
-check(map((VasmErr{k, _, _}) -> k, arg(native_expand.expand_all(user), 1)), ['undefined])
+check(map((VasmErr{k, _, _}) -> k, arg(native_compile.compile_all(user), 1)), ['undefined])
 
 put(f"native: {passed} passed, {failed} failed\n")
 if (failed > 0) exit(1)
