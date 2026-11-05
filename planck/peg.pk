@@ -16,6 +16,9 @@
 "   Act{e, f}       applies f to the value of e. f is an expression evaluated by _define_rule "
 "   Prev{}          the previous definition of the rule (only as an alternative of _define_rule) "
 "   Fail{}          never matches "
+"   Any{}           any one character, after blanks and comments. The value is the character as a string "
+"   OneOf{\"set\"}, NoneOf{\"set\"}  one character that is in the set, or is not in it, after blanks and comments "
+"                   A set is characters, ranges of letters or digits (a-z) and escapes with a backslash. "
 
 " Results of rules are memoized for each position. "
 " Direct left recursion (sum ::= sum \"+\" term | term) is handled by growing the seed. "
@@ -109,6 +112,55 @@ Def{peg_lit, Lambda{Tuple{s, p}, Do{
     If{Apply{_eq, Tuple{i, n}},
         Do{Set{peg_pv, s}, Apply{_add, Tuple{p, n}}},
         Apply{peg_fail, Tuple{p}}}}}}
+
+" === Character sets === "
+" the code of the character that a backslash and c stand for "
+Def{peg_escape_code, Lambda{Tuple{c},
+    If{Apply{_eq, Tuple{c, 97}}, 7,
+    If{Apply{_eq, Tuple{c, 98}}, 8,
+    If{Apply{_eq, Tuple{c, 102}}, 12,
+    If{Apply{_eq, Tuple{c, 110}}, 10,
+    If{Apply{_eq, Tuple{c, 114}}, 13,
+    If{Apply{_eq, Tuple{c, 116}}, 9,
+    If{Apply{_eq, Tuple{c, 118}}, 11,
+    If{Apply{_eq, Tuple{c, 48}}, 0, c}}}}}}}}}}
+
+" peg_charset(s) is the table from the codes of the characters of the set s to true, or none when s is not a set. "
+" A letter, a digit or _ followed by - and a character is a range. "
+Def{peg_charset, Lambda{Tuple{s}, Do{
+    Def{t, Apply{table_new, Tuple{}}},
+    Def{n, Apply{strlen, Tuple{s}}},
+    Def{i, 0},
+    Def{c, 0},
+    Def{d, 0},
+    Def{ok, true},
+    While{If{ok, Apply{_lt, Tuple{i, n}}, false}, Do{
+        Set{c, Apply{ord, Tuple{s, i}}},
+        If{Apply{_eq, Tuple{c, 92}},
+            If{Apply{_eq, Tuple{Apply{peg_inc, Tuple{i}}, n}}, Set{ok, false}, Do{
+                Apply{table_set, Tuple{t, Apply{peg_escape_code, Tuple{Apply{ord, Tuple{s, Apply{peg_inc, Tuple{i}}}}}}, true}},
+                Set{i, Apply{_add, Tuple{i, 2}}}}},
+        If{If{Apply{peg_is_alnum, Tuple{c}}, Apply{_eq, Tuple{Apply{ord, Tuple{s, Apply{peg_inc, Tuple{i}}}}, 45}}, false},
+            If{Apply{_ge, Tuple{Apply{_add, Tuple{i, 2}}, n}}, Set{ok, false}, Do{
+                Set{d, Apply{ord, Tuple{s, Apply{_add, Tuple{i, 2}}}}},
+                If{Apply{_gt, Tuple{c, d}}, Set{ok, false}, Do{
+                    While{Apply{_le, Tuple{c, d}}, Do{
+                        Apply{table_set, Tuple{t, c, true}},
+                        Set{c, Apply{peg_inc, Tuple{c}}}}},
+                    Set{i, Apply{_add, Tuple{i, 3}}}}}}},
+            Do{
+                Apply{table_set, Tuple{t, c, true}},
+                Set{i, Apply{peg_inc, Tuple{i}}}}}}}},
+    If{ok, t, none}}}}
+
+" one character at p (after blanks), accepted when it is in the table t (want true) or is not in it (want false) "
+Def{peg_px_char, Lambda{Tuple{t, want, p}, Do{
+    Def{q, Apply{peg_skip_ws, Tuple{p}}},
+    Def{c, Apply{peg_char_at, Tuple{q}}},
+    If{Apply{_lt, Tuple{c, 0}}, Apply{peg_fail, Tuple{q}},
+    If{If{want, Apply{table_get, Tuple{t, c, false}}, If{Apply{table_get, Tuple{t, c, false}}, false, true}},
+        Do{Set{peg_pv, Apply{substr, Tuple{peg_src, q, Apply{peg_inc, Tuple{q}}}}}, Apply{peg_inc, Tuple{q}}},
+        Apply{peg_fail, Tuple{q}}}}}}}
 
 " === Interpreter of parsing expressions === "
 " peg_px(e, p) returns the new position or -1, and sets peg_pv to the value "
@@ -208,6 +260,13 @@ Apply{table_set, Tuple{peg_handlers, Quote{Same}, Lambda{Tuple{e, p}, Do{
         Set{peg_pv, none},
         If{Apply{peg_same_line, Tuple{p}}, p, Apply{peg_fail, Tuple{p}}}}}}}
 Apply{table_set, Tuple{peg_handlers, Quote{Fail}, Lambda{Tuple{e, p}, Apply{peg_fail, Tuple{p}}}}}
+Apply{table_set, Tuple{peg_handlers, Quote{Any}, Lambda{Tuple{e, p}, Do{
+        Def{q, Apply{peg_skip_ws, Tuple{p}}},
+        If{Apply{_lt, Tuple{Apply{peg_char_at, Tuple{q}}, 0}}, Apply{peg_fail, Tuple{q}}, Do{
+            Set{peg_pv, Apply{substr, Tuple{peg_src, q, Apply{peg_inc, Tuple{q}}}}},
+            Apply{peg_inc, Tuple{q}}}}}}}}
+Apply{table_set, Tuple{peg_handlers, Quote{OneOf}, Lambda{Tuple{e, p}, Apply{peg_px_char, Tuple{Apply{arg, Tuple{e, 0}}, true, p}}}}}
+Apply{table_set, Tuple{peg_handlers, Quote{NoneOf}, Lambda{Tuple{e, p}, Apply{peg_px_char, Tuple{Apply{arg, Tuple{e, 0}}, false, p}}}}}
 
 Set{peg_px, Lambda{Tuple{e, p}, Do{
     Def{t, Apply{typeof, Tuple{e}}},
@@ -271,12 +330,22 @@ Set{peg_run_rule, Lambda{Tuple{r, p, row, b}, Do{
 
 " evaluate the actions of a parsing expression "
 Def{peg_prepare, none}
+" OneOf{\"set\"} and NoneOf{\"set\"} hold the table of the set when they are run "
+Def{peg_prepare_set, Lambda{Tuple{e}, Do{
+    Def{t, Apply{peg_charset, Tuple{Apply{arg, Tuple{e, 0}}}}},
+    If{Apply{_eq, Tuple{t, none}}, Do{
+        Apply{put, Tuple{"invalid character set: "}},
+        Apply{println, Tuple{Apply{arg, Tuple{e, 0}}}},
+        Apply{exit, Tuple{1}}}, none},
+    Apply{mexpr, Tuple{Apply{head, Tuple{e}}, Tuple{t}}}}}}
 Set{peg_prepare, Lambda{Tuple{e},
+    If{If{Apply{peg_is_head, Tuple{e, Quote{OneOf}}}, true, Apply{peg_is_head, Tuple{e, Quote{NoneOf}}}},
+        Apply{peg_prepare_set, Tuple{e}},
     If{Apply{peg_is_head, Tuple{e, Quote{Act}}},
         Act{Apply{peg_prepare, Tuple{Apply{arg, Tuple{e, 0}}}}, Apply{eval, Tuple{Apply{arg, Tuple{e, 1}}}}},
     If{Apply{_eq, Tuple{Apply{typeof, Tuple{e}}, Quote{mexpr}}},
         Apply{peg_map_args, Tuple{peg_prepare, e}},
-        e}}}}
+        e}}}}}
 
 " replace Prev{} among the alternatives with the previous definition "
 Def{peg_subst_prev, Lambda{Tuple{e, old},
