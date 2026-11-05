@@ -42,22 +42,28 @@
 <table>
 <tr><th>Expression</th><th>M-expression</th></tr>
 <tr><td><code>x := e</code></td><td><code>Def{x, e}</code></td></tr>
+<tr><td><code>(x, y, ...) := e</code>, <code>(x, y, ...) = e</code></td><td class="wrap">A block that defines or assigns the variables from the elements of the tuple <code>e</code>: <code>Do{Def{t, e}, Def{x, Apply{_destructure, Tuple{t, 0, n}}}, ...}</code> (<code>t</code> is a variable that no other name is the same as, <code>n</code> is the number of the names, and <code>Def</code> is <code>Set</code> for <code>=</code>)</td></tr>
 <tr><td><code>f(p, ...) := e</code></td><td><code>Do{Declare{f}, Set{f, Fusion{f, Lambda{Tuple{p, ...}, e}}}}</code></td></tr>
+<tr><td><code>f(p, ...) if c := e</code></td><td class="wrap">adds the function with a guard <code>(p, ...) if c -&gt; e</code> to <code>f</code>. When <code>c</code> is false, the definitions of <code>f</code> written after it are tried</td></tr>
 <tr><td><code>record T(f, ...)</code></td><td><code>Apply{_record_declare, Tuple{Quote{T}, Quote{Tuple{f, ...}}}}</code></td></tr>
 <tr><td><code>x = e</code></td><td><code>Set{x, e}</code></td></tr>
+<tr><td><code>x += e</code> <code>x -= e</code> <code>x *= e</code> <code>x /= e</code> <code>x %= e</code></td><td><code>Set{x, Apply{_add, Tuple{x, e}}}</code>. The others are <code>_sub</code> <code>_mul</code> <code>_div</code> <code>_mod</code></td></tr>
 <tr><td><code>a[i] = e</code></td><td><code>Apply{_index_set, Tuple{a, i, e}}</code></td></tr>
+<tr><td><code>a[i] += e</code> (and <code>-=</code> <code>*=</code> <code>/=</code> <code>%=</code>)</td><td class="wrap"><code>Do{Def{ta, a}, Def{ti, i}, Apply{_index_set, Tuple{ta, ti, Apply{_add, Tuple{Apply{_index_get, Tuple{ta, ti}}, e}}}}}</code> (<code>ta</code> and <code>ti</code> are variables that no other name is the same as)</td></tr>
+<tr><td><code>t with { f = e, ... }</code></td><td class="wrap"><code>Apply{_record_with, Tuple{t, Quote{f}, e}}</code>. With two or more fields the calls of <code>_record_with</code> are nested in the order of the fields</td></tr>
 <tr><td><code>f | g</code></td><td><code>Fusion{f, g}</code></td></tr>
 <tr><td><code>(p, ...) if c -&gt; e | g</code>, <code>p if c -&gt; e | g</code></td><td class="wrap">a function that calls <code>g</code> with its arguments when they do not match the parameters or <code>c</code> is false</td></tr>
 <tr><td><code>(p, ...) -> e</code>, <code>p -> e</code></td><td><code>Lambda{Tuple{p, ...}, e}</code></td></tr>
-<tr><td><code>c ? a : b</code></td><td><code>If{c, a, b}</code></td></tr>
 <tr><td><code>a or b</code>, <code>a and b</code></td><td><code>If{a, true, b}</code>, <code>If{a, b, false}</code></td></tr>
 <tr><td><code>not a</code></td><td><code>Apply{_not, Tuple{a}}</code></td></tr>
 <tr><td><code>a == b</code> <code>a != b</code> <code>a &lt; b</code> <code>a &lt;= b</code> <code>a &gt; b</code> <code>a &gt;= b</code></td><td><code>Apply{_eq, Tuple{a, b}}</code> and <code>_ne</code> <code>_lt</code> <code>_le</code> <code>_gt</code> <code>_ge</code></td></tr>
 <tr><td><code>a :: b</code></td><td><code>Cons{a, b}</code></td></tr>
-<tr><td><code>a + b</code> <code>a - b</code> <code>a * b</code> <code>a / b</code> <code>a % b</code></td><td><code>Apply{_add, Tuple{a, b}}</code> and <code>_sub</code> <code>_mul</code> <code>_div</code> <code>_mod</code></td></tr>
+<tr><td><code>a..b</code></td><td><code>Range{a, b}</code></td></tr>
+<tr><td><code>a + b</code> <code>a - b</code> <code>a * b</code> <code>a / b</code> <code>a // b</code> <code>a % b</code></td><td><code>Apply{_add, Tuple{a, b}}</code> and <code>_sub</code> <code>_mul</code> <code>_div</code> <code>_quo</code> <code>_mod</code></td></tr>
 <tr><td><code>-a</code></td><td><code>Apply{_sub, Tuple{0, a}}</code></td></tr>
 <tr><td><code>+a</code></td><td><code>a</code></td></tr>
 <tr><td><code>'e</code>, <code>`e</code>, <code>!e</code></td><td><code>Quote{e}</code>, <code>QuasiQuote{e}</code>, <code>UnQuote{e}</code></td></tr>
+<tr><td><code>1.5</code></td><td><code>Apply{_float, Tuple{"1.5"}}</code>. The string is the text of the number (<code>"-0.25"</code> for <code>-0.25</code>)</td></tr>
 <tr><td><code>f(a, ...)</code></td><td><code>Apply{f, Tuple{a, ...}}</code></td></tr>
 <tr><td><code>t.f</code></td><td><code>Apply{_record_get, Tuple{t, Quote{f}}}</code></td></tr>
 <tr><td><code>a[i]</code></td><td><code>Apply{_index_get, Tuple{a, i}}</code></td></tr>
@@ -86,7 +92,6 @@
 <span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-op">'</span><span class="tok-op">(</span><span class="tok-name">x</span> <span class="tok-op">=</span> <span class="tok-num">2</span><span class="tok-op">)</span><span class="tok-op">)</span>
 <span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-op">'</span><span class="tok-op">(</span><span class="tok-name">f</span> <span class="tok-op">|</span> <span class="tok-name">g</span><span class="tok-op">)</span><span class="tok-op">)</span>
 <span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-op">'</span><span class="tok-op">(</span><span class="tok-name">x</span> <span class="tok-op">-&gt;</span> <span class="tok-name">x</span><span class="tok-op">)</span><span class="tok-op">)</span>
-<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-op">'</span><span class="tok-op">(</span><span class="tok-name">c</span> <span class="tok-op">?</span> <span class="tok-name">a</span> <span class="tok-op">:</span> <span class="tok-name">b</span><span class="tok-op">)</span><span class="tok-op">)</span>
 <span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-op">'</span><span class="tok-op">(</span><span class="tok-name">a</span> <span class="tok-kw">and</span> <span class="tok-name">b</span> <span class="tok-kw">or</span> <span class="tok-name">c</span><span class="tok-op">)</span><span class="tok-op">)</span>
 <span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-op">'</span><span class="tok-op">(</span><span class="tok-kw">not</span> <span class="tok-name">a</span><span class="tok-op">)</span><span class="tok-op">)</span>
 <span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-op">'</span><span class="tok-op">(</span><span class="tok-name">a</span> <span class="tok-op">::</span> <span class="tok-name">b</span><span class="tok-op">)</span><span class="tok-op">)</span>
@@ -109,7 +114,6 @@ Do{Declare{f}, Set{f, Fusion{f, Lambda{Tuple{x}, Apply{_add, Tuple{x, 1}}}}}}
 Set{x, 2}
 Fusion{f, g}
 Lambda{Tuple{x}, x}
-If{c, a, b}
 If{If{a, b, false}, true, c}
 Apply{_not, Tuple{a}}
 Cons{a, b}
@@ -132,6 +136,7 @@ Apply{_record_declare, Tuple{Quote{T}, Quote{Tuple{a, b}}}}</pre>
 <ul>
 <li><code>|</code>, <code>-></code> and <code>::</code> group to the right. <code>+ - * / %</code> group to the left. Comparisons do not group: <code>a &lt; b &lt; c</code> is not an expression.</li>
 <li><code>::</code> binds tighter than comparisons and looser than <code>+ -</code>, so <code>a + 1 :: b == c</code> is <code>Cons{a + 1, b} == c</code>.</li>
+<li><code>..</code> binds tighter than <code>::</code> and looser than <code>+ -</code>, and does not chain (<code>a..b..c</code> is not written). <code>a + 1..b * 2</code> is <code>Range{a + 1, b * 2}</code>.</li>
 <li><code>()</code> groups an expression.</li>
 </ul>
 
@@ -145,6 +150,115 @@ Apply{_record_declare, Tuple{Quote{T}, Quote{Tuple{a, b}}}}</pre>
 <h2>record</h2>
 <p><code>record T(f, g, ...)</code> declares the names of the fields of the values <code>T{a, b, ...}</code>, which are built as before. <code>t.f</code> is the argument of <code>t</code> at the position of the field <code>f</code> in the declaration for the head of <code>t</code>.</p>
 <p>Values with different heads can have fields of the same name. Declaring <code>T</code> again replaces the names. A <code>.</code> follows its left operand with no space. A value whose head is not declared or has no field <code>f</code> stops the program with a message.</p>
+
+<p><code>t with { f = e, g = e2 }</code> is a new value in which the fields <code>f</code> and <code>g</code> of <code>t</code> are the values of <code>e</code> and <code>e2</code>. <code>t</code> does not change. <code>t</code> is a postfix expression such as <code>x</code>, <code>f(x)</code> or <code>t.f</code>, and <code>with { ... }</code> can follow another one (<code>t with { f = 1 } with { g = 2 }</code>). The fields are replaced from the left, and the values of the fields can refer to the original <code>t</code>. A value that is not an M-expression or has no such field stops the program with a message.</p>
+<div class="example">
+<p class="file">t1_with.pk</p>
+<pre class="pk"><span class="tok-kw">record</span> <span class="tok-name">Point</span><span class="tok-op">(</span><span class="tok-name">x</span><span class="tok-op">,</span> <span class="tok-name">y</span><span class="tok-op">)</span>
+
+<span class="tok-name">p</span> <span class="tok-op">:=</span> <span class="tok-name">Point</span><span class="tok-op">{</span><span class="tok-num">1</span><span class="tok-op">,</span> <span class="tok-num">2</span><span class="tok-op">}</span>
+<span class="tok-name">q</span> <span class="tok-op">:=</span> <span class="tok-name">p</span> <span class="tok-kw">with</span> <span class="tok-op">{</span> <span class="tok-name">y</span> <span class="tok-op">=</span> <span class="tok-num">5</span> <span class="tok-op">}</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">p</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">q</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">p</span> <span class="tok-kw">with</span> <span class="tok-op">{</span> <span class="tok-name">x</span> <span class="tok-op">=</span> <span class="tok-name">p</span><span class="tok-op">.</span><span class="tok-name">y</span><span class="tok-op">,</span> <span class="tok-name">y</span> <span class="tok-op">=</span> <span class="tok-name">p</span><span class="tok-op">.</span><span class="tok-name">x</span> <span class="tok-op">}</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">p</span> <span class="tok-kw">with</span> <span class="tok-op">{</span> <span class="tok-name">x</span> <span class="tok-op">=</span> <span class="tok-num">7</span> <span class="tok-op">}</span> <span class="tok-kw">with</span> <span class="tok-op">{</span> <span class="tok-name">y</span> <span class="tok-op">=</span> <span class="tok-num">8</span> <span class="tok-op">}</span><span class="tok-op">)</span></pre>
+<p class="label">Output</p>
+<pre class="out">Point{1, 2}
+Point{1, 5}
+Point{2, 1}
+Point{7, 8}</pre>
+</div>
+
+<h2 id="compound">Compound assignment</h2>
+<p><code>x += e</code> is the same as <code>x = x + e</code>. <code>-=</code>, <code>*=</code>, <code>/=</code> and <code>%=</code> are the same with the operators <code>-</code>, <code>*</code>, <code>/</code> and <code>%</code>. <code>a[i] += e</code> is the same as <code>a[i] = a[i] + e</code>, but <code>a</code> and <code>i</code> are evaluated once. The left side is a variable or <code>a[i]</code>; <code>t.f += e</code> is not allowed. The value is the assigned value.</p>
+<div class="example">
+<p class="file">t1_compound.pk</p>
+<pre class="pk"><span class="tok-com"># x += e is x = x + e. The same goes for -=, *=, /= and %=.</span>
+
+<span class="tok-name">x</span> <span class="tok-op">:=</span> <span class="tok-num">10</span>
+<span class="tok-name">x</span> <span class="tok-op">+=</span> <span class="tok-num">5</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">x</span><span class="tok-op">)</span>
+<span class="tok-name">x</span> <span class="tok-op">-=</span> <span class="tok-num">3</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">x</span><span class="tok-op">)</span>
+<span class="tok-name">x</span> <span class="tok-op">*=</span> <span class="tok-num">2</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">x</span><span class="tok-op">)</span>
+<span class="tok-name">x</span> <span class="tok-op">/=</span> <span class="tok-num">4</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">x</span><span class="tok-op">)</span>
+<span class="tok-name">x</span> <span class="tok-op">%=</span> <span class="tok-num">4</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">x</span><span class="tok-op">)</span>
+
+<span class="tok-com"># the element of an array</span>
+<span class="tok-name">a</span> <span class="tok-op">:=</span> <span class="tok-name">array</span><span class="tok-op">(</span><span class="tok-num">3</span><span class="tok-op">)</span>
+<span class="tok-name">a</span><span class="tok-op">[</span><span class="tok-num">0</span><span class="tok-op">]</span> <span class="tok-op">=</span> <span class="tok-num">1</span>
+<span class="tok-name">a</span><span class="tok-op">[</span><span class="tok-num">1</span><span class="tok-op">]</span> <span class="tok-op">=</span> <span class="tok-num">2</span>
+<span class="tok-name">a</span><span class="tok-op">[</span><span class="tok-num">2</span><span class="tok-op">]</span> <span class="tok-op">=</span> <span class="tok-num">3</span>
+<span class="tok-name">a</span><span class="tok-op">[</span><span class="tok-num">1</span><span class="tok-op">]</span> <span class="tok-op">*=</span> <span class="tok-num">10</span>
+<span class="tok-name">a</span><span class="tok-op">[</span><span class="tok-num">2</span><span class="tok-op">]</span> <span class="tok-op">+=</span> <span class="tok-name">a</span><span class="tok-op">[</span><span class="tok-num">1</span><span class="tok-op">]</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">a</span><span class="tok-op">[</span><span class="tok-num">0</span><span class="tok-op">]</span><span class="tok-op">,</span> <span class="tok-name">a</span><span class="tok-op">[</span><span class="tok-num">1</span><span class="tok-op">]</span><span class="tok-op">,</span> <span class="tok-name">a</span><span class="tok-op">[</span><span class="tok-num">2</span><span class="tok-op">]</span><span class="tok-op">}</span><span class="tok-op">)</span>
+
+<span class="tok-com"># the index is evaluated once</span>
+<span class="tok-name">n</span> <span class="tok-op">:=</span> <span class="tok-num">0</span>
+<span class="tok-name">next</span><span class="tok-op">(</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-op">{</span>
+    <span class="tok-name">n</span> <span class="tok-op">+=</span> <span class="tok-num">1</span>
+    <span class="tok-name">n</span> <span class="tok-op">-</span> <span class="tok-num">1</span>
+<span class="tok-op">}</span>
+<span class="tok-name">a</span><span class="tok-op">[</span><span class="tok-name">next</span><span class="tok-op">(</span><span class="tok-op">)</span><span class="tok-op">]</span> <span class="tok-op">+=</span> <span class="tok-num">100</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">a</span><span class="tok-op">[</span><span class="tok-num">0</span><span class="tok-op">]</span><span class="tok-op">,</span> <span class="tok-name">a</span><span class="tok-op">[</span><span class="tok-num">1</span><span class="tok-op">]</span><span class="tok-op">,</span> <span class="tok-name">n</span><span class="tok-op">}</span><span class="tok-op">)</span>
+
+<span class="tok-com"># in a loop</span>
+<span class="tok-name">sum</span> <span class="tok-op">:=</span> <span class="tok-num">0</span>
+<span class="tok-name">i</span> <span class="tok-op">:=</span> <span class="tok-num">1</span>
+<span class="tok-kw">while</span> <span class="tok-op">(</span><span class="tok-name">i</span> <span class="tok-op">&lt;=</span> <span class="tok-num">10</span><span class="tok-op">)</span> <span class="tok-op">{</span>
+    <span class="tok-name">sum</span> <span class="tok-op">+=</span> <span class="tok-name">i</span>
+    <span class="tok-name">i</span> <span class="tok-op">+=</span> <span class="tok-num">1</span>
+<span class="tok-op">}</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">sum</span><span class="tok-op">)</span></pre>
+<p class="label">Output</p>
+<pre class="out">15
+12
+24
+6
+2
+Tuple{1, 20, 23}
+Tuple{101, 20, 1}
+55</pre>
+</div>
+
+<h2 id="destructure">Splitting a tuple</h2>
+<p><code>(a, b) := e</code> defines <code>a</code> and <code>b</code> from the elements of the tuple <code>e</code>, and <code>(a, b) = e</code> assigns them to the variables already defined. The left side is two or more names separated by <code>,</code> in parentheses. The right side is evaluated before any assignment, so <code>(a, b) = (b, a)</code> swaps the two values. A tuple whose number of elements differs from the number of the names, and a value that is not a tuple, stop the program with a message.</p>
+<div class="example">
+<p class="file">t1_destructure.pk</p>
+<pre class="pk"><span class="tok-com"># (a, b) := e defines several variables from the elements of a tuple</span>
+
+<span class="tok-op">(</span><span class="tok-name">a</span><span class="tok-op">,</span> <span class="tok-name">b</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-op">(</span><span class="tok-num">1</span><span class="tok-op">,</span> <span class="tok-num">2</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">a</span> <span class="tok-op">+</span> <span class="tok-name">b</span><span class="tok-op">)</span>
+
+<span class="tok-com"># swap</span>
+<span class="tok-op">(</span><span class="tok-name">a</span><span class="tok-op">,</span> <span class="tok-name">b</span><span class="tok-op">)</span> <span class="tok-op">=</span> <span class="tok-op">(</span><span class="tok-name">b</span><span class="tok-op">,</span> <span class="tok-name">a</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">a</span><span class="tok-op">,</span> <span class="tok-name">b</span><span class="tok-op">}</span><span class="tok-op">)</span>
+
+<span class="tok-com"># a function that returns two values</span>
+<span class="tok-name">divmod</span><span class="tok-op">(</span><span class="tok-name">x</span><span class="tok-op">,</span> <span class="tok-name">y</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-op">(</span><span class="tok-name">x</span> <span class="tok-op">/</span> <span class="tok-name">y</span><span class="tok-op">,</span> <span class="tok-name">x</span> <span class="tok-op">%</span> <span class="tok-name">y</span><span class="tok-op">)</span>
+<span class="tok-op">(</span><span class="tok-name">q</span><span class="tok-op">,</span> <span class="tok-name">r</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-name">divmod</span><span class="tok-op">(</span><span class="tok-num">17</span><span class="tok-op">,</span> <span class="tok-num">5</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">q</span><span class="tok-op">,</span> <span class="tok-name">r</span><span class="tok-op">}</span><span class="tok-op">)</span>
+
+<span class="tok-com"># in a function and in a loop</span>
+<span class="tok-name">fib</span><span class="tok-op">(</span><span class="tok-name">n</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-op">{</span>
+    <span class="tok-op">(</span><span class="tok-name">x</span><span class="tok-op">,</span> <span class="tok-name">y</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-op">(</span><span class="tok-num">0</span><span class="tok-op">,</span> <span class="tok-num">1</span><span class="tok-op">)</span>
+    <span class="tok-name">i</span> <span class="tok-op">:=</span> <span class="tok-num">0</span>
+    <span class="tok-kw">while</span> <span class="tok-op">(</span><span class="tok-name">i</span> <span class="tok-op">&lt;</span> <span class="tok-name">n</span><span class="tok-op">)</span> <span class="tok-op">{</span>
+        <span class="tok-op">(</span><span class="tok-name">x</span><span class="tok-op">,</span> <span class="tok-name">y</span><span class="tok-op">)</span> <span class="tok-op">=</span> <span class="tok-op">(</span><span class="tok-name">y</span><span class="tok-op">,</span> <span class="tok-name">x</span> <span class="tok-op">+</span> <span class="tok-name">y</span><span class="tok-op">)</span>
+        <span class="tok-name">i</span> <span class="tok-op">=</span> <span class="tok-name">i</span> <span class="tok-op">+</span> <span class="tok-num">1</span>
+    <span class="tok-op">}</span>
+    <span class="tok-name">x</span>
+<span class="tok-op">}</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">fib</span><span class="tok-op">(</span><span class="tok-num">10</span><span class="tok-op">)</span><span class="tok-op">)</span></pre>
+<p class="label">Output</p>
+<pre class="out">3
+Tuple{2, 1}
+Tuple{3, 2}
+55</pre>
+</div>
 
 <h2 id="scope">Scope of variables</h2>
 <p><code>true</code>, <code>false</code> and <code>none</code> are literals, not identifiers, so they cannot name a variable: <code>true := e</code>, <code>true = e</code>, <code>fun true</code> and <code>true(p) := e</code> are syntax errors. As a parameter, <code>true</code> is a pattern that matches the value <code>true</code> and binds nothing. When <code>x</code> holds <code>'true</code>, <code>!x := e</code> and <code>!x = e</code> stop the program as <code>Def{true, e}</code> and <code>Set{true, e}</code> do.</p>
@@ -203,6 +317,7 @@ undefined variable: later</pre>
 
 <h3>A function definition that adds a case</h3>
 <p>A function definition <code>f(p, ...) := e</code> is <code>f(p, ...) = e</code> when <code>f</code> is already a variable of the place where it is written, and otherwise <code>fun f</code> followed by <code>f(p, ...) = e</code>, which defines a new <code>f</code> where it is written. Several definitions of <code>f</code> in one place make one function whose functions are tried in the order they are written.</p>
+<p>A definition can have a guard too. <code>f(p, ...) if c := e</code> adds to <code>f</code> an arm that gives <code>e</code> when the arguments match <code>p, ...</code> and <code>c</code> is true. When <code>c</code> is false, or the arguments do not match, the arms after it are tried with the same arguments. They are the definitions of <code>f</code> written after it in a row in the same place; a definition with another expression between does not follow. After <code>f(x) if x &gt; 0 := "positive"</code>, writing <code>f(_) := "other"</code> makes <code>f(-1)</code> <code>"other"</code>. A definition marked <code>export</code> and <code>f(p, ...) = e</code> cannot have a guard.</p>
 <p>The variables of the place are the global variables defined by the same file at the top level, and in a function the parameters of the function and the variables defined before it in the function. In a branch of <code>if</code> or the body of <code>while</code> at the top level, they are the variables defined before it in the branch or the body. A variable of a function around it, or a global variable seen from a function, is not of the place. So <code>f(p, ...) := e</code> there defines a new <code>f</code> and does not change the <code>f</code> outside.</p>
 <div class="example">
 <p class="file">r_scope_same.pk</p>
@@ -344,14 +459,55 @@ outer.inner.g(3)</pre>
     }
 }</pre>
 
+<h2 id="import">import</h2>
+<p><code>import a::b</code> loads a file of a library. It loads as <code>use("a/b")</code> does, and a file is loaded once. The path is names separated by <code>::</code>, and the last name is the name of the <a href="#module">module</a> that the file defines. <code>import</code> can be written wherever an expression can.</p>
+<p>How the names are taken in follows the path.</p>
+<table>
+<tr><th>Form</th><th>Meaning</th></tr>
+<tr><td><code>import m</code></td><td>Only loads the module <code>m</code>. A field is read as <code>m.f</code>.</td></tr>
+<tr><td><code>import m as n</code></td><td>Adds <code>n := m</code>.</td></tr>
+<tr><td><code>import m (x, y)</code></td><td>Defines the fields <code>x</code> and <code>y</code> as <code>x := m.x</code> and <code>y := m.y</code>.</td></tr>
+<tr><td><code>import m (*)</code></td><td>Defines all the fields under their own names.</td></tr>
+<tr><td><code>import m hiding (x, y)</code></td><td>Defines all the fields but <code>x</code> and <code>y</code> under their own names.</td></tr>
+</table>
+<p><code>as n</code> can come before <code>(x, y)</code>, <code>(*)</code> and <code>hiding (...)</code>. <code>as</code>, <code>(...)</code> and <code>hiding</code> are written on the same line as <code>m</code>. Naming a field that <code>m</code> does not have in <code>(x, y)</code> prints the same message as reading the field with <code>.</code> and stops the program. The names that <code>(*)</code> and <code>hiding</code> define are global variables even when <code>import</code> is written in a function. <code>(x, y)</code> and <code>as</code> define local variables in a function.</p>
+<div class="example">
+<p class="file">i_import.pk</p>
+<pre class="pk"><span class="tok-com"># import: the module of a library under the names that are chosen</span>
+
+<span class="tok-kw">import</span> <span class="tok-name">bitset</span> <span class="tok-kw">as</span> <span class="tok-name">bs</span>
+<span class="tok-name">s</span> <span class="tok-op">:=</span> <span class="tok-name">bs</span><span class="tok-op">.</span><span class="tok-name">new</span><span class="tok-op">(</span><span class="tok-num">100</span><span class="tok-op">)</span>
+<span class="tok-name">bs</span><span class="tok-op">.</span><span class="tok-name">add</span><span class="tok-op">(</span><span class="tok-name">s</span><span class="tok-op">,</span> <span class="tok-num">3</span><span class="tok-op">)</span>
+<span class="tok-name">bs</span><span class="tok-op">.</span><span class="tok-name">add</span><span class="tok-op">(</span><span class="tok-name">s</span><span class="tok-op">,</span> <span class="tok-num">42</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">bs</span><span class="tok-op">.</span><span class="tok-name">to_list</span><span class="tok-op">(</span><span class="tok-name">s</span><span class="tok-op">)</span><span class="tok-op">)</span>
+
+<span class="tok-com"># only the listed fields are defined</span>
+<span class="tok-kw">import</span> <span class="tok-name">bitset</span> <span class="tok-op">(</span><span class="tok-name">has</span><span class="tok-op">,</span> <span class="tok-name">count</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">has</span><span class="tok-op">(</span><span class="tok-name">s</span><span class="tok-op">,</span> <span class="tok-num">42</span><span class="tok-op">)</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">count</span><span class="tok-op">(</span><span class="tok-name">s</span><span class="tok-op">)</span><span class="tok-op">)</span>
+
+<span class="tok-com"># all the fields but the hidden ones</span>
+<span class="tok-kw">import</span> <span class="tok-name">bitset</span> <span class="tok-kw">hiding</span> <span class="tok-op">(</span><span class="tok-name">new</span><span class="tok-op">,</span> <span class="tok-name">add</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">to_list</span><span class="tok-op">(</span><span class="tok-name">s</span><span class="tok-op">)</span><span class="tok-op">)</span></pre>
+<p class="label">Output</p>
+<pre class="out">Cons{3, Cons{42, Nil{}}}
+true
+2
+Cons{3, Cons{42, Nil{}}}</pre>
+</div>
+
 <h2 id="names">Names the sugar calls</h2>
 <p>The functions a piece of sugar expands to have a name starting with <code>_</code>, and there is no function of the same name without <code>_</code>. A variable named <code>add</code> or <code>index_get</code> in a program therefore does not change the meaning of <code>a + b</code> or <code>a[i]</code>.</p>
 <table>
 <tr><th>Sugar</th><th>Function</th></tr>
-<tr><td>operators</td><td><code>_add</code> <code>_sub</code> <code>_mul</code> <code>_div</code> <code>_mod</code> <code>_lt</code> <code>_le</code> <code>_gt</code> <code>_ge</code> <code>_eq</code> <code>_ne</code> <code>_not</code></td></tr>
+<tr><td>operators</td><td><code>_add</code> <code>_sub</code> <code>_mul</code> <code>_div</code> <code>_quo</code> <code>_mod</code> <code>_lt</code> <code>_le</code> <code>_gt</code> <code>_ge</code> <code>_eq</code> <code>_ne</code> <code>_not</code></td></tr>
+<tr><td>float literal</td><td><code>_float</code></td></tr>
 <tr><td>string with embedded values</td><td><code>_strcat</code> <code>_to_text</code></td></tr>
 <tr><td><code>t.f</code></td><td><code>_record_get</code></td></tr>
+<tr><td><code>import</code></td><td><code>_import_module</code> <code>_import_defs</code></td></tr>
 <tr><td><code>record</code></td><td><code>_record_declare</code></td></tr>
+<tr><td><code>with</code></td><td><code>_record_with</code></td></tr>
+<tr><td><code>(a, b) := e</code></td><td><code>_destructure</code></td></tr>
 <tr><td><code>::=</code></td><td><code>_define_rule</code></td></tr>
 <tr><td><code>a[i]</code>, <code>a[i] = e</code></td><td><code>_index_get</code> <code>_index_set</code></td></tr>
 </table>
@@ -403,7 +559,7 @@ none</pre>
 </div>
 
 <h2>for</h2>
-<p><code>for (p in e) a</code> evaluates <code>a</code> for each element of the list or the vector <code>e</code>, with the elements matched by the pattern <code>p</code>, and has the value <code>none</code>. The variables of <code>a</code> outside the loop are shared, so <code>a</code> can assign them.</p>
+<p><code>for (p in e) a</code> evaluates <code>a</code> for each element of the list, the vector or the range <code>e</code>, with the elements matched by the pattern <code>p</code>, and has the value <code>none</code>. The variables of <code>a</code> outside the loop are shared, so <code>a</code> can assign them.</p>
 
 <h2>return, break and continue</h2>
 <p><code>return e</code> ends the call of the function that contains it, with the value <code>e</code> (<code>none</code> without <code>e</code>; <code>e</code> must start on the same line and is an expression up to <code>-&gt;</code>, without <code>|</code>, <code>:=</code> and <code>=</code> outside of brackets). <code>break</code> ends the innermost <code>while</code> or <code>for</code> that contains it.</p>
@@ -416,7 +572,7 @@ none</pre>
     p -&gt; a
   | q -&gt; b
 }</pre>
-<p>The guard <code>if c</code> of <code>(p, ...) if c -&gt; e | g</code> is evaluated after the parameters matched, with their variables. When it is false, or the arguments do not match the parameters, <code>g</code> is called with the same arguments, so <code>g</code> is the arms after it. Without <code>| g</code> the call fails as a call of a function with no matching pattern does. <code>g</code> is what is joined after the function by <code>|</code> in the text, also when the function is in parentheses: <code>(p if c -&gt; a) | g</code>. A function with a guard that is given by a variable, as <code>h | g</code> after <code>h := p if c -&gt; a</code>, does not call <code>g</code>. The guard and <code>e</code> of <code>match</code> are expressions up to <code>?:</code>, so a lambda needs parentheses. The function binds variables whose names start with <code>%</code>, which no identifier can name.</p>
+<p>The guard <code>if c</code> of <code>(p, ...) if c -&gt; e | g</code> is evaluated after the parameters matched, with their variables. When it is false, or the arguments do not match the parameters, <code>g</code> is called with the same arguments, so <code>g</code> is the arms after it. Without <code>| g</code> the call fails as a call of a function with no matching pattern does. <code>g</code> is what is joined after the function by <code>|</code> in the text, also when the function is in parentheses: <code>(p if c -&gt; a) | g</code>. A function with a guard that is given by a variable, as <code>h | g</code> after <code>h := p if c -&gt; a</code>, does not call <code>g</code>. The guard and <code>e</code> of <code>match</code> are expressions up to <code>or</code>, so a lambda needs parentheses. The function binds variables whose names start with <code>%</code>, which no identifier can name.</p>
 
 <h2 id="rest">Rest arguments</h2>
 <p>The last argument of a function can be written <code>x...</code>. <code>x</code> is bound to a <code>Tuple</code> of the remaining arguments after the preceding ones, which is <code>Tuple{}</code> when there are none. <code>x...</code> is the tree <code>_Rest{x}</code>.</p>
@@ -488,6 +644,7 @@ Tuple{2, 3}</pre>
 <li><code>(f)(p, ...)</code> is <code>Apply{f, Tuple{p, ...}}</code>. The name in parentheses is a variable, not a symbol, so <code>(f)(x)</code> matches a call of any function with one argument and binds <code>f</code>.</li>
 <li><code>'e</code> is <code>Quote{e}</code> for the expression <code>e</code>.</li>
 <li><code>x...</code> can be written only as the last argument (<a href="#rest">Rest arguments</a>).</li>
+<li><code>p or q</code> matches what <code>p</code> or <code>q</code> matches. They can be written in a row, <code>a or b or c</code>, and anywhere in an argument (<code>F{1 or 2, x}</code>). When none matches, it is the same as a pattern that does not match. The alternatives can write variables when every alternative binds the same variables (<code>f((x, 0) or (0, x)) := x</code>); otherwise it is an error and the program stops. A name written twice in the parameters, as in <code>f(a, a)</code>, matches only two values that are equal by <code>==</code>: <code>f([1], [1])</code> matches. To match the M-expression <code>If{a, true, b}</code> of an <code>or</code> expression, write <code>If{a, 'true, b}</code>.</li>
 <li>The forms are the operators <code>or and not == != &lt;= &gt;= &lt; &gt; :: + - * / %</code>, the unary <code>-</code> and <code>'</code>, <code>f(p, ...)</code>, <code>p @ type</code>, <code>Head{p, ...}</code>, <code>(f)(p, ...)</code>, identifiers, <code>true</code>, <code>false</code>, <code>none</code>, integers, strings, <code>()</code>, <code>(p)</code>, <code>(p, q, ...)</code> and <code>[p, ...]</code>, with the same binding as in expressions: <code>a @ int + b @ int</code> is <code>(a @ int) + (b @ int)</code>.</li>
 </ul>
 <div class="example">
@@ -511,6 +668,41 @@ z
 Apply{sq, Tuple{z}}
 Apply{_add, Tuple{2, 1}}
 g</pre>
+</div>
+<div class="example">
+<p class="file">r_pattern_or.pk</p>
+<pre class="pk"><span class="tok-name">size</span><span class="tok-op">(</span><span class="tok-num">0</span> <span class="tok-kw">or</span> <span class="tok-num">1</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-str">"small"</span>
+<span class="tok-name">size</span><span class="tok-op">(</span><span class="tok-name">_</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-str">"big"</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">size</span><span class="tok-op">(</span><span class="tok-num">1</span><span class="tok-op">)</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">size</span><span class="tok-op">(</span><span class="tok-num">2</span><span class="tok-op">)</span><span class="tok-op">)</span>
+<span class="tok-name">kind</span><span class="tok-op">(</span><span class="tok-name">F</span><span class="tok-op">{</span><span class="tok-num">1</span> <span class="tok-kw">or</span> <span class="tok-num">2</span><span class="tok-op">,</span> <span class="tok-name">x</span><span class="tok-op">}</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-str">"small first"</span>
+<span class="tok-name">kind</span><span class="tok-op">(</span><span class="tok-name">_</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-str">"other"</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">kind</span><span class="tok-op">(</span><span class="tok-name">F</span><span class="tok-op">{</span><span class="tok-num">2</span><span class="tok-op">,</span> <span class="tok-num">0</span><span class="tok-op">}</span><span class="tok-op">)</span><span class="tok-op">)</span>
+<span class="tok-name">sign</span><span class="tok-op">(</span><span class="tok-name">x</span><span class="tok-op">)</span> <span class="tok-kw">if</span> <span class="tok-name">x</span> <span class="tok-op">&gt;</span> <span class="tok-num">0</span> <span class="tok-op">:=</span> <span class="tok-str">"positive"</span>
+<span class="tok-name">sign</span><span class="tok-op">(</span><span class="tok-num">0</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-str">"zero"</span>
+<span class="tok-name">sign</span><span class="tok-op">(</span><span class="tok-name">_</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-str">"negative"</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">sign</span><span class="tok-op">(</span><span class="tok-num">5</span><span class="tok-op">)</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">sign</span><span class="tok-op">(</span><span class="tok-num">0</span><span class="tok-op">)</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">sign</span><span class="tok-op">(</span><span class="tok-num">-5</span><span class="tok-op">)</span><span class="tok-op">)</span>
+<span class="tok-name">same</span><span class="tok-op">(</span><span class="tok-name">a</span><span class="tok-op">,</span> <span class="tok-name">a</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-str">"same"</span>
+<span class="tok-name">same</span><span class="tok-op">(</span><span class="tok-name">_</span><span class="tok-op">,</span> <span class="tok-name">_</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-str">"differ"</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">same</span><span class="tok-op">(</span><span class="tok-op">[</span><span class="tok-num">1</span><span class="tok-op">]</span><span class="tok-op">,</span> <span class="tok-op">[</span><span class="tok-num">1</span><span class="tok-op">]</span><span class="tok-op">)</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">same</span><span class="tok-op">(</span><span class="tok-op">[</span><span class="tok-num">1</span><span class="tok-op">]</span><span class="tok-op">,</span> <span class="tok-op">[</span><span class="tok-num">2</span><span class="tok-op">]</span><span class="tok-op">)</span><span class="tok-op">)</span>
+<span class="tok-name">origin</span><span class="tok-op">(</span><span class="tok-op">(</span><span class="tok-name">x</span><span class="tok-op">,</span> <span class="tok-num">0</span><span class="tok-op">)</span> <span class="tok-kw">or</span> <span class="tok-op">(</span><span class="tok-num">0</span><span class="tok-op">,</span> <span class="tok-name">x</span><span class="tok-op">)</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-name">x</span>
+<span class="tok-name">origin</span><span class="tok-op">(</span><span class="tok-name">_</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-str">"none"</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">origin</span><span class="tok-op">(</span><span class="tok-op">(</span><span class="tok-num">0</span><span class="tok-op">,</span> <span class="tok-num">4</span><span class="tok-op">)</span><span class="tok-op">)</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">origin</span><span class="tok-op">(</span><span class="tok-op">(</span><span class="tok-num">1</span><span class="tok-op">,</span> <span class="tok-num">2</span><span class="tok-op">)</span><span class="tok-op">)</span><span class="tok-op">)</span></pre>
+<p class="label">Output</p>
+<pre class="out">&quot;small&quot;
+&quot;big&quot;
+&quot;small first&quot;
+&quot;positive&quot;
+&quot;zero&quot;
+&quot;negative&quot;
+&quot;same&quot;
+&quot;differ&quot;
+4
+&quot;none&quot;</pre>
 </div>
 
 <h2 id="macro">macro</h2>
@@ -558,9 +750,10 @@ Inside{1}</pre>
 
 <h2>Lexical rules</h2>
 <ul>
-<li>Identifiers are <code>[A-Za-z_][A-Za-z0-9_]*</code> except the reserved words<br><code>if else while and or handle with perform match record for in return break continue fun macro module export</code><br>and the literals <code>true false none</code>.</li>
-<li>Integers are decimal (<code>10</code>, <code>-3</code>), <code>0x1f</code>, <code>0o17</code> or <code>0b101</code>.</li>
-<li>Floats are decimal with a point, as <code>1.5</code>.</li>
+<li>Identifiers are <code>[A-Za-z_][A-Za-z0-9_]*[?!]?</code> except the reserved words<br><code>if else while and or handle with perform match record for in return break continue fun macro module export import</code><br>and the literals <code>true false none</code>.</li>
+<li>A <code>?</code> or <code>!</code> right after a name, with no space, is part of the name: <code>empty?(x)</code> and <code>x?</code> are names. <code>x!=y</code> is <code>x != y</code>. In a grammar, a <code>?</code> after the name of a rule is the optional item, as in <code>x:digits?</code>.</li>
+<li>Integers are decimal (<code>10</code>, <code>-3</code>), <code>0x1f</code>, <code>0o17</code> or <code>0b101</code>. The number of digits is not limited.</li>
+<li>Floats are decimal with a point (<code>1.5</code>, <code>-0.25</code>). Digits are needed on both sides of the point. <code>e</code> or <code>E</code> and an integer exponent, which may have a <code>-</code>, may follow (<code>1.5e-3</code>).</li>
 <li>Strings are <code>"..."</code> in one line with the escapes <code>\0 \a \b \t \n \v \f \r \" \' \\</code>. <code>f"...{e}..."</code> embeds the value of the expression <code>e</code>, which may contain strings and f-strings; <code>{{</code> and <code>}}</code> are the braces themselves. A string without the prefix <code>f</code> embeds nothing.</li>
 <li><code>#</code> starts a comment up to the end of the line.</li>
 <li>There is no space between <code>f</code> and <code>(</code> in <code>f(a)</code>, between <code>a</code> and <code>[</code> in <code>a[i]</code>, and between <code>Head</code> and <code>{</code> in <code>Head{a}</code>.</li>
