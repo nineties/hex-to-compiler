@@ -859,6 +859,8 @@ Def{
 Def{peg_module, none}
 Def{peg_macro, none}
 
+Def{peg_with, none}
+
 " _testing is true while the tests in the test blocks of modules run (tools/test.pk) "
 Def{_testing, false}
 
@@ -1532,6 +1534,13 @@ arrow ::= lambda_ahead ps:params "->" e:arrow { peg_lambda(ps, e) }
         | lambda_ahead ps:params 'if c:ternary "->" e:arrow { peg_guard(ps, c, e) }
         | ternary
 
+" the fields of e with { f = v, ... } "
+with_field ::= f:ident "=" !nospace("=") e:expr { Tuple{f, e} }
+
+" a record value with some fields replaced; with can follow with "
+with_expr ::= o:with_expr 'with "{" fs:delimited1(with_field, ",") "}" { peg_with(o, fs) }
+            | postfix
+
 " the left side of x := e and x = e: a name, or !x which is replaced by the name inside a quasi-quote "
 target ::= ident
          | "!" x:ident { mexpr('UnQuote, Tuple{x}) }
@@ -1615,6 +1624,7 @@ expr ::= syntax_decl
        | 'fun f:ident !nospace("(") { `Def{!f, none} }
        | 'macro p:pattern ":=" e:expr { peg_macro(p, e) }
        | a:postfix nospace("[") i:expr "]" "=" !nospace("=") v:expr { `Apply{_index_set, Tuple{!a, !i, !v}} }
+       | &(postfix 'with "{") with_expr
        | union
        | 'record n:ident "(" fs:idents ")" { peg_record(n, fs) }
        | module_expr
@@ -1764,4 +1774,37 @@ eval = e -> {
         _macro_steps = saved
         _eval_expanded(x)
     } else _eval_expanded(e)
+}
+
+" e with { f = v, ... } is _record_with(_record_with(e, 'f, v), 'g, w) ... "
+peg_with(o, fs) := {
+    r := o
+    i := 0
+    while (i < arity(fs)) {
+        r = `Apply{_record_with, Tuple{!r, Quote{!arg(arg(fs, i), 0)}, !arg(arg(fs, i), 1)}}
+        i = i + 1
+    }
+    r
+}
+
+_record_with_error(t, name) := {
+    put("no field ")
+    put(symname(name))
+    put(" in ")
+    println(t)
+    exit(1)
+}
+
+" a copy of the record t whose field name is v. The fields are declared by record "
+_record_with(t, name, v) := {
+    if (typeof(t) != 'mexpr) _record_with_error(t, name)
+    i := table_get(record_slots, Tuple{head(t), name}, none)
+    if (i == none) _record_with_error(t, name)
+    args := Tuple{}
+    j := 0
+    while (j < arity(t)) {
+        args = push(args, if (j == i) v else arg(t, j))
+        j = j + 1
+    }
+    mexpr(head(t), args)
 }
