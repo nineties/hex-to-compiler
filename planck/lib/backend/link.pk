@@ -29,31 +29,31 @@ link_join(objs, names, joined, pieces) := each(name -> {
     al := 1
     k := 0
     each(o -> {
-        s := table_get(arg(o, 1), name, none)
+        s := table.get(arg(o, 1), name, none)
         if (s != none) {
             a := arg(s, 2)
             if (a > al) al = a
             bytes.align(out, a)
-            table_set(pieces, Tuple{k, name}, bytes.len(out))
+            table.set(pieces, Tuple{k, name}, bytes.len(out))
             bytes.append(out, obj.buf(s))
         }
         k = k + 1
     }, objs)
-    table_set(joined, name, Tuple{out, al})
+    table.set(joined, name, Tuple{out, al})
 }, names)
 
 export link(objs, entry, base, hdr) := {
     each(o -> each(s -> if (not member(arg(s, 0), append(link_first, link_second))) panic(f"link: the section {arg(s, 0)} of {obj.name(o)} is not supported"), obj.sections(o)), objs)
-    joined := table()
-    pieces := table()
+    joined := table.new()
+    pieces := table.new()
     link_join(objs, append(link_first, link_second), joined, pieces)
     # addresses of the joined sections
-    addr := table()
+    addr := table.new()
     cur := base + hdr
     each(n -> {
-        j := table_get(joined, n, none)
+        j := table.get(joined, n, none)
         cur = link_align(cur, arg(j, 1))
-        table_set(addr, n, cur)
+        table.set(addr, n, cur)
         cur = cur + bytes.len(arg(j, 0))
     }, link_first)
     end0 := cur
@@ -61,26 +61,26 @@ export link(objs, entry, base, hdr) := {
     off1 := link_align(end0 - base, 16)
     cur = base + off1 + 4096
     each(n -> {
-        j := table_get(joined, n, none)
+        j := table.get(joined, n, none)
         cur = link_align(cur, arg(j, 1))
-        table_set(addr, n, cur)
+        table.set(addr, n, cur)
         cur = cur + bytes.len(arg(j, 0))
     }, link_second)
     end1 := cur
     # symbols
-    globals := table()
+    globals := table.new()
     locals := array(length(objs))
     k := 0
     each(o -> {
-        loc := table()
+        loc := table.new()
         array_set(locals, k, loc)
         each((Sym{name, sec, off, global}) -> {
-            a := table_get(addr, sec, -1) + table_get(pieces, Tuple{k, sec}, 0) + off
-            if (table_get(addr, sec, -1) < 0) panic(f"link: {name} is in the section {sec}, which is not supported")
+            a := table.get(addr, sec, -1) + table.get(pieces, Tuple{k, sec}, 0) + off
+            if (table.get(addr, sec, -1) < 0) panic(f"link: {name} is in the section {sec}, which is not supported")
             if (global) {
-                if (table_has(globals, name)) panic(f"link: {name} is defined twice")
-                table_set(globals, name, a)
-            } else table_set(loc, name, a)
+                if (table.has(globals, name)) panic(f"link: {name} is defined twice")
+                table.set(globals, name, a)
+            } else table.set(loc, name, a)
         }, obj.symbols(o))
         k = k + 1
     }, objs)
@@ -88,34 +88,34 @@ export link(objs, entry, base, hdr) := {
     k = 0
     each(o -> {
         each((Rel{sec, off, kind, sym, addend}) -> {
-            s := table_get(array_get(locals, k), sym, table_get(globals, sym, none))
+            s := table.get(array_get(locals, k), sym, table.get(globals, sym, none))
             if (s == none) panic(f"link: {sym} is not defined (used in {obj.name(o)})")
-            at := table_get(pieces, Tuple{k, sec}, 0) + off
-            place := table_get(addr, sec, 0) + at
+            at := table.get(pieces, Tuple{k, sec}, 0) + off
+            place := table.get(addr, sec, 0) + at
             v := match kind {
                 'Abs32 -> s + addend
               | 'Pc32 -> s + addend - place
               | _ -> panic(f"link: unknown kind of relocation {kind}")
             }
-            bytes.set_u32(arg(table_get(joined, sec, none), 0), at, v)
+            bytes.set_u32(arg(table.get(joined, sec, none), 0), at, v)
         }, obj.relocs(o))
         k = k + 1
     }, objs)
-    e := table_get(globals, entry, none)
+    e := table.get(globals, entry, none)
     if (e == none) panic(f"link: the entry {entry} is not defined")
     # segments
     seg0 := bytes.new()
     bytes.zeros(seg0, hdr)
     each(n -> {
-        j := table_get(joined, n, none)
-        bytes.zeros(seg0, table_get(addr, n, 0) - base - bytes.len(seg0))
+        j := table.get(joined, n, none)
+        bytes.zeros(seg0, table.get(addr, n, 0) - base - bytes.len(seg0))
         bytes.append(seg0, arg(j, 0))
     }, link_first)
     seg1 := bytes.new()
     each(n -> {
-        j := table_get(joined, n, none)
+        j := table.get(joined, n, none)
         if (n == ".data") {
-            bytes.zeros(seg1, table_get(addr, n, 0) - (base + off1 + 4096) - bytes.len(seg1))
+            bytes.zeros(seg1, table.get(addr, n, 0) - (base + off1 + 4096) - bytes.len(seg1))
             bytes.append(seg1, arg(j, 0))
         }
     }, link_second)

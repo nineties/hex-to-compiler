@@ -1,130 +1,141 @@
 # list: lists made of Cons{x, xs} and Nil{}, written [x, y, ...]
 # Copyright (C) 2026 nineties
+#
+# The functions are the fields of the module list. The ones used most are also
+# variables of their own at the end of this file: foldl, reverse, length, append,
+# map, filter, concat_map, each, find, member and range.
 
 use("base")
 
-fun foldl
-foldl = (f, acc, Nil{}) -> acc
-       | (f, acc, x :: xs) -> foldl(f, f(acc, x), xs)
+module list {
+    export foldl(f, acc, Nil{}) := acc
+    foldl(f, acc, x :: xs) := foldl(f, f(acc, x), xs)
 
-reverse(xs) := foldl((acc, x) -> x :: acc, [], xs)
+    export reverse(xs) := foldl((acc, x) -> x :: acc, [], xs)
 
-# foldr(f, init, [a, b, c]) is f(a, f(b, f(c, init)))
-foldr(f, init, xs) := foldl((acc, x) -> f(x, acc), init, reverse(xs))
+    # foldr(f, init, [a, b, c]) is f(a, f(b, f(c, init)))
+    export foldr(f, init, xs) := foldl((acc, x) -> f(x, acc), init, reverse(xs))
 
-length(xs) := foldl((n, _) -> n + 1, 0, xs)
+    export length(xs) := foldl((n, _) -> n + 1, 0, xs)
 
-append(xs, ys) := foldl((acc, x) -> x :: acc, ys, reverse(xs))
+    export append(xs, ys) := foldl((acc, x) -> x :: acc, ys, reverse(xs))
 
-# concat([[1], [2, 3]]) is [1, 2, 3]
-concat(xss) := foldr((xs, acc) -> append(xs, acc), [], xss)
+    # concat([[1], [2, 3]]) is [1, 2, 3]
+    export concat(xss) := foldr((xs, acc) -> append(xs, acc), [], xss)
 
-# map and filter call f from the first element to the last
-map(f, xs) := reverse(foldl((acc, x) -> f(x) :: acc, [], xs))
+    # map and filter call f from the first element to the last
+    export map(f, xs) := reverse(foldl((acc, x) -> f(x) :: acc, [], xs))
 
-filter(p, xs) := reverse(foldl((acc, x) -> if (p(x)) x :: acc else acc, [], xs))
+    export filter(p, xs) := reverse(foldl((acc, x) -> if (p(x)) x :: acc else acc, [], xs))
 
-concat_map(f, xs) := concat(map(f, xs))
+    export concat_map(f, xs) := concat(map(f, xs))
 
-# each(f, xs) calls f on every element, in order
-each(f, xs) := foldl((_, x) -> f(x), none, xs)
+    # each(f, xs) calls f on every element, in order
+    export each(f, xs) := foldl((_, x) -> f(x), none, xs)
 
-sum(xs) := foldl((a, b) -> a + b, 0, xs)
+    export sum(xs) := foldl((a, b) -> a + b, 0, xs)
 
-# nth(xs, i) is the i-th element (from 0). It stops the program when xs is shorter.
-fun nth
-nth = (Nil{}, i) -> panic("nth: index out of range")
-     | (x :: xs, i) -> if (i == 0) x else nth(xs, i - 1)
+    # nth(xs, i) is the i-th element (from 0). It stops the program when xs is shorter.
+    export nth(Nil{}, i) := panic("nth: index out of range")
+    nth(x :: xs, i) := if (i == 0) x else nth(xs, i - 1)
 
-fun last
-last(Nil{}) = panic("last: empty list")
-last(x :: Nil{}) = x
-last(_ :: xs) = last(xs)
+    export last(Nil{}) := panic("last: empty list")
+    last(x :: Nil{}) := x
+    last(_ :: xs) := last(xs)
 
-# take(xs, n) is the first n elements, drop(xs, n) is the rest
-take(xs, n) := {
-    fun go
-    go = (_, 0, acc) -> reverse(acc)
-        | (Nil{}, _, acc) -> reverse(acc)
-        | (x :: r, n, acc) -> go(r, n - 1, x :: acc)
-    go(xs, n, [])
-}
-
-fun drop
-drop = (xs, 0) -> xs
-      | (Nil{}, _) -> []
-      | (_ :: r, n) -> drop(r, n - 1)
-
-# find(p, xs) is the first element with p(x), or none
-fun find
-find = (p, Nil{}) -> none
-      | (p, x :: xs) -> if (p(x)) x else find(p, xs)
-
-fun any
-any = (p, Nil{}) -> false
-     | (p, x :: xs) -> if (p(x)) true else any(p, xs)
-
-fun all
-all = (p, Nil{}) -> true
-     | (p, x :: xs) -> if (p(x)) all(p, xs) else false
-
-# member(x, xs) is true when an element is eq to x
-member(x, xs) := any(y -> y == x, xs)
-
-# index_of(x, xs) is the position of x (from 0), or -1
-index_of(x, xs) := {
-    fun go
-    go = (Nil{}, i) -> -1
-        | (y :: ys, i) -> if (y == x) i else go(ys, i + 1)
-    go(xs, 0)
-}
-
-# zip([1, 2], [a, b]) is [Tuple{1, a}, Tuple{2, b}]. The result is as long as the shorter list.
-zip(xs, ys) := {
-    fun go
-    go = (Nil{}, _, acc) -> reverse(acc)
-        | (_, Nil{}, acc) -> reverse(acc)
-        | (x :: xs, y :: ys, acc) -> go(xs, ys, Tuple{x, y} :: acc)
-    go(xs, ys, [])
-}
-
-# range(a, b) is [a, a + 1, ..., b - 1]
-range(a, b) := {
-    r := []
-    i := b - 1
-    while (i >= a) {
-        r = i :: r
-        i = i - 1
+    # take(xs, n) is the first n elements, drop(xs, n) is the rest
+    export take(xs, n) := {
+        fun go
+        go = (_, 0, acc) -> reverse(acc)
+            | (Nil{}, _, acc) -> reverse(acc)
+            | (x :: r, n, acc) -> go(r, n - 1, x :: acc)
+        go(xs, n, [])
     }
-    r
-}
 
-# list_to_array(xs) is an array of the elements of xs
-list_to_array(xs) := {
-    a := array(length(xs))
-    i := 0
-    each(x -> {
-        array_set(a, i, x)
-        i = i + 1
-    }, xs)
-    a
-}
+    export drop(xs, 0) := xs
+    drop(Nil{}, _) := []
+    drop(_ :: r, n) := drop(r, n - 1)
 
-# sort(less, xs) is xs in the order of less(a, b), a stable merge sort
-sort(less, xs) := {
-    prepend := (acc, x) -> x :: acc
-    fun merge
-    merge = (Nil{}, ys, acc) -> foldl(prepend, acc, ys)
-           | (xs, Nil{}, acc) -> foldl(prepend, acc, xs)
-           | (x :: xs, y :: ys, acc) ->
-                if (less(y, x)) merge(x :: xs, ys, y :: acc) else merge(xs, y :: ys, x :: acc)
-    fun go
-    go = (xs) -> {
-        n := length(xs)
-        if (n < 2) xs else {
-            h := n / 2
-            reverse(merge(go(take(xs, h)), go(drop(xs, h)), []))
+    # find(p, xs) is the first element with p(x), or none
+    export find(p, Nil{}) := none
+    find(p, x :: xs) := if (p(x)) x else find(p, xs)
+
+    export any(p, Nil{}) := false
+    any(p, x :: xs) := if (p(x)) true else any(p, xs)
+
+    export all(p, Nil{}) := true
+    all(p, x :: xs) := if (p(x)) all(p, xs) else false
+
+    # member(x, xs) is true when an element is eq to x
+    export member(x, xs) := any(y -> y == x, xs)
+
+    # index_of(x, xs) is the position of x (from 0), or -1
+    export index_of(x, xs) := {
+        fun go
+        go = (Nil{}, i) -> -1
+            | (y :: ys, i) -> if (y == x) i else go(ys, i + 1)
+        go(xs, 0)
+    }
+
+    # zip([1, 2], [a, b]) is [Tuple{1, a}, Tuple{2, b}]. The result is as long as the shorter list.
+    export zip(xs, ys) := {
+        fun go
+        go = (Nil{}, _, acc) -> reverse(acc)
+            | (_, Nil{}, acc) -> reverse(acc)
+            | (x :: xs, y :: ys, acc) -> go(xs, ys, Tuple{x, y} :: acc)
+        go(xs, ys, [])
+    }
+
+    # range(a, b) is [a, a + 1, ..., b - 1]
+    export range(a, b) := {
+        r := []
+        i := b - 1
+        while (i >= a) {
+            r = i :: r
+            i = i - 1
         }
+        r
     }
-    go(xs)
+
+    # list_to_array(xs) is an array of the elements of xs
+    export list_to_array(xs) := {
+        a := array(length(xs))
+        i := 0
+        each(x -> {
+            array_set(a, i, x)
+            i = i + 1
+        }, xs)
+        a
+    }
+
+    # sort(less, xs) is xs in the order of less(a, b), a stable merge sort
+    export sort(less, xs) := {
+        prepend := (acc, x) -> x :: acc
+        fun merge
+        merge = (Nil{}, ys, acc) -> foldl(prepend, acc, ys)
+               | (xs, Nil{}, acc) -> foldl(prepend, acc, xs)
+               | (x :: xs, y :: ys, acc) ->
+                    if (less(y, x)) merge(x :: xs, ys, y :: acc) else merge(xs, y :: ys, x :: acc)
+        fun go
+        go = (xs) -> {
+            n := length(xs)
+            if (n < 2) xs else {
+                h := n / 2
+                reverse(merge(go(take(xs, h)), go(drop(xs, h)), []))
+            }
+        }
+        go(xs)
+    }
 }
+
+foldl := list.foldl
+reverse := list.reverse
+length := list.length
+append := list.append
+map := list.map
+filter := list.filter
+concat_map := list.concat_map
+each := list.each
+find := list.find
+member := list.member
+range := list.range

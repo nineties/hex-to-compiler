@@ -84,16 +84,16 @@ un_match_args(p, t, i, env) := {
 # un_match(template, tree, env) binds the holes in the table env. A label that appears twice must match equal subtrees.
 un_match(p, t, env) =
     if (is_hole(p)) {
-        old := table_get(env, arg(p, 0), bad)
+        old := table.get(env, arg(p, 0), bad)
         if (is_bad(old)) {
-            table_set(env, arg(p, 0), t)
+            table.set(env, arg(p, 0), t)
             true
         } else old == t
     } else if (is_unwrap(p)) un_match_unwrap(p, t, env)
     else if (is_mx(p) and head(p) == 'Generic) {
         if (is_mx(t)) {
-            table_set(env, arg(arg(p, 0), 0), head(t))
-            table_set(env, arg(arg(p, 1), 0), args_tuple(t))
+            table.set(env, arg(arg(p, 0), 0), head(t))
+            table.set(env, arg(arg(p, 1), 0), args_tuple(t))
             true
         } else false
     } else if (is_mx(p)) {
@@ -120,7 +120,7 @@ vars_tmpl(h, tup, labels) := {
 # template of the tree it makes. The wrapper that return, break and continue add is looked through.
 call_tmpl(c, labels) :=
     if (not (is_mx(c) and head(c) == 'Apply and arity(c) == 2 and is_mx(arg(c, 1)) and head(arg(c, 1)) == 'Tuple)) bad
-    else if (not all(x -> label_ok(x, labels), pretty.args_of(arg(c, 1)))) bad
+    else if (not list.all(x -> label_ok(x, labels), pretty.args_of(arg(c, 1)))) bad
     else {
         f := arg(c, 0)
         n := arity(arg(c, 1))
@@ -170,7 +170,7 @@ body_tmpl(b, labels) :=
     else if (head(b) == 'Apply) call_tmpl(b, labels)
     else bad
 
-mentions(x, s) := if (is_mx(x)) any(c -> mentions(c, s), pretty.args_of(x)) else x == s
+mentions(x, s) := if (is_mx(x)) list.any(c -> mentions(c, s), pretty.args_of(x)) else x == s
 
 # return takes an optional expression: Option{Seq{same, expr}}. The template has the expression itself.
 unopt(e) :=
@@ -198,7 +198,7 @@ action_of(f, elems, is_seq) := {
 const_text(e, depth) :=
     if (typeof(e) == 'string) e
     else if (typeof(e) == 'symbol) {
-        src := table_get(peg_sources, e, none)
+        src := table.get(peg_sources, e, none)
         if (depth > 3 or not is_mx(src)) bad else const_text(src, depth + 1)
     } else if (not is_mx(e)) bad
     else if (head(e) == 'Tight or head(e) == 'Key) arg(e, 0)
@@ -218,7 +218,7 @@ const_text(e, depth) :=
 const_kind(e, i, n, text, prev) :=
     if (is_mx(e) and head(e) == 'Tight) 'tight
     else if (text == "(" and prev == 'ident) 'tight
-    else if (i == 0 and n > 1 and strlen(text) > 0 and not is_ident_char(ord(text, 0))) 'prefix
+    else if (i == 0 and n > 1 and strlen(text) > 0 and not string.is_ident_char(ord(text, 0))) 'prefix
     else 'plain
 
 # ConstItem{text, kind} or ValItem{label, element}, or Bad{} when an element cannot be run backwards
@@ -237,17 +237,17 @@ make_items(elems, labels, holes) := {
         }
     items := go(elems, labels, 0, none)
     if (is_bad(items)) bad
-    else if (all(h -> any(it -> head(it) == 'ValItem and arg(it, 0) == h, items), holes)) items
+    else if (list.all(h -> list.any(it -> head(it) == 'ValItem and arg(it, 0) == h, items), holes)) items
     else bad
 }
 
-token_rule(r) := typeof(table_get(peg_sources, r, none)) == 'function
+token_rule(r) := typeof(table.get(peg_sources, r, none)) == 'function
 
 # the rule of the last element when it is a rule of its own, or none. The alternative
 # runs on to the right as far as that rule does.
 tail_of(items) :=
     if (items == []) none
-    else if (head(last(items)) == 'ValItem and typeof(arg(last(items), 1)) == 'symbol and not token_rule(arg(last(items), 1))) arg(last(items), 1)
+    else if (head(list.last(items)) == 'ValItem and typeof(arg(list.last(items), 1)) == 'symbol and not token_rule(arg(list.last(items), 1))) arg(list.last(items), 1)
     else none
 
 # Alt{owner, order, template, items, tail}
@@ -280,10 +280,10 @@ find_paren(owner, a) := {
 un_flat(src) := if (is_mx(src) and head(src) == 'Choice) concat_map(un_flat, pretty.args_of(src)) else [src]
 
 tok_types := {
-    t := table()
-    table_set(t, 'ident, 'symbol)
-    table_set(t, 'integer, 'int)
-    table_set(t, 'string, 'string)
+    t := table.new()
+    table.set(t, 'ident, 'symbol)
+    table.set(t, 'integer, 'int)
+    table.set(t, 'string, 'string)
     t
 }
 
@@ -292,32 +292,32 @@ ug_version := -1
 ug_extra := []
 ug_stack := []
 ug_alts := []
-ug_links := table()
+ug_links := table.new()
 ug_parens := []
-ug_reach := table()
-ug_cands := table()
+ug_reach := table.new()
+ug_cands := table.new()
 
 un_build() := {
     alts := []
-    links := table()
+    links := table.new()
     parens := []
-    names := map(kv -> arg(kv, 0), sort((a, b) -> arg(a, 1) < arg(b, 1), table_items(peg_ids)))
+    names := map(kv -> arg(kv, 0), list.sort((a, b) -> arg(a, 1) < arg(b, 1), table.items(peg_ids)))
     each(r -> {
-        src := table_get(peg_sources, r, none)
+        src := table.get(peg_sources, r, none)
         if (is_mx(src) or typeof(src) == 'symbol) {
-            id := table_get(peg_ids, r, 0)
+            id := table.get(peg_ids, r, 0)
             i := 0
             each(a -> {
                 order := id * 100 + i
                 i = i + 1
                 p := find_paren(r, a)
-                if (p != none and not any(x -> arg(x, 0) == r, parens)) parens = p :: parens
+                if (p != none and not list.any(x -> arg(x, 0) == r, parens)) parens = p :: parens
                 if (typeof(a) == 'symbol) {
-                    target := table_get(peg_sources, a, none)
+                    target := table.get(peg_sources, a, none)
                     if (typeof(target) == 'function) {
-                        ty := table_get(tok_types, a, none)
+                        ty := table.get(tok_types, a, none)
                         if (ty != none) alts = Alt{r, order, Tok{a, ty}, [], none} :: alts
-                    } else if (target != none) table_set(links, r, a :: table_get(links, r, []))
+                    } else if (target != none) table.set(links, r, a :: table.get(links, r, []))
                 } else if (is_mx(a) and head(a) == 'Act) {
                     x := extract_act(r, order, arg(a, 0), arg(a, 1))
                     if (not is_bad(x)) alts = x :: alts
@@ -333,8 +333,8 @@ un_build() := {
     ug_alts = reverse(alts)
     ug_links = links
     ug_parens = reverse(parens)
-    ug_reach = table()
-    ug_cands = table()
+    ug_reach = table.new()
+    ug_cands = table.new()
     ug_version = peg_version
 }
 
@@ -353,16 +353,16 @@ alt_spec(a) := if (is_tok(alt_tmpl(a))) 1 else if (is_custom(alt_tmpl(a))) arg(a
 
 reach_add(seen, r) := if (not set.has(seen, r)) {
     set.add(seen, r)
-    each(x -> reach_add(seen, x), table_get(ug_links, r, []))
+    each(x -> reach_add(seen, x), table.get(ug_links, r, []))
 }
 
 # the rules that rule r reaches by alternatives that are only a rule name
 un_reach(r) := {
-    c := table_get(ug_reach, r, none)
+    c := table.get(ug_reach, r, none)
     if (c != none) c else {
         seen := set.new()
         reach_add(seen, r)
-        table_set(ug_reach, r, seen)
+        table.set(ug_reach, r, seen)
         seen
     }
 }
@@ -378,7 +378,7 @@ rest_of := (_ :: xs) -> xs
 # Cand{key, alt, paren or false}, the alternatives that can stand for rule r. The more concrete
 # template comes first. An alternative of a stronger rule needs parentheses.
 un_cands(r) := {
-    c := table_get(ug_cands, r, none)
+    c := table.get(ug_cands, r, none)
     if (c != none) c else {
         rr := un_reach(r)
         ps := filter(x -> set.has(rr, arg(x, 0)), ug_parens)
@@ -392,8 +392,8 @@ un_cands(r) := {
             if (set.has(rr, o) and (not is_open(a) or set.has(rr, alt_tail(a)))) out = Cand{(sp * 2 + 1) * 100000 - alt_order(a), a, false} :: out
             else if (wrap_ok and sp > 0 and set.has(uni, o)) out = Cand{sp * 2 * 100000 - alt_order(a), a, paren} :: out
         }, ug_alts)
-        res := sort((x, y) -> arg(x, 0) > arg(y, 0), out)
-        table_set(ug_cands, r, res)
+        res := list.sort((x, y) -> arg(x, 0) > arg(y, 0), out)
+        table.set(ug_cands, r, res)
         res
     }
 }
@@ -401,10 +401,10 @@ un_cands(r) := {
 # === Printing ===
 
 ident_ok(name) := {
-    ok := strlen(name) > 0 and is_ident_start(ord(name, 0)) and not table_get(peg_reserved, name, false)
+    ok := strlen(name) > 0 and string.is_ident_start(ord(name, 0)) and not table.get(peg_reserved, name, false)
     i := 1
     while (ok and i < strlen(name)) {
-        ok = is_ident_char(ord(name, i))
+        ok = string.is_ident_char(ord(name, i))
         i = i + 1
     }
     ok
@@ -412,7 +412,7 @@ ident_ok(name) := {
 
 print_tok(rule, t) :=
     if (rule == 'ident) (if (ident_ok(symname(t))) symname(t) else none)
-    else if (rule == 'integer) int_to_str(t)
+    else if (rule == 'integer) string.int_to_str(t)
     else pretty.quote_str(t)
 
 # pieces are strings, T{s} (sticks to the left) and P{s} (sticks to the right)
@@ -431,7 +431,7 @@ un_render(ps) := {
         s := piece_text(p)
         if (strlen(s) > 0) {
             sp := not (glue or (is_mx(p) and head(p) == 'T) or no_space_before(s))
-            if (glue and pfx == "-" and is_digit(ord(s, 0))) sp = true
+            if (glue and pfx == "-" and string.is_digit(ord(s, 0))) sp = true
             if (sp) out = _strcat(out, " ")
             out = _strcat(out, s)
             pfx = if (is_mx(p) and head(p) == 'P) s else ""
@@ -462,12 +462,12 @@ list_pieces(inner, sep, v) := {
 
 # a rule that is only a list of another rule: idents ::= ident, ...
 is_list_rule(r) := {
-    src := table_get(peg_sources, r, none)
+    src := table.get(peg_sources, r, none)
     is_mx(src) and (head(src) == 'Delimited or head(src) == 'Delimited1 or head(src) == 'Many)
 }
 
 val_pieces(elem, v) :=
-    if (typeof(elem) == 'symbol and is_list_rule(elem)) val_pieces(table_get(peg_sources, elem, none), v)
+    if (typeof(elem) == 'symbol and is_list_rule(elem)) val_pieces(table.get(peg_sources, elem, none), v)
     else if (typeof(elem) == 'symbol) {
         s := unparse_pp(elem, v)
         if (s == none) none else [s]
@@ -487,7 +487,7 @@ val_pieces(elem, v) :=
 item_pieces := (ConstItem{text, kind}, env) -> {
                    if (text == "") [] else if (kind == 'tight) [T{text}] else if (kind == 'prefix) [P{text}] else [text]
                }
-             | (ValItem{label, elem}, env) -> val_pieces(elem, table_get(env, label, none))
+             | (ValItem{label, elem}, env) -> val_pieces(elem, table.get(env, label, none))
 
 fun items_pieces
 items_pieces = (Nil{}, env) -> []
@@ -518,7 +518,7 @@ fits(p, t) := {
 }
 
 try_fit(a, wrapped, t) := {
-    env := table()
+    env := table.new()
     tm := alt_tmpl(a)
     if (is_tok(tm)) {
         if (typeof(t) == arg(tm, 1)) print_tok(arg(tm, 0), t) else none
@@ -547,15 +547,15 @@ try_cands = (Nil{}, t) -> none
 
 # unparse_pp(rule, t) is the text of t as the rule, or none
 unparse_pp(r, t) =
-    if (typeof(table_get(peg_sources, r, none)) == 'function) {
-        ty := table_get(tok_types, r, none)
+    if (typeof(table.get(peg_sources, r, none)) == 'function) {
+        ty := table.get(tok_types, r, none)
         if (ty != none and typeof(t) == ty) print_tok(r, t) else none
-    } else if (any(e -> arg(e, 0) == r and arg(e, 1) == t, ug_stack)) none
+    } else if (list.any(e -> arg(e, 0) == r and arg(e, 1) == t, ug_stack)) none
     else {
         # a rule that passes its tree on to itself (identity actions) would go round forever
         ug_stack = Tuple{r, t} :: ug_stack
         res := try_cands(un_cands(r), t)
-        ug_stack = drop(ug_stack, 1)
+        ug_stack = list.drop(ug_stack, 1)
         res
     }
 
@@ -586,7 +586,7 @@ export custom(owner, spec, tail, f) := {
 # { ... } puts every expression on its own line, indented by 4 spaces.
 # if (c) a else b is used for If instead of c ? a : b.
 
-indent(s) := _strcat("    ", join("\n    ", split(s, "\n")))
+indent(s) := _strcat("    ", join("\n    ", string.split(s, "\n")))
 
 # the texts of the arguments of t as expr, or none
 arg_texts(t) := {
@@ -625,7 +625,7 @@ print_do(t) :=
 has_open_if(t) :=
     if (not is_mx(t) or head(t) == 'Do) false
     else if (head(t) == 'If and arity(t) == 3 and arg(t, 2) == none) true
-    else any(has_open_if, pretty.args_of(t))
+    else list.any(has_open_if, pretty.args_of(t))
 
 print_if(t) :=
     if (not (is_mx(t) and head(t) == 'If and arity(t) == 3)) none
@@ -658,7 +658,7 @@ fstr_segs(t) :=
         l := fstr_segs(arg(arg(t, 1), 0))
         x := arg(arg(t, 1), 1)
         if (l == none) none
-        else if (is_text_lit(x) and head(last(l)) != 'S) append(l, [S{x}])
+        else if (is_text_lit(x) and head(list.last(l)) != 'S) append(l, [S{x}])
         else if (is_text_hole(x)) append(l, [E{arg(arg(x, 1), 0)}])
         else none
     } else if (is_text_hole(t)) [E{arg(arg(t, 1), 0)}]
@@ -672,7 +672,7 @@ fstr_escape(s) := {
     i := 1
     while (i < strlen(q) - 1) {
         c := ord(q, i)
-        strbuf.add(b, if (c == 123) "{{" else if (c == 125) "}}" else chr(c))
+        strbuf.add(b, if (c == 123) "{{" else if (c == 125) "}}" else string.chr(c))
         i = i + 1
     }
     strbuf.str(b)
@@ -689,7 +689,7 @@ print_fstr(t) := {
             else {
                 e := unparse_pp('expr, arg(sg, 0))
                 if (e == none) ok = false
-                else acc = _strcat("{", _strcat(if (starts_with(e, "{")) " " else "", _strcat(e, "}"))) :: acc
+                else acc = _strcat("{", _strcat(if (string.starts_with(e, "{")) " " else "", _strcat(e, "}"))) :: acc
             }
         }, segs)
         if (ok) _strcat("f\"", _strcat(join("", reverse(acc)), "\"")) else none
@@ -718,7 +718,7 @@ params_text(ps) := {
     xs := list_pieces('pattern, ",", ps)
     s := if (xs == none) none else un_render(xs)
     if (s == none) none
-    else if (arity(ps) == 1 and not (is_mx(arg(ps, 0)) and head(arg(ps, 0)) == 'Tuple and starts_with(s, "("))) s
+    else if (arity(ps) == 1 and not (is_mx(arg(ps, 0)) and head(arg(ps, 0)) == 'Tuple and string.starts_with(s, "("))) s
     else _strcat("(", _strcat(s, ")"))
 }
 
@@ -759,7 +759,7 @@ print_match(t) := {
     s := if (arms == none) none else unparse_pp('ternary, arg(arg(t, 1), 0))
     if (arms == none or s == none) none
     else {
-        lines := indent(first_of(arms)) :: map(a -> _strcat("  | ", join("\n    ", split(a, "\n"))), rest_of(arms))
+        lines := indent(first_of(arms)) :: map(a -> _strcat("  | ", join("\n    ", string.split(a, "\n"))), rest_of(arms))
         _strcat("match ", _strcat(s, _strcat(" {\n", _strcat(join("\n", lines), "\n}"))))
     }
 }

@@ -170,7 +170,7 @@ x64_select_one(f, emit, i) = {
       | I{'ret, [Us{vals}]} -> {
             if (vals != []) mov(0, vals[0])
             if (length(vals) > 1) mov(2, vals[1])
-            emit(I{'ret, map(r -> IU{r}, take([0, 2], length(vals)))})
+            emit(I{'ret, map(r -> IU{r}, list.take([0, 2], length(vals)))})
         }
       | I{'jmp, _} -> emit(i)
       | I{'br, [Cc{c}, U{a}, b, L{t}, L{e}]} -> {
@@ -212,7 +212,7 @@ x64_sched_model := SchedModel{x64_latency, x64_effect}
 # === Registers ===
 # the registers that a call may change are given first; rbx and r12 to r15 are kept by the callee
 x64_callee_saved := [3, 12, 13, 14, 15]
-x64_ra := RATarget{[0, 1, 2, 6, 7, 8, 9, 10, 11, 3, 12, 13, 14, 15], table(),
+x64_ra := RATarget{[0, 1, 2, 6, 7, 8, 9, 10, 11, 3, 12, 13, 14, 15], table.new(),
     (r, slot) -> I{'mov, [W{'w64}, D{r}, MF{'slot, slot, 0}]}, (r, slot) -> I{'mov, [W{'w64}, MF{'slot, slot, 0}, U{r}]}, 8}
 
 # === Frames ===
@@ -220,25 +220,25 @@ x64_align(n, a) := (n + a - 1) / a * a
 
 x64_resolve(offs, o) := match o {
     MF{'arg, n, d} -> M{U{5}, 16 + 8 * n + d}
-  | MF{'slot, n, d} -> M{U{5}, d - table_get(offs, n, 0)}
+  | MF{'slot, n, d} -> M{U{5}, d - table.get(offs, n, 0)}
   | _ -> o
 }
 
 # x64_frame(f, code) adds the prologue and the epilogue to the allocated code and gives an address to each stack slot
 x64_frame(f, code) := {
-    defined := table()
-    each(i -> each(r -> table_set(defined, r, true), ir.defs(i)), code)
-    used := filter(r -> table_has(defined, r), x64_callee_saved)
-    offs := table()
+    defined := table.new()
+    each(i -> each(r -> table.set(defined, r, true), ir.defs(i)), code)
+    used := filter(r -> table.has(defined, r), x64_callee_saved)
+    offs := table.new()
     off := 8 * length(used)
     n := 0
     each((Tuple{size, al}) -> {
         off = x64_align(off + size, al)
-        table_set(offs, n, off)
+        table.set(offs, n, off)
         n = n + 1
-    }, vector.to_list(table_get(ir.meta(f), 'slots, none)))
+    }, vector.to_list(table.get(ir.meta(f), 'slots, none)))
     total := x64_align(off, 16)
-    save_at := r -> -8 * (index_of(r, used) + 1)
+    save_at := r -> -8 * (list.index_of(r, used) + 1)
     prologue := append([I{'push, [U{5}, ID{4}, IU{4}]}, I{'mov, [W{'w64}, D{5}, U{4}]}],
         append(if (total > 0) [I{'sub, [W{'w64}, DU{4}, K{total}, x64_flags_def]}] else [],
             map(r -> I{'mov, [W{'w64}, M{U{5}, save_at(r)}, U{r}]}, used)))
@@ -307,37 +307,37 @@ test {
 # a straight line code is run to see that the allocation keeps the result: values on the stack are in mem
 test {
     run(code) := {
-        regs := table()
-        mem := table()
+        regs := table.new()
+        mem := table.new()
         val := o -> match o {
             K{n} -> n
-          | U{r} -> table_get(regs, r, 0)
-          | MF{k, n, d} -> table_get(mem, Tuple{k, n, d}, 0)
+          | U{r} -> table.get(regs, r, 0)
+          | MF{k, n, d} -> table.get(mem, Tuple{k, n, d}, 0)
         }
         each(i -> match i {
-            I{'mov, [D{d}, s]} -> table_set(regs, d, val(s))
-          | I{'mov, [MF{k, n, d}, s]} -> table_set(mem, Tuple{k, n, d}, val(s))
-          | I{'mov, [W{_}, D{d}, s]} -> table_set(regs, d, val(s))
-          | I{'mov, [W{_}, MF{k, n, d}, s]} -> table_set(mem, Tuple{k, n, d}, val(s))
-          | I{'add, [DU{d}, s, _]} -> table_set(regs, d, table_get(regs, d, 0) + val(s))
+            I{'mov, [D{d}, s]} -> table.set(regs, d, val(s))
+          | I{'mov, [MF{k, n, d}, s]} -> table.set(mem, Tuple{k, n, d}, val(s))
+          | I{'mov, [W{_}, D{d}, s]} -> table.set(regs, d, val(s))
+          | I{'mov, [W{_}, MF{k, n, d}, s]} -> table.set(mem, Tuple{k, n, d}, val(s))
+          | I{'add, [DU{d}, s, _]} -> table.set(regs, d, table.get(regs, d, 0) + val(s))
           | I{'ret, _} -> none
         }, code)
-        table_get(regs, 0, 0)
+        table.get(regs, 0, 0)
     }
     f := ir.fn("t")
     vs := map(i -> ir.vreg(f, 64), range(0, 16))
     acc := ir.vreg(f, 64)
-    each((Tuple{v, n}) -> ir.emit(f, I{'mov, [D{v}, K{n}]}), zip(vs, range(1, 17)))
+    each((Tuple{v, n}) -> ir.emit(f, I{'mov, [D{v}, K{n}]}), list.zip(vs, range(1, 17)))
     ir.emit(f, I{'mov, [D{acc}, K{0}]})
     each(v -> ir.emit(f, I{'add, [DU{acc}, U{v}, x64_flags_def]}), vs)
     ir.emit(f, I{'mov, [D{0}, U{acc}]})
     ir.emit(f, I{'ret, [IU{0}]})
     allocated := regalloc.allocate(f, x64_ra)
-    assert(not any(i -> any(r -> ir.is_vreg(r), append(ir.uses(i), ir.defs(i))), allocated), "no virtual register is left")
+    assert(not list.any(i -> list.any(r -> ir.is_vreg(r), append(ir.uses(i), ir.defs(i))), allocated), "no virtual register is left")
     assert(run(allocated) == 136, "the allocation keeps the result")
     # seventeen values do not fit in fourteen registers, so some are kept in stack slots
-    assert(any(i -> any(o -> head(o) == 'MF, ir.explicit(i)), allocated), "some values are in stack slots")
-    assert(length(vector.to_list(table_get(ir.meta(f), 'slots, none))) > 0, "the function has stack slots")
+    assert(list.any(i -> list.any(o -> head(o) == 'MF, ir.explicit(i)), allocated), "some values are in stack slots")
+    assert(length(vector.to_list(table.get(ir.meta(f), 'slots, none))) > 0, "the function has stack slots")
 }
 
 }
