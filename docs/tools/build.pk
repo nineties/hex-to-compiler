@@ -1,0 +1,911 @@
+# build.pk: writes docs/ from the page sources in src/, the examples and the source files.
+# Copyright (C) 2026 nineties
+#
+# usage (in the root of the repository): ./planck0 docs/tools/build.pk
+#
+# src/ has the pieces of the pages: src/ja for Japanese and src/en for English. The Japanese pages
+# are written to docs/ja/ and the English pages to docs/en/. The first line of a piece is
+# <!--title TITLE-->. These marks in a piece are replaced:
+#   <!--ex NAME-->     examples/NAME.pk and examples/NAME.out, as the code and its output
+#   <!--src NAME-->    only examples/NAME.pk
+#   <!--out NAME-->    only examples/NAME.out
+#   <!--text NAME-->   examples/NAME.txt, as code that is not planck
+#   <!--bits ... -->   a diagram of 32-bit words as an HTML table. A line is one word,
+#                      "label | field text/width | ...", and the widths of a line must add up to 32
+#   <!--diagram-->     the diagram of the stages (inline SVG, a wide one and a narrow one)
+#   <!--file F A-->    an excerpt of the source F. A is the start of a line, and the excerpt is the item
+#                      that begins at the line (for a line at the left edge, up to the blank line before
+#                      the next line at the left edge).
+#                      <!--file F A .. B--> is from the line A to the line before B,
+#                      <!--file F A ..--> is from the line A to the end, and <!--file F--> is the whole file
+#   [[F A]]            a link to the item A of the source F ([[F A .. B]] is the same).
+#                      A and B must each match exactly one line, or the build stops
+#                      (write fun f, not (fun f, which starts with a parenthesis)
+# The code of planck is written as HTML with spans of the classes by highlight.html (planck/lib/highlight.pk).
+# docs/index.html is the entrance that chooses a language, and the pages at the old URLs such as docs/tutorial/
+# only move to docs/ja/.
+
+use("base")
+use("list")
+use("string")
+use("table")
+use("vector")
+use("highlight")
+
+SRC := "docs/tools/src"
+EX := "docs/tools/examples"
+OUT := "docs"
+REPO := "https://github.com/nineties/hex-to-compiler"
+SITE := "hex-to-compiler project"
+
+# === Text ===
+
+# the character classes of the bytes
+is_word(c) := string.is_alnum(c) or c == 95 or c >= 128
+is_path(c) := is_word(c) or c == 46 or c == 47 or c == 45
+is_blank(c) := c == 32 or c == 9 or c == 10 or c == 13 or c == 11 or c == 12
+
+starts_at(s, i, pat) := {
+    m := strlen(pat)
+    ok := i >= 0 and i + m <= strlen(s)
+    k := 0
+    while (ok and k < m) {
+        if (ord(s, i + k) != ord(pat, k)) ok = false
+        k = k + 1
+    }
+    ok
+}
+
+# str_find(s, pat, from) is the first position >= from where pat starts, or -1
+str_find(s, pat, from) := {
+    n := strlen(s)
+    m := strlen(pat)
+    c0 := ord(pat, 0)
+    i := from
+    r := -1
+    while (r < 0 and i + m <= n) {
+        if (ord(s, i) == c0 and starts_at(s, i, pat)) r = i
+        i = i + 1
+    }
+    r
+}
+
+# the position after the bytes of s from i that are accepted by ok
+run_end(s, i, ok) := {
+    n := strlen(s)
+    while (i < n and ok(ord(s, i))) i = i + 1
+    i
+}
+
+# the first position of s that is not blank (strlen(s) for a blank string)
+lead(s) := run_end(s, 0, is_blank)
+
+strip(s) := {
+    i := lead(s)
+    j := strlen(s)
+    while (j > i and is_blank(ord(s, j - 1))) j = j - 1
+    substr(s, i, j)
+}
+
+# rstrip_nl("a\n\n") is "a"
+rstrip_nl(s) := {
+    j := strlen(s)
+    while (j > 0 and ord(s, j - 1) == 10) j = j - 1
+    substr(s, 0, j)
+}
+
+# the number of characters of the UTF-8 string s
+char_count(s) := {
+    n := 0
+    i := 0
+    while (i < strlen(s)) {
+        c := ord(s, i)
+        if (c < 128 or c >= 192) n = n + 1
+        i = i + 1
+    }
+    n
+}
+
+replace_lit(s, pat, rep) := {
+    b := strbuf.new()
+    pos := 0
+    i := str_find(s, pat, 0)
+    while (i >= 0) {
+        strbuf.add(b, substr(s, pos, i))
+        strbuf.add(b, rep)
+        pos = i + strlen(pat)
+        i = str_find(s, pat, pos)
+    }
+    if (pos == 0) s else {
+        strbuf.add(b, substr(s, pos, strlen(s)))
+        strbuf.str(b)
+    }
+}
+
+html_escape(s) := {
+    n := strlen(s)
+    b := strbuf.new()
+    start := 0
+    i := 0
+    while (i < n) {
+        c := ord(s, i)
+        r := if (c == 38) "&amp;" else if (c == 60) "&lt;" else if (c == 62) "&gt;"
+             else if (c == 34) "&quot;" else if (c == 39) "&#x27;" else none
+        if (r != none) {
+            strbuf.add(b, substr(s, start, i))
+            strbuf.add(b, r)
+            start = i + 1
+        }
+        i = i + 1
+    }
+    if (start == 0) s else {
+        strbuf.add(b, substr(s, start, n))
+        strbuf.str(b)
+    }
+}
+
+# the lines of s without the newlines, as a vector
+split_lines(s) := {
+    v := vector.new()
+    n := strlen(s)
+    start := 0
+    i := 0
+    while (i < n) {
+        if (ord(s, i) == 10) {
+            vector.push(v, substr(s, start, i))
+            start = i + 1
+        }
+        i = i + 1
+    }
+    if (start < n) vector.push(v, substr(s, start, n))
+    v
+}
+
+# the lines from a to b - 1 of the vector ls, joined by newlines
+join_lines(ls, a, b) := {
+    bf := strbuf.new()
+    i := a
+    while (i < b) {
+        if (i > a) strbuf.add(bf, "\n")
+        strbuf.add(bf, ls[i])
+        i = i + 1
+    }
+    strbuf.str(bf)
+}
+
+# scan(s, prefix, f) replaces the texts that start with prefix: f(s, i) is none, or (the end of the match, the new text)
+scan(s, prefix, f) := {
+    b := strbuf.new()
+    pos := 0
+    i := str_find(s, prefix, 0)
+    while (i >= 0) {
+        m := f(s, i)
+        if (m == none) i = str_find(s, prefix, i + 1)
+        else {
+            strbuf.add(b, substr(s, pos, i))
+            strbuf.add(b, arg(m, 1))
+            pos = arg(m, 0)
+            i = str_find(s, prefix, pos)
+        }
+    }
+    strbuf.add(b, substr(s, pos, strlen(s)))
+    strbuf.str(b)
+}
+
+# === Reading files ===
+
+read_text(path) := {
+    t := try_read_file(path)
+    if (t == none) panic(f"missing {path}")
+    t
+}
+
+used_examples := table.new()
+
+ex_file(name, ext) := {
+    table.set(used_examples, name, true)
+    read_text(f"{EX}/{name}.{ext}")
+}
+
+source_lines := table.new()
+
+# the lines of a source file of the repository
+lines_of(f) := {
+    ls := table.get(source_lines, f, none)
+    if (ls == none) {
+        ls = split_lines(read_text(f))
+        table.set(source_lines, f, ls)
+    }
+    ls
+}
+
+# === Texts of the pages ===
+
+SECTIONS_JA := [
+    ("tutorial", "チュートリアル", [
+        ("index", "前提と実行"),
+        ("1", "1. 式・束縛・関数"),
+        ("2", "2. 値と M式"),
+        ("3", "3. パターンと融合"),
+        ("4", "4. ライブラリ"),
+        ("5", "5. 代数的エフェクト"),
+        ("6", "6. クオートと評価器"),
+        ("7", "7. 文法の拡張"),
+        ("8", "8. レコード・局所関数・脱出"),
+        ("9", "9. 変数の範囲"),
+        ("10", "10. 添字と置き換え")]),
+    ("reference", "リファレンス", [
+        ("index", "目次"),
+        ("syntax", "構文"),
+        ("values", "値・パターン・M式"),
+        ("grammar", "文法の宣言"),
+        ("builtins", "組み込み関数"),
+        ("library", "ライブラリ"),
+        ("vasm", "vasm"),
+        ("native", "native"),
+        ("vasmc", "vasmc")]),
+    ("implementation", "処理系の実装", [
+        ("index", "構成"),
+        ("bootstrap", "機械語から planck0 まで"),
+        ("planck0", "planck0"),
+        ("init", "init.pk と M式"),
+        ("peg", "packrat パーサ"),
+        ("syntax", "構文の定義"),
+        ("vasm", "vasm の検査器"),
+        ("planckvm", "planckvm: 実行モデルと値"),
+        ("planckvm-isa", "planckvm の命令"),
+        ("planckvm-internals", "planckvm の内部仕様")])]
+
+SECTIONS_EN := [
+    ("tutorial", "Tutorial", [
+        ("index", "Prerequisites and running"),
+        ("1", "1. Expressions, bindings, functions"),
+        ("2", "2. Values and M-expressions"),
+        ("3", "3. Patterns and fusion"),
+        ("4", "4. Libraries"),
+        ("5", "5. Algebraic effects"),
+        ("6", "6. Quotation and the evaluator"),
+        ("7", "7. Extending the grammar"),
+        ("8", "8. Records, local functions, escapes"),
+        ("9", "9. Scope of variables"),
+        ("10", "10. Indexing and rewriting")]),
+    ("reference", "Reference", [
+        ("index", "Contents"),
+        ("syntax", "Syntax"),
+        ("values", "Values, patterns, M-expressions"),
+        ("grammar", "Grammar declarations"),
+        ("builtins", "Builtin functions"),
+        ("library", "Libraries"),
+        ("vasm", "vasm"),
+        ("native", "native"),
+        ("vasmc", "vasmc")]),
+    ("implementation", "Implementation", [
+        ("index", "Overview"),
+        ("bootstrap", "From machine code to planck0"),
+        ("planck0", "planck0"),
+        ("init", "init.pk and M-expressions"),
+        ("peg", "The packrat parser"),
+        ("syntax", "Defining the syntax"),
+        ("vasm", "The vasm checker"),
+        ("planckvm", "planckvm: execution model and values"),
+        ("planckvm-isa", "planckvm instructions"),
+        ("planckvm-internals", "planckvm internals")])]
+
+sections(lang) := if (lang == "ja") SECTIONS_JA else SECTIONS_EN
+
+UI_JA := table.new()
+table.set(UI_JA, "sub", "自分自身をブートストラップする処理系")
+table.set(UI_JA, "overview", "概要")
+table.set(UI_JA, "out", "出力")
+table.set(UI_JA, "prev", "前のページ")
+table.set(UI_JA, "next", "次のページ")
+table.set(UI_JA, "toc", "の目次")
+table.set(UI_JA, "switch", "English")
+table.set(UI_JA, "lang", "ja")
+
+UI_EN := table.new()
+table.set(UI_EN, "sub", "A compiler that pulls itself up by its bootstraps.")
+table.set(UI_EN, "overview", "Overview")
+table.set(UI_EN, "out", "Output")
+table.set(UI_EN, "prev", "Previous")
+table.set(UI_EN, "next", "Next")
+table.set(UI_EN, "toc", " contents")
+table.set(UI_EN, "switch", "日本語")
+table.set(UI_EN, "lang", "en")
+
+# the language of the page being written
+LANG := "ja"
+
+ui(key) := (if (LANG == "ja") UI_JA else UI_EN)[key]
+
+# === The diagram of the stages ===
+
+# a node: name, description in Japanese, description in English, the key of the language it is written in
+D_NODES := table.new()
+table.set(D_NODES, "xxd", ("pforth.xxd", "16進ダンプ", "Hex dump", "mc"))
+table.set(D_NODES, "pforth", ("pforth", "1文字の語だけの Forth", "Forth with one-letter words", "mc"))
+table.set(D_NODES, "plisp", ("plisp", "Forth の上の Lisp", "A Lisp on top of Forth", "fs"))
+table.set(D_NODES, "asm", ("asm・sasm", "アセンブラと C 風の言語", "Assembler and C-like language", "lisp"))
+table.set(D_NODES, "plisp2", ("plisp2", "sasm で書き直した Lisp", "plisp rewritten in sasm", "sasm"))
+table.set(D_NODES, "planck0", ("planck0", "planck の最初の処理系", "The first planck implementation", "sasm"))
+table.set(D_NODES, "planck", ("planck", "M式の上に載せた言語", "A language on M-expressions", "pk"))
+
+D_LANG := table.new()
+table.set(D_LANG, "mc", ("機械語", "machine code"))
+table.set(D_LANG, "fs", ("Forth", "Forth"))
+table.set(D_LANG, "lisp", ("plisp", "plisp"))
+table.set(D_LANG, "sasm", ("sasm", "sasm"))
+table.set(D_LANG, "pk", ("M式・planck", "M-expr, planck"))
+
+# the edges: from, to
+D_EDGES := [("xxd", "pforth"), ("pforth", "plisp"), ("plisp", "asm"), ("asm", "plisp2"), ("plisp2", "planck0"), ("planck0", "planck")]
+
+# the stages: the nodes, the title in Japanese, the title in English
+D_STAGES := [
+    (["xxd", "pforth", "plisp"], "ステージ1　機械語 → Forth → Lisp", "Stage 1: machine code to Lisp"),
+    (["asm", "plisp2"], "ステージ2　機械語を出す道具", "Stage 2: machine code tools"),
+    (["planck0", "planck"], "ステージ3　言語処理系", "Stage 3: the language")]
+
+# the width of the text t in the font size 12, in hundredths: a character of the CJK range is as wide as the size (1200), the others are
+# 0.58 of it (696)
+text_width100(t) := {
+    acc := 0
+    n := strlen(t)
+    i := 0
+    while (i < n) {
+        c := ord(t, i)
+        cp := if (c < 128) c
+              else if (c < 224) bit_or(bit_shl(bit_and(c, 31), 6), bit_and(ord(t, i + 1), 63))
+              else if (c < 240) bit_or(bit_or(bit_shl(bit_and(c, 15), 12), bit_shl(bit_and(ord(t, i + 1), 63), 6)), bit_and(ord(t, i + 2), 63))
+              else 65536
+        acc = acc + (if (cp > 11904) 1200 else 696)
+        i = i + (if (c < 128) 1 else if (c < 224) 2 else if (c < 240) 3 else 4)
+    }
+    acc
+}
+
+# v / 2 rounded to an integer, a half to the even one (v is not negative)
+half_even(v) := if (v % 2 == 0) v / 2 else if ((v / 2) % 2 == 0) v / 2 else v / 2 + 1
+
+# v / 100 rounded to an integer, a half to the even one (v is not negative)
+round100(v) := {
+    r := v / 100
+    d := v % 100
+    if (d > 50) r + 1 else if (d < 50) r else if (r % 2 == 0) r else r + 1
+}
+
+svg_node(lang, key, x, y, w, h) := {
+    info := D_NODES[key]
+    name := arg(info, 0)
+    desc := if (lang == "ja") arg(info, 1) else arg(info, 2)
+    lk := D_LANG[arg(info, 3)]
+    lt := if (lang == "ja") arg(lk, 0) else arg(lk, 1)
+    cw := text_width100(lt) + 1600
+    shown := if (lang == "ja") name else replace_lit(name, "・", " / ")
+    string.join("", [
+        f"<g class=\"dg-n dg-{arg(info, 3)}\"><rect x=\"{x}\" y=\"{y}\" width=\"{w}\" height=\"{h}\" rx=\"8\"/>",
+        f"<text class=\"dg-name\" x=\"{x + 12}\" y=\"{y + 25}\">{html_escape(shown)}</text>",
+        f"<rect class=\"dg-chip\" x=\"{round100((x + w) * 100 - cw - 1000)}\" y=\"{y + 9}\" width=\"{round100(cw)}\" height=\"20\" rx=\"10\"/>",
+        f"<text class=\"dg-chip-t\" x=\"{round100((x + w) * 100 - cw / 2 - 1000)}\" y=\"{y + 23}.5\" text-anchor=\"middle\">{html_escape(lt)}</text>",
+        f"<text class=\"dg-desc\" x=\"{x + 12}\" y=\"{y + 47}\">{html_escape(desc)}</text></g>"])
+}
+
+svg_edge(a, b, pos, kind) := {
+    pa := pos[a]
+    pb := pos[b]
+    ax := arg(pa, 0)
+    ay := arg(pa, 1)
+    aw := arg(pa, 2)
+    ah := arg(pa, 3)
+    bx := arg(pb, 0)
+    by := arg(pb, 1)
+    mk := f"url(#dg-ah-{kind})"
+    if (ax == bx) {
+        x := ax + 26
+        y1 := ay + ah
+        y2 := by
+        gy1 := y1
+        gy2 := y2
+        if ((a == "plisp" and b == "asm") or (a == "plisp2" and b == "planck0")) {
+            # in the narrow diagram an arrow between the stages runs from the bottom of the box above to the top of the box below
+            gy1 = y1 + 12
+            gy2 = y2 - 38
+            y2 = gy2 + 3
+        }
+        ty := half_even(gy1 + gy2 + 8)
+        f"<path class=\"dg-a\" d=\"M{x} {y1 + 3} V{y2 - 5}\" marker-end=\"{mk}\"/><text class=\"dg-lab\" x=\"{x + 12}\" y=\"{ty}\"></text>"
+    } else {
+        y := ay + ah / 2
+        x1 := ax + aw
+        x2 := bx
+        f"<path class=\"dg-a\" d=\"M{x1 + 3} {y}.0 H{x2 - 5}\" marker-end=\"{mk}\"/><text class=\"dg-lab\" x=\"{half_even(x1 + x2)}\" y=\"{y + 16}\" text-anchor=\"middle\"></text>"
+    }
+}
+
+svg(lang, kind) := {
+    nh := 62
+    pos := table.new()
+    order := vector.new()
+    panels := vector.new()
+    place(k, x, y, w) := {
+        table.set(pos, k, (x, y, w, nh))
+        vector.push(order, k)
+    }
+    title_of(st) := if (lang == "ja") arg(st, 1) else arg(st, 2)
+    W := 0
+    H := 0
+    if (kind == "wide") {
+        nw := 238
+        colgap := 126
+        pad := 12
+        step := nw + 2 * pad + colgap
+        cols := [8 + pad, 8 + pad + step, 8 + pad + 2 * step]
+        W = 8 + pad + 2 * step + nw + pad + 8
+        rowy(r) := 44 + r * (nh + 46)
+        rows := [[0, 1, 2], [2, 3], [3, 4]]
+        st_i := 0
+        for (st in D_STAGES) {
+            c := list.nth(cols, st_i)
+            rs := list.nth(rows, st_i)
+            for ((k, r) in list.zip(arg(st, 0), rs)) place(k, c, rowy(r), nw)
+            top := rowy(list.nth(rs, 0)) - 38
+            bot := rowy(list.last(rs)) + nh + pad
+            vector.push(panels, (c - pad, top, nw + 2 * pad, bot - top, title_of(st)))
+            st_i = st_i + 1
+        }
+        H = rowy(4) + nh + pad + 8
+    } else {
+        nw := 296
+        pad := 12
+        W = 360
+        y := 44
+        for (st in D_STAGES) {
+            top := y - 38
+            for (k in arg(st, 0)) {
+                place(k, 32, y, nw)
+                y = y + nh + 42
+            }
+            y = y - 42
+            bot := y + pad
+            vector.push(panels, (8, top, W - 16, bot - top, title_of(st)))
+            y = bot + 68
+        }
+        H = y - 68 + 8
+    }
+    label := if (lang == "ja") "ブートストラップのステージの図" else "Diagram of the bootstrap stages"
+    b := strbuf.new()
+    add(s) := {
+        strbuf.add(b, s)
+        strbuf.add(b, "\n")
+    }
+    add(f"<svg class=\"dg dg-{kind}\" viewBox=\"0 0 {W} {H}\" role=\"img\" aria-label=\"{label}\" xmlns=\"http://www.w3.org/2000/svg\">")
+    add(f"<defs><marker id=\"dg-ah-{kind}\" markerWidth=\"8\" markerHeight=\"8\" refX=\"6\" refY=\"4\" orient=\"auto\"><path d=\"M0 0 L8 4 L0 8 z\" class=\"dg-ahp\"/></marker></defs>")
+    i := 0
+    while (i < vector.len(panels)) {
+        p := panels[i]
+        add(f"<rect class=\"dg-panel\" x=\"{arg(p, 0)}\" y=\"{arg(p, 1)}\" width=\"{arg(p, 2)}\" height=\"{arg(p, 3)}\" rx=\"12\"/>")
+        add(f"<text class=\"dg-title\" x=\"{arg(p, 0) + 14}\" y=\"{arg(p, 1) + 24}\">{html_escape(arg(p, 4))}</text>")
+        i = i + 1
+    }
+    for (e in D_EDGES) add(svg_edge(arg(e, 0), arg(e, 1), pos, kind))
+    i := 0
+    while (i < vector.len(order)) {
+        k := order[i]
+        p := pos[k]
+        add(svg_node(lang, k, arg(p, 0), arg(p, 1), arg(p, 2), arg(p, 3)))
+        i = i + 1
+    }
+    strbuf.add(b, "</svg>")
+    strbuf.str(b)
+}
+
+diagram(lang) := string.join("\n", ["<div class=\"dg-wrap\">", svg(lang, "wide"), svg(lang, "narrow"), "</div>"])
+
+# === Bit diagram ===
+
+# the last position of the byte c in s
+last_index(s, c) := {
+    i := strlen(s) - 1
+    while (i >= 0 and ord(s, i) != c) i = i - 1
+    i
+}
+
+# bits(spec): a line of spec is a word. The label is above the word, and a field is a cell of a table with colspan of its width
+bits(spec) := {
+    h := vector.new()
+    vector.push(h, "<table class=\"bits\">")
+    vector.push(h, f"<colgroup>{string.str_repeat("<col>", 32)}</colgroup>")
+    ruler := strbuf.new()
+    n := 31
+    while (n >= 0) {
+        strbuf.add(ruler, f"<td>{if (n / 10 == 0) "" else n / 10}<br>{n % 10}</td>")
+        n = n - 1
+    }
+    vector.push(h, f"<tr class=\"ruler\">{strbuf.str(ruler)}</tr>")
+    lines := split_lines(strip(spec))
+    li := 0
+    while (li < vector.len(lines)) {
+        line := lines[li]
+        parts := list.map(strip, string.split(line, "|"))
+        label := list.nth(parts, 0)
+        total := 0
+        cells := strbuf.new()
+        for (fld in list.drop(parts, 1)) {
+            sl := last_index(fld, 47)
+            text := strip(substr(fld, 0, sl))
+            w := string.str_to_int(strip(substr(fld, sl + 1, strlen(fld))))
+            total = total + w
+            cls := if (w <= 2 and char_count(text) > 1) " class=\"v\"" else ""
+            strbuf.add(cells, f"<td colspan=\"{w}\"{cls}>{html_escape(text)}</td>")
+        }
+        if (total != 32) panic(f"bits: width {total} != 32: {line}")
+        if (label != "") vector.push(h, f"<tr class=\"lab\"><td colspan=\"32\">{html_escape(label)}</td></tr>")
+        vector.push(h, f"<tr class=\"fld\">{strbuf.str(cells)}</tr>")
+        li = li + 1
+    }
+    vector.push(h, "</table>")
+    string.join("\n", vector.to_list(h))
+}
+
+# === Code and output in the pages ===
+
+hl_cache := table.new()
+
+# the HTML of planck code. The same code is highlighted once
+highlighted(text) := {
+    h := table.get(hl_cache, text, none)
+    if (h == none) {
+        h = highlight.html(text)
+        table.set(hl_cache, text, h)
+    }
+    h
+}
+
+code_block(name) := f"<p class=\"file\">{name}.pk</p>\n<pre class=\"pk\">{highlighted(rstrip_nl(ex_file(name, "pk")))}</pre>"
+
+out_block(name) := f"<p class=\"label\">{ui("out")}</p>\n<pre class=\"out\">{html_escape(rstrip_nl(ex_file(name, "out")))}</pre>"
+
+# === Excerpts of the source files ===
+
+blank_line(l) := lead(l) == strlen(l)
+
+# the number of the line of ls that starts with anchor (after the blanks, and after a ( unless anchor starts with it).
+# It stops unless exactly one line does
+find_line(ls, anchor, ref) := {
+    al := strlen(anchor)
+    paren := ord(anchor, 0) == 40
+    last_word := is_word(ord(anchor, al - 1))
+    count := 0
+    first := -1
+    i := 0
+    while (i < vector.len(ls)) {
+        l := ls[i]
+        o := lead(l)
+        ok := starts_at(l, o, anchor)
+        if (not ok and ord(l, o) == 40 and not paren) {
+            o = o + 1
+            ok = starts_at(l, o, anchor)
+        }
+        if (ok and not (last_word and is_word(ord(l, o + al)))) {
+            if (count == 0) first = i
+            count = count + 1
+        }
+        i = i + 1
+    }
+    if (count != 1) panic(f"{ref}: the anchor matches {count} lines (it must match one)")
+    first
+}
+
+# end, moved up to after the last line that is not blank
+trim_end(ls, end) := {
+    while (end > 0 and blank_line(ls[end - 1])) end = end - 1
+    end
+}
+
+# the number of the last line of the item that starts at the line i. An item at the left edge goes up to the blank line
+# before the next line at the left edge. An indented item goes up to the line before the next line of the same indent
+# (a line of only a closing ) } ] is in it)
+item_end(ls, i) := {
+    n := vector.len(ls)
+    s := lead(ls[i])
+    j := i + 1
+    if (s > 0) {
+        while (j < n and (blank_line(ls[j]) or lead(ls[j]) > s)) j = j + 1
+        if (j < n) {
+            c := ord(ls[j], lead(ls[j]))
+            if (c == 41 or c == 125 or c == 93) j = j + 1
+        }
+    } else {
+        done := false
+        while (not done and j < n) {
+            if (blank_line(ls[j])) {
+                k := j
+                while (k < n and blank_line(ls[k])) k = k + 1
+                if (k >= n or lead(ls[k]) == 0) done = true else j = k
+            } else j = j + 1
+        }
+    }
+    trim_end(ls, j)
+}
+
+# the range of an excerpt, (the first line, the last line) counted from 1. spec is A (the item at the line A),
+# A .. B (from the line A to the line before B), A .. (from A to the end) or empty (the whole file)
+span(path, spec, ref) := {
+    ls := lines_of(path)
+    n := vector.len(ls)
+    spec = strip(spec)
+    r := none
+    if (spec == "") r = (1, trim_end(ls, n))
+    else {
+        d := str_find(spec, " ..", 0)
+        a_s := if (d < 0) spec else substr(spec, 0, d)
+        i := find_line(ls, strip(a_s), ref)
+        if (i > 0 and lead(ls[i]) > 0 and (strip(ls[i - 1]) == "Def{" or strip(ls[i - 1]) == "Set{")) i = i - 1
+        if (d < 0) r = (i + 1, item_end(ls, i))
+        else {
+            b_s := strip(substr(spec, d + 3, strlen(spec)))
+            if (b_s == "") r = (i + 1, trim_end(ls, n))
+            else {
+                k := find_line(ls, b_s, ref)
+                if (k <= i) panic(f"{ref}: the end anchor is before the start anchor")
+                r = (i + 1, trim_end(ls, k))
+            }
+        }
+    }
+    r
+}
+
+# the name of an excerpt that is shown: the anchor without the marks of the code around it
+label_of(path, spec) := {
+    d := str_find(spec, " ..", 0)
+    name := strip(if (d < 0) spec else substr(spec, 0, d))
+    n := strlen(name)
+    i := 0
+    go := true
+    while (go and i < n) {
+        c := ord(name, i)
+        if (c == 59 or c == 35 or c == 92 or c == 34 or c == 40) i = run_end(name, i + 1, is_blank)
+        else if (c == 61) i = run_end(name, run_end(name, i, c -> c == 61), is_blank)
+        else go = false
+    }
+    j := n
+    while (j > i and (is_blank(ord(name, j - 1)) or ord(name, j - 1) == 34 or ord(name, j - 1) == 61
+                      or ord(name, j - 1) == 41 or ord(name, j - 1) == 58)) j = j - 1
+    name = substr(name, i, j)
+    html_escape(if (name != "") f"{path}: {name}" else path)
+}
+
+line_anchor(a, b) := if (b > a) f"#L{a}-L{b}" else f"#L{a}"
+
+excerpt(path, spec, ref) := {
+    ab := span(path, spec, ref)
+    a := arg(ab, 0)
+    b := arg(ab, 1)
+    text := join_lines(lines_of(path), a - 1, b)
+    pk := string.ends_with(path, ".pk")
+    body := if (pk) highlighted(text) else html_escape(text)
+    cls := if (pk) " class=\"pk\"" else ""
+    f"<div class=\"example\">\n<p class=\"file\"><a href=\"{REPO}/blob/main/{path}{line_anchor(a, b)}\">{label_of(path, spec)}</a></p>\n<pre{cls}>{body}</pre>\n</div>"
+}
+
+line_link(path, spec, ref) := {
+    ab := span(path, spec, ref)
+    f"<a href=\"{REPO}/blob/main/{path}{line_anchor(arg(ab, 0), arg(ab, 1))}\"><code>{label_of(path, spec)}</code></a>"
+}
+
+# === Expanding the marks of a piece ===
+
+# the replacement of <!--KIND NAME--> by render(NAME)
+by_name(body, kind, render) := {
+    prefix := f"<!--{kind} "
+    scan(body, prefix, (s, i) -> {
+        j := i + strlen(prefix)
+        e := run_end(s, j, is_word)
+        if (e > j and starts_at(s, e, "-->")) (e + 3, render(substr(s, j, e))) else none
+    })
+}
+
+# <!--file F A--> where F is of the letters, digits and _ . / - and A is a text of one line
+expand_file(body) := scan(body, "<!--file ", (s, i) -> {
+    p0 := i + 9
+    t := str_find(s, "-->", p0 + 1)
+    e := run_end(s, p0, is_path)
+    nl := str_find(s, "\n", p0)
+    if (t < 0 or e == p0 or (nl >= 0 and nl < t)) none
+    else {
+        k := if (e < t) e else t
+        (t + 3, excerpt(substr(s, p0, k), substr(s, k, t), substr(s, i, t + 3)))
+    }
+})
+
+# [[F A]] where A is a text of one line without ]]
+expand_link(body) := scan(body, "[[", (s, i) -> {
+    p0 := i + 2
+    e := run_end(s, p0, is_path)
+    if (e == p0 or ord(s, e) != 32) none
+    else {
+        t := str_find(s, "]]", e + 1)
+        nl := str_find(s, "\n", e + 1)
+        if (t <= e + 1 or (nl >= 0 and nl < t)) none
+        else (t + 2, line_link(substr(s, p0, e), substr(s, e + 1, t), substr(s, i, t + 2)))
+    }
+})
+
+expand(body) := {
+    body = if (str_find(body, "<!--diagram-->", 0) >= 0) replace_lit(body, "<!--diagram-->", diagram(LANG)) else body
+    body = scan(body, "<!--bits\n", (s, i) -> {
+        j := i + 9
+        e := str_find(s, "-->", j)
+        if (e < 0) none else (e + 3, bits(substr(s, j, e)))
+    })
+    body = by_name(body, "ex", name -> f"<div class=\"example\">\n{code_block(name)}\n{out_block(name)}\n</div>")
+    body = by_name(body, "src", name -> f"<div class=\"example\">\n{code_block(name)}\n</div>")
+    body = by_name(body, "out", name -> f"<div class=\"example\">\n{out_block(name)}\n</div>")
+    body = by_name(body, "text", name -> f"<pre>{html_escape(rstrip_nl(ex_file(name, "txt")))}</pre>")
+    body = expand_file(body)
+    body = expand_link(body)
+    replace_lit(body, "@REPO@", REPO)
+}
+
+# === Pages ===
+
+href(frm_sec, to_sec, to_page) := {
+    up := if (frm_sec != none) "../" else ""
+    if (to_sec == none) f"{up}index.html" else f"{up}{to_sec}/{to_page}.html"
+}
+
+here_class(on) := if (on) " class=\"here\"" else ""
+
+nav(cur_sec) := {
+    items := vector.new()
+    vector.push(items, f"<a{here_class(cur_sec == none)} href=\"{href(cur_sec, none, none)}\">{ui("overview")}</a>")
+    for (s in sections(LANG)) {
+        vector.push(items, f"<a{here_class(arg(s, 0) == cur_sec)} href=\"{href(cur_sec, arg(s, 0), "index")}\">{arg(s, 1)}</a>")
+    }
+    string.join("\n", vector.to_list(items))
+}
+
+# the path to the same page in the other language
+other_lang_href(cur_sec, cur_page) := {
+    path := if (cur_sec != none) f"{cur_sec}/{cur_page}.html" else "index.html"
+    other_code := if (LANG == "ja") "en" else "ja"
+    _strcat(_strcat(if (cur_sec != none) "../" else "", f"../{other_code}/"), path)
+}
+
+page(cur_sec, cur_page, title, body, toc_pages, sec_label) := {
+    toc := ""
+    pager := ""
+    if (cur_sec != none) {
+        lis := list.map(p -> f"<li><a{here_class(arg(p, 0) == cur_page)} href=\"{arg(p, 0)}.html\">{arg(p, 1)}</a></li>", toc_pages)
+        toc = string.join("\n", [
+            f"<nav class=\"toc\" aria-label=\"{sec_label}{ui("toc")}\"><details open><summary>{sec_label}{ui("toc")}</summary>",
+            f"<h2>{sec_label}</h2>",
+            "<ol>",
+            string.join("\n", lis),
+            "</ol></details></nav>"])
+        idx := list.index_of(cur_page, list.map(p -> arg(p, 0), toc_pages))
+        prev := if (idx > 0) list.nth(toc_pages, idx - 1) else none
+        nxt := if (idx + 1 < list.length(toc_pages)) list.nth(toc_pages, idx + 1) else none
+        a := if (prev != none) f"<a class=\"prev\" href=\"{arg(prev, 0)}.html\"><small>{ui("prev")}</small>{arg(prev, 1)}</a>" else ""
+        b := if (nxt != none) f"<a class=\"next\" href=\"{arg(nxt, 0)}.html\"><small>{ui("next")}</small>{arg(nxt, 1)}</a>" else ""
+        pager = f"<nav class=\"pager\">{a}{b}</nav>"
+    }
+    up := if (cur_sec != none) "../../" else "../"
+    other := other_lang_href(cur_sec, cur_page)
+    other_code := if (LANG == "ja") "en" else "ja"
+    full_title := if (title != SITE) f"{title} | {SITE}" else title
+    body = replace_lit(body, "@UP@", up)
+    string.join("\n", [
+        "<!DOCTYPE html>",
+        f"<html lang=\"{ui("lang")}\">",
+        "<head>",
+        "<meta charset=\"utf-8\">",
+        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">",
+        f"<title>{full_title}</title>",
+        f"<link rel=\"alternate\" hreflang=\"{other_code}\" href=\"{other}\">",
+        f"<link rel=\"stylesheet\" href=\"{up}assets/style.css\">",
+        "</head>",
+        "<body>",
+        "<header class=\"site-header\"><div class=\"inner\">",
+        f"<a class=\"logo\" href=\"{href(cur_sec, none, none)}\"><span class=\"brand\"><b>hex-to-compiler <i>project</i></b><small>{ui("sub")}</small></span></a>",
+        "<nav class=\"site-nav\">",
+        nav(cur_sec),
+        f"<a href=\"{REPO}\">GitHub</a>",
+        f"<a class=\"lang-switch\" lang=\"{other_code}\" hreflang=\"{other_code}\" href=\"{other}\">{ui("switch")}</a>",
+        "</nav>",
+        "</div></header>",
+        f"<div class=\"layout{if (cur_sec != none) "" else " single"}\">",
+        toc,
+        "<main>",
+        body,
+        pager,
+        "</main>",
+        "</div>",
+        f"<footer><div class=\"inner\"><a href=\"{REPO}\">github.com/nineties/hex-to-compiler</a></div></footer>",
+        f"<script src=\"{up}assets/page.js\"></script>",
+        "</body>",
+        "</html>",
+        ""])
+}
+
+# a piece is <!--title TITLE--> on the first line and then the body. The result is (TITLE, the body)
+read_src(path) := {
+    s := read_text(path)
+    nl := str_find(s, "\n", 0)
+    if (nl < 0 or not starts_at(s, 0, "<!--title ") or not starts_at(s, nl - 3, "-->") or nl < 13) panic(f"no title in {path}")
+    (substr(s, 10, nl - 3), substr(s, nl + 1, strlen(s)))
+}
+
+# the pages of a language. The number of the pages is returned
+build_lang(lang) := {
+    LANG = lang
+    src := f"{SRC}/{lang}"
+    out := f"{OUT}/{lang}"
+    n := 1
+    tb := read_src(f"{src}/index.html")
+    write_file(f"{out}/index.html", page(none, none, arg(tb, 0), expand(arg(tb, 1)), [], ""))
+    for (s in sections(lang)) {
+        sec := arg(s, 0)
+        for (p in arg(s, 2)) {
+            tb = read_src(f"{src}/{sec}/{arg(p, 0)}.html")
+            write_file(f"{out}/{sec}/{arg(p, 0)}.html", page(sec, arg(p, 0), arg(tb, 0), expand(arg(tb, 1)), arg(s, 2), arg(s, 1)))
+            n = n + 1
+        }
+    }
+    n
+}
+
+# docs/index.html: the entrance that chooses a language
+entrance() := string.join("\n", [
+    "<!DOCTYPE html>",
+    "<html lang=\"en\">",
+    "<head>",
+    "<meta charset=\"utf-8\">",
+    "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">",
+    f"<title>{SITE}</title>",
+    "<link rel=\"stylesheet\" href=\"assets/style.css\">",
+    "</head>",
+    "<body>",
+    "<div class=\"layout single\">",
+    "<main>",
+    f"<h1>{SITE}</h1>",
+    "<p><a href=\"ja/index.html\">日本語</a></p>",
+    "<p><a href=\"en/index.html\">English</a></p>",
+    "</main>",
+    "</div>",
+    "</body>",
+    "</html>",
+    ""])
+
+# the page that shows where the page moved
+moved(to) := string.join("\n", [
+    "<!DOCTYPE html>",
+    "<html lang=\"ja\">",
+    "<head>",
+    "<meta charset=\"utf-8\">",
+    "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">",
+    f"<title>{SITE}</title>",
+    f"<meta http-equiv=\"refresh\" content=\"0; url={to}\">",
+    "<link rel=\"stylesheet\" href=\"../assets/style.css\">",
+    "</head>",
+    "<body>",
+    "<div class=\"layout single\">",
+    "<main>",
+    f"<p><a href=\"{to}\">{to}</a></p>",
+    "</main>",
+    "</div>",
+    "</body>",
+    "</html>",
+    ""])
+
+build_entrance() := {
+    write_file(f"{OUT}/index.html", entrance())
+    for (s in SECTIONS_JA) {
+        for (p in arg(s, 2)) write_file(f"{OUT}/{arg(s, 0)}/{arg(p, 0)}.html", moved(f"../ja/{arg(s, 0)}/{arg(p, 0)}.html"))
+    }
+}
+
+build_entrance()
+ja_pages := build_lang("ja")
+en_pages := build_lang("en")
+println(f"built pages: ja {ja_pages}, en {en_pages}, examples used: {table.len(used_examples)}, highlighted: {table.len(hl_cache)}")
