@@ -1672,6 +1672,9 @@ _macro := e -> e
 " the macros that the module being rewritten exports, the last one first "
 _macro_exports := Nil{}
 _eval_expanded := eval
+" a rewriting that takes more than _macro_limit steps in one eval stops with an error "
+_macro_limit := 1000
+_macro_steps := 0
 
 " _macro_on is set when a macro is read, so that nothing is rewritten before the first macro "
 peg_macro(p, e) := {
@@ -1743,6 +1746,8 @@ expand_macro = (e, lvl) -> {
     else {
         n := _macro(e)
         while (n != e) {
+            _macro_steps = _macro_steps + 1
+            if (_macro_steps > _macro_limit) perform Error{none, "macro expansion does not end"}
             e = n
             n = _macro(e)
         }
@@ -1751,4 +1756,12 @@ expand_macro = (e, lvl) -> {
 }
 
 " eval rewrites the tree by the macros first. Nothing is rewritten until the first macro is read. "
-eval = e -> _eval_expanded(if (_macro_on) expand_macro(e, 0) else e)
+eval = e -> {
+    if (_macro_on) {
+        saved := _macro_steps
+        _macro_steps = 0
+        x := expand_macro(e, 0)
+        _macro_steps = saved
+        _eval_expanded(x)
+    } else _eval_expanded(e)
+}
