@@ -72,6 +72,7 @@ preprocess: planck0
 test-planck0: planck0
 	./planck0 planck/tests/core.pk
 	./planck0 planck/tests/syntax.pk
+	./planck0 planck/tests/macro.pk
 	./planck0 planck/tests/define.pk
 	./planck0 planck/tests/module.pk
 	./planck0 planck/tests/builtins.pk one "two words"

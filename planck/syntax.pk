@@ -28,6 +28,7 @@ Apply{table_set, Tuple{peg_reserved, "continue", true}}
 Apply{table_set, Tuple{peg_reserved, "fun", true}}
 Apply{table_set, Tuple{peg_reserved, "module", true}}
 Apply{table_set, Tuple{peg_reserved, "export", true}}
+Apply{table_set, Tuple{peg_reserved, "macro", true}}
 
 " identifier: [A-Za-z_][A-Za-z0-9_]* except the peg_reserved words and the f of f\"...\" "
 Def{peg_tok_ident, Lambda{Tuple{p}, Do{
@@ -1608,6 +1609,9 @@ expr ::= syntax_decl
          }
        | x:target "=" !nospace("=") e:expr { `Set{!x, !e} }
        | 'fun f:ident !nospace("(") { `Def{!f, none} }
+       | 'macro p:pattern ":=" e:expr {
+             `Do{Set{_macro_on, true}, Set{_macro, Fusion{!peg_lambda(Tuple{p}, e), _macro}}}
+         }
        | a:postfix nospace("[") i:expr "]" "=" !nospace("=") v:expr { `Apply{_index_set, Tuple{!a, !i, !v}} }
        | union
        | 'record n:ident "(" fs:idents ")" { peg_record(n, fs) }
@@ -1649,3 +1653,56 @@ peg_module(n, rev) := {
     blocks = push(blocks, `Apply{_module, Tuple{Quote{!names}, !names}})
     `Def{!n, Apply{Lambda{Tuple{}, !mexpr('Do, blocks)}, Tuple{}}}
 }
+
+" === Macro === "
+" macro p := e adds the arm p -> e in front of the arms of _macro (the last arm gives the tree itself). "
+" Before eval takes an expression, each part of its tree is rewritten by _macro, from the root down: "
+" a part is rewritten until it no longer changes, then the parts inside the result are rewritten. "
+" A quote is not rewritten, and in a quasi-quote only what is unquoted is rewritten. The patterns "
+" of a function and the names that Def and Set define are not rewritten. "
+_macro_on := false
+_macro := e -> e
+fun expand_macro
+
+" the tree whose arguments from index from on are rewritten at the quasi-quote level lvl "
+expand_macro_args(e, lvl, from) := {
+    n := arity(e)
+    xs := Tuple{}
+    i := 0
+    while (i < n) {
+        a := arg(e, i)
+        xs = push(xs, if (i < from) a else expand_macro(a, lvl))
+        i = i + 1
+    }
+    mexpr(head(e), xs)
+}
+
+expand_macro_sub(e, lvl) := {
+    if (typeof(e) != 'mexpr) e
+    else {
+        h := head(e)
+        if (h == 'QuasiQuote) expand_macro_args(e, lvl + 1, 0)
+        else if (h == 'UnQuote) { if (lvl == 0) e else expand_macro_args(e, lvl - 1, 0) }
+        else if (lvl > 0) expand_macro_args(e, lvl, 0)
+        else if (h == 'Quote) e
+        else if (h == 'Lambda) expand_macro_args(e, 0, 1)
+        else if (h == 'Def or h == 'Set or h == 'Declare) expand_macro_args(e, 0, 1)
+        else expand_macro_args(e, 0, 0)
+    }
+}
+
+expand_macro = (e, lvl) -> {
+    if (lvl != 0) expand_macro_sub(e, lvl)
+    else {
+        n := _macro(e)
+        while (n != e) {
+            e = n
+            n = _macro(e)
+        }
+        expand_macro_sub(e, 0)
+    }
+}
+
+" eval rewrites the tree by the macros first. Nothing is rewritten until the first macro is defined. "
+_eval_expanded := eval
+eval = e -> _eval_expanded(if (_macro_on) expand_macro(e, 0) else e)
