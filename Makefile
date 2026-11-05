@@ -50,7 +50,7 @@ VASM_EXAMPLES := $(wildcard planck/examples/vasm/*.vasm)
 NATIVE_EXAMPLES := $(wildcard planck/examples/native/*.native)
 VASM_TARGETS := x86_64
 BACKEND_EXAMPLES := $(wildcard planck/examples/backend/*.pk)
-PE_EXAMPLES := $(wildcard planck/examples/pe/*.pk)
+PARTIAL_EVAL_EXAMPLES := $(wildcard planck/examples/partial_eval/*.pk)
 
 .PHONY: clean test test-planck0 preprocess
 clean:
@@ -84,7 +84,7 @@ test-planck0: planck0
 	tools/test_preprocess.sh
 	./planck0 planck/tests/vasm.pk
 	./planck0 planck/tests/native.pk
-	./planck0 planck/tests/pe.pk
+	./planck0 planck/tests/partial_eval.pk
 	@for f in $(PLANCK_EXAMPLES); do \
 		./planck0 $$f > tmp-example.out || exit 1; \
 		diff -u $${f%.pk}.out tmp-example.out || exit 1; \
@@ -128,7 +128,7 @@ test-planck0: planck0
 		diff -u $${f%.native}.out tmp-unit.out || exit 1; \
 		echo "$$f: stops"; \
 	done; rm -f tmp-lib.unit tmp-unit.unit tmp-unit.out
-	@for f in $(PE_EXAMPLES); do \
+	@for f in $(PARTIAL_EVAL_EXAMPLES); do \
 		./planck0 $$f tmp-pe > tmp-pe.out || exit 1; \
 		diff -u $${f%.pk}.out tmp-pe.out || exit 1; \
 		./tmp-pe tmp-pe > tmp-pe.run; s=$$?; \
