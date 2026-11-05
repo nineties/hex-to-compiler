@@ -72,35 +72,31 @@ export slot(f, size, align) := {
 }
 
 # === Instructions ===
-op_regs(o, role) := match o {
-    D{r} -> if (role == 'def) [r] else []
-  | ID{r} -> if (role == 'def) [r] else []
-  | U{r} -> if (role == 'use) [r] else []
-  | IU{r} -> if (role == 'use) [r] else []
-  | DU{r} -> [r]
-  | Ds{rs} -> if (role == 'def) rs else []
-  | Us{rs} -> if (role == 'use) rs else []
-  | M{b, _} -> op_regs(b, role)
-  | MX{b, x, _, _} -> append(op_regs(b, role), op_regs(x, role))
-  | _ -> []
-}
+op_regs(D{r}, role) := if (role == 'def) [r] else []
+op_regs(ID{r}, role) := if (role == 'def) [r] else []
+op_regs(U{r}, role) := if (role == 'use) [r] else []
+op_regs(IU{r}, role) := if (role == 'use) [r] else []
+op_regs(DU{r}, role) := [r]
+op_regs(Ds{rs}, role) := if (role == 'def) rs else []
+op_regs(Us{rs}, role) := if (role == 'use) rs else []
+op_regs(M{b, _}, role) := op_regs(b, role)
+op_regs(MX{b, x, _, _}, role) := append(op_regs(b, role), op_regs(x, role))
+op_regs(_, role) := []
 
 export defs(I{_, ops}) := concat_map(o -> op_regs(o, 'def), ops)
 export uses(I{_, ops}) := concat_map(o -> op_regs(o, 'use), ops)
 
 # map_op(f, o) renames every register of the operand o with f
-map_op(f, o) := match o {
-    D{r} -> D{f(r)}
-  | U{r} -> U{f(r)}
-  | DU{r} -> DU{f(r)}
-  | ID{r} -> ID{f(r)}
-  | IU{r} -> IU{f(r)}
-  | Ds{rs} -> Ds{map(f, rs)}
-  | Us{rs} -> Us{map(f, rs)}
-  | M{b, d} -> M{map_op(f, b), d}
-  | MX{b, x, s, d} -> MX{map_op(f, b), map_op(f, x), s, d}
-  | _ -> o
-}
+map_op(f, D{r}) := D{f(r)}
+map_op(f, U{r}) := U{f(r)}
+map_op(f, DU{r}) := DU{f(r)}
+map_op(f, ID{r}) := ID{f(r)}
+map_op(f, IU{r}) := IU{f(r)}
+map_op(f, Ds{rs}) := Ds{map(f, rs)}
+map_op(f, Us{rs}) := Us{map(f, rs)}
+map_op(f, M{b, d}) := M{map_op(f, b), d}
+map_op(f, MX{b, x, s, d}) := MX{map_op(f, b), map_op(f, x), s, d}
+map_op(f, o) := o
 
 export map_regs(f, I{op, ops}) := I{op, map(o -> map_op(f, o), ops)}
 
@@ -123,36 +119,32 @@ export targets(I{op, ops}) := concat_map(o -> match o {
 # a conditional jump falls through to the next instruction
 export falls(i) := not member(op(i), ['jmp, 'br, 'ret, 'trap, 'ud2])
 
-export move_pair(i) := match i {
-    I{'mov, [D{a}, U{b}]} -> Tuple{a, b}
-  | I{'mov, [W{_}, D{a}, U{b}]} -> Tuple{a, b}
-  | _ -> none
-}
+export move_pair(I{'mov, [D{a}, U{b}]}) := Tuple{a, b}
+move_pair(I{'mov, [W{_}, D{a}, U{b}]}) := Tuple{a, b}
+move_pair(_) := none
 
 # === Text ===
 show_regs(rs) := join(" ", map(r -> string.int_to_str(r), rs))
 
-show_op(o) := match o {
-    D{r} -> f"d{r}"
-  | U{r} -> f"u{r}"
-  | DU{r} -> f"du{r}"
-  | ID{r} -> f"id{r}"
-  | IU{r} -> f"iu{r}"
-  | Ds{rs} -> f"d[{show_regs(rs)}]"
-  | Us{rs} -> f"u[{show_regs(rs)}]"
-  | K{n} -> string.int_to_str(n)
-  | S{n, off} -> if (off == 0) n else f"{n}+{off}"
-  | L{l} -> f"L{l}"
-  | Cc{c} -> symname(c)
-  | W{w} -> f"w{w}"
-  | N{n} -> symname(n)
-  | M{b, d} -> f"[{show_op(b)} {d}]"
-  | MX{b, x, s, d} -> f"[{show_op(b)} {show_op(x)}*{s} {d}]"
-  | MG{n, d} -> f"[{n} {d}]"
-  | MF{k, n, d} -> f"[{symname(k)}{n} {d}]"
-  | 'none -> "-"
-  | _ -> "?"
-}
+show_op(D{r}) := f"d{r}"
+show_op(U{r}) := f"u{r}"
+show_op(DU{r}) := f"du{r}"
+show_op(ID{r}) := f"id{r}"
+show_op(IU{r}) := f"iu{r}"
+show_op(Ds{rs}) := f"d[{show_regs(rs)}]"
+show_op(Us{rs}) := f"u[{show_regs(rs)}]"
+show_op(K{n}) := string.int_to_str(n)
+show_op(S{n, off}) := if (off == 0) n else f"{n}+{off}"
+show_op(L{l}) := f"L{l}"
+show_op(Cc{c}) := symname(c)
+show_op(W{w}) := f"w{w}"
+show_op(N{n}) := symname(n)
+show_op(M{b, d}) := f"[{show_op(b)} {d}]"
+show_op(MX{b, x, s, d}) := f"[{show_op(b)} {show_op(x)}*{s} {d}]"
+show_op(MG{n, d}) := f"[{n} {d}]"
+show_op(MF{k, n, d}) := f"[{symname(k)}{n} {d}]"
+show_op('none) := "-"
+show_op(_) := "?"
 
 show_ops(ops) := join(", ", map(show_op, ops))
 

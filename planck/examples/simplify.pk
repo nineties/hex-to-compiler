@@ -3,23 +3,21 @@
 use("unparse")
 
 # one step at the root
-step(e) := match e {
-    a @ int + b @ int -> a + b
-  | a @ int * b @ int -> a * b
-  | a @ int * (b @ int * c) -> `(!(a * b) * !c)
-  | a + 0 -> a
-  | 0 + a -> a
-  | a - 0 -> a
-  | a - b if a == b -> 0
-  | a + b if a == b -> `(2 * !a)
-  | a * 1 -> a
-  | 1 * a -> a
-  | _ * 0 -> 0
-  | 0 * _ -> 0
-  | pow(a, 1) -> a
-  | pow(_, 0) -> 1
-  | _ -> e
-}
+step(a @ int + b @ int) := a + b
+step(a @ int * b @ int) := a * b
+step(a @ int * (b @ int * c)) := `(!(a * b) * !c)
+step(a + 0) := a
+step(0 + a) := a
+step(a - 0) := a
+step(a - b) if a == b := 0
+step(a + b) if a == b := `(2 * !a)
+step(a * 1) := a
+step(1 * a) := a
+step(_ * 0) := 0
+step(0 * _) := 0
+step(pow(a, 1)) := a
+step(pow(_, 0)) := 1
+step(e) := e
 
 # the arguments first, then the root until nothing changes.
 # (f)(a, b) is a call of any function f with two arguments: f is a variable.
@@ -32,14 +30,12 @@ simp(e) := {
     if (t == s) s else simp(t)
 }
 
-d(e, x) := match e {
-    _ @ int -> 0
-  | y @ symbol -> if (y == x) 1 else 0
-  | a + b -> `(!d(a, x) + !d(b, x))
-  | a - b -> `(!d(a, x) - !d(b, x))
-  | a * b -> `(!d(a, x) * !b + !a * !d(b, x))
-  | pow(a, n @ int) -> `(!n * pow(!a, !(n - 1)) * !d(a, x))
-}
+d(_ @ int, x) := 0
+d(y @ symbol, x) := if (y == x) 1 else 0
+d(a + b, x) := `(!d(a, x) + !d(b, x))
+d(a - b, x) := `(!d(a, x) - !d(b, x))
+d(a * b, x) := `(!d(a, x) * !b + !a * !d(b, x))
+d(pow(a, n @ int), x) := `(!n * pow(!a, !(n - 1)) * !d(a, x))
 
 show(e) := {
     put(unparse.text(e)); put("  =>  "); put(unparse.text(simp(e))); put("\n")

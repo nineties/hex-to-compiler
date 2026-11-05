@@ -812,11 +812,9 @@ call_value(fv, vs) := match fv {
     }
 }
 
-var_value(v) := match v {
-    Mt{x, t} -> assign(t, Mov{Reg{pe_at, x}})
-  | Ce{c} -> assign(Val{}, Index{pe_at, arg(c, 0), Imm{pe_at, 0}})
-  | _ -> v
-}
+var_value(Mt{x, t}) := assign(t, Mov{Reg{pe_at, x}})
+var_value(Ce{c}) := assign(Val{}, Index{pe_at, arg(c, 0), Imm{pe_at, 0}})
+var_value(v) := v
 
 apply(env, f, vs) := if (typeof(f) == 'symbol) {
     loc := pe_loc(env, f)
@@ -1190,13 +1188,11 @@ pe_while(env, c, b) := {
 # The state of a handle: an array of the register of its value, its type, and the register of its flag (set when a path has left it).
 # A handler is Hd{id, function, depth, state, key}.
 
-handler_clause(hv, ev) := match hv {
-    Cl{cs, _} -> find(c -> {
-        l := arg(c, 0)
-        arity(arg(l, 0)) == 2 and static_match(arg(arg(l, 0), 0), ev) != false
-    }, cs)
-  | _ -> none
-}
+handler_clause(Cl{cs, _}, ev) := find(c -> {
+    l := arg(c, 0)
+    arity(arg(l, 0)) == 2 and static_match(arg(arg(l, 0), 0), ev) != false
+}, cs)
+handler_clause(_, ev) := none
 
 # the pattern p matches v as far as it is known: true, false or 'dyn
 static_match(p, v) := {
@@ -1343,11 +1339,9 @@ quasi(env, t) := if (typeof(t) != 'mexpr) t
     else foldl((a, x) -> push(a, x), mexpr(head(t), Tuple{}), map(x -> quasi(env, x), vasm_tlist(t)))
 
 # f | g
-clauses_value(v) := match v {
-    Cl{cs, _} -> cs
-  | Fv{f} -> clauses_of(f)
-  | _ -> none
-}
+clauses_value(Cl{cs, _}) := cs
+clauses_value(Fv{f}) := clauses_of(f)
+clauses_value(_) := none
 
 fusion(a, b) := if (a == none) b else {
     ca := clauses_value(a)
@@ -1612,13 +1606,11 @@ reads_into(s, out) := if (typeof(s) == 'symbol) table.set(out, s, true)
       | _ -> each(x -> reads_into(x, out), vasm_tlist(s))
     }
 
-pure(r) := match r {
-    Mov{_} -> true
-  | Conv{_, _, Val{}} -> true
-  | Con{_, _, _} -> true
-  | Clo{_, _, _} -> true
-  | _ -> false
-}
+pure(Mov{_}) := true
+pure(Conv{_, _, Val{}}) := true
+pure(Con{_, _, _}) := true
+pure(Clo{_, _, _}) := true
+pure(_) := false
 
 # the assignments to variables that are not read, with no other effect, are taken out
 clean_stmts(ss, reads) := concat_map(s -> match s {

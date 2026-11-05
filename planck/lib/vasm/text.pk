@@ -26,31 +26,27 @@ module vasm_text {
         Tuple{'shl, "<<"}, Tuple{'shr, ">>"}, Tuple{'bit_and, "&"}, Tuple{'bit_or, "|"}, Tuple{'bit_xor, "^"},
         Tuple{'eq, "=="}, Tuple{'ne, "!="}, Tuple{'le, "<="}, Tuple{'ge, ">="}, Tuple{'lt, "<"}, Tuple{'gt, ">"}]
 
-    operand(o) := match o {
-        Imm{_, n} -> if (n == true) "true" else if (n == false) "false" else if (typeof(n) == 'int) f"{n}" else arg(n, 0)
-      | Str{_, s} -> f"\"{escape(s)}\""
-      | Sym{_, s} -> f"'{symname(s)}"
-      | Reg{_, x} -> symname(x)
-      | Load{_, p} -> f"*{symname(p)}"
-      | Index{_, a, i} -> f"{symname(a)}[{operand(i)}]"
-      | Get{_, a, f} -> f"{symname(a)}.{symname(f)}"
-    }
+    operand(Imm{_, n}) := if (n == true) "true" else if (n == false) "false" else if (typeof(n) == 'int) f"{n}" else arg(n, 0)
+    operand(Str{_, s}) := f"\"{escape(s)}\""
+    operand(Sym{_, s}) := f"'{symname(s)}"
+    operand(Reg{_, x}) := symname(x)
+    operand(Load{_, p}) := f"*{symname(p)}"
+    operand(Index{_, a, i}) := f"{symname(a)}[{operand(i)}]"
+    operand(Get{_, a, f}) := f"{symname(a)}.{symname(f)}"
 
     args(as) := join(", ", map(operand, as))
 
-    rhs(r) := match r {
-        Mov{a} -> operand(a)
-      | Bin{op, a, b} -> f"{operand(a)} {arg(find(p -> arg(p, 0) == op, ops), 1)} {operand(b)}"
-      | Load{_, p} -> f"*{symname(p)}"
-      | Index{_, a, i} -> f"{symname(a)}[{operand(i)}]"
-      | Get{_, a, f} -> f"{symname(a)}.{symname(f)}"
-      | Conv{_, a, t} -> f"{operand(a)} as {vasm_check.show_type(t)}"
-      | Make{_, s, inits} -> f"{symname(s)}{{{join(", ", map((Init{_, f, a}) -> f"{symname(f)}: {operand(a)}", inits))}}}"
-      | Call{_, f, as} -> f"{symname(f)}({args(as)})"
-      | Con{_, h, as} -> f"val {symname(h)}({args(as)})"
-      | Clo{_, f, as} -> f"fn {symname(f)}({args(as)})"
-      | Borrow{_, k, rg, y} -> if (k == 'mut) f"&mut {symname(rg)} {symname(y)}" else f"&{symname(rg)} {symname(y)}"
-    }
+    rhs(Mov{a}) := operand(a)
+    rhs(Bin{op, a, b}) := f"{operand(a)} {arg(find(p -> arg(p, 0) == op, ops), 1)} {operand(b)}"
+    rhs(Load{_, p}) := f"*{symname(p)}"
+    rhs(Index{_, a, i}) := f"{symname(a)}[{operand(i)}]"
+    rhs(Get{_, a, f}) := f"{symname(a)}.{symname(f)}"
+    rhs(Conv{_, a, t}) := f"{operand(a)} as {vasm_check.show_type(t)}"
+    rhs(Make{_, s, inits}) := f"{symname(s)}{{{join(", ", map((Init{_, f, a}) -> f"{symname(f)}: {operand(a)}", inits))}}}"
+    rhs(Call{_, f, as}) := f"{symname(f)}({args(as)})"
+    rhs(Con{_, h, as}) := f"val {symname(h)}({args(as)})"
+    rhs(Clo{_, f, as}) := f"fn {symname(f)}({args(as)})"
+    rhs(Borrow{_, k, rg, y}) := if (k == 'mut) f"&mut {symname(rg)} {symname(y)}" else f"&{symname(rg)} {symname(y)}"
 
     indent(n) := string.str_repeat("    ", n)
 
@@ -78,14 +74,12 @@ module vasm_text {
 
     param(Param{_, x, t}) := f"{symname(x)}: {vasm_check.show_type(t)}"
 
-    item(d) := match d {
-        Fn{_, f, rs, ps, ret, body} -> {
-            regions := if (rs == []) "" else f"[{join(", ", map(symname, rs))}]"
-            result := if (ret == Unit{}) "" else f" -> {vasm_check.show_type(ret)}"
-            join("\n", append(append([f"fn {symname(f)}{regions}({join(", ", map(param, ps))}){result} {{"], block(body, 1)), ["}"]))
-        }
-      | Struct{_, s, fs} -> join("\n", append(append([f"struct {symname(s)} {{"], map((Field{_, x, t}) -> f"    {symname(x)}: {vasm_check.show_type(t)}", fs)), ["}"]))
+    item(Fn{_, f, rs, ps, ret, body}) := {
+        regions := if (rs == []) "" else f"[{join(", ", map(symname, rs))}]"
+        result := if (ret == Unit{}) "" else f" -> {vasm_check.show_type(ret)}"
+        join("\n", append(append([f"fn {symname(f)}{regions}({join(", ", map(param, ps))}){result} {{"], block(body, 1)), ["}"]))
     }
+    item(Struct{_, s, fs}) := join("\n", append(append([f"struct {symname(s)} {{"], map((Field{_, x, t}) -> f"    {symname(x)}: {vasm_check.show_type(t)}", fs)), ["}"]))
 
     export text(Module{items}) := _strcat(join("\n\n", map(item, items)), "\n")
 }

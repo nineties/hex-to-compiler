@@ -107,35 +107,27 @@ pos(e) := arg(e, 0)
 known(t) := not (head(t) == 'Lit or head(t) == 'Unk)
 
 # the type of a value that is kept in a variable. A literal has the type that the context gives.
-keep(at, t, want) := match t {
-    Lit{_} -> if (vasm_check.int(want)) want else fail(at, 'type, "the type of this value is not known; write the type, as in let x: i32 = ... or e as i32")
-  | Unk{msg} -> fail(at, 'type, msg)
-  | Unit{} -> fail(at, 'type, "this call gives no value")
-  | _ -> t
-}
+keep(at, Lit{_}, want) := if (vasm_check.int(want)) want else fail(at, 'type, "the type of this value is not known; write the type, as in let x: i32 = ... or e as i32")
+keep(at, Unk{msg}, want) := fail(at, 'type, msg)
+keep(at, Unit{}, want) := fail(at, 'type, "this call gives no value")
+keep(at, t, want) := t
 
 # the type to give a literal beside a value of type t
 px_hint(t, want) := if (vasm_check.int(t)) t else want
 
-elem(at, t) := match t {
-    Val{} -> Val{}
-  | Own{Arr{u}} -> u
-  | Ref{_, _, Arr{u}} -> u
-  | _ -> fail(at, 'type, f"{vasm_check.show_type(t)} is not an array to index")
-}
+elem(at, Val{}) := Val{}
+elem(at, Own{Arr{u}}) := u
+elem(at, Ref{_, _, Arr{u}}) := u
+elem(at, t) := fail(at, 'type, f"{vasm_check.show_type(t)} is not an array to index")
 
-pointee(at, t) := match t {
-    Own{u} -> u
-  | Ref{_, _, u} -> u
-  | _ -> fail(at, 'type, f"{vasm_check.show_type(t)} is not a pointer")
-}
+pointee(at, Own{u}) := u
+pointee(at, Ref{_, _, u}) := u
+pointee(at, t) := fail(at, 'type, f"{vasm_check.show_type(t)} is not a pointer")
 
-struct_of(at, t) := match t {
-    Named{s} -> s
-  | Own{Named{s}} -> s
-  | Ref{_, _, Named{s}} -> s
-  | _ -> fail(at, 'type, f"{vasm_check.show_type(t)} is not a struct or a pointer to a struct")
-}
+struct_of(at, Named{s}) := s
+struct_of(at, Own{Named{s}}) := s
+struct_of(at, Ref{_, _, Named{s}}) := s
+struct_of(at, t) := fail(at, 'type, f"{vasm_check.show_type(t)} is not a struct or a pointer to a struct")
 
 field(at, s, f) := {
     sd := table.get(structs, s, none)
@@ -237,14 +229,12 @@ lit(at, n, want) := if (typeof(n) == 'int) Tuple{Imm{at, n}, Lit{n}}
     else if (vasm_check.int(want)) big(at, arg(n, 0), want)
     else fail(at, 'type, f"the type of {arg(n, 0)} is not known; write it as {arg(n, 0)} as i32 or give the type of the variable")
 
-simple_ex(e, want) := match e {
-    ELit{at, n} -> lit(at, n, want)
-  | EBool{at, b} -> Tuple{Imm{at, b}, Bool{}}
-  | EStr{at, s} -> Tuple{Str{at, s}, Ref{'shr, 'static, Arr{U8{}}}}
-  | ESym{at, s} -> Tuple{Sym{at, s}, Val{}}
-  | EVar{at, x} -> var(at, x)
-  | ENeg{at, ELit{_, n}} -> if (typeof(n) == 'int) Tuple{Imm{at, 0 - n}, Lit{0 - n}} else lit(at, Big{_strcat("-", arg(n, 0))}, want)
-}
+simple_ex(ELit{at, n}, want) := lit(at, n, want)
+simple_ex(EBool{at, b}, want) := Tuple{Imm{at, b}, Bool{}}
+simple_ex(EStr{at, s}, want) := Tuple{Str{at, s}, Ref{'shr, 'static, Arr{U8{}}}}
+simple_ex(ESym{at, s}, want) := Tuple{Sym{at, s}, Val{}}
+simple_ex(EVar{at, x}, want) := var(at, x)
+simple_ex(ENeg{at, ELit{_, n}}, want) := if (typeof(n) == 'int) Tuple{Imm{at, 0 - n}, Lit{0 - n}} else lit(at, Big{_strcat("-", arg(n, 0))}, want)
 
 ex(e, want) := if (simple(e)) simple_ex(e, want) else {
     at := pos(e)
@@ -290,22 +280,20 @@ px_base(e) := if (head(e) == 'EVar) var(pos(e), arg(e, 1))
     else fail(pos(e), 'type, "an element or a field is taken from a variable; bind the value to a variable with let")
 
 # a place of swap: *p, p[i] or p.f
-place(e) := match e {
-    EDeref{at, p} -> {
-        b := var(at, p)
-        Tuple{Load{at, arg(arg(b, 0), 1)}, pointee(at, arg(b, 1))}
-    }
-  | EIndex{at, a, i} -> {
-        b := px_base(a)
-        u := elem(at, arg(b, 1))
-        Tuple{Index{at, arg(arg(b, 0), 1), index(i)}, u}
-    }
-  | EGet{at, a, f} -> {
-        b := px_base(a)
-        Tuple{Get{at, arg(arg(b, 0), 1), f}, field(at, struct_of(at, arg(b, 1)), f)}
-    }
-  | _ -> fail(pos(e), 'type, "this argument is a place: *p, p[i] or p.f")
+place(EDeref{at, p}) := {
+    b := var(at, p)
+    Tuple{Load{at, arg(arg(b, 0), 1)}, pointee(at, arg(b, 1))}
 }
+place(EIndex{at, a, i}) := {
+    b := px_base(a)
+    u := elem(at, arg(b, 1))
+    Tuple{Index{at, arg(arg(b, 0), 1), index(i)}, u}
+}
+place(EGet{at, a, f}) := {
+    b := px_base(a)
+    Tuple{Get{at, arg(arg(b, 0), 1), f}, field(at, struct_of(at, arg(b, 1)), f)}
+}
+place(e) := fail(pos(e), 'type, "this argument is a place: *p, p[i] or p.f")
 
 # the result type of a call with the types ts of the arguments
 result(at, f, sig, ts, tsub) := {
@@ -328,13 +316,11 @@ result(at, f, sig, ts, tsub) := {
     else t
 }
 
-has_tvar(t) = match t {
-    TVar{_} -> true
-  | Own{u} -> has_tvar(u)
-  | Arr{u} -> has_tvar(u)
-  | Ref{_, _, u} -> has_tvar(u)
-  | _ -> false
-}
+has_tvar(TVar{_}) = true
+has_tvar(Own{u}) = has_tvar(u)
+has_tvar(Arr{u}) = has_tvar(u)
+has_tvar(Ref{_, _, u}) = has_tvar(u)
+has_tvar(_) = false
 
 call(at, f, args) := {
     b := table.get(env, f, none)
@@ -451,13 +437,11 @@ px_cond(e) := match e {
 # === Statements ===
 
 # the type of a place that is assigned
-target_type(tg) := match tg {
-    EVar{at, x} -> arg(var(at, x), 1)
-  | EDeref{at, p} -> pointee(at, arg(var(at, p), 1))
-  | EIndex{at, a, _} -> elem(at, arg(px_base(a), 1))
-  | EGet{at, a, f} -> field(at, struct_of(at, arg(px_base(a), 1)), f)
-  | _ -> fail(pos(tg), 'type, "the left of = is a variable, *p, p[i] or p.f")
-}
+target_type(EVar{at, x}) := arg(var(at, x), 1)
+target_type(EDeref{at, p}) := pointee(at, arg(var(at, p), 1))
+target_type(EIndex{at, a, _}) := elem(at, arg(px_base(a), 1))
+target_type(EGet{at, a, f}) := field(at, struct_of(at, arg(px_base(a), 1)), f)
+target_type(tg) := fail(pos(tg), 'type, "the left of = is a variable, *p, p[i] or p.f")
 
 px_set(at, tg, op, e) := {
     ty := target_type(tg)
@@ -534,44 +518,42 @@ px_for(at, i, lo, hi, body) := {
     table.set(env, i, old)
 }
 
-stmt(s) = match s {
-    SLet{at, x, t, e} -> {
-        r := px_rhs(e, t)
-        ty := if (t != none) t else keep(at, arg(r, 1), none)
-        name := declare(at, x, ty, true)
-        emit(Assign{at, name, arg(r, 0)})
-    }
-  | SVar{at, x, t} -> declare(at, x, t, true)
-  | SIf{at, c, a, b} -> {
-        cond := px_cond(c)
-        ba := block(a)
-        bb := block(b)
-        emit(IfS{at, cond, ba, bb})
-    }
-  | SWhile{at, c, body} -> px_while(at, c, body)
-  | SFor{at, i, lo, hi, body} -> px_for(at, i, lo, hi, body)
-  | SRegion{at, r, body} -> {
-        b := block(body)
-        emit(RegionS{at, r, b})
-    }
-  | SRet{at, e} -> if (e == none) emit(Ret{at, none}) else {
-        v := ex(e, if (vasm_check.int(px_ret)) px_ret else none)
-        emit(Ret{at, arg(v, 0)})
-    }
-  | SSet{at, tg, op, e} -> px_set(at, tg, op, e)
-  | SExpr{at, e} -> match e {
-        ECall{cat, f, args} -> {
-            r := call(cat, f, args)
-            emit(CallS{cat, arg(arg(r, 0), 1), arg(arg(r, 0), 2)})
-        }
-      | _ -> fail(at, 'type, "a statement that is an expression is a call, or the result at the end of a function")
-    }
-  | SRecheck{at, flag, c} -> {
-        cond := px_cond(c)
-        emit(Assign{at, flag, cond})
-    }
-  | SRaw{st} -> emit(st)
+stmt(SLet{at, x, t, e}) = {
+    r := px_rhs(e, t)
+    ty := if (t != none) t else keep(at, arg(r, 1), none)
+    name := declare(at, x, ty, true)
+    emit(Assign{at, name, arg(r, 0)})
 }
+stmt(SVar{at, x, t}) = declare(at, x, t, true)
+stmt(SIf{at, c, a, b}) = {
+    cond := px_cond(c)
+    ba := block(a)
+    bb := block(b)
+    emit(IfS{at, cond, ba, bb})
+}
+stmt(SWhile{at, c, body}) = px_while(at, c, body)
+stmt(SFor{at, i, lo, hi, body}) = px_for(at, i, lo, hi, body)
+stmt(SRegion{at, r, body}) = {
+    b := block(body)
+    emit(RegionS{at, r, b})
+}
+stmt(SRet{at, e}) = if (e == none) emit(Ret{at, none}) else {
+    v := ex(e, if (vasm_check.int(px_ret)) px_ret else none)
+    emit(Ret{at, arg(v, 0)})
+}
+stmt(SSet{at, tg, op, e}) = px_set(at, tg, op, e)
+stmt(SExpr{at, e}) = match e {
+    ECall{cat, f, args} -> {
+        r := call(cat, f, args)
+        emit(CallS{cat, arg(arg(r, 0), 1), arg(arg(r, 0), 2)})
+    }
+  | _ -> fail(at, 'type, "a statement that is an expression is a call, or the result at the end of a function")
+}
+stmt(SRecheck{at, flag, c}) = {
+    cond := px_cond(c)
+    emit(Assign{at, flag, cond})
+}
+stmt(SRaw{st}) = emit(st)
 
 # === Functions and modules ===
 
@@ -598,23 +580,21 @@ tail(ret, body) := if (ret != Unit{} and body != [] and head(list.last(body)) ==
     append(list.take(body, length(body) - 1), [SRet{arg(s, 0), arg(s, 1)}])
 } else body
 
-fn(d) := match d {
-    PFn{at, f, rs, ps, ret, body} -> {
-        env = table.new()
-        live = table.new()
-        used = table.new()
-        scope = []
-        px_out = []
-        next = 0
-        px_ret = ret
-        each((Param{_, x, t}) -> {
-            table.set(used, x, true)
-            table.set(live, x, true)
-            table.set(env, x, Tuple{x, t})
-        }, ps)
-        collect(body)
-        Fn{at, f, rs, ps, ret, block(tail(ret, body))}
-    }
+fn(PFn{at, f, rs, ps, ret, body}) := {
+    env = table.new()
+    live = table.new()
+    used = table.new()
+    scope = []
+    px_out = []
+    next = 0
+    px_ret = ret
+    each((Param{_, x, t}) -> {
+        table.set(used, x, true)
+        table.set(live, x, true)
+        table.set(env, x, Tuple{x, t})
+    }, ps)
+    collect(body)
+    Fn{at, f, rs, ps, ret, block(tail(ret, body))}
 }
 
 export compile_all_with(m, imports) := {

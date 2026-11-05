@@ -187,17 +187,15 @@ select_one(f, emit, i) = {
 is_memf(o) := member(head(o), ['M, 'MX, 'MG, 'MF])
 
 # the memory the instruction touches: 'load, 'store, 'barrier or 'none
-effect(i) := match i {
-    I{'mov, [W{_}, D{_}, m]} -> if (is_memf(m)) 'load else 'none
-  | I{'mov, [W{_}, m, _]} -> if (is_memf(m)) 'store else 'none
-  | I{op, [W{_}, D{_}, m]} if member(op, ['movzxb, 'movsxb, 'movzxw, 'movsxw]) -> if (is_memf(m)) 'load else 'none
-  | I{op, [m, _]} if member(op, ['movb, 'movw]) -> 'store
-  | I{'push, _} -> 'store
-  | I{'pop, _} -> 'load
-  | I{'call, _} -> 'barrier
-  | I{'syscall, _} -> 'barrier
-  | _ -> 'none
-}
+effect(I{'mov, [W{_}, D{_}, m]}) := if (is_memf(m)) 'load else 'none
+effect(I{'mov, [W{_}, m, _]}) := if (is_memf(m)) 'store else 'none
+effect(I{op, [W{_}, D{_}, m]}) if member(op, ['movzxb, 'movsxb, 'movzxw, 'movsxw]) := if (is_memf(m)) 'load else 'none
+effect(I{op, [m, _]}) if member(op, ['movb, 'movw]) := 'store
+effect(I{'push, _}) := 'store
+effect(I{'pop, _}) := 'load
+effect(I{'call, _}) := 'barrier
+effect(I{'syscall, _}) := 'barrier
+effect(_) := 'none
 
 latency(i) := match ir.op(i) {
     'imul -> 3
@@ -218,11 +216,9 @@ ra := RATarget{[0, 1, 2, 6, 7, 8, 9, 10, 11, 3, 12, 13, 14, 15], table.new(),
 # === Frames ===
 align(n, a) := (n + a - 1) / a * a
 
-resolve(offs, o) := match o {
-    MF{'arg, n, d} -> M{U{5}, 16 + 8 * n + d}
-  | MF{'slot, n, d} -> M{U{5}, d - table.get(offs, n, 0)}
-  | _ -> o
-}
+resolve(offs, MF{'arg, n, d}) := M{U{5}, 16 + 8 * n + d}
+resolve(offs, MF{'slot, n, d}) := M{U{5}, d - table.get(offs, n, 0)}
+resolve(offs, o) := o
 
 # frame(f, code) adds the prologue and the epilogue to the allocated code and gives an address to each stack slot
 frame(f, code) := {
