@@ -430,10 +430,12 @@ lib_callee(env, f) := if (typeof(f) == 'mexpr and head(f) == 'Apply and arg(f, 0
 } else f
 
 # === Operations on dynamic values ===
-pe_ops := [Tuple{'_add, 'add}, Tuple{'_sub, 'sub}, Tuple{'_mul, 'mul}, Tuple{'_div, 'div}, Tuple{'_mod, 'rem},
+pe_ops := [Tuple{'_add, 'add}, Tuple{'_sub, 'sub}, Tuple{'_mul, 'mul}, Tuple{'_div, 'div}, Tuple{'_quo, 'div}, Tuple{'_mod, 'rem},
     Tuple{'_eq, 'eq}, Tuple{'_ne, 'ne}, Tuple{'_lt, 'lt}, Tuple{'_le, 'le}, Tuple{'_gt, 'gt}, Tuple{'_ge, 'ge},
     Tuple{'bit_and, 'bit_and}, Tuple{'bit_or, 'bit_or}, Tuple{'bit_xor, 'bit_xor}, Tuple{'bit_shl, 'shl}, Tuple{'bit_sar, 'shr}]
 cmps := ['_eq, '_ne, '_lt, '_le, '_gt, '_ge]
+
+fun floor_op
 
 # the integer of v for an operation: a val is read as i64
 num(v) := if (val_dy(v)) assign(I64{}, Conv{pe_at, Reg{pe_at, arg(v, 0)}, I64{}}) else v
@@ -454,7 +456,27 @@ else {
         a2 := to(a, t)
         b2 := to(b, t)
         rt := if (member(f, cmps)) Bool{} else t
-        assign(rt, Bin{arg(o, 1), operand(a2), operand(b2)})
+        if (f == '_quo or f == '_mod) floor_op(f, a2, b2, t) else assign(rt, Bin{arg(o, 1), operand(a2), operand(b2)})
+    }
+}
+
+# a // b and a % b round toward minus infinity, while the operations div and rem of vasm round toward 0.
+# m is -1 when the remainder r is not 0 and r and b differ in sign, and 0 otherwise.
+# The quotient is then q + m and the remainder is r + (m & b).
+floor_op(f, a, b, t) := {
+    k := Imm{pe_at, if (t == I64{}) 63 else 31}
+    q := assign(t, Bin{'div, operand(a), operand(b)})
+    r := assign(t, Bin{'rem, operand(a), operand(b)})
+    x := assign(t, Bin{'bit_xor, operand(r), operand(b)})
+    m1 := assign(t, Bin{'shr, operand(x), k})
+    n := assign(t, Bin{'sub, Imm{pe_at, 0}, operand(r)})
+    o := assign(t, Bin{'bit_or, operand(n), operand(r)})
+    m2 := assign(t, Bin{'shr, operand(o), k})
+    m := assign(t, Bin{'bit_and, operand(m1), operand(m2)})
+    if (f == '_quo) assign(t, Bin{'add, operand(q), operand(m)})
+    else {
+        c := assign(t, Bin{'bit_and, operand(m), operand(b)})
+        assign(t, Bin{'add, operand(r), operand(c)})
     }
 }
 
@@ -517,7 +539,7 @@ impl_table := [Tuple{'print, 'v_print}, Tuple{'put, 'v_put}, Tuple{'exit, 'v_exi
 always := ['println, 'print, 'put, 'read_file, 'try_read_file, 'read_bytes, 'write_file, 'exit, 'array, 'u8_array, 'u16_array, 'i32_array, 'argv]
 
 # the numbers of arguments of the built-in functions, for a built-in function that is a value
-arity_of(f) := if (member(f, ['_add, '_sub, '_mul, '_div, '_mod, '_lt, '_le, '_gt, '_ge, '_eq, '_ne, 'ord, 'arg, 'push, 'mexpr, 'array_get, 'plain_get, '_strcat, '_index_get, 'write_file])) 2
+arity_of(f) := if (member(f, ['_add, '_sub, '_mul, '_div, '_quo, '_mod, '_lt, '_le, '_gt, '_ge, '_eq, '_ne, 'ord, 'arg, 'push, 'mexpr, 'array_get, 'plain_get, '_strcat, '_index_get, 'write_file])) 2
     else if (member(f, ['substr, 'array_set, 'plain_set, '_index_set])) 3
     else if (f == 'argv) 0
     else 1
