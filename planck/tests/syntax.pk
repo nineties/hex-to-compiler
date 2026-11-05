@@ -1042,8 +1042,8 @@ check(tree("[a, b + 1] -> a"), 'Lambda{Tuple{Cons{a, Cons{Apply{Quote{_add}, Tup
 check(tree("a + 1 :: b -> a"), 'Lambda{Tuple{Cons{Apply{Quote{_add}, Tuple{a, 1}}, b}}, a})
 check(tree("a == b -> a"), 'Lambda{Tuple{Apply{Quote{_eq}, Tuple{a, b}}}, a})
 check(tree("a < b + 1 -> a"), 'Lambda{Tuple{Apply{Quote{_lt}, Tuple{a, Apply{Quote{_add}, Tuple{b, 1}}}}}, a})
-check(tree("(not a, a and b, a or b) -> a"),
-      'Lambda{Tuple{Apply{Quote{_not}, Tuple{a}}, If{a, b, Quote{false}}, If{a, Quote{true}, b}}, a})
+check(tree("(not a, b and c, If{d, 'true, e}) -> a"),
+      'Lambda{Tuple{Apply{Quote{_not}, Tuple{a}}, If{b, c, Quote{false}}, If{d, Quote{true}, e}}, a})
 check(tree("'(x + 1) -> 0"), 'Lambda{Tuple{Quote{Apply{_add, Tuple{x, 1}}}}, 0})
 check(tree("F{a + 1, g(b)} -> a"), 'Lambda{Tuple{F{Apply{Quote{_add}, Tuple{a, 1}}, Apply{Quote{g}, Tuple{b}}}}, a})
 check(tree("(a + b, c) -> a"), 'Lambda{Tuple{Apply{Quote{_add}, Tuple{a, b}}, c}, a})
@@ -1079,7 +1079,7 @@ check(match '((1 + 2) * 3) { (a + b) * c -> Tuple{a, b, c} | _ -> 0 }, Tuple{1, 
 check(match '(1 + 2 * 3) { (a + b) * c -> 1 | a + b * c -> 2 | _ -> 0 }, 2)
 check(match '(-x) { -a -> a | _ -> 0 }, 'x)
 check(match '(not p) { not a -> a | _ -> 0 }, 'p)
-check(match '(p and q) { a or b -> 1 | a and b -> b | _ -> 0 }, 'q)
+check(match '(p and q) { If{a, 'true, b} -> 1 | a and b -> b | _ -> 0 }, 'q)
 check(match '(a < b) { x > y -> 1 | x < y -> 2 | _ -> 0 }, 2)
 check(match '(a :: b) { x :: y -> y | _ -> 0 }, 'b)
 check(match '[1, 2] { [x] -> 1 | [x, y] -> y | _ -> 0 }, 2)
@@ -1320,6 +1320,111 @@ check(arg(arg(tree("a[i] += 1"), 2), 0), '_index_set)
 check(tree("x == 1"), 'Apply{_eq, Tuple{x, 1}})
 check(tree("a[i] = 1"), 'Apply{_index_set, Tuple{a, i, 1}})
 check(tree("if (c) x += 1"), 'If{c, Set{x, Apply{_add, Tuple{x, 1}}}, none})
+
+# or in a pattern: the alternatives match the same value, and the arms after it are tried when none does
+size(0 or 1) := "small"
+size(_) := "big"
+check(size(0), "small")
+check(size(1), "small")
+check(size(2), "big")
+check(match 3 { 1 or 2 or 3 -> "low" | _ -> "high" }, "low")
+check(match 7 { 1 or 2 or 3 -> "low" | _ -> "high" }, "high")
+check(match 'b { 'a or 'b -> 1 | _ -> 2 }, 1)
+check(match F{2, 9} { F{1 or 2, x} -> x | _ -> 0 }, 9)
+check(match F{3, 9} { F{1 or 2, x} -> x | _ -> 0 }, 0)
+check(match (2, 5) { ((1 or 2, 5 or 6)) -> "in" | _ -> "out" }, "in")
+check(match (2, 7) { ((1 or 2, 5 or 6)) -> "in" | _ -> "out" }, "out")
+check(match G{2} { G{(1 or 2) or 3} -> 1 | _ -> 0 }, 1)
+check(match G{H{4}} { G{H{3 or 4} or J{}} -> 1 | _ -> 0 }, 1)
+check(match G{J{}} { G{H{3 or 4} or J{}} -> 1 | _ -> 0 }, 1)
+orlam := (1 or 2, x) -> x
+check(orlam(2, 8), 8)
+# an or and a guard together
+og(0 or 1, y) if y > 0 := "yes"
+og(_, _) := "no"
+check(og(1, 5), "yes")
+check(og(1, -5), "no")
+check(og(2, 5), "no")
+# an or expression is If{a, 'true, b}
+check(match '(p or q) { If{a, 'true, b} -> b | _ -> 0 }, 'q)
+check(match 5 { 'true or 'false -> 1 | 1 or 2 -> 2 | none or 5 -> 3 | _ -> 4 }, 3)
+check(match 6 { none or true -> 1 | _ -> 2 }, 2)
+
+# a name written twice matches two values that are ==
+same(a, a) := "same"
+same(_, _) := "differ"
+check(same(1, 1), "same")
+check(same(1, 2), "differ")
+check(same([1], [1]), "same")
+check(same([1], [2]), "differ")
+check(same("a", "a"), "same")
+check(match (3, 3, 4) { ((a, a, b)) -> b | _ -> 0 }, 4)
+check(match (3, 4, 3) { ((a, a, b)) -> b | _ -> 0 }, 0)
+check(match F{[1, 2], [1, 2]} { F{a, a} -> a | _ -> 0 }, [1, 2])
+check(match F{1, 2, 1} { F{a, b, a} -> b | _ -> 0 }, 2)
+check(match F{1, 2, 3} { F{a, b, a} -> b | _ -> 0 }, 0)
+check(match (5, 5, 5) { ((a, a, a)) -> a | _ -> 0 }, 5)
+check(match (5, 5, 6) { ((a, a, a)) -> a | _ -> 0 }, 0)
+sg(a, a) if a > 0 := "pos"
+sg(_, _) := "no"
+check(sg(2, 2), "pos")
+check(sg(-2, -2), "no")
+check(sg(2, 3), "no")
+sl := (a, a) -> a
+check(sl(7, 7), 7)
+# a name written twice and an or together
+sor(a, 1 or 2, a) := a
+sor(_, _, _) := "no"
+check(sor(5, 2, 5), 5)
+check(sor(5, 3, 5), "no")
+check(sor(5, 2, 6), "no")
+
+# an or whose alternatives all bind the same variables binds them
+ov((x, 0) or (0, x)) := x
+ov(_) := "no"
+check(ov((3, 0)), 3)
+check(ov((0, 4)), 4)
+check(ov((1, 2)), "no")
+check(match (0, 9) { ((x, 0) or (0, x)) -> x | _ -> 0 }, 9)
+check(match F{1} { F{x} or G{x} -> x | _ -> 0 }, 1)
+check(match G{2} { F{x} or G{x} -> x | _ -> 0 }, 2)
+check(match H{2} { F{x} or G{x} -> x | _ -> 0 }, 0)
+check(match (1, (2, 0)) { ((a, (x, 0) or (0, x))) -> Tuple{a, x} | _ -> 0 }, Tuple{1, 2})
+check(match (1, (0, 5)) { ((a, (x, 0) or (0, x))) -> Tuple{a, x} | _ -> 0 }, Tuple{1, 5})
+check(match F{G{1}, K{2}} { F{G{x} or H{x}, J{y} or K{y}} -> x + y | _ -> 0 }, 3)
+check(match F{K{7}} { F{G{x} or H{x} or K{x}} -> x | _ -> 0 }, 7)
+check(match (4, 0) { (((x, 0) or (0, x)) or (1, x)) -> x | _ -> 0 }, 4)
+check(match (1, 8) { (((x, 0) or (0, x)) or (1, x)) -> x | _ -> 0 }, 8)
+ovg((x, 0) or (0, x)) if x > 2 := "big"
+ovg(_) := "small"
+check(ovg((3, 0)), "big")
+check(ovg((0, 1)), "small")
+check(ovg((0, 5)), "big")
+ovl := ((x, 0) or (0, x)) -> x + 1
+check(ovl((0, 5)), 6)
+
+# a guard on a definition: when it is false the definitions of the same name that follow are tried
+sign(x) if x > 0 := "pos"
+sign(0) := "zero"
+sign(_) := "neg"
+check(sign(4), "pos")
+check(sign(0), "zero")
+check(sign(-4), "neg")
+dg1(x) if x > 1 := "a"
+dg1(x) if x > 0 := "b"
+dg1(_) := "c"
+dg2(x) := x + 1
+check(dg1(5), "a")
+check(dg1(1), "b")
+check(dg1(0), "c")
+check(dg2(1), 2)
+# a definition of a function in a block
+blk := {
+    h(x) if x > 0 := "p"
+    h(_) := "n"
+    Tuple{h(-3), h(3)}
+}
+check(blk, Tuple{"n", "p"})
 
 put("Tests passed "); print(passed); put("/"); println(passed + failed)
 if (failed > 0) exit(1)

@@ -9,6 +9,7 @@
 <tr><td><code>x := e</code></td><td><code>Def{x, e}</code></td></tr>
 <tr><td><code>(x, y, ...) := e</code>, <code>(x, y, ...) = e</code></td><td class="wrap">A block that defines or assigns the variables from the elements of the tuple <code>e</code>: <code>Do{Def{t, e}, Def{x, Apply{_destructure, Tuple{t, 0, n}}}, ...}</code> (<code>t</code> is a variable that no other name is the same as, <code>n</code> is the number of the names, and <code>Def</code> is <code>Set</code> for <code>=</code>)</td></tr>
 <tr><td><code>f(p, ...) := e</code></td><td><code>Do{Declare{f}, Set{f, Fusion{f, Lambda{Tuple{p, ...}, e}}}}</code></td></tr>
+<tr><td><code>f(p, ...) if c := e</code></td><td class="wrap">adds the function with a guard <code>(p, ...) if c -&gt; e</code> to <code>f</code>. When <code>c</code> is false, the definitions of <code>f</code> written after it are tried</td></tr>
 <tr><td><code>record T(f, ...)</code></td><td><code>Apply{_record_declare, Tuple{Quote{T}, Quote{Tuple{f, ...}}}}</code></td></tr>
 <tr><td><code>x = e</code></td><td><code>Set{x, e}</code></td></tr>
 <tr><td><code>x += e</code> <code>x -= e</code> <code>x *= e</code> <code>x /= e</code> <code>x %= e</code></td><td><code>Set{x, Apply{_add, Tuple{x, e}}}</code>. The others are <code>_sub</code> <code>_mul</code> <code>_div</code> <code>_mod</code></td></tr>
@@ -97,6 +98,7 @@
 
 <h3>A function definition that adds a case</h3>
 <p>A function definition <code>f(p, ...) := e</code> is <code>f(p, ...) = e</code> when <code>f</code> is already a variable of the place where it is written, and otherwise <code>fun f</code> followed by <code>f(p, ...) = e</code>, which defines a new <code>f</code> where it is written. Several definitions of <code>f</code> in one place make one function whose functions are tried in the order they are written.</p>
+<p>A definition can have a guard too. <code>f(p, ...) if c := e</code> adds to <code>f</code> an arm that gives <code>e</code> when the arguments match <code>p, ...</code> and <code>c</code> is true. When <code>c</code> is false, or the arguments do not match, the arms after it are tried with the same arguments. They are the definitions of <code>f</code> written after it in a row in the same place; a definition with another expression between does not follow. After <code>f(x) if x &gt; 0 := "positive"</code>, writing <code>f(_) := "other"</code> makes <code>f(-1)</code> <code>"other"</code>. A definition marked <code>export</code> and <code>f(p, ...) = e</code> cannot have a guard.</p>
 <p>The variables of the place are the global variables defined by the same file at the top level, and in a function the parameters of the function and the variables defined before it in the function. In a branch of <code>if</code> or the body of <code>while</code> at the top level, they are the variables defined before it in the branch or the body. A variable of a function around it, or a global variable seen from a function, is not of the place. So <code>f(p, ...) := e</code> there defines a new <code>f</code> and does not change the <code>f</code> outside.</p>
 <!--ex r_scope_same-->
 <!--ex t8_place-->
@@ -223,9 +225,11 @@
 <li><code>(f)(p, ...)</code> is <code>Apply{f, Tuple{p, ...}}</code>. The name in parentheses is a variable, not a symbol, so <code>(f)(x)</code> matches a call of any function with one argument and binds <code>f</code>.</li>
 <li><code>'e</code> is <code>Quote{e}</code> for the expression <code>e</code>.</li>
 <li><code>x...</code> can be written only as the last argument (<a href="#rest">Rest arguments</a>).</li>
+<li><code>p or q</code> matches what <code>p</code> or <code>q</code> matches. They can be written in a row, <code>a or b or c</code>, and anywhere in an argument (<code>F{1 or 2, x}</code>). When none matches, it is the same as a pattern that does not match. The alternatives can write variables when every alternative binds the same variables (<code>f((x, 0) or (0, x)) := x</code>); otherwise it is an error and the program stops. A name written twice in the parameters, as in <code>f(a, a)</code>, matches only two values that are equal by <code>==</code>: <code>f([1], [1])</code> matches. To match the M-expression <code>If{a, true, b}</code> of an <code>or</code> expression, write <code>If{a, 'true, b}</code>.</li>
 <li>The forms are the operators <code>or and not == != &lt;= &gt;= &lt; &gt; :: + - * / %</code>, the unary <code>-</code> and <code>'</code>, <code>f(p, ...)</code>, <code>p @ type</code>, <code>Head{p, ...}</code>, <code>(f)(p, ...)</code>, identifiers, <code>true</code>, <code>false</code>, <code>none</code>, integers, strings, <code>()</code>, <code>(p)</code>, <code>(p, q, ...)</code> and <code>[p, ...]</code>, with the same binding as in expressions: <code>a @ int + b @ int</code> is <code>(a @ int) + (b @ int)</code>.</li>
 </ul>
 <!--ex r_pattern-->
+<!--ex r_pattern_or-->
 
 <h2 id="macro">macro</h2>
 <p><code>macro p := e</code> adds a rule that rewrites a tree before it is evaluated. <code>p</code> is written as a parameter pattern and stands for the shape of a tree. <code>e</code> is evaluated with the variables of <code>p</code>, and its value is the new tree. <code>macro</code> turns an M-expression into another M-expression and does not touch the syntax that turns a string into an M-expression.</p>
