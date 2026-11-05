@@ -99,7 +99,8 @@ For x86 Linux
    $ git clone https://github.com/nineties/hex-to-compiler.git
    $ cd hex-to-compiler
    $ make
-   $ make test-planck0   # planck/tests/core.pk, planck/tests/syntax.pk, planck/tests/define.pk, planck/tests/builtins.pk, planck/tests/lib.pk, planck/tests/unparse.pk, planck/tests/unparse_pattern.pk, planck/tests/unparse_file.pk, planck/tests/highlight.pk and planck/examples
+   $ make test-planck0   # planck/tests/core.pk, syntax.pk, macro.pk, define.pk, module.pk, builtins.pk and the examples in planck/tests/errors
+   $ make test-all       # test-planck0 and then the libraries, the tools, the vasm, native and backend tests, and the examples
 
 For Other Environments
 ~~~~~~~~~~~~~~~~~~~~~~

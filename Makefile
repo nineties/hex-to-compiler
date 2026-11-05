@@ -52,7 +52,7 @@ VASM_TARGETS := x86_64
 BACKEND_EXAMPLES := $(wildcard planck/examples/backend/*.pk)
 PARTIAL_EVAL_EXAMPLES := $(wildcard planck/examples/partial_eval/*.pk)
 
-.PHONY: clean test test-planck0 preprocess
+.PHONY: clean test test-planck0 test-all preprocess
 clean:
 	rm -f planck/lib/*.pkm planck/lib/*/*.pkm
 	rm -f pforth
@@ -68,7 +68,7 @@ test: pforth bootstrap/plisp.fs $(shell find bootstrap/plisp -name "*.lisp")
 preprocess: planck0
 	./planck0 tools/preprocess.pk vasm/build native/compile
 
-# run tests of planck0 and compare outputs of examples with *.out
+# run the core tests of planck0: tests of the language and the examples in tests/errors
 test-planck0: planck0
 	./planck0 planck/tests/core.pk
 	./planck0 planck/tests/syntax.pk
@@ -76,6 +76,15 @@ test-planck0: planck0
 	./planck0 planck/tests/define.pk
 	./planck0 planck/tests/module.pk
 	./planck0 planck/tests/builtins.pk one "two words"
+	@for f in planck/tests/errors/*.pk; do \
+		./planck0 $$f > tmp-error.out 2> tmp-error.err && { echo "$$f: should stop"; exit 1; }; \
+		diff -u $${f%.pk}.out tmp-error.out || exit 1; \
+		diff -u $${f%.pk}.err tmp-error.err || exit 1; \
+		echo "$$f: stops"; \
+	done; rm -f tmp-error.out tmp-error.err
+
+# run everything: test-planck0 and then the libraries, the tools, the vasm, native and backend tests, and the examples
+test-all: test-planck0
 	./planck0 planck/tests/lib.pk
 	./planck0 planck/tests/unparse.pk
 	./planck0 planck/tests/unparse_pattern.pk
@@ -91,12 +100,6 @@ test-planck0: planck0
 		diff -u $${f%.pk}.out tmp-example.out || exit 1; \
 		echo "$$f: ok"; \
 	done; rm -f tmp-example.out
-	@for f in planck/tests/errors/*.pk; do \
-		./planck0 $$f > tmp-error.out 2> tmp-error.err && { echo "$$f: should stop"; exit 1; }; \
-		diff -u $${f%.pk}.out tmp-error.out || exit 1; \
-		diff -u $${f%.pk}.err tmp-error.err || exit 1; \
-		echo "$$f: stops"; \
-	done; rm -f tmp-error.out tmp-error.err
 	./planck0 planck/tests/backend.pk
 	./planck0 planck/tests/x64.pk
 	./planck0 planck/tests/target.pk
