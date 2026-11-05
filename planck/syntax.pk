@@ -1534,9 +1534,6 @@ and_expr ::= a:not_expr 'and b:and_expr { `If{!a, !b, false} }
 or_expr ::= a:and_expr 'or b:or_expr { `If{!a, true, !b} }
           | and_expr
 
-ternary ::= c:or_expr "?" a:or_expr ":" b:ternary { `If{!c, !a, !b} }
-          | or_expr
-
 " === Patterns === "
 " A pattern is written as an expression up to or, and matches the tree of that expression: "
 " a + b is Apply{'_add, Tuple{a, b}} and f(x) is Apply{'f, Tuple{x}}. "
@@ -1599,12 +1596,12 @@ pattern ::= a:pat_and 'or b:pattern { `If{!a, 'true, !b} }
 params ::= "(" ps:delimited(pattern, ",") ")" &arrow_next { ps }
          | p:pattern { Tuple{p} }
 
-lambda_ahead ::= &(ternary arrow_next)
+lambda_ahead ::= &(or_expr arrow_next)
 
 " params if c -> e is a function with the guard c (peg_guard) "
 arrow ::= lambda_ahead ps:params "->" e:arrow { peg_lambda(ps, e) }
-        | lambda_ahead ps:params 'if c:ternary "->" e:arrow { peg_guard(ps, c, e) }
-        | ternary
+        | lambda_ahead ps:params 'if c:or_expr "->" e:arrow { peg_guard(ps, c, e) }
+        | or_expr
 
 " the left side of x := e and x = e: a name, or !x which is replaced by the name inside a quasi-quote "
 target ::= ident
@@ -1631,7 +1628,7 @@ if_expr ::= 'if "(" c:expr ")" a:branch b:('else branch)? { peg_if(c, a, b) }
 union ::= f:arrow "|" g:union { peg_fuse(f, g) }
         | arrow
 
-sugar_primary ::= 'match s:ternary "{" f:union "}" { peg_match(s, f) }
+sugar_primary ::= 'match s:or_expr "{" f:union "}" { peg_match(s, f) }
                 | 'return v:(same arrow)? { peg_return(v) }
                 | 'break { peg_break() }
                 | 'continue { peg_continue() }
