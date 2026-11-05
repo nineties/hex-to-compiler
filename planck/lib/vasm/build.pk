@@ -25,19 +25,19 @@ use("vasm/unit")
 
 module vasm_build {
     # the names of the functions that the code calls
-    vb_calls(code) := concat_map(i -> match i {
+    calls(code) := concat_map(i -> match i {
         I{'call, [S{n, _}, _, _]} -> [n]
       | _ -> []
     }, code)
 
     # the names of the functions of rt.runtime
-    vb_helper_names := map(d -> symname(arg(d, 1)), arg(rt.runtime, 0))
+    helper_names := map(d -> symname(arg(d, 1)), arg(rt.runtime, 0))
 
     # the object for the target t of the merged units: the code of the functions, the runtime and the helpers they call
-    vasm_object_for(t, Merged{lowered, strs, syms, ret}) := {
+    object_for(t, Merged{lowered, strs, syms, ret}) := {
         w := target.word(t)
         datas := append(map(vasm_ir.string_data, strs), map(vasm_ir.symbol_data, map(intern, syms)))
-        called := concat_map(f -> vb_calls(ir.code(f)), lowered)
+        called := concat_map(f -> calls(ir.code(f)), lowered)
         fns := append(lowered, append([rt.alloc_fn(w), rt.free_fn(w), rt.start_fn(w, ret)], append(rt.ports(w, called), rt.val_fns(w, called))))
         done := table.new()
         out := []
@@ -49,7 +49,7 @@ module vasm_build {
             out = g :: out
             table.set(done, ir.name(f), true)
             # the helpers that the code calls and that are not made yet
-            need := filter(n -> member(n, vb_helper_names) and not table.has(done, n), vb_calls(ir.code(g)))
+            need := filter(n -> member(n, helper_names) and not table.has(done, n), calls(ir.code(g)))
             need = reverse(foldl((acc, n) -> if (member(n, acc)) acc else n :: acc, [], need))
             if (need != []) {
                 each(n -> table.set(done, n, true), need)
@@ -60,7 +60,7 @@ module vasm_build {
     }
 
     # units_executable_for(t, units) is the file for the target t as a buffer of bytes; the units must be made for the word of t
-    export units_executable_for(t, units) := target.executable(t, [vasm_object_for(t, vasm_unit.units_merge(units, target.word(t)))])
+    export units_executable_for(t, units) := target.executable(t, [object_for(t, vasm_unit.units_merge(units, target.word(t)))])
 
     # executable_for(t, m) is the file of the module m for the target t
     export executable_for(t, m) := units_executable_for(t, [vasm_unit.unit("main", m, [], target.word(t))])

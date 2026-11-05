@@ -33,7 +33,7 @@
 #
 # A variable that is assigned under a dynamic condition or in a loop that is left is a register of the function. A variable that a function value
 # shares with the place it was made is an array of one element. A while whose condition is static runs when specialize runs, at most
-# pe_loop_limit rounds; the rest of it is left.
+# loop_limit rounds; the rest of it is left.
 #
 # A built-in function with a dynamic argument calls its implementation of vasm/builtins.pk. Printing, reading and writing are always left, in
 # the order of the program; a function of the standard libraries is unfolded from its source when an argument is dynamic or a function.
@@ -44,7 +44,7 @@
 # use its continuation ends the handle, and one that gives a value to it in the end (k(v) last) goes on. What is left to do in the other
 # path of the condition is in the else part.
 #
-# What cannot be left as an operation of vasm stops the result when it is reached, with a message to the error output (pe_stop):
+# What cannot be left as an operation of vasm stops the result when it is reached, with a message to the error output (stop):
 # eval, parse, load and the like with a dynamic argument, a function that is not in the tree or the libraries with a dynamic argument, a perform
 # whose handle is outside the function that is made, and a continuation that is used otherwise than above across a dynamic condition.
 
@@ -61,79 +61,79 @@ module pe {
 text_of_vasm := vasm_text.text
 
 fun pe_eval
-fun pe_values
-fun pe_call_named
-fun pe_call_value
-fun pe_unfold
-fun pe_make_fn
-fun pe_residual_call
-fun pe_primitive
-fun pe_box
-fun pe_box_fun
-fun pe_coerce
-fun pe_dyn_if
-fun pe_stop
+fun values
+fun call_named
+fun call_value
+fun unfold
+fun make_fn
+fun residual_call
+fun primitive
+fun box
+fun box_fun
+fun coerce
+fun dyn_if
+fun stop
 fun pe_while
-fun pe_lift
-fun pe_eq_op
-fun pe_has_array
-fun pe_add_escapes
-fun pe_close
-fun pe_close_gone
-fun pe_take_defs
-fun pe_same_env
-fun pe_close_opens
-fun pe_box_closure
-fun pe_val_of_function
-fun pe_arity_known
-fun pe_loc_dy
-fun pe_assigns_into
-fun pe_specialize_once
-fun pe_set_reg_call
-fun pe_eq_test
-fun pe_static_match
+fun lift
+fun eq_op
+fun has_array
+fun add_escapes
+fun close
+fun close_gone
+fun take_defs
+fun same_env
+fun close_opens
+fun box_closure
+fun val_of_function
+fun arity_known
+fun loc_dy
+fun assigns_into
+fun specialize_once
+fun set_reg_call
+fun eq_test
+fun static_match
 
 # === State ===
 # the functions of the tree: name -> the list of the clauses Lambda{Tuple{p, ...}, body}
 pe_defs := table.new()
 # the variables, the statements (the last first) and the registers of the function that is being made
-pe_decls := []
+decls := []
 pe_stmts := []
-pe_count := 0
+count := 0
 # the number of the branches of dynamic conditions around the code, and the functions being unfolded: Tuple{key, depth}, the last first
-pe_depth := 0
+depth := 0
 pe_stack := []
 # the conditions around the code: Fr{depth, a one-element array of the statements to put before the condition}, the innermost first
-pe_frames := []
+frames := []
 # the if statements whose else part is being written: Op{statements before, condition, statements of the path that left, frame}
-pe_opens := []
+opens := []
 # the handlers of the function being made, the innermost first, the loops around the code, the handles left from a branch, the Defs in a branch
-pe_handlers := []
-pe_loops := []
-pe_escapes := []
-pe_deflog := []
+handlers := []
+loops := []
+escapes := []
+deflog := []
 # the bodies of the functions being unfolded
-pe_bodies := []
+bodies := []
 # the type of the results, the first function, the functions made (the last first), what they were made for, and the built-in functions called
 pe_rty := Unit{}
-pe_entry := ""
-pe_entry_fv := none
+entry := ""
+entry_fv := none
 pe_fns := []
-pe_memo := []
-pe_impls := []
-pe_nres := 0
-pe_nids := 0
-pe_nhandles := 0
+memo := []
+impls := []
+nres := 0
+nids := 0
+nhandles := 0
 # the functions being made: Tuple{key of the function, template}, the last first
-pe_making := []
+making := []
 # the names and the functions whose type has become val, and the variables that are registers in any loop: they stay over the starts of specialize
-pe_force := table.new()
+force := table.new()
 pe_at := Pos{0}
-pe_first_key := none
-pe_root := none
+first_key := none
+root := none
 
 # the rounds of a while with a static condition that run when specialize runs
-pe_loop_limit := 64
+loop_limit := 64
 
 # === Values ===
 # A static value is a value of planck, or a function: Cl{clauses, id} for a function made here, whose clauses are Tuple{lambda, environment},
@@ -142,30 +142,30 @@ pe_loop_limit := 64
 # A location of a variable holds a value, or Mt{register, type} for a register that is assigned, or Ce{array} for an array of one element.
 
 pe_dyn(v) := typeof(v) == 'mexpr and head(v) == 'Dy
-pe_marker(v) := typeof(v) == 'mexpr and head(v) == 'Dyn
+marker(v) := typeof(v) == 'mexpr and head(v) == 'Dyn
 pe_fun(v) := typeof(v) == 'mexpr and member(head(v), ['Cl, 'Fv, 'Pr, 'Kn, 'Ki])
-pe_is_mexpr(v) := typeof(v) == 'mexpr and not pe_dyn(v) and not pe_fun(v)
+is_mexpr(v) := typeof(v) == 'mexpr and not pe_dyn(v) and not pe_fun(v)
 # v has a dynamic value or a function in it, so it is not a value of planck that a function of planck takes
-pe_opaque(v) := pe_dyn(v) or pe_fun(v) or (typeof(v) == 'mexpr and list.any(pe_opaque, vasm_tlist(v)))
-pe_is_bool(v) := v == true or v == false
-pe_int_type(t) := vasm_check.int(t)
-pe_static_ref := Ref{'shr, 'static, Arr{U8{}}}
-pe_val_dy(v) := pe_dyn(v) and arg(v, 1) == Val{}
-pe_bool_dy(v) := pe_dyn(v) and arg(v, 1) == Bool{}
-pe_int_dy(v) := pe_dyn(v) and vasm_check.int(arg(v, 1))
-pe_ref_dy(v) := pe_dyn(v) and head(arg(v, 1)) == 'Ref
+opaque(v) := pe_dyn(v) or pe_fun(v) or (typeof(v) == 'mexpr and list.any(opaque, vasm_tlist(v)))
+is_bool(v) := v == true or v == false
+int_type(t) := vasm_check.int(t)
+static_ref := Ref{'shr, 'static, Arr{U8{}}}
+val_dy(v) := pe_dyn(v) and arg(v, 1) == Val{}
+bool_dy(v) := pe_dyn(v) and arg(v, 1) == Bool{}
+int_dy(v) := pe_dyn(v) and vasm_check.int(arg(v, 1))
+ref_dy(v) := pe_dyn(v) and head(arg(v, 1)) == 'Ref
 
 # the integer v is in the range of i32. The value is divided, so that nothing depends on the size of an integer of planck.
-pe_fits_i32(v) := {
+fits_i32(v) := {
     n := if (v < 0) 0 - v else v
     n / 65536 < 32768
 }
 
 # the type that holds v when it is a value of the kind that a register of a scalar holds, and else val
-pe_kind_type(v) := if (pe_dyn(v)) arg(v, 1)
-    else if (typeof(v) == 'int) (if (pe_fits_i32(v)) I32{} else I64{})
-    else if (pe_is_bool(v)) Bool{}
-    else if (typeof(v) == 'string) pe_static_ref
+kind_type(v) := if (pe_dyn(v)) arg(v, 1)
+    else if (typeof(v) == 'int) (if (fits_i32(v)) I32{} else I64{})
+    else if (is_bool(v)) Bool{}
+    else if (typeof(v) == 'string) static_ref
     else Val{}
 
 pe_join(a, b) := if (a == b) a
@@ -173,52 +173,52 @@ pe_join(a, b) := if (a == b) a
     else Val{}
 
 # a place of type t holds v without a check when the program runs
-pe_fits(v, t) := t == Val{} or pe_join(pe_kind_type(v), t) == t
+fits(v, t) := t == Val{} or pe_join(kind_type(v), t) == t
 
 # === Environments ===
-pe_env(parent) := En{table.new(), parent, table.new(), pe_depth}
-pe_env_vals(e) := arg(e, 0)
-pe_env_parent(e) := arg(e, 1)
-pe_env_depths(e) := arg(e, 2)
-pe_env_born(e) := arg(e, 3)
+pe_env(parent) := En{table.new(), parent, table.new(), depth}
+env_vals(e) := arg(e, 0)
+env_parent(e) := arg(e, 1)
+env_depths(e) := arg(e, 2)
+env_born(e) := arg(e, 3)
 
 pe_loc(env, x) := {
     e := env
     found := none
     while (found == none and e != none) {
-        if (table.get(pe_env_vals(e), x, Unbound{}) != Unbound{}) found = e
-        else e = pe_env_parent(e)
+        if (table.get(env_vals(e), x, Unbound{}) != Unbound{}) found = e
+        else e = env_parent(e)
     }
     found
 }
 
 # x := v in env
-pe_def(env, x, v) := {
-    if (pe_depth > pe_env_born(env)) pe_deflog = Tuple{env, x, table.get(pe_env_vals(env), x, Unbound{})} :: pe_deflog
-    table.set(pe_env_vals(env), x, v)
-    table.set(pe_env_depths(env), x, pe_depth)
+def(env, x, v) := {
+    if (depth > env_born(env)) deflog = Tuple{env, x, table.get(env_vals(env), x, Unbound{})} :: deflog
+    table.set(env_vals(env), x, v)
+    table.set(env_depths(env), x, depth)
 }
 
 # === Statements ===
-pe_fresh(t) := {
-    pe_count = pe_count + 1
-    x := intern(f"t{pe_count}")
-    pe_decls = Decl{pe_at, x, t} :: pe_decls
+fresh(t) := {
+    count = count + 1
+    x := intern(f"t{count}")
+    decls = Decl{pe_at, x, t} :: decls
     x
 }
 
-pe_emit(s) := {
+emit(s) := {
     pe_stmts = s :: pe_stmts
 }
 
-pe_assign(t, r) := {
-    x := pe_fresh(t)
-    pe_emit(Assign{pe_at, x, r})
+assign(t, r) := {
+    x := fresh(t)
+    emit(Assign{pe_at, x, r})
     Dy{x, t}
 }
 
 # the value of the statements that fn() emits, and these statements
-pe_capture(fn) := {
+capture(fn) := {
     saved := pe_stmts
     pe_stmts = []
     v := fn()
@@ -227,179 +227,179 @@ pe_capture(fn) := {
     Tuple{s, v}
 }
 
-pe_in_range(v) := v >= -32768 and v <= 32767
+in_range(v) := v >= -32768 and v <= 32767
 
 # the register of type t with the integer v, which is out of the range of a literal
-pe_big(v, t) := {
-    x := pe_fresh(t)
+big(v, t) := {
+    x := fresh(t)
     n := if (v < 0) 0 - v else v
     ds := []
     while (n > 0) {
         ds = n % 32768 :: ds
         n = n / 32768
     }
-    pe_emit(Assign{pe_at, x, Mov{Imm{pe_at, 0}}})
+    emit(Assign{pe_at, x, Mov{Imm{pe_at, 0}}})
     for (d in ds) {
-        pe_emit(Assign{pe_at, x, Bin{'shl, Reg{pe_at, x}, Imm{pe_at, 15}}})
-        pe_emit(Assign{pe_at, x, Bin{'bit_or, Reg{pe_at, x}, Imm{pe_at, d}}})
+        emit(Assign{pe_at, x, Bin{'shl, Reg{pe_at, x}, Imm{pe_at, 15}}})
+        emit(Assign{pe_at, x, Bin{'bit_or, Reg{pe_at, x}, Imm{pe_at, d}}})
     }
-    if (v < 0) pe_emit(Assign{pe_at, x, Bin{'sub, Imm{pe_at, 0}, Reg{pe_at, x}}})
+    if (v < 0) emit(Assign{pe_at, x, Bin{'sub, Imm{pe_at, 0}, Reg{pe_at, x}}})
     Dy{x, t}
 }
 
 # the operand of the value v: a dynamic value, a bool, an integer or a string
-pe_operand(v) := if (pe_dyn(v)) Reg{pe_at, arg(v, 0)}
-    else if (typeof(v) == 'int) (if (pe_in_range(v)) Imm{pe_at, v} else Reg{pe_at, arg(pe_big(v, I64{}), 0)})
-    else if (pe_is_bool(v)) Imm{pe_at, v}
+operand(v) := if (pe_dyn(v)) Reg{pe_at, arg(v, 0)}
+    else if (typeof(v) == 'int) (if (in_range(v)) Imm{pe_at, v} else Reg{pe_at, arg(big(v, I64{}), 0)})
+    else if (is_bool(v)) Imm{pe_at, v}
     else if (typeof(v) == 'string) Str{pe_at, v}
-    else Reg{pe_at, arg(pe_box(v), 0)}
+    else Reg{pe_at, arg(box(v), 0)}
 
 # the dynamic value v with the type t, converted if it has another integer type
-pe_to(v, t) := if (pe_dyn(v) and arg(v, 1) != t and vasm_check.int(arg(v, 1)) and vasm_check.int(t)) pe_assign(t, Conv{pe_at, Reg{pe_at, arg(v, 0)}, t})
-    else if (typeof(v) == 'int and vasm_check.int(t) and not pe_in_range(v)) pe_big(v, t)
+to(v, t) := if (pe_dyn(v) and arg(v, 1) != t and vasm_check.int(arg(v, 1)) and vasm_check.int(t)) assign(t, Conv{pe_at, Reg{pe_at, arg(v, 0)}, t})
+    else if (typeof(v) == 'int and vasm_check.int(t) and not in_range(v)) big(v, t)
     else v
 
 # the value that a register of type t holds on a path that does not go on
-pe_dummy(t) := if (vasm_check.int(t)) 0 else if (t == Bool{}) false else if (t == Val{}) none else if (t == pe_static_ref) "" else none
+dummy(t) := if (vasm_check.int(t)) 0 else if (t == Bool{}) false else if (t == Val{}) none else if (t == static_ref) "" else none
 
 # a statement for a place of type t with a value on a path that does not go on
-pe_dummy_op(t) := if (t == Val{}) Sym{pe_at, 'none} else pe_operand(pe_dummy(t))
+dummy_op(t) := if (t == Val{}) Sym{pe_at, 'none} else operand(dummy(t))
 
 # x = v for the register x of type t
-pe_set_reg(x, t, v) := pe_emit(Assign{pe_at, x, Mov{pe_operand(pe_coerce(v, t))}})
+set_reg(x, t, v) := emit(Assign{pe_at, x, Mov{operand(coerce(v, t))}})
 
 # a call of the function f of vasm/builtins.pk with the operands; its result has the type t (Unit{} for none)
-pe_impl_call(f, args, t) := {
-    if (not member(f, pe_impls)) pe_impls = f :: pe_impls
+impl_call(f, args, t) := {
+    if (not member(f, impls)) impls = f :: impls
     if (t == Unit{}) {
-        pe_emit(CallS{pe_at, f, args})
+        emit(CallS{pe_at, f, args})
         none
-    } else pe_assign(t, Call{pe_at, f, args})
+    } else assign(t, Call{pe_at, f, args})
 }
 
 # the result ends here when it runs, with the message; the value is what the place expects to go on
-pe_stop(msg) := {
-    pe_impl_call('v_stop, [Str{pe_at, msg}], Unit{})
+stop(msg) := {
+    impl_call('v_stop, [Str{pe_at, msg}], Unit{})
     none
 }
 
 # === Values of val ===
 # the value v as a val, in a register or as a symbol
-pe_box_op(v) := if (typeof(v) == 'symbol) Sym{pe_at, v} else Reg{pe_at, arg(pe_box(v), 0)}
+box_op(v) := if (typeof(v) == 'symbol) Sym{pe_at, v} else Reg{pe_at, arg(box(v), 0)}
 
-pe_box(v) := if (pe_val_dy(v)) v
-    else if (pe_dyn(v)) pe_assign(Val{}, Conv{pe_at, Reg{pe_at, arg(v, 0)}, Val{}})
-    else if (typeof(v) == 'int) (if (pe_in_range(v)) pe_assign(Val{}, Conv{pe_at, Imm{pe_at, v}, Val{}}) else pe_box(pe_big(v, I64{})))
-    else if (typeof(v) == 'string) pe_assign(Val{}, Conv{pe_at, Str{pe_at, v}, Val{}})
-    else if (typeof(v) == 'symbol) pe_assign(Val{}, Mov{Sym{pe_at, v}})
-    else if (pe_fun(v)) pe_box_fun(v)
+box(v) := if (val_dy(v)) v
+    else if (pe_dyn(v)) assign(Val{}, Conv{pe_at, Reg{pe_at, arg(v, 0)}, Val{}})
+    else if (typeof(v) == 'int) (if (in_range(v)) assign(Val{}, Conv{pe_at, Imm{pe_at, v}, Val{}}) else box(big(v, I64{})))
+    else if (typeof(v) == 'string) assign(Val{}, Conv{pe_at, Str{pe_at, v}, Val{}})
+    else if (typeof(v) == 'symbol) assign(Val{}, Mov{Sym{pe_at, v}})
+    else if (pe_fun(v)) box_fun(v)
     else if (typeof(v) == 'mexpr) {
-        ops := map(pe_box_op, vasm_tlist(v))
-        pe_assign(Val{}, Con{pe_at, head(v), ops})
-    } else if (typeof(v) == 'array or typeof(v) == 'plain) pe_box(pe_lift(v))
+        ops := map(box_op, vasm_tlist(v))
+        assign(Val{}, Con{pe_at, head(v), ops})
+    } else if (typeof(v) == 'array or typeof(v) == 'plain) box(lift(v))
     else {
-        pe_stop("a function of planck that has no name is a value that is not left in vasm")
-        pe_assign(Val{}, Mov{Sym{pe_at, 'none}})
+        stop("a function of planck that has no name is a value that is not left in vasm")
+        assign(Val{}, Mov{Sym{pe_at, 'none}})
     }
 
 # an array in the value v is made when the result runs: the value is the same with these arrays dynamic
-pe_lift(v) := if (typeof(v) == 'array or typeof(v) == 'plain) {
+lift(v) := if (typeof(v) == 'array or typeof(v) == 'plain) {
     n := if (typeof(v) == 'array) array_len(v) else plain_len(v)
-    x := pe_impl_call(if (typeof(v) == 'array) 'v_array else 'v_plain_array, [pe_box_op(n)], Val{})
+    x := impl_call(if (typeof(v) == 'array) 'v_array else 'v_plain_array, [box_op(n)], Val{})
     i := 0
     while (i < n) {
-        e := pe_lift(if (typeof(v) == 'array) array_get(v, i) else plain_get(v, i))
-        if (e != none and e != 0) pe_impl_call('v_index_set, [Reg{pe_at, arg(x, 0)}, pe_box_op(i), pe_box_op(e)], Val{})
+        e := lift(if (typeof(v) == 'array) array_get(v, i) else plain_get(v, i))
+        if (e != none and e != 0) impl_call('v_index_set, [Reg{pe_at, arg(x, 0)}, box_op(i), box_op(e)], Val{})
         i = i + 1
     }
     x
-} else if (pe_is_mexpr(v) and pe_has_array(v)) foldl((t, x) -> push(t, x), mexpr(head(v), Tuple{}), map(pe_lift, vasm_tlist(v)))
+} else if (is_mexpr(v) and has_array(v)) foldl((t, x) -> push(t, x), mexpr(head(v), Tuple{}), map(lift, vasm_tlist(v)))
 else v
 
-pe_has_array(v) := typeof(v) == 'array or typeof(v) == 'plain or (pe_is_mexpr(v) and list.any(pe_has_array, vasm_tlist(v)))
+has_array(v) := typeof(v) == 'array or typeof(v) == 'plain or (is_mexpr(v) and list.any(has_array, vasm_tlist(v)))
 
 # the value v in a place of type t. A val that is to be another type is checked when the program runs.
-pe_coerce(v, t) := if (t == Val{}) pe_box(v)
-    else if (pe_val_dy(v)) {
-        if (vasm_check.int(t) or t == Bool{} or t == Own{Arr{U8{}}}) pe_assign(t, Conv{pe_at, Reg{pe_at, arg(v, 0)}, t})
+coerce(v, t) := if (t == Val{}) box(v)
+    else if (val_dy(v)) {
+        if (vasm_check.int(t) or t == Bool{} or t == Own{Arr{U8{}}}) assign(t, Conv{pe_at, Reg{pe_at, arg(v, 0)}, t})
         else {
-            pe_stop("a val is not converted to the type of the result")
-            pe_dummy(t)
+            stop("a val is not converted to the type of the result")
+            dummy(t)
         }
-    } else if (pe_fits(v, t) or (pe_int_dy(v) and vasm_check.int(t))) pe_to(v, t)
-    else if (vasm_check.int(t) or t == Bool{} or t == Own{Arr{U8{}}}) pe_coerce(pe_box(v), t)
+    } else if (fits(v, t) or (int_dy(v) and vasm_check.int(t))) to(v, t)
+    else if (vasm_check.int(t) or t == Bool{} or t == Own{Arr{U8{}}}) coerce(box(v), t)
     else {
-        pe_stop("a value is not converted to the type of the result")
-        pe_dummy(t)
+        stop("a value is not converted to the type of the result")
+        dummy(t)
     }
 
 # === Starting again ===
 # what is named by key is held by val from now on
-pe_widen(key) := {
-    table.set(pe_force, key, true)
+widen(key) := {
+    table.set(force, key, true)
     perform PeRestart{}
 }
 
-pe_forced(key) := table.get(pe_force, key, false)
+forced(key) := table.get(force, key, false)
 
 # === The trees of functions ===
 # a clause is Do{Declare{f}, Set{f, Fusion{f, Lambda{...}}}}
-pe_is_clause(t) := typeof(t) == 'mexpr and head(t) == 'Do and arity(t) == 2 and typeof(arg(t, 0)) == 'mexpr and head(arg(t, 0)) == 'Declare
-pe_is_def_tree(t) := pe_is_clause(t) or (typeof(t) == 'mexpr and head(t) == 'Do and arity(t) > 0 and list.all(pe_is_def_tree, vasm_tlist(t)))
-pe_is_fun_tree(t) := typeof(t) == 'mexpr and (head(t) == 'Lambda or pe_is_def_tree(t))
+is_clause(t) := typeof(t) == 'mexpr and head(t) == 'Do and arity(t) == 2 and typeof(arg(t, 0)) == 'mexpr and head(arg(t, 0)) == 'Declare
+is_def_tree(t) := is_clause(t) or (typeof(t) == 'mexpr and head(t) == 'Do and arity(t) > 0 and list.all(is_def_tree, vasm_tlist(t)))
+is_fun_tree(t) := typeof(t) == 'mexpr and (head(t) == 'Lambda or is_def_tree(t))
 
 # add the clauses of the tree t to pe_defs and give the name of the function of the last clause
-pe_load_tree(t) := if (pe_is_clause(t)) match t {
+load_tree(t) := if (is_clause(t)) match t {
     Do{Declare{f}, Set{_, Fusion{_, l}}} -> {
         table.set(pe_defs, f, append(table.get(pe_defs, f, []), [l]))
         f
     }
 } else {
     last := none
-    for (x in vasm_tlist(t)) last = pe_load_tree(x)
+    for (x in vasm_tlist(t)) last = load_tree(x)
     last
 }
 
-pe_new_id() := {
-    pe_nids = pe_nids + 1
-    pe_nids
+new_id() := {
+    nids = nids + 1
+    nids
 }
 
 # the function the tree t stands for
-pe_fun_value(t) := if (head(t) == 'Lambda) Cl{[Tuple{t, pe_root}], pe_new_id()} else Fv{pe_load_tree(t)}
+fun_value(t) := if (head(t) == 'Lambda) Cl{[Tuple{t, root}], new_id()} else Fv{load_tree(t)}
 
 # === The functions of the standard libraries ===
 # name -> the clauses, read from the source when a call needs them
-pe_lib_defs := none
+lib_defs := none
 
-pe_lib_add(f, t) := if (typeof(t) == 'mexpr) match t {
-    Lambda{_, _} -> table.set(pe_lib_defs, f, append(table.get(pe_lib_defs, f, []), [t]))
+lib_add(f, t) := if (typeof(t) == 'mexpr) match t {
+    Lambda{_, _} -> table.set(lib_defs, f, append(table.get(lib_defs, f, []), [t]))
   | Fusion{a, b} -> {
-        pe_lib_add(f, a)
-        pe_lib_add(f, b)
+        lib_add(f, a)
+        lib_add(f, b)
     }
   | _ -> none
 }
 
-fun pe_note_module
-pe_note_top(e) := if (typeof(e) == 'mexpr) match e {
-    Do{Declare{f}, Set{_, t}} -> pe_lib_add(f, t)
-  | Set{f, t} -> pe_lib_add(f, t)
-  | Def{_, Apply{Lambda{Tuple{}, body}, Tuple{}}} -> pe_note_module(body)
-  | Def{f, t} -> pe_lib_add(f, t)
+fun note_module
+note_top(e) := if (typeof(e) == 'mexpr) match e {
+    Do{Declare{f}, Set{_, t}} -> lib_add(f, t)
+  | Set{f, t} -> lib_add(f, t)
+  | Def{_, Apply{Lambda{Tuple{}, body}, Tuple{}}} -> note_module(body)
+  | Def{f, t} -> lib_add(f, t)
   | _ -> none
 }
 
 # the functions defined in the body of a module are noted by the names they have in the body
-pe_note_module(body) := if (typeof(body) == 'mexpr and head(body) == 'Do) {
+note_module(body) := if (typeof(body) == 'mexpr and head(body) == 'Do) {
     for (s in vasm_tlist(body)) {
-        if (pe_is_clause(s)) pe_note_top(s)
-        else if (typeof(s) == 'mexpr and head(s) == 'Do) pe_note_module(s)
-        else pe_note_top(s)
+        if (is_clause(s)) note_top(s)
+        else if (typeof(s) == 'mexpr and head(s) == 'Do) note_module(s)
+        else note_top(s)
     }
 }
 
-pe_read_lib(path, parser) := {
+read_lib(path, parser) := {
     s := read_file(path)
     go := true
     while (go) {
@@ -407,23 +407,23 @@ pe_read_lib(path, parser) := {
         e := arg(r, 0)
         if (e == Eof{} or (typeof(e) == 'mexpr and head(e) == 'SyntaxError)) go = false
         else {
-            pe_note_top(e)
+            note_top(e)
             s = arg(r, 1)
         }
     }
 }
 
-pe_lib_clauses(f) := {
-    if (pe_lib_defs == none) {
-        pe_lib_defs = table.new()
-        pe_read_lib("planck/init.pk", parse_mexpr)
-        for (n in ["list", "string", "base"]) pe_read_lib(f"planck/lib/{n}.pk", parse)
+lib_clauses(f) := {
+    if (lib_defs == none) {
+        lib_defs = table.new()
+        read_lib("planck/init.pk", parse_mexpr)
+        for (n in ["list", "string", "base"]) read_lib(f"planck/lib/{n}.pk", parse)
     }
-    table.get(pe_lib_defs, f, none)
+    table.get(lib_defs, f, none)
 }
 
 # list.f, string.f and base.f call the function f of the library
-pe_lib_callee(env, f) := if (typeof(f) == 'mexpr and head(f) == 'Apply and arg(f, 0) == '_record_get) {
+lib_callee(env, f) := if (typeof(f) == 'mexpr and head(f) == 'Apply and arg(f, 0) == '_record_get) {
     m := arg(arg(f, 1), 0)
     n := arg(arg(f, 1), 1)
     if (member(m, ['list, 'string, 'base]) and pe_loc(env, m) == none and typeof(n) == 'mexpr and head(n) == 'Quote) arg(n, 0) else f
@@ -433,38 +433,38 @@ pe_lib_callee(env, f) := if (typeof(f) == 'mexpr and head(f) == 'Apply and arg(f
 pe_ops := [Tuple{'_add, 'add}, Tuple{'_sub, 'sub}, Tuple{'_mul, 'mul}, Tuple{'_div, 'div}, Tuple{'_mod, 'rem},
     Tuple{'_eq, 'eq}, Tuple{'_ne, 'ne}, Tuple{'_lt, 'lt}, Tuple{'_le, 'le}, Tuple{'_gt, 'gt}, Tuple{'_ge, 'ge},
     Tuple{'bit_and, 'bit_and}, Tuple{'bit_or, 'bit_or}, Tuple{'bit_xor, 'bit_xor}, Tuple{'bit_shl, 'shl}, Tuple{'bit_sar, 'shr}]
-pe_cmps := ['_eq, '_ne, '_lt, '_le, '_gt, '_ge]
+cmps := ['_eq, '_ne, '_lt, '_le, '_gt, '_ge]
 
 # the integer of v for an operation: a val is read as i64
-pe_num(v) := if (pe_val_dy(v)) pe_assign(I64{}, Conv{pe_at, Reg{pe_at, arg(v, 0)}, I64{}}) else v
+num(v) := if (val_dy(v)) assign(I64{}, Conv{pe_at, Reg{pe_at, arg(v, 0)}, I64{}}) else v
 
-pe_is_num(v) := typeof(v) == 'int or pe_int_dy(v)
+is_num(v) := typeof(v) == 'int or int_dy(v)
 
 # the operation f on the values a and b, one of which is dynamic
-pe_dyn_op(f, a0, b0) := if (f == '_eq or f == '_ne) pe_eq_op(f, a0, b0)
+dyn_op(f, a0, b0) := if (f == '_eq or f == '_ne) eq_op(f, a0, b0)
 else {
     o := find(p -> arg(p, 0) == f, pe_ops)
-    a := pe_num(a0)
-    b := pe_num(b0)
-    if (not pe_is_num(a) or not pe_is_num(b)) {
-        pe_stop(f"{symname(f)}: integer is expected")
+    a := num(a0)
+    b := num(b0)
+    if (not is_num(a) or not is_num(b)) {
+        stop(f"{symname(f)}: integer is expected")
         0
     } else {
         t := if (pe_dyn(a) and pe_dyn(b)) pe_join(arg(a, 1), arg(b, 1)) else if (pe_dyn(a)) arg(a, 1) else arg(b, 1)
-        a2 := pe_to(a, t)
-        b2 := pe_to(b, t)
-        rt := if (member(f, pe_cmps)) Bool{} else t
-        pe_assign(rt, Bin{arg(o, 1), pe_operand(a2), pe_operand(b2)})
+        a2 := to(a, t)
+        b2 := to(b, t)
+        rt := if (member(f, cmps)) Bool{} else t
+        assign(rt, Bin{arg(o, 1), operand(a2), operand(b2)})
     }
 }
 
 # a == b or a != b: on integers and bools as the operation of vasm, and on any other values as the operation on val
-pe_eq_op(f, a, b) := {
+eq_op(f, a, b) := {
     op := if (f == '_eq) 'eq else 'ne
-    if ((pe_is_num(a) and pe_is_num(b)) or ((pe_bool_dy(a) or pe_is_bool(a)) and (pe_bool_dy(b) or pe_is_bool(b)))) {
+    if ((is_num(a) and is_num(b)) or ((bool_dy(a) or is_bool(a)) and (bool_dy(b) or is_bool(b)))) {
         t := if (pe_dyn(a) and pe_dyn(b)) pe_join(arg(a, 1), arg(b, 1)) else if (pe_dyn(a)) arg(a, 1) else arg(b, 1)
-        pe_assign(Bool{}, Bin{op, pe_operand(pe_to(a, t)), pe_operand(pe_to(b, t))})
-    } else if (pe_is_mexpr(a) and pe_is_mexpr(b)) {
+        assign(Bool{}, Bin{op, operand(to(a, t)), operand(to(b, t))})
+    } else if (is_mexpr(a) and is_mexpr(b)) {
         # the shapes are known: only the parts that are dynamic are left
         same := if (head(a) != head(b) or arity(a) != arity(b)) false else {
             r := true
@@ -472,38 +472,38 @@ pe_eq_op(f, a, b) := {
             while (i < arity(a)) {
                 x := arg(a, i)
                 y := arg(b, i)
-                e := if (pe_opaque(x) or pe_opaque(y)) pe_eq_op('_eq, x, y) else x == y
+                e := if (opaque(x) or opaque(y)) eq_op('_eq, x, y) else x == y
                 if (r == true) r = e
                 else if (r != false and e != true) {
                     if (e == false) r = false
-                    else r = pe_dyn_if(r, () -> e, () -> false)
+                    else r = dyn_if(r, () -> e, () -> false)
                 }
                 i = i + 1
             }
             r
         }
-        if (f == '_eq) same else if (pe_dyn(same)) pe_primitive('_not, [same]) else not same
-    } else if ((pe_is_num(a) and (typeof(b) == 'string or pe_is_mexpr(b) or pe_bool_dy(b) or pe_is_bool(b) or pe_fun(b))) or (pe_is_num(b) and (typeof(a) == 'string or pe_is_mexpr(a) or pe_bool_dy(a) or pe_is_bool(a) or pe_fun(a)))) f != '_eq
+        if (f == '_eq) same else if (pe_dyn(same)) primitive('_not, [same]) else not same
+    } else if ((is_num(a) and (typeof(b) == 'string or is_mexpr(b) or bool_dy(b) or is_bool(b) or pe_fun(b))) or (is_num(b) and (typeof(a) == 'string or is_mexpr(a) or bool_dy(a) or is_bool(a) or pe_fun(a)))) f != '_eq
     else {
-        x := pe_box_op(a)
-        y := pe_box_op(b)
-        pe_assign(Bool{}, Bin{op, x, y})
+        x := box_op(a)
+        y := box_op(b)
+        assign(Bool{}, Bin{op, x, y})
     }
 }
 
-pe_dyn_not(v) := if (pe_bool_dy(v)) pe_assign(Bool{}, Bin{'eq, pe_operand(v), Imm{pe_at, false}})
-    else if (pe_val_dy(v)) pe_assign(Bool{}, Bin{'eq, pe_operand(v), Sym{pe_at, 'false}})
+dyn_not(v) := if (bool_dy(v)) assign(Bool{}, Bin{'eq, operand(v), Imm{pe_at, false}})
+    else if (val_dy(v)) assign(Bool{}, Bin{'eq, operand(v), Sym{pe_at, 'false}})
     else false
 
 # a condition: only false is false. The value is true, false or a dynamic bool.
-pe_truth(v) := if (pe_bool_dy(v)) v
-    else if (pe_val_dy(v)) pe_assign(Bool{}, Bin{'ne, pe_operand(v), Sym{pe_at, 'false}})
+truth(v) := if (bool_dy(v)) v
+    else if (val_dy(v)) assign(Bool{}, Bin{'ne, operand(v), Sym{pe_at, 'false}})
     else if (v == false) false
     else true
 
 # === The built-in functions ===
 # the functions that take any values in vasm/builtins.pk: Tuple{function of planck, function of vasm}
-pe_impl_table := [Tuple{'print, 'v_print}, Tuple{'put, 'v_put}, Tuple{'exit, 'v_exit},
+impl_table := [Tuple{'print, 'v_print}, Tuple{'put, 'v_put}, Tuple{'exit, 'v_exit},
     Tuple{'read_file, 'v_read_file}, Tuple{'try_read_file, 'v_try_read_file}, Tuple{'read_bytes, 'v_read_bytes}, Tuple{'write_file, 'v_write_file},
     Tuple{'strlen, 'v_strlen}, Tuple{'ord, 'v_ord}, Tuple{'substr, 'v_substr}, Tuple{'_strcat, 'v_strcat}, Tuple{'_to_text, 'v_to_text},
     Tuple{'head, 'v_head}, Tuple{'arity, 'v_arity}, Tuple{'arg, 'v_arg}, Tuple{'typeof, 'v_typeof}, Tuple{'intern, 'v_intern}, Tuple{'symname, 'v_symname},
@@ -514,55 +514,55 @@ pe_impl_table := [Tuple{'print, 'v_print}, Tuple{'put, 'v_put}, Tuple{'exit, 'v_
     Tuple{'argv, 'v_argv}]
 
 # the built-in functions that are left whatever their arguments are, since they read or write something outside or make an array
-pe_always := ['println, 'print, 'put, 'read_file, 'try_read_file, 'read_bytes, 'write_file, 'exit, 'array, 'u8_array, 'u16_array, 'i32_array, 'argv]
+always := ['println, 'print, 'put, 'read_file, 'try_read_file, 'read_bytes, 'write_file, 'exit, 'array, 'u8_array, 'u16_array, 'i32_array, 'argv]
 
 # the numbers of arguments of the built-in functions, for a built-in function that is a value
-pe_arity_of(f) := if (member(f, ['_add, '_sub, '_mul, '_div, '_mod, '_lt, '_le, '_gt, '_ge, '_eq, '_ne, 'ord, 'arg, 'push, 'mexpr, 'array_get, 'plain_get, '_strcat, '_index_get, 'write_file])) 2
+arity_of(f) := if (member(f, ['_add, '_sub, '_mul, '_div, '_mod, '_lt, '_le, '_gt, '_ge, '_eq, '_ne, 'ord, 'arg, 'push, 'mexpr, 'array_get, 'plain_get, '_strcat, '_index_get, 'write_file])) 2
     else if (member(f, ['substr, 'array_set, 'plain_set, '_index_set])) 3
     else if (f == 'argv) 0
     else 1
 
-pe_println(v) := if (typeof(v) == 'string) pe_impl_call('println_str, [Str{pe_at, v}], Unit{})
-    else if (pe_ref_dy(v)) pe_impl_call('println_str, [pe_operand(v)], Unit{})
-    else if (pe_is_num(v)) pe_impl_call('println_int, [pe_operand(pe_to(v, I64{}))], Unit{})
+pe_println(v) := if (typeof(v) == 'string) impl_call('println_str, [Str{pe_at, v}], Unit{})
+    else if (ref_dy(v)) impl_call('println_str, [operand(v)], Unit{})
+    else if (is_num(v)) impl_call('println_int, [operand(to(v, I64{}))], Unit{})
     else {
-        pe_impl_call('v_println, [pe_box_op(v)], Val{})
+        impl_call('v_println, [box_op(v)], Val{})
         none
     }
 
 # argv()[i] and array_len(argv())
-pe_argv_get(i) := if (pe_is_num(i) or pe_val_dy(i)) pe_assign(pe_static_ref, Call{pe_at, 'argv, [pe_operand(pe_to(pe_num(i), I64{}))]})
+argv_get(i) := if (is_num(i) or val_dy(i)) assign(static_ref, Call{pe_at, 'argv, [operand(to(num(i), I64{}))]})
     else {
-        pe_stop("the index of argv() is not an integer")
+        stop("the index of argv() is not an integer")
         ""
     }
 
-pe_argc() := pe_assign(I64{}, Call{pe_at, 'argc, []})
+pe_argc() := assign(I64{}, Call{pe_at, 'argc, []})
 
-pe_argv_call(e) := typeof(e) == 'mexpr and head(e) == 'Apply and arg(e, 0) == 'argv and arity(arg(e, 1)) == 0
+argv_call(e) := typeof(e) == 'mexpr and head(e) == 'Apply and arg(e, 0) == 'argv and arity(arg(e, 1)) == 0
 
 # the function f of the host called with the static values vs; an array in the result is made when the result runs
-pe_host(f, vs) := {
+host(f, vs) := {
     q := map(v -> mexpr('Quote, Tuple{v}), vs)
-    pe_lift(eval(mexpr('Apply, Tuple{f, foldl((t, x) -> push(t, x), Tuple{}, q)})))
+    lift(eval(mexpr('Apply, Tuple{f, foldl((t, x) -> push(t, x), Tuple{}, q)})))
 }
 
-pe_call_impl(impl, vs) := pe_impl_call(impl, map(pe_box_op, vs), Val{})
+call_impl(impl, vs) := impl_call(impl, map(box_op, vs), Val{})
 
 # the registers of the function being made that hold an array that it has made: a[i] and a[i] = v on them are the statements of vasm
-pe_arrays := []
-pe_known_array(v) := pe_val_dy(v) and member(arg(v, 0), pe_arrays)
-pe_index_op(i) := pe_operand(pe_to(pe_num(i), I64{}))
+arrays := []
+known_array(v) := val_dy(v) and member(arg(v, 0), arrays)
+index_op(i) := operand(to(num(i), I64{}))
 
 # array(n), u8_array(n), ... with an integer n
-pe_array_new(f, n) := {
-    x := pe_assign(Val{}, Call{pe_at, 'array, [pe_index_op(n), if (f == 'array) Sym{pe_at, 'none} else pe_box_op(0)]})
-    pe_arrays = arg(x, 0) :: pe_arrays
+array_new(f, n) := {
+    x := assign(Val{}, Call{pe_at, 'array, [index_op(n), if (f == 'array) Sym{pe_at, 'none} else box_op(0)]})
+    arrays = arg(x, 0) :: arrays
     x
 }
 
 # for (x in xs) body with a list that is not known or a function that is left: a loop where the call is
-pe_for_tree := `({
+for_tree := `({
     pe_for_i := pe_for_xs
     while (pe_for_i != Nil{}) {
         pe_for_f(arg(pe_for_i, 0))
@@ -571,52 +571,52 @@ pe_for_tree := `({
     none
 })
 pe_for(xs, fn) := {
-    env := pe_env(pe_root)
-    pe_def(env, 'pe_for_xs, xs)
-    pe_def(env, 'pe_for_f, fn)
-    pe_eval(env, pe_for_tree)
+    env := pe_env(root)
+    def(env, 'pe_for_xs, xs)
+    def(env, 'pe_for_f, fn)
+    pe_eval(env, for_tree)
 }
 
-pe_primitive(f, vs) := {
-    dyn := list.any(pe_opaque, vs)
+primitive(f, vs) := {
+    dyn := list.any(opaque, vs)
     op := find(p -> arg(p, 0) == f, pe_ops)
-    impl := find(p -> arg(p, 0) == f, pe_impl_table)
+    impl := find(p -> arg(p, 0) == f, impl_table)
     if (f == 'println and length(vs) == 1) {
         pe_println(vs[0])
         none
-    } else if (not dyn and not member(f, pe_always)) pe_host(f, vs)
+    } else if (not dyn and not member(f, always)) host(f, vs)
     else if (f == 'peg_for and length(vs) == 2) pe_for(vs[0], vs[1])
-    else if (f == 'arg and pe_is_mexpr(vs[0]) and typeof(vs[1]) == 'int) arg(vs[0], vs[1])
-    else if (f == 'head and pe_is_mexpr(vs[0])) head(vs[0])
-    else if (f == 'arity and pe_is_mexpr(vs[0])) arity(vs[0])
-    else if (f == 'typeof and not pe_val_dy(vs[0])) (if (pe_fun(vs[0])) 'function else if (pe_is_mexpr(vs[0])) 'mexpr else if (pe_int_dy(vs[0])) 'int else if (pe_bool_dy(vs[0])) 'symbol else 'string)
-    else if (f == 'strlen and pe_ref_dy(vs[0])) pe_impl_call('strlen, [pe_operand(vs[0])], I32{})
-    else if (f == '_not and length(vs) == 1) pe_dyn_not(vs[0])
-    else if (op != none and length(vs) == 2) pe_dyn_op(f, vs[0], vs[1])
-    else if (member(f, ['array, 'u8_array, 'u16_array, 'i32_array]) and length(vs) == 1 and (pe_is_num(vs[0]) or pe_val_dy(vs[0]))) pe_array_new(f, vs[0])
-    else if (f == 'array_get or f == 'plain_get or (f == '_index_get and length(vs) == 2 and pe_known_array(vs[0]))) pe_assign(Val{}, Index{pe_at, arg(pe_box(vs[0]), 0), pe_index_op(vs[1])})
-    else if ((f == 'array_set or f == 'plain_set or f == '_index_set) and length(vs) == 3 and (f != '_index_set or pe_known_array(vs[0]))) {
-        i := pe_index_op(vs[1])
-        pe_emit(IStore{pe_at, arg(pe_box(vs[0]), 0), i, pe_box_op(vs[2])})
+    else if (f == 'arg and is_mexpr(vs[0]) and typeof(vs[1]) == 'int) arg(vs[0], vs[1])
+    else if (f == 'head and is_mexpr(vs[0])) head(vs[0])
+    else if (f == 'arity and is_mexpr(vs[0])) arity(vs[0])
+    else if (f == 'typeof and not val_dy(vs[0])) (if (pe_fun(vs[0])) 'function else if (is_mexpr(vs[0])) 'mexpr else if (int_dy(vs[0])) 'int else if (bool_dy(vs[0])) 'symbol else 'string)
+    else if (f == 'strlen and ref_dy(vs[0])) impl_call('strlen, [operand(vs[0])], I32{})
+    else if (f == '_not and length(vs) == 1) dyn_not(vs[0])
+    else if (op != none and length(vs) == 2) dyn_op(f, vs[0], vs[1])
+    else if (member(f, ['array, 'u8_array, 'u16_array, 'i32_array]) and length(vs) == 1 and (is_num(vs[0]) or val_dy(vs[0]))) array_new(f, vs[0])
+    else if (f == 'array_get or f == 'plain_get or (f == '_index_get and length(vs) == 2 and known_array(vs[0]))) assign(Val{}, Index{pe_at, arg(box(vs[0]), 0), index_op(vs[1])})
+    else if ((f == 'array_set or f == 'plain_set or f == '_index_set) and length(vs) == 3 and (f != '_index_set or known_array(vs[0]))) {
+        i := index_op(vs[1])
+        emit(IStore{pe_at, arg(box(vs[0]), 0), i, box_op(vs[2])})
         vs[2]
     }
     else if (f == 'exit and length(vs) == 1) {
-        pe_call_impl('v_exit, vs)
+        call_impl('v_exit, vs)
         none
     } else if (member(f, ['print, 'put]) and length(vs) == 1) {
-        pe_call_impl(arg(impl, 1), vs)
+        call_impl(arg(impl, 1), vs)
         none
     } else if (f == 'write_file or f == '_index_set or f == 'array_set or f == 'plain_set) {
-        pe_call_impl(arg(impl, 1), vs)
+        call_impl(arg(impl, 1), vs)
         vs[length(vs) - 1]
-    } else if (impl != none) pe_call_impl(arg(impl, 1), vs)
+    } else if (impl != none) call_impl(arg(impl, 1), vs)
     else {
-        cs := pe_lib_clauses(f)
+        cs := lib_clauses(f)
         if (cs != none) {
             table.set(pe_defs, f, cs)
-            pe_call_named(f, vs)
+            call_named(f, vs)
         } else {
-            pe_stop(f"{symname(f)} with a value known only when the program runs is not left in vasm")
+            stop(f"{symname(f)} with a value known only when the program runs is not left in vasm")
             none
         }
     }
@@ -625,7 +625,7 @@ pe_primitive(f, vs) := {
 # === Patterns ===
 
 # v is of the type shown by typeof: true, false or a dynamic bool
-pe_type_test(v, ty) := if (pe_val_dy(v)) pe_assign(Bool{}, Bin{'eq, Reg{pe_at, arg(pe_assign(Val{}, Call{pe_at, 'typeof, [pe_operand(v)]}), 0)}, Sym{pe_at, ty}})
+type_test(v, ty) := if (val_dy(v)) assign(Bool{}, Bin{'eq, Reg{pe_at, arg(assign(Val{}, Call{pe_at, 'typeof, [operand(v)]}), 0)}, Sym{pe_at, ty}})
     else if (pe_dyn(v)) (if (vasm_check.int(arg(v, 1))) ty == 'int else if (arg(v, 1) == Bool{}) ty == 'symbol else ty == 'string)
     else if (pe_fun(v)) ty == 'function
     else if (typeof(v) == 'mexpr) ty == 'mexpr
@@ -635,55 +635,55 @@ pe_type_test(v, ty) := if (pe_val_dy(v)) pe_assign(Bool{}, Bin{'eq, Reg{pe_at, a
 pe_and(a, fn) := if (a == false) false
     else if (a == true) fn()
     else {
-        c := pe_capture(fn)
+        c := capture(fn)
         if (arg(c, 0) == [] and arg(c, 1) == true) a
-        else pe_dyn_if(a, () -> {
-            for (s in arg(c, 0)) pe_emit(s)
+        else dyn_if(a, () -> {
+            for (s in arg(c, 0)) emit(s)
             arg(c, 1)
         }, () -> false)
     }
 
-# the pattern p matches the value v: true, false or a dynamic bool. Only the test is emitted; pe_bind gives the variables.
+# the pattern p matches the value v: true, false or a dynamic bool. Only the test is emitted; bind gives the variables.
 fun pe_test
-pe_test_args(p, v, i) := if (i >= arity(p)) true else {
-    a := if (pe_val_dy(v)) pe_assign(Val{}, Index{pe_at, arg(v, 0), Imm{pe_at, i}}) else arg(v, i)
-    pe_and(pe_test(arg(p, i), a), () -> pe_test_args(p, v, i + 1))
+test_args(p, v, i) := if (i >= arity(p)) true else {
+    a := if (val_dy(v)) assign(Val{}, Index{pe_at, arg(v, 0), Imm{pe_at, i}}) else arg(v, i)
+    pe_and(pe_test(arg(p, i), a), () -> test_args(p, v, i + 1))
 }
 
 pe_test(p, v) := {
     t := typeof(p)
-    if (t == 'symbol) (if (p == true or p == false or p == none) pe_eq_test(p, v) else true)
-    else if (t == 'int or t == 'string) pe_eq_test(p, v)
-    else if (head(p) == 'Quote) pe_eq_test(arg(p, 0), v)
-    else if (head(p) == '_TypeOf) pe_and(pe_type_test(v, arg(p, 1)), () -> pe_test(arg(p, 0), v))
-    else if (pe_val_dy(v)) {
-        c := pe_assign(Bool{}, Call{pe_at, 'is, [pe_operand(v), Sym{pe_at, head(p)}, Imm{pe_at, arity(p)}]})
+    if (t == 'symbol) (if (p == true or p == false or p == none) eq_test(p, v) else true)
+    else if (t == 'int or t == 'string) eq_test(p, v)
+    else if (head(p) == 'Quote) eq_test(arg(p, 0), v)
+    else if (head(p) == '_TypeOf) pe_and(type_test(v, arg(p, 1)), () -> pe_test(arg(p, 0), v))
+    else if (val_dy(v)) {
+        c := assign(Bool{}, Call{pe_at, 'is, [operand(v), Sym{pe_at, head(p)}, Imm{pe_at, arity(p)}]})
         if (list.all(q -> typeof(q) == 'symbol and not (q == true or q == false or q == none), vasm_tlist(p))) c
-        else pe_and(c, () -> pe_test_args(p, v, 0))
-    } else if (not pe_is_mexpr(v) or head(p) != head(v) or arity(p) != arity(v)) false
-    else pe_test_args(p, v, 0)
+        else pe_and(c, () -> test_args(p, v, 0))
+    } else if (not is_mexpr(v) or head(p) != head(v) or arity(p) != arity(v)) false
+    else test_args(p, v, 0)
 }
 
 # the constant c and the value v are equal
-pe_eq_test(c, v) := if (pe_opaque(v)) pe_eq_op('_eq, c, v) else c == v
+eq_test(c, v) := if (opaque(v)) eq_op('_eq, c, v) else c == v
 
 # bind the variables of the pattern p, which has matched v, in env
-pe_bind(env, p, v) := {
+bind(env, p, v) := {
     t := typeof(p)
     if (t == 'symbol) {
         if (p != '_ and p != true and p != false and p != none) {
-            table.set(pe_env_vals(env), p, v)
-            table.set(pe_env_depths(env), p, pe_depth)
+            table.set(env_vals(env), p, v)
+            table.set(env_depths(env), p, depth)
         }
     } else if (t == 'int or t == 'string or head(p) == 'Quote) none
-    else if (head(p) == '_TypeOf) pe_bind(env, arg(p, 0), v)
+    else if (head(p) == '_TypeOf) bind(env, arg(p, 0), v)
     else {
         i := 0
         while (i < arity(p)) {
             q := arg(p, i)
             if (not (typeof(q) == 'symbol and (q == '_ or q == true or q == false or q == none)) and not (typeof(q) == 'int or typeof(q) == 'string)) {
-                a := if (pe_val_dy(v)) pe_assign(Val{}, Index{pe_at, arg(v, 0), Imm{pe_at, i}}) else arg(v, i)
-                pe_bind(env, q, a)
+                a := if (val_dy(v)) assign(Val{}, Index{pe_at, arg(v, 0), Imm{pe_at, i}}) else arg(v, i)
+                bind(env, q, a)
             }
             i = i + 1
         }
@@ -693,7 +693,7 @@ pe_bind(env, p, v) := {
 # === Evaluation ===
 
 # the values of the expressions es, evaluated from the first, as the program does
-pe_values(env, es) := {
+values(env, es) := {
     n := arity(es)
     out := []
     i := 0
@@ -706,14 +706,14 @@ pe_values(env, es) := {
 
 # the clauses cs (Tuple{lambda, environment}) called with the values vs: the first clause that matches is unfolded. A test that depends on a
 # dynamic value is left, and the other clauses are in its else part.
-pe_try(key, cs, vs) := if (cs == []) {
-    pe_stop("no pattern of the function matches")
+try(key, cs, vs) := if (cs == []) {
+    stop("no pattern of the function matches")
     none
 } else {
     l := arg(cs[0], 0)
     base := arg(cs[0], 1)
     rest := list.drop(cs, 1)
-    if (arity(arg(l, 0)) != length(vs)) pe_try(key, rest, vs)
+    if (arity(arg(l, 0)) != length(vs)) try(key, rest, vs)
     else {
         c := true
         i := 0
@@ -726,218 +726,218 @@ pe_try(key, cs, vs) := if (cs == []) {
             env := pe_env(base)
             j := 0
             for (v in vs) {
-                pe_bind(env, arg(arg(l, 0), j), v)
+                bind(env, arg(arg(l, 0), j), v)
                 j = j + 1
             }
-            sb := pe_bodies
-            pe_bodies = arg(l, 1) :: pe_bodies
+            sb := bodies
+            bodies = arg(l, 1) :: bodies
             r := pe_eval(env, arg(l, 1))
-            pe_bodies = sb
+            bodies = sb
             r
         }
         if (c == true) go()
-        else if (c == false) pe_try(key, rest, vs)
-        else pe_dyn_if(c, go, () -> pe_try(key, rest, vs))
+        else if (c == false) try(key, rest, vs)
+        else dyn_if(c, go, () -> try(key, rest, vs))
     }
 }
 
-pe_unfold(key, cs, vs) := {
+unfold(key, cs, vs) := {
     saved := pe_stack
-    pe_stack = Tuple{key, pe_depth} :: pe_stack
-    r := pe_try(key, cs, vs)
+    pe_stack = Tuple{key, depth} :: pe_stack
+    r := try(key, cs, vs)
     pe_stack = saved
     r
 }
 
-pe_clauses_of(f) := map(l -> Tuple{l, pe_root}, table.get(pe_defs, f, []))
+clauses_of(f) := map(l -> Tuple{l, root}, table.get(pe_defs, f, []))
 
 # the function f of the tree called with the values vs: a call is made if f is being unfolded outside the branch of a dynamic condition around it
-pe_call_named(f, vs) := {
-    if (find(fr -> arg(fr, 0) == f and arg(fr, 1) < pe_depth, pe_stack) != none) pe_residual_call(f, vs)
-    else pe_unfold(f, pe_clauses_of(f), vs)
+call_named(f, vs) := {
+    if (find(fr -> arg(fr, 0) == f and arg(fr, 1) < depth, pe_stack) != none) residual_call(f, vs)
+    else unfold(f, clauses_of(f), vs)
 }
 
-pe_call_dynamic(fv, vs) := {
-    ops := map(pe_box_op, vs)
-    pe_assign(Val{}, Call{pe_at, arg(pe_box(fv), 0), ops})
+call_dynamic(fv, vs) := {
+    ops := map(box_op, vs)
+    assign(Val{}, Call{pe_at, arg(box(fv), 0), ops})
 }
 
-pe_cl_key(fv) := arg(arg(fv, 0)[0], 0)
+cl_key(fv) := arg(arg(fv, 0)[0], 0)
 
-pe_call_value(fv, vs) := match fv {
-    Fv{f} -> pe_call_named(f, vs)
-  | Pr{f} -> pe_primitive(f, vs)
+call_value(fv, vs) := match fv {
+    Fv{f} -> call_named(f, vs)
+  | Pr{f} -> primitive(f, vs)
   | Cl{cs, _} -> {
-        key := pe_cl_key(fv)
-        if (find(fr -> arg(fr, 0) == key and arg(fr, 1) < pe_depth, pe_stack) != none) pe_call_dynamic(fv, vs)
-        else pe_unfold(key, cs, vs)
+        key := cl_key(fv)
+        if (find(fr -> arg(fr, 0) == key and arg(fr, 1) < depth, pe_stack) != none) call_dynamic(fv, vs)
+        else unfold(key, cs, vs)
     }
   | Kn{k, hs, st} -> {
-        sh := pe_handlers
+        sh := handlers
         ss := pe_stack
-        pe_handlers = hs
+        handlers = hs
         pe_stack = st
         r := k(vs[0])
-        pe_handlers = sh
+        handlers = sh
         pe_stack = ss
         r
     }
   | Ki{} -> vs[0]
-  | Dy{_, Val{}} -> pe_call_dynamic(fv, vs)
+  | Dy{_, Val{}} -> call_dynamic(fv, vs)
   | _ -> {
-        pe_stop("a value that is not a function is called")
+        stop("a value that is not a function is called")
         none
     }
 }
 
-pe_var_value(v) := match v {
-    Mt{x, t} -> pe_assign(t, Mov{Reg{pe_at, x}})
-  | Ce{c} -> pe_assign(Val{}, Index{pe_at, arg(c, 0), Imm{pe_at, 0}})
+var_value(v) := match v {
+    Mt{x, t} -> assign(t, Mov{Reg{pe_at, x}})
+  | Ce{c} -> assign(Val{}, Index{pe_at, arg(c, 0), Imm{pe_at, 0}})
   | _ -> v
 }
 
-pe_apply(env, f, vs) := if (typeof(f) == 'symbol) {
+apply(env, f, vs) := if (typeof(f) == 'symbol) {
     loc := pe_loc(env, f)
-    if (loc != none) pe_call_value(pe_var_value(table.get(pe_env_vals(loc), f, none)), vs)
-    else if (table.get(pe_defs, f, none) != none) pe_call_named(f, vs)
-    else pe_primitive(f, vs)
-} else pe_call_value(pe_eval(env, f), vs)
+    if (loc != none) call_value(var_value(table.get(env_vals(loc), f, none)), vs)
+    else if (table.get(pe_defs, f, none) != none) call_named(f, vs)
+    else primitive(f, vs)
+} else call_value(pe_eval(env, f), vs)
 
 # === Conditions ===
 # the statements of fn() in the branch of a condition with the frame: Br{statements, value or Gone{}, Defs of the branch}. A Def of the branch
 # is taken out of its environment; pe_put_defs puts it back after the condition.
-pe_branch(frame, fn) := {
-    sf := pe_frames
-    so := pe_opens
+branch(frame, fn) := {
+    sf := frames
+    so := opens
     ss := pe_stack
-    sh := pe_handlers
-    sb := pe_bodies
-    sd := pe_deflog
-    sl := pe_loops
-    se := pe_escapes
-    pe_escapes = []
-    pe_deflog = []
-    pe_frames = frame :: sf
-    pe_depth = pe_depth + 1
+    sh := handlers
+    sb := bodies
+    sd := deflog
+    sl := loops
+    se := escapes
+    escapes = []
+    deflog = []
+    frames = frame :: sf
+    depth = depth + 1
     base := length(so)
-    out := pe_capture(() -> handle {
+    out := capture(() -> handle {
         v := fn()
-        pe_close(base, v)
+        close(base, v)
     } with (PeAbort{}, k) -> {
-        pe_close_gone(base)
+        close_gone(base)
         Gone{}
     })
-    pe_depth = pe_depth - 1
-    pe_frames = sf
-    pe_opens = so
+    depth = depth - 1
+    frames = sf
+    opens = so
     pe_stack = ss
-    pe_handlers = sh
-    pe_bodies = sb
-    pe_loops = sl
-    defs := pe_take_defs()
-    pe_deflog = sd
-    esc := pe_escapes
-    pe_escapes = se
-    pe_add_escapes(esc)
+    handlers = sh
+    bodies = sb
+    loops = sl
+    defs := take_defs()
+    deflog = sd
+    esc := escapes
+    escapes = se
+    add_escapes(esc)
     Br{arg(out, 0), arg(out, 1), defs, esc}
 }
 
-pe_add_escapes(hs) := for (h in hs) if (not list.any(x -> arg(x, 0) == arg(h, 0), pe_escapes)) pe_escapes = h :: pe_escapes
+add_escapes(hs) := for (h in hs) if (not list.any(x -> arg(x, 0) == arg(h, 0), escapes)) escapes = h :: escapes
 
 # the Defs of the branch: Tuple{environment, name, value}, and the environments as they were before the branch
-pe_take_defs() := {
+take_defs() := {
     seen := []
     out := []
-    for (e in pe_deflog) {
+    for (e in deflog) {
         env := arg(e, 0)
         x := arg(e, 1)
-        if (not list.any(p -> arg(p, 0) == x and pe_same_env(arg(p, 1), env), seen)) {
+        if (not list.any(p -> arg(p, 0) == x and same_env(arg(p, 1), env), seen)) {
             seen = Tuple{x, env} :: seen
-            out = Tuple{env, x, table.get(pe_env_vals(env), x, none)} :: out
+            out = Tuple{env, x, table.get(env_vals(env), x, none)} :: out
         }
-        table.set(pe_env_vals(env), x, arg(e, 2))
+        table.set(env_vals(env), x, arg(e, 2))
     }
     out
 }
 
-pe_same_env(a, b) := arg(a, 0) == arg(b, 0)
+same_env(a, b) := arg(a, 0) == arg(b, 0)
 
 # the statements to put before the condition of the frame
-pe_frame_pre(fr) := arg(fr, 1)[0]
-pe_new_frame() := Fr{pe_depth + 1, {
+frame_pre(fr) := arg(fr, 1)[0]
+new_frame() := Fr{depth + 1, {
     a := array(1)
     a[0] = []
     a
 }}
-pe_add_pre(fr, s) := {
+add_pre(fr, s) := {
     a := arg(fr, 1)
     a[0] = append(a[0], s)
 }
-pe_emit_pre(fr) := for (s in pe_frame_pre(fr)) pe_emit(s)
+emit_pre(fr) := for (s in frame_pre(fr)) emit(s)
 
 # the opens above base are ended: the value v of the path that went on is put in a register that both paths set
-pe_close(base, v) := {
-    n := length(pe_opens) - base
+close(base, v) := {
+    n := length(opens) - base
     if (n <= 0) v else {
         r := if (pe_dyn(v)) {
             t := arg(v, 1)
-            x := pe_fresh(t)
-            pe_emit(Assign{pe_at, x, Mov{pe_operand(v)}})
+            x := fresh(t)
+            emit(Assign{pe_at, x, Mov{operand(v)}})
             Dy{x, t}
         } else v
-        pe_close_opens(n, if (pe_dyn(r)) Tuple{arg(r, 0), arg(r, 1)} else none)
+        close_opens(n, if (pe_dyn(r)) Tuple{arg(r, 0), arg(r, 1)} else none)
         r
     }
 }
 
-pe_close_gone(base) := {
-    n := length(pe_opens) - base
-    if (n > 0) pe_close_opens(n, none)
+close_gone(base) := {
+    n := length(opens) - base
+    if (n > 0) close_opens(n, none)
 }
 
 # end n opens; the register holds the dummy on the paths that left
-pe_close_opens(n, reg) := {
+close_opens(n, reg) := {
     i := n
     while (i > 0) {
-        o := pe_opens[0]
-        pe_opens = list.drop(pe_opens, 1)
+        o := opens[0]
+        opens = list.drop(opens, 1)
         # a variable defined on the path that went on is read after the condition, so the other path sets it too
         dummies := []
         for (e in arg(o, 5)) {
-            cur := table.get(pe_env_vals(arg(e, 0)), arg(e, 1), none)
+            cur := table.get(env_vals(arg(e, 0)), arg(e, 1), none)
             if (pe_dyn(cur)) {
-                y := pe_fresh(arg(cur, 1))
-                pe_emit(Assign{pe_at, y, Mov{pe_operand(cur)}})
-                dummies = Assign{pe_at, y, Mov{pe_dummy_op(arg(cur, 1))}} :: dummies
-                table.set(pe_env_vals(arg(e, 0)), arg(e, 1), Dy{y, arg(cur, 1)})
+                y := fresh(arg(cur, 1))
+                emit(Assign{pe_at, y, Mov{operand(cur)}})
+                dummies = Assign{pe_at, y, Mov{dummy_op(arg(cur, 1))}} :: dummies
+                table.set(env_vals(arg(e, 0)), arg(e, 1), Dy{y, arg(cur, 1)})
             }
         }
         inner := reverse(pe_stmts)
         pe_stmts = arg(o, 0)
-        pe_emit_pre(arg(o, 3))
-        for (s in dummies) pe_emit(s)
-        if (i == 1 and reg != none) pe_emit(Assign{pe_at, arg(reg, 0), Mov{pe_dummy_op(arg(reg, 1))}})
-        pe_emit(if (arg(o, 4)) IfS{pe_at, Mov{arg(o, 1)}, arg(o, 2), inner} else IfS{pe_at, Mov{arg(o, 1)}, inner, arg(o, 2)})
-        pe_frames = list.drop(pe_frames, 1)
-        pe_depth = pe_depth - 1
+        emit_pre(arg(o, 3))
+        for (s in dummies) emit(s)
+        if (i == 1 and reg != none) emit(Assign{pe_at, arg(reg, 0), Mov{dummy_op(arg(reg, 1))}})
+        emit(if (arg(o, 4)) IfS{pe_at, Mov{arg(o, 1)}, arg(o, 2), inner} else IfS{pe_at, Mov{arg(o, 1)}, inner, arg(o, 2)})
+        frames = list.drop(frames, 1)
+        depth = depth - 1
         i = i - 1
     }
 }
 
 # go on in the path of a condition with the statements stmts, whose other path has left with the statements gone. gone_first: the left path is the then part.
-pe_open(c, gone, stmts, frame, defs, gone_first) := {
-    pe_opens = Op{pe_stmts, c, gone, frame, gone_first, defs} :: pe_opens
+open(c, gone, stmts, frame, defs, gone_first) := {
+    opens = Op{pe_stmts, c, gone, frame, gone_first, defs} :: opens
     pe_stmts = reverse(stmts)
-    pe_frames = frame :: pe_frames
-    pe_depth = pe_depth + 1
+    frames = frame :: frames
+    depth = depth + 1
 }
 
 # the handles hs that a path of the code left: the code from here runs when their flags are not set
-pe_check_escapes(hs) := {
+check_escapes(hs) := {
     for (h in hs) {
-        if (list.any(x -> arg(x, 0) == arg(h, 0), pe_handlers)) {
+        if (list.any(x -> arg(x, 0) == arg(h, 0), handlers)) {
             fl := arg(h, 3)[2]
-            if (fl != none) pe_open(Reg{pe_at, fl}, [], [], pe_new_frame(), [], true)
+            if (fl != none) open(Reg{pe_at, fl}, [], [], new_frame(), [], true)
         }
     }
 }
@@ -949,86 +949,86 @@ pe_key(v) := if (typeof(v) == 'mexpr) {
     else foldl((t, x) -> push(t, x), mexpr(head(v), Tuple{}), map(pe_key, vasm_tlist(v)))
 } else v
 
-pe_same_value(a, b) := pe_key(a) == pe_key(b)
+same_value(a, b) := pe_key(a) == pe_key(b)
 
-pe_set_at_end(stmts, r, t, v) := {
+set_at_end(stmts, r, t, v) := {
     saved := pe_stmts
     pe_stmts = reverse(stmts)
-    pe_set_reg(r, t, v)
+    set_reg(r, t, v)
     out := reverse(pe_stmts)
     pe_stmts = saved
     out
 }
 
 # if with a dynamic condition: both branches are evaluated, and the value is a variable that each branch sets
-pe_dyn_if(cv0, fa, fb) := {
-    cv := pe_truth(cv0)
+dyn_if(cv0, fa, fb) := {
+    cv := truth(cv0)
     if (cv == true) fa()
     else if (cv == false) fb()
     else {
-        c := pe_operand(cv)
-        frame := pe_new_frame()
-        ra := pe_branch(frame, fa)
-        rb := pe_branch(frame, fb)
+        c := operand(cv)
+        frame := new_frame()
+        ra := branch(frame, fa)
+        rb := branch(frame, fb)
         sa := arg(ra, 0)
         sb := arg(rb, 0)
         va := arg(ra, 1)
         vb := arg(rb, 1)
         if (va == Gone{} and vb == Gone{}) {
-            pe_emit_pre(frame)
-            pe_emit(IfS{pe_at, Mov{c}, sa, sb})
+            emit_pre(frame)
+            emit(IfS{pe_at, Mov{c}, sa, sb})
             perform PeAbort{}
         } else if (va == Gone{}) {
-            for (e in arg(rb, 2)) table.set(pe_env_vals(arg(e, 0)), arg(e, 1), arg(e, 2))
-            pe_open(c, sa, sb, frame, arg(rb, 2), true)
-            pe_check_escapes(arg(rb, 3))
+            for (e in arg(rb, 2)) table.set(env_vals(arg(e, 0)), arg(e, 1), arg(e, 2))
+            open(c, sa, sb, frame, arg(rb, 2), true)
+            check_escapes(arg(rb, 3))
             vb
         } else if (vb == Gone{}) {
-            for (e in arg(ra, 2)) table.set(pe_env_vals(arg(e, 0)), arg(e, 1), arg(e, 2))
-            pe_open(c, sb, sa, frame, arg(ra, 2), false)
-            pe_check_escapes(arg(ra, 3))
+            for (e in arg(ra, 2)) table.set(env_vals(arg(e, 0)), arg(e, 1), arg(e, 2))
+            open(c, sb, sa, frame, arg(ra, 2), false)
+            check_escapes(arg(ra, 3))
             va
         } else {
             da := arg(ra, 2)
             db := arg(rb, 2)
-            names := append(da, filter(e -> not list.any(p -> arg(p, 1) == arg(e, 1) and pe_same_env(arg(p, 0), arg(e, 0)), da), db))
+            names := append(da, filter(e -> not list.any(p -> arg(p, 1) == arg(e, 1) and same_env(arg(p, 0), arg(e, 0)), da), db))
             for (e in names) {
                 env := arg(e, 0)
                 x := arg(e, 1)
-                old := table.get(pe_env_vals(env), x, none)
-                fda := find(p -> arg(p, 1) == x and pe_same_env(arg(p, 0), env), da)
-                fdb := find(p -> arg(p, 1) == x and pe_same_env(arg(p, 0), env), db)
+                old := table.get(env_vals(env), x, none)
+                fda := find(p -> arg(p, 1) == x and same_env(arg(p, 0), env), da)
+                fdb := find(p -> arg(p, 1) == x and same_env(arg(p, 0), env), db)
                 xa := if (fda == none) old else arg(fda, 2)
                 xb := if (fdb == none) old else arg(fdb, 2)
-                if (pe_same_value(xa, xb) or pe_fun(xa) or pe_fun(xb)) table.set(pe_env_vals(env), x, if (fda != none) xa else xb)
+                if (same_value(xa, xb) or pe_fun(xa) or pe_fun(xb)) table.set(env_vals(env), x, if (fda != none) xa else xb)
                 else {
-                    t := pe_join(pe_kind_type(xa), pe_kind_type(xb))
-                    r := pe_fresh(t)
-                    sa = pe_set_at_end(sa, r, t, xa)
-                    sb = pe_set_at_end(sb, r, t, xb)
-                    table.set(pe_env_vals(env), x, Dy{r, t})
-                    table.set(pe_env_depths(env), x, pe_depth)
+                    t := pe_join(kind_type(xa), kind_type(xb))
+                    r := fresh(t)
+                    sa = set_at_end(sa, r, t, xa)
+                    sb = set_at_end(sb, r, t, xb)
+                    table.set(env_vals(env), x, Dy{r, t})
+                    table.set(env_depths(env), x, depth)
                 }
             }
             esc := append(arg(ra, 3), arg(rb, 3))
-            if (not pe_opaque(va) and not pe_opaque(vb) and va == vb) {
-                pe_emit_pre(frame)
-                pe_emit(IfS{pe_at, Mov{c}, sa, sb})
-                pe_check_escapes(esc)
+            if (not opaque(va) and not opaque(vb) and va == vb) {
+                emit_pre(frame)
+                emit(IfS{pe_at, Mov{c}, sa, sb})
+                check_escapes(esc)
                 va
-            } else if (pe_fun(va) and pe_fun(vb) and pe_same_value(va, vb)) {
-                pe_emit_pre(frame)
-                pe_emit(IfS{pe_at, Mov{c}, sa, sb})
-                pe_check_escapes(esc)
+            } else if (pe_fun(va) and pe_fun(vb) and same_value(va, vb)) {
+                emit_pre(frame)
+                emit(IfS{pe_at, Mov{c}, sa, sb})
+                check_escapes(esc)
                 va
             } else {
-                t := pe_join(pe_kind_type(va), pe_kind_type(vb))
-                x := pe_fresh(t)
-                sa = pe_set_at_end(sa, x, t, va)
-                sb = pe_set_at_end(sb, x, t, vb)
-                pe_emit_pre(frame)
-                pe_emit(IfS{pe_at, Mov{c}, sa, sb})
-                pe_check_escapes(esc)
+                t := pe_join(kind_type(va), kind_type(vb))
+                x := fresh(t)
+                sa = set_at_end(sa, x, t, va)
+                sb = set_at_end(sb, x, t, vb)
+                emit_pre(frame)
+                emit(IfS{pe_at, Mov{c}, sa, sb})
+                check_escapes(esc)
                 Dy{x, t}
             }
         }
@@ -1037,50 +1037,50 @@ pe_dyn_if(cv0, fa, fb) := {
 
 pe_if(env, c, a, b) := {
     cv := pe_eval(env, c)
-    if (pe_dyn(cv)) pe_dyn_if(cv, () -> pe_eval(env, a), () -> pe_eval(env, b))
+    if (pe_dyn(cv)) dyn_if(cv, () -> pe_eval(env, a), () -> pe_eval(env, b))
     else if (cv != false) pe_eval(env, a)
     else pe_eval(env, b)
 }
 
 # === Assignments ===
 # the frame of the depth d
-pe_frame_at(d) := find(fr -> arg(fr, 0) == d, pe_frames)
+frame_at(d) := find(fr -> arg(fr, 0) == d, frames)
 
 # the location of x in the environment loc becomes a register, which holds the value of x from before the condition around it
-pe_make_mut(loc, x, v) := {
-    cur := table.get(pe_env_vals(loc), x, none)
-    d := table.get(pe_env_depths(loc), x, 0)
-    t := if (pe_forced(x)) Val{} else pe_join(pe_kind_type(cur), pe_kind_type(v))
-    r := pe_fresh(t)
-    if (d < pe_depth and pe_frame_at(d + 1) != none) {
-        fr := pe_frame_at(d + 1)
-        c := pe_capture(() -> pe_set_reg(r, t, cur))
-        pe_add_pre(fr, arg(c, 0))
-    } else pe_set_reg(r, t, cur)
-    table.set(pe_env_vals(loc), x, Mt{r, t})
+make_mut(loc, x, v) := {
+    cur := table.get(env_vals(loc), x, none)
+    d := table.get(env_depths(loc), x, 0)
+    t := if (forced(x)) Val{} else pe_join(kind_type(cur), kind_type(v))
+    r := fresh(t)
+    if (d < depth and frame_at(d + 1) != none) {
+        fr := frame_at(d + 1)
+        c := capture(() -> set_reg(r, t, cur))
+        add_pre(fr, arg(c, 0))
+    } else set_reg(r, t, cur)
+    table.set(env_vals(loc), x, Mt{r, t})
     Mt{r, t}
 }
 
-pe_assign_var(env, x, v) := {
+assign_var(env, x, v) := {
     loc0 := pe_loc(env, x)
-    loc := if (loc0 == none) pe_root else loc0
+    loc := if (loc0 == none) root else loc0
     if (loc0 == none) {
-        table.set(pe_env_vals(pe_root), x, none)
-        table.set(pe_env_depths(pe_root), x, 0)
+        table.set(env_vals(root), x, none)
+        table.set(env_depths(root), x, 0)
     }
-    cur := table.get(pe_env_vals(loc), x, none)
+    cur := table.get(env_vals(loc), x, none)
     match cur {
         Mt{r, t} -> {
-            if (not pe_fits(v, t)) pe_widen(x)
-            pe_set_reg(r, t, v)
+            if (not fits(v, t)) widen(x)
+            set_reg(r, t, v)
         }
-      | Ce{c} -> pe_emit(IStore{pe_at, arg(c, 0), Imm{pe_at, 0}, pe_box_op(v)})
-      | _ -> if (table.get(pe_env_depths(loc), x, 0) >= pe_depth) table.set(pe_env_vals(loc), x, v)
+      | Ce{c} -> emit(IStore{pe_at, arg(c, 0), Imm{pe_at, 0}, box_op(v)})
+      | _ -> if (table.get(env_depths(loc), x, 0) >= depth) table.set(env_vals(loc), x, v)
         else {
             # a variable from outside a loop that is left is a register from the start of the loop
-            if (list.any(l -> arg(l, 1) > table.get(pe_env_depths(loc), x, 0), pe_loops) and not pe_forced(RegIn{x})) pe_widen(RegIn{x})
-            m := pe_make_mut(loc, x, v)
-            pe_set_reg(arg(m, 0), arg(m, 1), v)
+            if (list.any(l -> arg(l, 1) > table.get(env_depths(loc), x, 0), loops) and not forced(RegIn{x})) widen(RegIn{x})
+            m := make_mut(loc, x, v)
+            set_reg(arg(m, 0), arg(m, 1), v)
         }
     }
 }
@@ -1096,70 +1096,70 @@ pe_assigned(t) := if (typeof(t) != 'mexpr) []
     }
 
 # the symbols in the tree t
-pe_syms_into(t, out) := if (typeof(t) == 'symbol) table.set(out, t, true)
-    else if (typeof(t) == 'mexpr and head(t) != 'Quote) each(x -> pe_syms_into(x, out), vasm_tlist(t))
+syms_into(t, out) := if (typeof(t) == 'symbol) table.set(out, t, true)
+    else if (typeof(t) == 'mexpr and head(t) != 'Quote) each(x -> syms_into(x, out), vasm_tlist(t))
 
-pe_syms(t) := {
+syms(t) := {
     out := table.new()
-    pe_syms_into(t, out)
+    syms_into(t, out)
     table.keys(out)
 }
 
 # the variables assigned in the tree of a loop are registers from before the loop
-pe_loop_regs(env, tree) := {
+loop_regs(env, tree) := {
     names := pe_assigned(tree)
-    extra := filter(x -> pe_forced(RegIn{x}), pe_syms(tree))
+    extra := filter(x -> forced(RegIn{x}), syms(tree))
     for (x in append(names, extra)) {
         loc := pe_loc(env, x)
         if (loc != none) {
-            cur := table.get(pe_env_vals(loc), x, none)
-            if (not (typeof(cur) == 'mexpr and (head(cur) == 'Mt or head(cur) == 'Ce))) pe_make_mut(loc, x, cur)
+            cur := table.get(env_vals(loc), x, none)
+            if (not (typeof(cur) == 'mexpr and (head(cur) == 'Mt or head(cur) == 'Ce))) make_mut(loc, x, cur)
         }
     }
 }
 
 # the value of the condition c when it depends on nothing dynamic now
-pe_static_cond(env, c) := {
-    sd := pe_decls
+static_cond(env, c) := {
+    sd := decls
     ss := pe_stmts
-    sn := pe_count
-    si := pe_impls
+    sn := count
+    si := impls
     v := pe_eval(env, c)
-    static := not pe_opaque(v)
-    pe_decls = sd
+    static := not opaque(v)
+    decls = sd
     pe_stmts = ss
-    pe_count = sn
-    pe_impls = si
+    count = sn
+    impls = si
     if (static) (if (v != false) true else false) else none
 }
 
 pe_while(env, c, b) := {
     rounds := 0
-    state := pe_static_cond(env, c)
-    while (state == true and rounds < pe_loop_limit) {
+    state := static_cond(env, c)
+    while (state == true and rounds < loop_limit) {
         pe_eval(env, b)
         rounds = rounds + 1
-        state = pe_static_cond(env, c)
+        state = static_cond(env, c)
     }
     if (state == false) none
     else {
-        pe_loop_regs(env, Tuple{c, b})
-        go := pe_fresh(Bool{})
-        cv := pe_truth(pe_eval(env, c))
-        pe_emit(Assign{pe_at, go, Mov{if (pe_dyn(cv)) pe_operand(cv) else Imm{pe_at, cv}}})
-        frame := pe_new_frame()
-        sl := pe_loops
-        pe_loops = Lp{go, pe_depth + 1} :: pe_loops
-        r := pe_branch(frame, () -> {
+        loop_regs(env, Tuple{c, b})
+        go := fresh(Bool{})
+        cv := truth(pe_eval(env, c))
+        emit(Assign{pe_at, go, Mov{if (pe_dyn(cv)) operand(cv) else Imm{pe_at, cv}}})
+        frame := new_frame()
+        sl := loops
+        loops = Lp{go, depth + 1} :: loops
+        r := branch(frame, () -> {
             pe_eval(env, b)
-            cv2 := pe_truth(pe_eval(env, c))
-            pe_emit(Assign{pe_at, go, Mov{if (pe_dyn(cv2)) pe_operand(cv2) else Imm{pe_at, cv2}}})
+            cv2 := truth(pe_eval(env, c))
+            emit(Assign{pe_at, go, Mov{if (pe_dyn(cv2)) operand(cv2) else Imm{pe_at, cv2}}})
             none
         })
-        pe_loops = sl
-        pe_emit_pre(frame)
-        pe_emit(WhileS{pe_at, Mov{Reg{pe_at, go}}, arg(r, 0)})
-        pe_check_escapes(arg(r, 3))
+        loops = sl
+        emit_pre(frame)
+        emit(WhileS{pe_at, Mov{Reg{pe_at, go}}, arg(r, 0)})
+        check_escapes(arg(r, 3))
         none
     }
 }
@@ -1168,28 +1168,28 @@ pe_while(env, c, b) := {
 # The state of a handle: an array of the register of its value, its type, and the register of its flag (set when a path has left it).
 # A handler is Hd{id, function, depth, state, key}.
 
-pe_handler_clause(hv, ev) := match hv {
+handler_clause(hv, ev) := match hv {
     Cl{cs, _} -> find(c -> {
         l := arg(c, 0)
-        arity(arg(l, 0)) == 2 and pe_static_match(arg(arg(l, 0), 0), ev) != false
+        arity(arg(l, 0)) == 2 and static_match(arg(arg(l, 0), 0), ev) != false
     }, cs)
   | _ -> none
 }
 
 # the pattern p matches v as far as it is known: true, false or 'dyn
-pe_static_match(p, v) := {
+static_match(p, v) := {
     t := typeof(p)
-    if (t == 'symbol) (if (p == true or p == false or p == none) (if (pe_opaque(v)) 'dyn else p == v) else true)
-    else if (t == 'int or t == 'string) (if (pe_opaque(v)) 'dyn else p == v)
-    else if (head(p) == 'Quote) (if (pe_opaque(v)) 'dyn else arg(p, 0) == v)
+    if (t == 'symbol) (if (p == true or p == false or p == none) (if (opaque(v)) 'dyn else p == v) else true)
+    else if (t == 'int or t == 'string) (if (opaque(v)) 'dyn else p == v)
+    else if (head(p) == 'Quote) (if (opaque(v)) 'dyn else arg(p, 0) == v)
     else if (head(p) == '_TypeOf) 'dyn
-    else if (pe_val_dy(v)) 'dyn
-    else if (not pe_is_mexpr(v) or head(p) != head(v) or arity(p) != arity(v)) false
+    else if (val_dy(v)) 'dyn
+    else if (not is_mexpr(v) or head(p) != head(v) or arity(p) != arity(v)) false
     else {
         r := true
         i := 0
         while (r != false and i < arity(p)) {
-            m := pe_static_match(arg(p, i), arg(v, i))
+            m := static_match(arg(p, i), arg(v, i))
             if (m == false) r = false else if (m == 'dyn) r = 'dyn
             i = i + 1
         }
@@ -1198,61 +1198,61 @@ pe_static_match(p, v) := {
 }
 
 # the continuation k is the last thing that the tree of the handler does
-pe_k_tail(t, k) := if (not member(k, pe_syms(t))) true else match t {
-    Apply{f, Tuple{a}} -> f == k and not member(k, pe_syms(a))
-  | If{c, a, b} -> not member(k, pe_syms(c)) and pe_k_tail(a, k) and pe_k_tail(b, k) and member(k, pe_syms(a)) and member(k, pe_syms(b))
+k_tail(t, k) := if (not member(k, syms(t))) true else match t {
+    Apply{f, Tuple{a}} -> f == k and not member(k, syms(a))
+  | If{c, a, b} -> not member(k, syms(c)) and k_tail(a, k) and k_tail(b, k) and member(k, syms(a)) and member(k, syms(b))
   | Do{} -> false
   | _ -> if (head(t) == 'Do) {
         xs := vasm_tlist(t)
-        list.all(x -> not member(k, pe_syms(x)), list.take(xs, length(xs) - 1)) and pe_k_tail(xs[length(xs) - 1], k)
+        list.all(x -> not member(k, syms(x)), list.take(xs, length(xs) - 1)) and k_tail(xs[length(xs) - 1], k)
     } else false
 }
 
 # leave the handle h with the value v from where the depth is more than that of the handle
-pe_abort(h, v) := {
+abort(h, v) := {
     st := arg(h, 3)
     if (st[0] == none) {
-        t := if (pe_forced(arg(h, 4))) Val{} else pe_kind_type(v)
-        st[0] = pe_fresh(t)
+        t := if (forced(arg(h, 4))) Val{} else kind_type(v)
+        st[0] = fresh(t)
         st[1] = t
     }
-    if (not pe_fits(v, st[1])) pe_widen(arg(h, 4))
-    pe_set_reg(st[0], st[1], v)
-    if (st[2] == none) st[2] = pe_fresh(Bool{})
-    pe_emit(Assign{pe_at, st[2], Mov{Imm{pe_at, true}}})
-    for (l in pe_loops) if (arg(l, 1) > arg(h, 2)) pe_emit(Assign{pe_at, arg(l, 0), Mov{Imm{pe_at, false}}})
-    if (not list.any(x -> arg(x, 0) == arg(h, 0), pe_escapes)) pe_escapes = h :: pe_escapes
+    if (not fits(v, st[1])) widen(arg(h, 4))
+    set_reg(st[0], st[1], v)
+    if (st[2] == none) st[2] = fresh(Bool{})
+    emit(Assign{pe_at, st[2], Mov{Imm{pe_at, true}}})
+    for (l in loops) if (arg(l, 1) > arg(h, 2)) emit(Assign{pe_at, arg(l, 0), Mov{Imm{pe_at, false}}})
+    if (not list.any(x -> arg(x, 0) == arg(h, 0), escapes)) escapes = h :: escapes
     perform PeAbort{}
 }
 
 pe_perform(ev) := {
     found := none
-    for (h in pe_handlers) if (found == none and pe_handler_clause(arg(h, 1), ev) != none) found = h
+    for (h in handlers) if (found == none and handler_clause(arg(h, 1), ev) != none) found = h
     if (found == none) {
-        pe_stop("an effect has no handler in the function that is made")
+        stop("an effect has no handler in the function that is made")
         none
-    } else if (arg(found, 2) == pe_depth) perform PeEff{arg(found, 0), ev}
+    } else if (arg(found, 2) == depth) perform PeEff{arg(found, 0), ev}
     else {
-        c := pe_handler_clause(arg(found, 1), ev)
+        c := handler_clause(arg(found, 1), ev)
         l := arg(c, 0)
         kp := arg(arg(l, 0), 1)
-        sh := pe_handlers
-        pe_handlers = list.drop(pe_handlers, list.index_of(found, pe_handlers) + 1)
-        if (pe_static_match(arg(arg(l, 0), 0), ev) == 'dyn) {
-            pe_handlers = sh
-            pe_stop("a handler whose pattern depends on a value known only when the program runs is not left in vasm")
+        sh := handlers
+        handlers = list.drop(handlers, list.index_of(found, handlers) + 1)
+        if (static_match(arg(arg(l, 0), 0), ev) == 'dyn) {
+            handlers = sh
+            stop("a handler whose pattern depends on a value known only when the program runs is not left in vasm")
             none
-        } else if (typeof(kp) == 'symbol and not member(kp, pe_syms(arg(l, 1)))) {
-            v := pe_unfold(l, [c], [ev, none])
-            pe_handlers = sh
-            pe_abort(found, v)
-        } else if (typeof(kp) == 'symbol and pe_k_tail(arg(l, 1), kp)) {
-            v := pe_unfold(l, [c], [ev, Ki{}])
-            pe_handlers = sh
+        } else if (typeof(kp) == 'symbol and not member(kp, syms(arg(l, 1)))) {
+            v := unfold(l, [c], [ev, none])
+            handlers = sh
+            abort(found, v)
+        } else if (typeof(kp) == 'symbol and k_tail(arg(l, 1), kp)) {
+            v := unfold(l, [c], [ev, Ki{}])
+            handlers = sh
             v
         } else {
-            pe_handlers = sh
-            pe_stop("a continuation that is not the last thing of the handler is not left across a condition known only when the program runs")
+            handlers = sh
+            stop("a continuation that is not the last thing of the handler is not left across a condition known only when the program runs")
             none
         }
     }
@@ -1261,79 +1261,79 @@ pe_perform(ev) := {
 # handle e with h
 pe_handle(env, e, hexpr) := {
     hv := pe_eval(env, hexpr)
-    pe_nhandles = pe_nhandles + 1
-    id := pe_nhandles
+    nhandles = nhandles + 1
+    id := nhandles
     st := array(3)
-    h := Hd{id, hv, pe_depth, st, HandleOf{hexpr}}
-    sh := pe_handlers
-    sd := pe_depth
+    h := Hd{id, hv, depth, st, HandleOf{hexpr}}
+    sh := handlers
+    sd := depth
     sst := pe_stack
-    sbd := pe_bodies
-    sfr := pe_frames
+    sbd := bodies
+    sfr := frames
     start := pe_stmts
-    base := length(pe_opens)
-    pe_handlers = h :: sh
+    base := length(opens)
+    handlers = h :: sh
     v := handle {
         r := handle pe_eval(env, e) with (PeAbort{}, k) -> {
-            pe_close_gone(base)
+            close_gone(base)
             Gone{}
         }
         if (r == Gone{}) r
         else if (st[0] != none) {
-            if (not pe_fits(r, st[1])) pe_widen(arg(h, 4))
-            pe_set_reg(st[0], st[1], r)
-            pe_close_gone(base)
+            if (not fits(r, st[1])) widen(arg(h, 4))
+            set_reg(st[0], st[1], r)
+            close_gone(base)
             Gone{}
-        } else pe_close(base, r)
+        } else close(base, r)
     } with (PeEff{i, ev}, k) -> {
         if (i == id) {
-            hs := pe_handlers
+            hs := handlers
             stack := pe_stack
-            pe_handlers = sh
-            pe_call_value(hv, [ev, Kn{k, hs, stack}])
+            handlers = sh
+            call_value(hv, [ev, Kn{k, hs, stack}])
         } else k(perform PeEff{i, ev})
     }
-    pe_handlers = sh
+    handlers = sh
     pe_stack = sst
-    pe_bodies = sbd
-    pe_depth = sd
-    pe_frames = sfr
-    pe_escapes = filter(x -> arg(x, 0) != id, pe_escapes)
+    bodies = sbd
+    depth = sd
+    frames = sfr
+    escapes = filter(x -> arg(x, 0) != id, escapes)
     if (st[0] != none) {
         # the register and the flag have values on all the paths
         new := list.take(pe_stmts, length(pe_stmts) - length(start))
         init := if (st[2] == none) [] else [Assign{pe_at, st[2], Mov{Imm{pe_at, false}}}]
-        pe_stmts = append(new, append(init, Assign{pe_at, st[0], Mov{pe_dummy_op(st[1])}} :: start))
+        pe_stmts = append(new, append(init, Assign{pe_at, st[0], Mov{dummy_op(st[1])}} :: start))
         # the handler ran with its continuation and has its own value
-        if (v != Gone{}) pe_set_reg(st[0], st[1], v)
-        pe_check_escapes(pe_escapes)
+        if (v != Gone{}) set_reg(st[0], st[1], v)
+        check_escapes(escapes)
         Dy{st[0], st[1]}
     } else if (v == Gone{}) perform PeAbort{}
     else {
-        pe_check_escapes(pe_escapes)
+        check_escapes(escapes)
         v
     }
 }
 
 # === Quasi-quotes ===
-pe_quasi(env, t) := if (typeof(t) != 'mexpr) t
+quasi(env, t) := if (typeof(t) != 'mexpr) t
     else if (head(t) == 'UnQuote) pe_eval(env, arg(t, 0))
-    else foldl((a, x) -> push(a, x), mexpr(head(t), Tuple{}), map(x -> pe_quasi(env, x), vasm_tlist(t)))
+    else foldl((a, x) -> push(a, x), mexpr(head(t), Tuple{}), map(x -> quasi(env, x), vasm_tlist(t)))
 
 # f | g
-pe_clauses_value(v) := match v {
+clauses_value(v) := match v {
     Cl{cs, _} -> cs
-  | Fv{f} -> pe_clauses_of(f)
+  | Fv{f} -> clauses_of(f)
   | _ -> none
 }
 
-pe_fusion(a, b) := if (a == none) b else {
-    ca := pe_clauses_value(a)
-    cb := pe_clauses_value(b)
+fusion(a, b) := if (a == none) b else {
+    ca := clauses_value(a)
+    cb := clauses_value(b)
     if (ca == none or cb == none) {
-        pe_stop("| of a function that is not made here is not left in vasm")
+        stop("| of a function that is not made here is not left in vasm")
         b
-    } else Cl{append(ca, cb), pe_new_id()}
+    } else Cl{append(ca, cb), new_id()}
 }
 
 pe_eval(env, e) := {
@@ -1341,129 +1341,129 @@ pe_eval(env, e) := {
     if (t == 'int or t == 'string) e
     else if (t == 'symbol) {
         loc := pe_loc(env, e)
-        if (loc != none) pe_var_value(table.get(pe_env_vals(loc), e, none))
+        if (loc != none) var_value(table.get(env_vals(loc), e, none))
         else if (e == true or e == false or e == none) e
         else if (table.get(pe_defs, e, none) != none) Fv{e}
         else {
             g := eval(e)
-            if (typeof(g) == 'function) Pr{e} else pe_lift(g)
+            if (typeof(g) == 'function) Pr{e} else lift(g)
         }
     } else if (t != 'mexpr) e
     else if (head(e) == 'Quote) arg(e, 0)
-    else if (head(e) == 'QuasiQuote) pe_quasi(env, arg(e, 0))
+    else if (head(e) == 'QuasiQuote) quasi(env, arg(e, 0))
     else if (head(e) == 'Apply) {
-        f := pe_lib_callee(env, arg(e, 0))
+        f := lib_callee(env, arg(e, 0))
         args := arg(e, 1)
-        if (f == '_index_get and arity(args) == 2 and pe_argv_call(arg(args, 0))) pe_argv_get(pe_eval(env, arg(args, 1)))
-        else if (f == 'array_len and arity(args) == 1 and pe_argv_call(arg(args, 0))) pe_argc()
-        else if (typeof(f) == 'mexpr and head(f) == 'Quote) pe_apply(env, arg(f, 0), pe_values(env, args))
-        else pe_apply(env, f, pe_values(env, args))
+        if (f == '_index_get and arity(args) == 2 and argv_call(arg(args, 0))) argv_get(pe_eval(env, arg(args, 1)))
+        else if (f == 'array_len and arity(args) == 1 and argv_call(arg(args, 0))) pe_argc()
+        else if (typeof(f) == 'mexpr and head(f) == 'Quote) apply(env, arg(f, 0), values(env, args))
+        else apply(env, f, values(env, args))
     } else if (head(e) == 'If) pe_if(env, arg(e, 0), arg(e, 1), arg(e, 2))
     else if (head(e) == 'While) pe_while(env, arg(e, 0), arg(e, 1))
-    else if (head(e) == 'Lambda) Cl{[Tuple{e, env}], pe_new_id()}
-    else if (head(e) == 'Fusion) pe_fusion(pe_eval(env, arg(e, 0)), pe_eval(env, arg(e, 1)))
+    else if (head(e) == 'Lambda) Cl{[Tuple{e, env}], new_id()}
+    else if (head(e) == 'Fusion) fusion(pe_eval(env, arg(e, 0)), pe_eval(env, arg(e, 1)))
     else if (head(e) == 'Do) {
         r := none
         for (x in vasm_tlist(e)) r = pe_eval(env, x)
         r
     } else if (head(e) == 'Def) {
         v := pe_eval(env, arg(e, 1))
-        pe_def(env, arg(e, 0), v)
+        def(env, arg(e, 0), v)
         v
     } else if (head(e) == 'Declare) {
-        if (table.get(pe_env_vals(env), arg(e, 0), Unbound{}) == Unbound{}) pe_def(env, arg(e, 0), none)
+        if (table.get(env_vals(env), arg(e, 0), Unbound{}) == Unbound{}) def(env, arg(e, 0), none)
         none
     } else if (head(e) == 'Set) {
         v := pe_eval(env, arg(e, 1))
-        pe_assign_var(env, arg(e, 0), v)
+        assign_var(env, arg(e, 0), v)
         v
     } else if (head(e) == 'Handle) pe_handle(env, arg(e, 0), arg(e, 1))
     else if (head(e) == 'Perform) pe_perform(pe_eval(env, arg(e, 0)))
-    else foldl((a, x) -> push(a, x), mexpr(head(e), Tuple{}), pe_values(env, e))
+    else foldl((a, x) -> push(a, x), mexpr(head(e), Tuple{}), values(env, e))
 }
 
 # === Function values ===
 # a function that is left as a value keeps the dynamic values that it uses. A variable that is assigned is shared with the place where the
 # function was made, so it is an array of one element in both.
 
-pe_has_dy_deep(v, seen) := if (pe_dyn(v)) true
+has_dy_deep(v, seen) := if (pe_dyn(v)) true
     else if (typeof(v) != 'mexpr) false
     else if (head(v) == 'Cl) {
         if (member(arg(v, 1), seen)) false
         else list.any(c -> list.any(x -> {
             loc := pe_loc(arg(c, 1), x)
-            loc != none and pe_loc_dy(table.get(pe_env_vals(loc), x, none), arg(v, 1) :: seen)
-        }, pe_syms(arg(c, 0))), arg(v, 0))
+            loc != none and loc_dy(table.get(env_vals(loc), x, none), arg(v, 1) :: seen)
+        }, syms(arg(c, 0))), arg(v, 0))
     } else if (pe_fun(v)) head(v) == 'Kn or head(v) == 'Ki
-    else list.any(x -> pe_has_dy_deep(x, seen), vasm_tlist(v))
+    else list.any(x -> has_dy_deep(x, seen), vasm_tlist(v))
 
-pe_loc_dy(v, seen) := typeof(v) == 'mexpr and (head(v) == 'Mt or head(v) == 'Ce or pe_has_dy_deep(v, seen))
+loc_dy(v, seen) := typeof(v) == 'mexpr and (head(v) == 'Mt or head(v) == 'Ce or has_dy_deep(v, seen))
 
 # the location of x becomes an array of one element
-pe_make_cell(loc, x) := {
-    cur := table.get(pe_env_vals(loc), x, none)
+make_cell(loc, x) := {
+    cur := table.get(env_vals(loc), x, none)
     if (typeof(cur) == 'mexpr and head(cur) == 'Ce) cur
     else {
-        d := table.get(pe_env_depths(loc), x, 0)
-        c := pe_fresh(Val{})
+        d := table.get(env_depths(loc), x, 0)
+        c := fresh(Val{})
         mk := () -> {
-            pe_emit(Assign{pe_at, c, Call{pe_at, 'array, [Imm{pe_at, 1}, Sym{pe_at, 'none}]}})
-            pe_emit(IStore{pe_at, c, Imm{pe_at, 0}, pe_box_op(if (typeof(cur) == 'mexpr and head(cur) == 'Mt) Dy{arg(cur, 0), arg(cur, 1)} else cur)})
+            emit(Assign{pe_at, c, Call{pe_at, 'array, [Imm{pe_at, 1}, Sym{pe_at, 'none}]}})
+            emit(IStore{pe_at, c, Imm{pe_at, 0}, box_op(if (typeof(cur) == 'mexpr and head(cur) == 'Mt) Dy{arg(cur, 0), arg(cur, 1)} else cur)})
         }
-        fr := pe_frame_at(d + 1)
-        if (d < pe_depth and fr != none) pe_add_pre(fr, arg(pe_capture(mk), 0))
+        fr := frame_at(d + 1)
+        if (d < depth and fr != none) add_pre(fr, arg(capture(mk), 0))
         else mk()
-        if (d < pe_depth and fr != none and typeof(cur) == 'mexpr and head(cur) == 'Mt) pe_emit(IStore{pe_at, c, Imm{pe_at, 0}, pe_box_op(Dy{arg(cur, 0), arg(cur, 1)})})
+        if (d < depth and fr != none and typeof(cur) == 'mexpr and head(cur) == 'Mt) emit(IStore{pe_at, c, Imm{pe_at, 0}, box_op(Dy{arg(cur, 0), arg(cur, 1)})})
         cell := Ce{Dy{c, Val{}}}
-        table.set(pe_env_vals(loc), x, cell)
+        table.set(env_vals(loc), x, cell)
         cell
     }
 }
 
-pe_boxing := []
+boxing := []
 
-pe_box_fun(fv) := match fv {
+box_fun(fv) := match fv {
     Fv{f} -> {
-        pe_val_of_function(fv, Tuple{'fnval, f}, arity(arg(table.get(pe_defs, f, [])[0], 0)))
+        val_of_function(fv, Tuple{'fnval, f}, arity(arg(table.get(pe_defs, f, [])[0], 0)))
     }
   | Pr{f} -> {
-        cs := if (pe_arity_known(f)) none else pe_lib_clauses(f)
+        cs := if (arity_known(f)) none else lib_clauses(f)
         if (cs != none) {
             table.set(pe_defs, f, cs)
-            pe_box_fun(Fv{f})
-        } else pe_val_of_function(fv, Tuple{'fnval, f}, pe_arity_of(f))
+            box_fun(Fv{f})
+        } else val_of_function(fv, Tuple{'fnval, f}, arity_of(f))
     }
-  | Cl{cs, _} -> pe_box_closure(fv)
+  | Cl{cs, _} -> box_closure(fv)
   | _ -> {
-        pe_stop("a continuation is not a value that is left in vasm")
-        pe_assign(Val{}, Mov{Sym{pe_at, 'none}})
+        stop("a continuation is not a value that is left in vasm")
+        assign(Val{}, Mov{Sym{pe_at, 'none}})
     }
 }
 
-pe_arity_known(f) := find(p -> arg(p, 0) == f, pe_impl_table) != none or find(p -> arg(p, 0) == f, pe_ops) != none or f == 'println or f == '_not
+arity_known(f) := find(p -> arg(p, 0) == f, impl_table) != none or find(p -> arg(p, 0) == f, pe_ops) != none or f == 'println or f == '_not
 
 # a function of vasm that takes and gives val for the function fv with n arguments
-pe_val_of_function(fv, key, n) := {
-    hit := find(m -> arg(m, 0) == key, pe_memo)
+val_of_function(fv, key, n) := {
+    hit := find(m -> arg(m, 0) == key, memo)
     name := if (hit != none) arg(hit, 1) else {
-        pe_nres = pe_nres + 1
-        nm := intern(f"{pe_entry}_spec_{pe_nres}")
-        pe_make_fn(nm, fv, map(_ -> Dyn{Val{}}, range(0, n)), 0, Val{}, key)
+        nres = nres + 1
+        nm := intern(f"{entry}_spec_{nres}")
+        make_fn(nm, fv, map(_ -> Dyn{Val{}}, range(0, n)), 0, Val{}, key)
         nm
     }
-    pe_assign(Val{}, Clo{pe_at, name, []})
+    assign(Val{}, Clo{pe_at, name, []})
 }
 
-pe_box_closure(fv) := {
+box_closure(fv) := {
     cs := arg(fv, 0)
     lams := map(c -> arg(c, 0), cs)
-    if (member(lams, pe_boxing)) {
-        pe_stop("functions that call each other as values with values known only when the program runs are not left in vasm")
-        pe_assign(Val{}, Mov{Sym{pe_at, 'none}})
+    if (member(lams, boxing)) {
+        stop("functions that call each other as values with values known only when the program runs are not left in vasm")
+        assign(Val{}, Mov{Sym{pe_at, 'none}})
     } else {
-        names := pe_syms(foldl((t, x) -> push(t, x), Tuple{}, lams))
-        assigned := append(concat_map(pe_assigned, lams), concat_map(pe_assigned, pe_bodies))
-        env2 := En{table.new(), pe_root, table.new(), 0}
+        names := syms(foldl((t, x) -> push(t, x), Tuple{}, lams))
+        assigned := append(concat_map(pe_assigned, lams), concat_map(pe_assigned, bodies))
+        env2 := En{table.new(), root, table.new(), 0}
         caps := []
         keys := []
         k := 0
@@ -1471,126 +1471,126 @@ pe_box_closure(fv) := {
         for (x in names) {
             loc := pe_loc(env0, x)
             if (loc != none) {
-                cur := table.get(pe_env_vals(loc), x, none)
+                cur := table.get(env_vals(loc), x, none)
                 isself := typeof(cur) == 'mexpr and head(cur) == 'Cl and map(c -> arg(c, 0), arg(cur, 0)) == lams
-                if (isself) table.set(pe_env_vals(env2), x, SelfRef{})
+                if (isself) table.set(env_vals(env2), x, SelfRef{})
                 else if (member(x, assigned) or (typeof(cur) == 'mexpr and head(cur) == 'Ce)) {
-                    cell := pe_make_cell(loc, x)
+                    cell := make_cell(loc, x)
                     caps = arg(cell, 0) :: caps
-                    table.set(pe_env_vals(env2), x, Ce{Dy{intern(f"a{k}"), Val{}}})
+                    table.set(env_vals(env2), x, Ce{Dy{intern(f"a{k}"), Val{}}})
                     keys = CellOf{x} :: keys
                     k = k + 1
                 } else if (typeof(cur) == 'mexpr and head(cur) == 'Mt) {
-                    caps = pe_var_value(cur) :: caps
-                    table.set(pe_env_vals(env2), x, Dy{intern(f"a{k}"), Val{}})
+                    caps = var_value(cur) :: caps
+                    table.set(env_vals(env2), x, Dy{intern(f"a{k}"), Val{}})
                     keys = CapOf{x} :: keys
                     k = k + 1
-                } else if (pe_has_dy_deep(cur, [])) {
+                } else if (has_dy_deep(cur, [])) {
                     caps = cur :: caps
-                    table.set(pe_env_vals(env2), x, Dy{intern(f"a{k}"), Val{}})
+                    table.set(env_vals(env2), x, Dy{intern(f"a{k}"), Val{}})
                     keys = CapOf{x} :: keys
                     k = k + 1
                 } else {
-                    table.set(pe_env_vals(env2), x, cur)
+                    table.set(env_vals(env2), x, cur)
                     keys = Tuple{x, pe_key(cur)} :: keys
                 }
             }
         }
         cs2 := map(c -> Tuple{arg(c, 0), env2}, cs)
-        fv2 := Cl{cs2, pe_new_id()}
-        for (x in names) if (table.get(pe_env_vals(env2), x, none) == SelfRef{}) table.set(pe_env_vals(env2), x, fv2)
+        fv2 := Cl{cs2, new_id()}
+        for (x in names) if (table.get(env_vals(env2), x, none) == SelfRef{}) table.set(env_vals(env2), x, fv2)
         key := Tuple{'closure, lams, keys}
         n := arity(arg(lams[0], 0))
-        hit := find(m -> arg(m, 0) == key, pe_memo)
-        ops := map(pe_box_op, reverse(caps))
+        hit := find(m -> arg(m, 0) == key, memo)
+        ops := map(box_op, reverse(caps))
         name := if (hit != none) arg(hit, 1) else {
-            pe_nres = pe_nres + 1
-            nm := intern(f"{pe_entry}_spec_{pe_nres}")
-            sb := pe_boxing
-            pe_boxing = lams :: sb
-            pe_make_fn(nm, fv2, map(_ -> Dyn{Val{}}, range(0, k + n)), k, Val{}, key)
-            pe_boxing = sb
+            nres = nres + 1
+            nm := intern(f"{entry}_spec_{nres}")
+            sb := boxing
+            boxing = lams :: sb
+            make_fn(nm, fv2, map(_ -> Dyn{Val{}}, range(0, k + n)), k, Val{}, key)
+            boxing = sb
             nm
         }
-        pe_assign(Val{}, Clo{pe_at, name, ops})
+        assign(Val{}, Clo{pe_at, name, ops})
     }
 }
 
 # === The functions that are made ===
 
 # the key of a call: the function and its arguments, each a static value or Dyn{type}. A value with a dynamic part is a val.
-pe_template(vs) := map(v -> if (pe_dyn(v)) Dyn{arg(v, 1)} else if (pe_has_dy_deep(v, [])) Dyn{Val{}} else v, vs)
+template(vs) := map(v -> if (pe_dyn(v)) Dyn{arg(v, 1)} else if (has_dy_deep(v, [])) Dyn{Val{}} else v, vs)
 
-pe_tmpl_key(tmpl) := map(pe_key, tmpl)
+tmpl_key(tmpl) := map(pe_key, tmpl)
 
 # the element of a template, the static value v of the call, as a parameter
-pe_dynamize(v, old) := if (pe_marker(v)) v
-    else if (pe_marker(old)) old
-    else Dyn{pe_kind_type(v)}
+dynamize(v, old) := if (marker(v)) v
+    else if (marker(old)) old
+    else Dyn{kind_type(v)}
 
 # the template of a call whose static values differ from those of the function that is being made for the same function: the elements that
 # differ are parameters
-pe_generalize(tmpl, old) := {
+generalize(tmpl, old) := {
     out := []
     i := 0
     for (v in tmpl) {
-        out = (if (pe_key(v) == pe_key(old[i])) v else pe_dynamize(v, old[i])) :: out
+        out = (if (pe_key(v) == pe_key(old[i])) v else dynamize(v, old[i])) :: out
         i = i + 1
     }
     reverse(out)
 }
 
 # the type of the result of a function made for the function fv
-pe_ret_type(f) := if (pe_forced(Ret{f})) Val{}
-    else if (Fv{f} == pe_entry_fv) pe_rty
+ret_type(f) := if (forced(Ret{f})) Val{}
+    else if (Fv{f} == entry_fv) pe_rty
     else if (pe_rty == Unit{}) Val{}
     else pe_rty
 
 # the call of the function f made for the static values of vs; the dynamic values of vs are its arguments
-pe_residual_call(f, vs) := {
-    tmpl := pe_template(vs)
+residual_call(f, vs) := {
+    tmpl := template(vs)
     keyf := Fv{f}
-    hit := find(m -> arg(m, 0) == Tuple{keyf, pe_tmpl_key(tmpl)}, pe_memo)
+    hit := find(m -> arg(m, 0) == Tuple{keyf, tmpl_key(tmpl)}, memo)
     if (hit == none) {
-        outer := find(m -> arg(m, 0) == keyf and length(arg(m, 1)) == length(tmpl), pe_making)
+        outer := find(m -> arg(m, 0) == keyf and length(arg(m, 1)) == length(tmpl), making)
         if (outer != none) {
-            tmpl = pe_generalize(tmpl, arg(outer, 1))
-            hit = find(m -> arg(m, 0) == Tuple{keyf, pe_tmpl_key(tmpl)}, pe_memo)
+            tmpl = generalize(tmpl, arg(outer, 1))
+            hit = find(m -> arg(m, 0) == Tuple{keyf, tmpl_key(tmpl)}, memo)
         }
     }
-    ret := if (hit != none) arg(hit, 2) else pe_ret_type(f)
+    ret := if (hit != none) arg(hit, 2) else ret_type(f)
     name := if (hit != none) arg(hit, 1) else {
-        pe_nres = pe_nres + 1
-        nm := intern(f"{pe_entry}_spec_{pe_nres}")
-        pe_make_fn(nm, keyf, tmpl, 0, ret, Tuple{keyf, pe_tmpl_key(tmpl)})
+        nres = nres + 1
+        nm := intern(f"{entry}_spec_{nres}")
+        make_fn(nm, keyf, tmpl, 0, ret, Tuple{keyf, tmpl_key(tmpl)})
         nm
     }
     args := []
     i := 0
     for (a in tmpl) {
-        if (pe_marker(a)) args = pe_operand(pe_coerce(vs[i], arg(a, 0))) :: args
+        if (marker(a)) args = operand(coerce(vs[i], arg(a, 0))) :: args
         i = i + 1
     }
     args = reverse(args)
     if (ret == Unit{}) {
-        pe_emit(CallS{pe_at, name, args})
+        emit(CallS{pe_at, name, args})
         none
-    } else pe_assign(ret, Call{pe_at, name, args})
+    } else assign(ret, Call{pe_at, name, args})
 }
 
 # the variables that the statements read
-pe_reads_into(s, out) := if (typeof(s) == 'symbol) table.set(out, s, true)
+reads_into(s, out) := if (typeof(s) == 'symbol) table.set(out, s, true)
     else if (typeof(s) == 'mexpr) match s {
         Decl{_, _, _} -> none
-      | Assign{_, _, r} -> pe_reads_into(r, out)
+      | Assign{_, _, r} -> reads_into(r, out)
       | Cons{a, b} -> {
-            pe_reads_into(a, out)
-            pe_reads_into(b, out)
+            reads_into(a, out)
+            reads_into(b, out)
         }
-      | _ -> each(x -> pe_reads_into(x, out), vasm_tlist(s))
+      | _ -> each(x -> reads_into(x, out), vasm_tlist(s))
     }
 
-pe_pure(r) := match r {
+pure(r) := match r {
     Mov{_} -> true
   | Conv{_, _, Val{}} -> true
   | Con{_, _, _} -> true
@@ -1599,132 +1599,132 @@ pe_pure(r) := match r {
 }
 
 # the assignments to variables that are not read, with no other effect, are taken out
-pe_clean_stmts(ss, reads) := concat_map(s -> match s {
-    Assign{_, x, r} -> if (pe_pure(r) and not table.get(reads, x, false)) [] else [s]
+clean_stmts(ss, reads) := concat_map(s -> match s {
+    Assign{_, x, r} -> if (pure(r) and not table.get(reads, x, false)) [] else [s]
   | IfS{at, c, a, b} -> {
-        a2 := pe_clean_stmts(a, reads)
-        b2 := pe_clean_stmts(b, reads)
+        a2 := clean_stmts(a, reads)
+        b2 := clean_stmts(b, reads)
         if (a2 == [] and b2 == [] and head(c) == 'Mov) [] else [IfS{at, c, a2, b2}]
     }
-  | WhileS{at, c, a} -> [WhileS{at, c, pe_clean_stmts(a, reads)}]
+  | WhileS{at, c, a} -> [WhileS{at, c, clean_stmts(a, reads)}]
   | _ -> [s]
 }, ss)
 
-pe_clean(ss) := {
+clean(ss) := {
     reads := table.new()
-    pe_reads_into(ss, reads)
-    out := pe_clean_stmts(ss, reads)
-    if (out == ss) out else pe_clean(out)
+    reads_into(ss, reads)
+    out := clean_stmts(ss, reads)
+    if (out == ss) out else clean(out)
 }
 
 # the statements of the function: the variables first
 pe_body(r, ret) := {
-    op := if (ret == Unit{}) none else pe_operand(pe_coerce(r, ret))
-    ss := pe_clean(append(reverse(pe_stmts), [Ret{pe_at, op}]))
+    op := if (ret == Unit{}) none else operand(coerce(r, ret))
+    ss := clean(append(reverse(pe_stmts), [Ret{pe_at, op}]))
     reads := table.new()
-    pe_reads_into(ss, reads)
+    reads_into(ss, reads)
     assigned := table.new()
-    pe_assigns_into(ss, assigned)
-    append(filter((Decl{_, x, _}) -> table.get(reads, x, false) or table.get(assigned, x, false), reverse(pe_decls)), ss)
+    assigns_into(ss, assigned)
+    append(filter((Decl{_, x, _}) -> table.get(reads, x, false) or table.get(assigned, x, false), reverse(decls)), ss)
 }
 
-pe_assigns_into(ss, out) := each(s -> match s {
+assigns_into(ss, out) := each(s -> match s {
     Assign{_, x, _} -> table.set(out, x, true)
   | IfS{_, _, a, b} -> {
-        pe_assigns_into(a, out)
-        pe_assigns_into(b, out)
+        assigns_into(a, out)
+        assigns_into(b, out)
     }
-  | WhileS{_, _, a} -> pe_assigns_into(a, out)
+  | WhileS{_, _, a} -> assigns_into(a, out)
   | _ -> none
 }, ss)
 
 # the function name of vasm for the function fv called with tmpl, whose elements are static values or Dyn{type}.
 # The first skip parameters are not arguments of fv: the environment of fv has them. key is what the function is kept under.
-pe_make_fn(name, fv, tmpl, skip, ret, key) := {
-    pe_memo = Tuple{key, name, ret} :: pe_memo
-    pe_making = Tuple{fv, tmpl} :: pe_making
-    sd := pe_decls
+make_fn(name, fv, tmpl, skip, ret, key) := {
+    memo = Tuple{key, name, ret} :: memo
+    making = Tuple{fv, tmpl} :: making
+    sd := decls
     ss := pe_stmts
-    sc := pe_count
-    sdp := pe_depth
+    sc := count
+    sdp := depth
     sst := pe_stack
-    sfr := pe_frames
-    sop := pe_opens
-    shd := pe_handlers
-    slp := pe_loops
-    sec := pe_escapes
-    sdl := pe_deflog
-    sbd := pe_bodies
-    sar := pe_arrays
-    pe_arrays = []
-    pe_decls = []
+    sfr := frames
+    sop := opens
+    shd := handlers
+    slp := loops
+    sec := escapes
+    sdl := deflog
+    sbd := bodies
+    sar := arrays
+    arrays = []
+    decls = []
     pe_stmts = []
-    pe_count = 0
-    pe_depth = 0
+    count = 0
+    depth = 0
     pe_stack = []
-    pe_frames = []
-    pe_opens = []
-    pe_handlers = []
-    pe_loops = []
-    pe_escapes = []
-    pe_deflog = []
-    pe_bodies = []
+    frames = []
+    opens = []
+    handlers = []
+    loops = []
+    escapes = []
+    deflog = []
+    bodies = []
     ps := []
     vs := []
     i := 0
     for (a in tmpl) {
-        if (pe_marker(a)) {
+        if (marker(a)) {
             x := intern(f"a{i}")
             ps = Param{pe_at, x, arg(a, 0)} :: ps
             if (i >= skip) vs = Dy{x, arg(a, 0)} :: vs
-        } else if (i >= skip) vs = pe_lift(a) :: vs
+        } else if (i >= skip) vs = lift(a) :: vs
         i = i + 1
     }
     vs = reverse(vs)
     r := handle match fv {
-        Fv{f} -> pe_unfold(f, pe_clauses_of(f), vs)
-      | Cl{cs, _} -> pe_unfold(pe_cl_key(fv), cs, vs)
-      | Pr{f} -> pe_primitive(f, vs)
+        Fv{f} -> unfold(f, clauses_of(f), vs)
+      | Cl{cs, _} -> unfold(cl_key(fv), cs, vs)
+      | Pr{f} -> primitive(f, vs)
     } with (PeAbort{}, k) -> none
     # a function other than the first has the type val when its value does not fit
-    if (ret != Unit{} and not pe_fits(r, ret) and key != pe_first_key) match fv {
-        Fv{f} -> pe_widen(Ret{f})
+    if (ret != Unit{} and not fits(r, ret) and key != first_key) match fv {
+        Fv{f} -> widen(Ret{f})
       | _ -> none
     }
     d := Fn{pe_at, name, [], reverse(ps), ret, pe_body(r, ret)}
-    pe_decls = sd
+    decls = sd
     pe_stmts = ss
-    pe_count = sc
-    pe_depth = sdp
+    count = sc
+    depth = sdp
     pe_stack = sst
-    pe_frames = sfr
-    pe_opens = sop
-    pe_handlers = shd
-    pe_loops = slp
-    pe_escapes = sec
-    pe_deflog = sdl
-    pe_bodies = sbd
-    pe_arrays = sar
-    pe_making = list.drop(pe_making, 1)
+    frames = sfr
+    opens = sop
+    handlers = shd
+    loops = slp
+    escapes = sec
+    deflog = sdl
+    bodies = sbd
+    arrays = sar
+    making = list.drop(making, 1)
     pe_fns = d :: pe_fns
     name
 }
 
 
 # the functions of vasm/builtins.pk that the functions fs call, with the functions that these call
-pe_calls_into(s, out) := if (typeof(s) == 'mexpr) match s {
+calls_into(s, out) := if (typeof(s) == 'mexpr) match s {
     Call{_, f, a} -> {
         table.set(out, f, true)
-        pe_calls_into(a, out)
+        calls_into(a, out)
     }
   | CallS{_, f, a} -> {
         table.set(out, f, true)
-        pe_calls_into(a, out)
+        calls_into(a, out)
     }
-  | _ -> each(x -> pe_calls_into(x, out), vasm_tlist(s))
+  | _ -> each(x -> calls_into(x, out), vasm_tlist(s))
 }
 
-pe_impl_closure(names) := {
+impl_closure(names) := {
     all_impls := arg(vasm_planck.builtins, 0)
     need := table.new()
     work := names
@@ -1736,7 +1736,7 @@ pe_impl_closure(names) := {
             d := find(x -> arg(x, 1) == f, all_impls)
             if (d != none) {
                 out := table.new()
-                pe_calls_into(arg(d, 5), out)
+                calls_into(arg(d, 5), out)
                 work = append(table.keys(out), work)
             }
         }
@@ -1746,48 +1746,48 @@ pe_impl_closure(names) := {
 
 # the module of vasm for the function of the tree called with args (static values and Dyn{type}), whose result has the type rty
 export specialize(tree, args, rty) := {
-    if (not pe_is_fun_tree(tree)) panic("pe: the first argument of specialize is the tree of a function")
-    pe_force = table.new()
+    if (not is_fun_tree(tree)) panic("pe: the first argument of specialize is the tree of a function")
+    force = table.new()
     result := none
     while (result == none) {
-        result = handle pe_specialize_once(tree, args, rty) with (PeRestart{}, k) -> none
+        result = handle specialize_once(tree, args, rty) with (PeRestart{}, k) -> none
     }
     result
 }
 
-pe_specialize_once(tree, args, rty) := {
+specialize_once(tree, args, rty) := {
     pe_defs = table.new()
-    pe_decls = []
+    decls = []
     pe_stmts = []
-    pe_count = 0
-    pe_depth = 0
+    count = 0
+    depth = 0
     pe_stack = []
-    pe_frames = []
-    pe_opens = []
-    pe_handlers = []
-    pe_loops = []
-    pe_escapes = []
-    pe_deflog = []
-    pe_bodies = []
+    frames = []
+    opens = []
+    handlers = []
+    loops = []
+    escapes = []
+    deflog = []
+    bodies = []
     pe_rty = rty
     pe_fns = []
-    pe_memo = []
-    pe_impls = []
-    pe_nres = 0
-    pe_making = []
-    pe_boxing = []
-    pe_root = En{table.new(), none, table.new(), 0}
-    fv := pe_fun_value(tree)
-    pe_entry_fv = fv
-    pe_entry = match fv {
+    memo = []
+    impls = []
+    nres = 0
+    making = []
+    boxing = []
+    root = En{table.new(), none, table.new(), 0}
+    fv := fun_value(tree)
+    entry_fv = fv
+    entry = match fv {
         Fv{f} -> symname(f)
       | _ -> "lambda"
     }
-    tmpl := map(a -> if (pe_marker(a)) a else if (pe_is_fun_tree(a)) pe_fun_value(a) else a, args)
-    pe_first_key = Tuple{pe_key(fv), pe_tmpl_key(tmpl)}
-    pe_make_fn(intern(f"{pe_entry}_spec"), fv, tmpl, 0, rty, pe_first_key)
-    made := map(m -> find(d -> arg(d, 1) == arg(m, 1), pe_fns), reverse(pe_memo))
-    Module{append(made, pe_impl_closure(reverse(pe_impls)))}
+    tmpl := map(a -> if (marker(a)) a else if (is_fun_tree(a)) fun_value(a) else a, args)
+    first_key = Tuple{pe_key(fv), tmpl_key(tmpl)}
+    make_fn(intern(f"{entry}_spec"), fv, tmpl, 0, rty, first_key)
+    made := map(m -> find(d -> arg(d, 1) == arg(m, 1), pe_fns), reverse(memo))
+    Module{append(made, impl_closure(reverse(impls)))}
 }
 
 # the module m of specialize with the function main that calls its first function with the values vs (static values of planck).
@@ -1796,42 +1796,42 @@ export with_main(m, vs) := {
     f := arg(arg(m, 0)[0], 1)
     ps := arg(arg(m, 0)[0], 3)
     rty := arg(arg(m, 0)[0], 4)
-    pe_decls = []
+    decls = []
     pe_stmts = []
-    pe_count = 0
-    pe_impls = []
+    count = 0
+    impls = []
     pe_fns = []
-    pe_memo = []
-    pe_making = []
-    pe_frames = []
-    pe_depth = 0
+    memo = []
+    making = []
+    frames = []
+    depth = 0
     regs := []
     i := 0
     for (p in ps) {
-        regs = pe_operand(pe_coerce(vs[i], arg(p, 2))) :: regs
+        regs = operand(coerce(vs[i], arg(p, 2))) :: regs
         i = i + 1
     }
     args := reverse(regs)
     ints := vasm_check.int(rty) or rty == Bool{}
     body := if (ints) {
-        pe_set_reg_call(f, args, rty)
+        set_reg_call(f, args, rty)
     } else if (rty == Unit{}) {
-        pe_emit(CallS{pe_at, f, args})
-        pe_emit(Ret{pe_at, none})
+        emit(CallS{pe_at, f, args})
+        emit(Ret{pe_at, none})
     } else {
-        r := pe_assign(rty, Call{pe_at, f, args})
-        pe_println(if (rty == Val{} or pe_ref_dy(r) or vasm_check.int(rty)) r else none)
-        pe_emit(Ret{pe_at, none})
+        r := assign(rty, Call{pe_at, f, args})
+        pe_println(if (rty == Val{} or ref_dy(r) or vasm_check.int(rty)) r else none)
+        emit(Ret{pe_at, none})
     }
-    fns := append(reverse(pe_fns), [Fn{pe_at, 'main, [], [], if (ints) rty else Unit{}, append(reverse(pe_decls), reverse(pe_stmts))}])
+    fns := append(reverse(pe_fns), [Fn{pe_at, 'main, [], [], if (ints) rty else Unit{}, append(reverse(decls), reverse(pe_stmts))}])
     have := map(d -> arg(d, 1), arg(m, 0))
-    extra := filter(d -> not member(arg(d, 1), have), pe_impl_closure(pe_impls))
+    extra := filter(d -> not member(arg(d, 1), have), impl_closure(impls))
     Module{append(arg(m, 0), append(extra, fns))}
 }
 
-pe_set_reg_call(f, args, rty) := {
-    r := pe_assign(rty, Call{pe_at, f, args})
-    pe_emit(Ret{pe_at, pe_operand(r)})
+set_reg_call(f, args, rty) := {
+    r := assign(rty, Call{pe_at, f, args})
+    emit(Ret{pe_at, operand(r)})
 }
 
 # the module m as the text of vasm; the function main of with_main is not in it. The name vasm_text of the field is also the name of the

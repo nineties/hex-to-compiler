@@ -176,8 +176,8 @@ export int(t) := int_entry(t) != none
 
 # A literal is from -32768 to 32767. A type of 16 bits or more holds all of them but the negative ones
 # for an unsigned type, so these are the bounds of a literal of the type e of ints.
-vasm_lit_lo(e) := if (not arg(e, 3)) 0 else if (arg(e, 2) == 8) -128 else -32768
-vasm_lit_hi(e) := if (arg(e, 2) != 8) 32767 else if (arg(e, 3)) 127 else 255
+lit_lo(e) := if (not arg(e, 3)) 0 else if (arg(e, 2) == 8) -128 else -32768
+lit_hi(e) := if (arg(e, 2) != 8) 32767 else if (arg(e, 3)) 127 else 255
 
 export show_type(t) := match t {
     Bool{} -> "bool"
@@ -198,43 +198,43 @@ export show_type(t) := match t {
 # a state: name -> Vs{status, loans}, and ".dead" -> true after return
 #   status: 'init, 'uninit, Moved{at}, Freed{at}, Taken{at} (an own value whose contents are moved out by x = *p)
 #   or Parts{fields} (a struct value whose fields that own are moved out by x = s.f); loans: [Loan{region, kind}, ...]
-# vasm_regions: the regions in scope, the innermost first, ending with the regions of the function
+# regions: the regions in scope, the innermost first, ending with the regions of the function
 
-vasm_sigs := table.new()
-vasm_structs := table.new()
+sigs := table.new()
+structs := table.new()
 vasm_info := table.new()
-vasm_regions := []
-vasm_fn_regions := []
-vasm_ret_type := Unit{}
+regions := []
+fn_regions := []
+ret_type := Unit{}
 
 # t owns a value: t is own or val, or a struct with a field that owns, or an array of them.
-# A val in a register is copied (vasm_linear); a val in a struct, in a box or in an array of own is what own is there.
-fun vasm_owning_in
-vasm_owning(t) := vasm_owning_in(t, [])
-vasm_owning_in(t, seen) := match t {
+# A val in a register is copied (linear); a val in a struct, in a box or in an array of own is what own is there.
+fun owning_in
+owning(t) := owning_in(t, [])
+owning_in(t, seen) := match t {
     Own{_} -> true
   | Val{} -> true
-  | Arr{u} -> vasm_owning_in(u, seen)
+  | Arr{u} -> owning_in(u, seen)
   | Named{s} -> {
-        sd := table.get(vasm_structs, s, none)
+        sd := table.get(structs, s, none)
         if (sd == none or member(s, seen)) false
-        else list.any((Field{_, _, u}) -> vasm_owning_in(u, s :: seen), arg(sd, 2))
+        else list.any((Field{_, _, u}) -> owning_in(u, s :: seen), arg(sd, 2))
     }
   | _ -> false
 }
 
 # the fields of the struct s that own, in the order of the struct
-vasm_own_fields(s) := map((Field{_, x, _}) -> x, filter((Field{_, _, u}) -> vasm_owning(u), arg(table.get(vasm_structs, s, none), 2)))
+own_fields(s) := map((Field{_, x, _}) -> x, filter((Field{_, _, u}) -> owning(u), arg(table.get(structs, s, none), 2)))
 
 # An integer literal is Lit{n} until it meets an integer type; Lit{none} is the result of an operation on literals.
 # Integers, bool and structs without own are copied. own and a struct with own are linear: they are moved
 # by a use and must be moved or freed once. &mut is moved by a use, except for an argument of a call
-# (vasm_call). & is copied.
-vasm_linear(t) := head(t) == 'Own or (head(t) == 'Named and vasm_owning(t))
-vasm_moves(t) := vasm_linear(t) or (head(t) == 'Ref and arg(t, 0) == 'mut)
+# (call). & is copied.
+linear(t) := head(t) == 'Own or (head(t) == 'Named and owning(t))
+moves(t) := linear(t) or (head(t) == 'Ref and arg(t, 0) == 'mut)
 
 # the built-in functions, given as types with the type variable T.
-# free also marks its argument as freed (vasm_call). The contents of own are checked by vasm_type_ok.
+# free also marks its argument as freed (call). The contents of own are checked by type_ok.
 # swap(x, v) puts v in the place x (*p, p[i] or p.f) and gives the value that was there.
 export builtins := table.new()
 table.set(builtins, 'box, Sig{[], [TVar{'T}], Own{TVar{'T}}})
@@ -243,92 +243,92 @@ table.set(builtins, 'alloc, Sig{[], [I64{}, TVar{'T}], Own{Arr{TVar{'T}}}})
 table.set(builtins, 'len, Sig{['r], [Ref{'shr, 'r, Arr{TVar{'T}}}], I64{}})
 table.set(builtins, 'swap, Sig{[], [Place{TVar{'T}}, TVar{'T}], TVar{'T}})
 
-vasm_fail(at, kind, msg) := perform VasmFail{at, kind, msg}
+fail(at, kind, msg) := perform VasmFail{at, kind, msg}
 
-vasm_dead(st) := table.get(st, ".dead", false)
-vasm_status(st, x) := arg(table.get(st, x, none), 0)
-vasm_loans(st, x) := arg(table.get(st, x, none), 1)
-vasm_set_status(st, x, s) := table.set(st, x, Vs{s, vasm_loans(st, x)})
-vasm_set_loans(st, x, l) := table.set(st, x, Vs{vasm_status(st, x), l})
+dead(st) := table.get(st, ".dead", false)
+status(st, x) := arg(table.get(st, x, none), 0)
+loans(st, x) := arg(table.get(st, x, none), 1)
+set_status(st, x, s) := table.set(st, x, Vs{s, loans(st, x)})
+set_loans(st, x, l) := table.set(st, x, Vs{status(st, x), l})
 
-vasm_copy_state(st) := {
+copy_state(st) := {
     s := table.new()
     each(kv -> table.set(s, arg(kv, 0), arg(kv, 1)), table.items(st))
     s
 }
 
 # the variables of a state, without the removed ones
-vasm_vars(st) := filter(x -> typeof(x) == 'symbol and table.get(st, x, none) != none, table.keys(st))
+vars(st) := filter(x -> typeof(x) == 'symbol and table.get(st, x, none) != none, table.keys(st))
 
-vasm_lookup(at, x) := {
+lookup(at, x) := {
     i := table.get(vasm_info, x, none)
-    if (i == none) vasm_fail(at, 'undefined, f"{symname(x)} is not declared")
+    if (i == none) fail(at, 'undefined, f"{symname(x)} is not declared")
     i
 }
-vasm_type_of(at, x) := arg(vasm_lookup(at, x), 0)
+type_of(at, x) := arg(lookup(at, x), 0)
 
-vasm_need_init(at, st, x) := match vasm_status(st, x) {
+need_init(at, st, x) := match status(st, x) {
     'init -> none
-  | 'uninit -> vasm_fail(at, 'uninit, f"{symname(x)} is read before it is initialized")
-  | Moved{_} -> vasm_fail(at, 'moved, f"{symname(x)} is used after it is moved")
-  | Freed{_} -> vasm_fail(at, 'freed, f"{symname(x)} is used after it is freed")
-  | Taken{_} -> vasm_fail(at, 'moved, f"the contents of {symname(x)} are moved out; write *{symname(x)} or free {symname(x)}")
-  | Parts{fs} -> vasm_fail(at, 'moved, f"{symname(x)}.{symname(fs[0])} is moved out")
+  | 'uninit -> fail(at, 'uninit, f"{symname(x)} is read before it is initialized")
+  | Moved{_} -> fail(at, 'moved, f"{symname(x)} is used after it is moved")
+  | Freed{_} -> fail(at, 'freed, f"{symname(x)} is used after it is freed")
+  | Taken{_} -> fail(at, 'moved, f"the contents of {symname(x)} are moved out; write *{symname(x)} or free {symname(x)}")
+  | Parts{fs} -> fail(at, 'moved, f"{symname(x)}.{symname(fs[0])} is moved out")
 }
 
 # the fields moved out of the struct value x
-vasm_moved_fields(st, x) := match vasm_status(st, x) {
+moved_fields(st, x) := match status(st, x) {
     Parts{fs} -> fs
   | _ -> []
 }
 
 # the field f of the struct value x is read or written: x is initialized and f is not moved out
-vasm_need_field(at, st, x, f) := match vasm_status(st, x) {
-    Parts{fs} -> if (member(f, fs)) vasm_fail(at, 'moved, f"{symname(x)}.{symname(f)} is used after it is moved")
-  | _ -> vasm_need_init(at, st, x)
+need_field(at, st, x, f) := match status(st, x) {
+    Parts{fs} -> if (member(f, fs)) fail(at, 'moved, f"{symname(x)}.{symname(f)} is used after it is moved")
+  | _ -> need_init(at, st, x)
 }
 
 # x of type t still owns a value with the status s: something in it is not moved out or freed
-vasm_owns(t, s) := if (not vasm_linear(t)) false else match s {
+owns(t, s) := if (not linear(t)) false else match s {
     'init -> true
   | Taken{_} -> true
-  | Parts{fs} -> list.any(f -> not member(f, fs), vasm_own_fields(arg(t, 0)))
+  | Parts{fs} -> list.any(f -> not member(f, fs), own_fields(arg(t, 0)))
   | _ -> false
 }
 
 # the status s of x of type t as far as the checks of if and while see it: what x still owns, or initialized or not
-vasm_key(t, s) := if (not vasm_linear(t)) s == 'init else if (not vasm_owns(t, s)) 'none else match s {
+key(t, s) := if (not linear(t)) s == 'init else if (not owns(t, s)) 'none else match s {
     Taken{_} -> 'taken
   | Parts{fs} -> Parts{fs}
   | _ -> 'init
 }
 
-vasm_no_loans(at, st, x, what) := if (vasm_loans(st, x) != []) vasm_fail(at, 'borrowed, f"{symname(x)} is borrowed and cannot be {what}")
-vasm_no_mut_loan(at, st, x, what) := if (list.any(l -> arg(l, 1) == 'mut, vasm_loans(st, x))) vasm_fail(at, 'borrowed, f"{symname(x)} is borrowed as mut and cannot be {what}")
+no_loans(at, st, x, what) := if (loans(st, x) != []) fail(at, 'borrowed, f"{symname(x)} is borrowed and cannot be {what}")
+no_mut_loan(at, st, x, what) := if (list.any(l -> arg(l, 1) == 'mut, loans(st, x))) fail(at, 'borrowed, f"{symname(x)} is borrowed as mut and cannot be {what}")
 
 # the contents of own and of a borrow: an integer, bool, a struct or own, or an array of them
-fun vasm_type_ok
-vasm_contents_ok(at, t, u) := {
+fun type_ok
+contents_ok(at, t, u) := {
     e := if (head(u) == 'Arr) arg(u, 0) else u
-    if (head(e) == 'Ref) vasm_fail(at, 'type, f"{show_type(t)}: the contents do not borrow")
-    vasm_type_ok(at, e)
+    if (head(e) == 'Ref) fail(at, 'type, f"{show_type(t)}: the contents do not borrow")
+    type_ok(at, e)
 }
 
-vasm_type_ok(at, t) := match t {
-    Own{u} -> vasm_contents_ok(at, t, u)
+type_ok(at, t) := match t {
+    Own{u} -> contents_ok(at, t, u)
   | Ref{_, r, u} -> {
-        if (r != 'static and not member(r, vasm_regions)) vasm_fail(at, 'region, f"region {symname(r)} is not in scope")
-        vasm_contents_ok(at, t, u)
+        if (r != 'static and not member(r, regions)) fail(at, 'region, f"region {symname(r)} is not in scope")
+        contents_ok(at, t, u)
     }
-  | Arr{_} -> vasm_fail(at, 'type, f"{show_type(t)}: an array is held by own or a borrow")
-  | Named{s} -> if (table.get(vasm_structs, s, none) == none) vasm_fail(at, 'undefined, f"struct {symname(s)} is not defined")
+  | Arr{_} -> fail(at, 'type, f"{show_type(t)}: an array is held by own or a borrow")
+  | Named{s} -> if (table.get(structs, s, none) == none) fail(at, 'undefined, f"struct {symname(s)} is not defined")
   | _ -> none
 }
 
-vasm_declare(at, st, x, t, init) := {
-    if (table.get(vasm_info, x, none) != none) vasm_fail(at, 'type, f"{symname(x)} is already declared")
-    vasm_type_ok(at, t)
-    table.set(vasm_info, x, Info{t, vasm_regions})
+declare(at, st, x, t, init) := {
+    if (table.get(vasm_info, x, none) != none) fail(at, 'type, f"{symname(x)} is already declared")
+    type_ok(at, t)
+    table.set(vasm_info, x, Info{t, regions})
     table.set(st, x, Vs{if (init) 'init else 'uninit, []})
 }
 
@@ -336,25 +336,25 @@ vasm_declare(at, st, x, t, init) := {
 
 # q outlives r: q is r, or q is static (the region of the string literals, which lasts to the end of the program),
 # or r is a region opened in the function and q was opened before it. The regions of the function are not ordered.
-vasm_outlives(q, r) := q == r or q == 'static or (r != 'static and not member(r, vasm_fn_regions) and list.index_of(q, vasm_regions) > list.index_of(r, vasm_regions))
+outlives(q, r) := q == r or q == 'static or (r != 'static and not member(r, fn_regions) and list.index_of(q, regions) > list.index_of(r, regions))
 
-vasm_lit_range(at, n, t) := if (n != none) {
+lit_range(at, n, t) := if (n != none) {
     e := int_entry(t)
-    if (n < vasm_lit_lo(e) or n > vasm_lit_hi(e)) vasm_fail(at, 'type, f"{n} is out of the range of {arg(e, 1)}")
+    if (n < lit_lo(e) or n > lit_hi(e)) fail(at, 'type, f"{n} is out of the range of {arg(e, 1)}")
 }
 
 # a value of type t can be put where e is expected: an integer literal in the range of e,
 # or a borrow of a region that outlives the region of e
-vasm_fits(at, e, t) := if (head(t) == 'Lit and int(e)) {
-    vasm_lit_range(at, arg(t, 0), e)
+fits(at, e, t) := if (head(t) == 'Lit and int(e)) {
+    lit_range(at, arg(t, 0), e)
     true
-} else if (head(e) == 'Own and head(t) == 'Own) vasm_fits(at, arg(e, 0), arg(t, 0))
-else if (head(e) == 'Arr and head(t) == 'Arr) vasm_fits(at, arg(e, 0), arg(t, 0))
-else if (head(e) == 'Ref and head(t) == 'Ref) arg(e, 0) == arg(t, 0) and vasm_outlives(arg(t, 1), arg(e, 1)) and vasm_fits(at, arg(e, 2), arg(t, 2))
+} else if (head(e) == 'Own and head(t) == 'Own) fits(at, arg(e, 0), arg(t, 0))
+else if (head(e) == 'Arr and head(t) == 'Arr) fits(at, arg(e, 0), arg(t, 0))
+else if (head(e) == 'Ref and head(t) == 'Ref) arg(e, 0) == arg(t, 0) and outlives(arg(t, 1), arg(e, 1)) and fits(at, arg(e, 2), arg(t, 2))
 else e == t
 
 # a borrow that does not fit only because its region is opened inside the function and does not outlive the expected one
-vasm_escapes(e, t) := head(e) == 'Ref and head(t) == 'Ref and arg(e, 0) == arg(t, 0) and arg(e, 2) == arg(t, 2) and not member(arg(t, 1), vasm_fn_regions)
+escapes(e, t) := head(e) == 'Ref and head(t) == 'Ref and arg(e, 0) == arg(t, 0) and arg(e, 2) == arg(t, 2) and not member(arg(t, 1), fn_regions)
 
 export mentions(t, r) := match t {
     Ref{_, q, u} -> q == r or mentions(u, r)
@@ -382,121 +382,121 @@ export pos(o) := match o {
 # the type of the operand o, which is read. own and &mut are moved.
 vasm_use(st, o) := match o {
     Imm{at, n} -> if (typeof(n) == 'int) Lit{n} else if (n == true or n == false) Bool{}
-        else vasm_fail(at, 'type, f"{arg(n, 0)} is out of the range of a literal, -32768 to 32767; make it with << and |")
+        else fail(at, 'type, f"{arg(n, 0)} is out of the range of a literal, -32768 to 32767; make it with << and |")
   | Str{_, _} -> Ref{'shr, 'static, Arr{U8{}}}
   | Sym{_, _} -> Val{}
   | Reg{at, x} -> {
-        t := vasm_type_of(at, x)
-        vasm_need_init(at, st, x)
-        if (vasm_moves(t)) {
-            vasm_no_loans(at, st, x, "moved")
-            vasm_set_status(st, x, Moved{at})
+        t := type_of(at, x)
+        need_init(at, st, x)
+        if (moves(t)) {
+            no_loans(at, st, x, "moved")
+            set_status(st, x, Moved{at})
         }
         t
     }
 }
 
 # the type of the contents of the pointer p, to read (write is false) or write
-vasm_ptr(at, st, p, write) := {
-    t := vasm_type_of(at, p)
-    vasm_need_init(at, st, p)
+ptr(at, st, p, write) := {
+    t := type_of(at, p)
+    need_init(at, st, p)
     match t {
         Own{u} -> {
-            if (write) vasm_no_loans(at, st, p, "written") else vasm_no_mut_loan(at, st, p, "read")
+            if (write) no_loans(at, st, p, "written") else no_mut_loan(at, st, p, "read")
             u
         }
       | Ref{k, _, u} -> {
-            if (write and k != 'mut) vasm_fail(at, 'borrowed, f"{symname(p)} is a shared borrow and cannot be written")
+            if (write and k != 'mut) fail(at, 'borrowed, f"{symname(p)} is a shared borrow and cannot be written")
             u
         }
-      | _ -> vasm_fail(at, 'type, f"{symname(p)} is {show_type(t)}, not a pointer")
+      | _ -> fail(at, 'type, f"{symname(p)} is {show_type(t)}, not a pointer")
     }
 }
 
 # the contents of p, which must not be an array (a whole array is not read or written at once)
-vasm_cell(at, st, p, write) := {
-    u := vasm_ptr(at, st, p, write)
-    if (head(u) == 'Arr) vasm_fail(at, 'type, f"{symname(p)} points to an array; use an element {symname(p)}[i]")
+cell(at, st, p, write) := {
+    u := ptr(at, st, p, write)
+    if (head(u) == 'Arr) fail(at, 'type, f"{symname(p)} points to an array; use an element {symname(p)}[i]")
     u
 }
 
 # the element type of the array p at the index operand i. The range of i is checked when the program runs.
 # For a val p the kind of the value is checked when the program runs too.
-vasm_elem(at, st, p, i, write) := {
-    isval := vasm_type_of(at, p) == Val{}
-    if (isval) vasm_need_init(at, st, p)
-    u := if (isval) Arr{Val{}} else vasm_ptr(at, st, p, write)
-    if (head(u) != 'Arr) vasm_fail(at, 'type, f"{symname(p)} points to {show_type(u)}, not an array")
+elem(at, st, p, i, write) := {
+    isval := type_of(at, p) == Val{}
+    if (isval) need_init(at, st, p)
+    u := if (isval) Arr{Val{}} else ptr(at, st, p, write)
+    if (head(u) != 'Arr) fail(at, 'type, f"{symname(p)} points to {show_type(u)}, not an array")
     ti := vasm_use(st, i)
-    if (not vasm_fits(arg(i, 0), I64{}, ti)) vasm_fail(arg(i, 0), 'type, f"the index is {show_type(ti)}, not i64")
+    if (not fits(arg(i, 0), I64{}, ti)) fail(arg(i, 0), 'type, f"the index is {show_type(ti)}, not i64")
     arg(u, 0)
 }
 
 # the type of the field f of the struct s
-vasm_field_type(at, s, f) := {
-    fd := find((Field{_, x, _}) -> x == f, arg(table.get(vasm_structs, s, none), 2))
-    if (fd == none) vasm_fail(at, 'type, f"struct {symname(s)} has no field {symname(f)}")
+field_type(at, s, f) := {
+    fd := find((Field{_, x, _}) -> x == f, arg(table.get(structs, s, none), 2))
+    if (fd == none) fail(at, 'type, f"struct {symname(s)} has no field {symname(f)}")
     arg(fd, 2)
 }
 
 # the struct of a register p of a struct type, or of the contents of a pointer p
-vasm_struct_of(at, st, p, write) := {
-    t := vasm_type_of(at, p)
+struct_of(at, st, p, write) := {
+    t := type_of(at, p)
     u := if (head(t) == 'Named) {
-        vasm_need_init(at, st, p)
+        need_init(at, st, p)
         t
-    } else if (head(t) == 'Own or head(t) == 'Ref) vasm_ptr(at, st, p, write) else t
-    if (head(u) != 'Named) vasm_fail(at, 'type, f"{symname(p)} is {show_type(t)}, not a struct or a pointer to a struct")
+    } else if (head(t) == 'Own or head(t) == 'Ref) ptr(at, st, p, write) else t
+    if (head(u) != 'Named) fail(at, 'type, f"{symname(p)} is {show_type(t)}, not a struct or a pointer to a struct")
     arg(u, 0)
 }
 
 # x = *p. Contents that own are moved out of an own p, which is then Taken until *p is written or p is freed.
 # They are not moved out of a borrow.
 vasm_load(at, st, p) := {
-    u := vasm_cell(at, st, p, false)
-    if (vasm_owning(u)) {
-        if (head(vasm_type_of(at, p)) != 'Own) vasm_fail(at, 'owner, f"the contents of {symname(p)} own a value and are not moved out of a borrow; use swap(*{symname(p)}, v)")
-        vasm_no_loans(at, st, p, "moved out of")
-        vasm_set_status(st, p, Taken{at})
+    u := cell(at, st, p, false)
+    if (owning(u)) {
+        if (head(type_of(at, p)) != 'Own) fail(at, 'owner, f"the contents of {symname(p)} own a value and are not moved out of a borrow; use swap(*{symname(p)}, v)")
+        no_loans(at, st, p, "moved out of")
+        set_status(st, p, Taken{at})
     }
     u
 }
 
 # x = p.f. A field that owns is moved out of a struct value p, and not copied out of a pointer p.
-vasm_get(at, st, p, f) := {
-    t := vasm_type_of(at, p)
+get(at, st, p, f) := {
+    t := type_of(at, p)
     if (head(t) == 'Named) {
-        u := vasm_field_type(at, arg(t, 0), f)
-        vasm_need_field(at, st, p, f)
-        if (vasm_owning(u)) {
-            fs := f :: vasm_moved_fields(st, p)
-            vasm_set_status(st, p, Parts{filter(x -> member(x, fs), vasm_own_fields(arg(t, 0)))})
+        u := field_type(at, arg(t, 0), f)
+        need_field(at, st, p, f)
+        if (owning(u)) {
+            fs := f :: moved_fields(st, p)
+            set_status(st, p, Parts{filter(x -> member(x, fs), own_fields(arg(t, 0)))})
         }
         u
     } else {
-        u := vasm_field_type(at, vasm_struct_of(at, st, p, false), f)
-        if (vasm_owning(u)) vasm_fail(at, 'owner, f"field {symname(f)} owns a value and is not copied out of {symname(p)}; use swap({symname(p)}.{symname(f)}, v)")
+        u := field_type(at, struct_of(at, st, p, false), f)
+        if (owning(u)) fail(at, 'owner, f"field {symname(f)} owns a value and is not copied out of {symname(p)}; use swap({symname(p)}.{symname(f)}, v)")
         u
     }
 }
 
 # the type of the place a (*p, p[i] or p.f) of swap, which is read and written
-vasm_place(st, a) := match a {
-    Load{at, p} -> vasm_cell(at, st, p, true)
+place(st, a) := match a {
+    Load{at, p} -> cell(at, st, p, true)
   | Index{at, p, i} -> {
-        if (vasm_type_of(at, p) == Val{}) vasm_fail(at, 'type, f"{symname(p)} is val; write {symname(p)}[i] = v")
-        vasm_elem(at, st, p, i, true)
+        if (type_of(at, p) == Val{}) fail(at, 'type, f"{symname(p)} is val; write {symname(p)}[i] = v")
+        elem(at, st, p, i, true)
     }
   | Get{at, p, f} -> {
-        t := vasm_type_of(at, p)
+        t := type_of(at, p)
         if (head(t) == 'Named) {
-            vasm_need_field(at, st, p, f)
-            vasm_field_type(at, arg(t, 0), f)
-        } else vasm_field_type(at, vasm_struct_of(at, st, p, true), f)
+            need_field(at, st, p, f)
+            field_type(at, arg(t, 0), f)
+        } else field_type(at, struct_of(at, st, p, true), f)
     }
-  | _ -> vasm_fail(arg(a, 0), 'type, "the first argument of swap is a place: *p, p[i] or p.f")
+  | _ -> fail(arg(a, 0), 'type, "the first argument of swap is a place: *p, p[i] or p.f")
 }
-vasm_is_place(a) := member(head(a), ['Load, 'Index, 'Get])
+is_place(a) := member(head(a), ['Load, 'Index, 'Get])
 
 # a parameter type pt of a function matches an argument type t.
 # rs are the regions of the function; rsub gets the regions given to each, tsub the type of T.
@@ -507,7 +507,7 @@ else if (head(pt) == 'TVar) {
     if (b == none or (head(b) == 'Lit and int(t))) {
         table.set(tsub, arg(pt, 0), t)
         true
-    } else vasm_fits(at, b, t)
+    } else fits(at, b, t)
 } else if (head(pt) == 'Ref and head(t) == 'Ref) {
     r := arg(pt, 1)
     if (arg(pt, 0) != arg(t, 0) and not (arg(pt, 0) == 'shr and arg(t, 0) == 'mut)) false
@@ -515,73 +515,73 @@ else if (head(pt) == 'TVar) {
     else if (member(r, rs)) {
         table.set(rsub, r, arg(t, 1) :: table.get(rsub, r, []))
         true
-    } else vasm_outlives(arg(t, 1), r)
+    } else outlives(arg(t, 1), r)
 } else if (head(pt) == 'Own and head(t) == 'Own) vasm_match(at, arg(pt, 0), arg(t, 0), rs, rsub, tsub)
 else if (head(pt) == 'Arr and head(t) == 'Arr) vasm_match(at, arg(pt, 0), arg(t, 0), rs, rsub, tsub)
-else vasm_fits(at, pt, t)
+else fits(at, pt, t)
 
 # the region given to r: the innermost of the regions qs of the arguments, which all outlive it
-vasm_pick_region(at, f, r, qs) := {
-    inner := filter(q -> list.all(q2 -> vasm_outlives(q2, q), qs), qs)
+pick_region(at, f, r, qs) := {
+    inner := filter(q -> list.all(q2 -> outlives(q2, q), qs), qs)
     names := join(", ", map(q -> symname(q), reverse(qs)))
-    if (inner == []) vasm_fail(at, 'type, f"{symname(f)} is given borrows of regions {names} for region {symname(r)}, and none of them is inside the others")
+    if (inner == []) fail(at, 'type, f"{symname(f)} is given borrows of regions {names} for region {symname(r)}, and none of them is inside the others")
     arg(inner, 0)
 }
 
 # An &mut register given to a borrow parameter is borrowed again for the call and is not moved,
 # unless the result has the region of the parameter. It is given once in the call.
-vasm_mut_reg(a) := if (head(a) == 'Reg) {
-    t := vasm_type_of(arg(a, 0), arg(a, 1))
+mut_reg(a) := if (head(a) == 'Reg) {
+    t := type_of(arg(a, 0), arg(a, 1))
     head(t) == 'Ref and arg(t, 0) == 'mut
 } else false
-vasm_reborrows(p, a, ret) := head(p) == 'Ref and not mentions(ret, arg(p, 1)) and vasm_mut_reg(a)
+reborrows(p, a, ret) := head(p) == 'Ref and not mentions(ret, arg(p, 1)) and mut_reg(a)
 
-vasm_val_operand(st, a) := {
-    if (vasm_is_place(a)) vasm_fail(arg(a, 0), 'type, "the value of a val is a register or a literal, not a place")
+val_operand(st, a) := {
+    if (is_place(a)) fail(arg(a, 0), 'type, "the value of a val is a register or a literal, not a place")
     t := vasm_use(st, a)
-    if (t != Val{}) vasm_fail(arg(a, 0), 'type, f"the value is {show_type(t)}, not val")
+    if (t != Val{}) fail(arg(a, 0), 'type, f"the value is {show_type(t)}, not val")
 }
 
 # v(a, ...) for a register v of val: the arguments and the result are val. That v is a function that takes as many arguments is checked when the program runs.
-vasm_is_val_reg(f) := {
+is_val_reg(f) := {
     i := table.get(vasm_info, f, none)
     i != none and arg(i, 0) == Val{}
 }
 
 # x = fn f(a, ...): the arguments are the first arguments of f, and all that f takes and gives is val
-vasm_closure(at, st, f, args) := {
-    sig := table.get(vasm_sigs, f, none)
-    if (sig == none) vasm_fail(at, 'undefined, f"function {symname(f)} is not defined")
-    if (arg(sig, 0) != [] or arg(sig, 2) != Val{} or list.any(p -> p != Val{}, arg(sig, 1))) vasm_fail(at, 'type, f"{symname(f)} is made a value of val, so all that it takes and gives is val")
-    if (length(args) > length(arg(sig, 1))) vasm_fail(at, 'type, f"{symname(f)} takes {length(arg(sig, 1))} arguments but {length(args)} are given")
-    each(a -> vasm_val_operand(st, a), args)
+closure(at, st, f, args) := {
+    sig := table.get(sigs, f, none)
+    if (sig == none) fail(at, 'undefined, f"function {symname(f)} is not defined")
+    if (arg(sig, 0) != [] or arg(sig, 2) != Val{} or list.any(p -> p != Val{}, arg(sig, 1))) fail(at, 'type, f"{symname(f)} is made a value of val, so all that it takes and gives is val")
+    if (length(args) > length(arg(sig, 1))) fail(at, 'type, f"{symname(f)} takes {length(arg(sig, 1))} arguments but {length(args)} are given")
+    each(a -> val_operand(st, a), args)
     Val{}
 }
 
-fun vasm_call_named
-vasm_call(at, st, f, args) := if (vasm_is_val_reg(f)) {
-    vasm_need_init(at, st, f)
-    each(a -> vasm_val_operand(st, a), args)
+fun call_named
+call(at, st, f, args) := if (is_val_reg(f)) {
+    need_init(at, st, f)
+    each(a -> val_operand(st, a), args)
     Val{}
-} else vasm_call_named(at, st, f, args)
+} else call_named(at, st, f, args)
 
-vasm_call_named(at, st, f, args) = {
-    user := table.get(vasm_sigs, f, none)
+call_named(at, st, f, args) = {
+    user := table.get(sigs, f, none)
     sig := if (user == none) table.get(builtins, f, none) else user
-    if (sig == none) vasm_fail(at, 'undefined, f"function {symname(f)} is not defined")
+    if (sig == none) fail(at, 'undefined, f"function {symname(f)} is not defined")
     rs := arg(sig, 0)
     ps := arg(sig, 1)
     ret := arg(sig, 2)
-    if (length(ps) != length(args)) vasm_fail(at, 'type, f"{symname(f)} takes {length(ps)} arguments but {length(args)} are given")
+    if (length(ps) != length(args)) fail(at, 'type, f"{symname(f)} takes {length(ps)} arguments but {length(args)} are given")
     freeing := user == none and f == 'free
     if (freeing) each(a -> if (head(a) == 'Reg) {
         x := arg(a, 1)
-        match vasm_status(st, x) {
-            Freed{_} -> vasm_fail(at, 'freed, f"{symname(x)} is freed twice")
-          | Taken{_} -> vasm_set_status(st, x, 'init)
+        match status(st, x) {
+            Freed{_} -> fail(at, 'freed, f"{symname(x)} is freed twice")
+          | Taken{_} -> set_status(st, x, 'init)
           | _ -> none
         }
-        vasm_no_loans(at, st, x, "freed")
+        no_loans(at, st, x, "freed")
     }, args)
     rsub := table.new()
     tsub := table.new()
@@ -589,249 +589,249 @@ vasm_call_named(at, st, f, args) = {
     each(pa -> {
         p := arg(pa, 0)
         a := arg(pa, 1)
-        if (head(a) == 'Reg and member(arg(a, 1), lent)) vasm_fail(arg(a, 0), 'borrowed, f"{symname(arg(a, 1))} is borrowed as mut by another argument of the call")
-        t := if (head(p) == 'Place) vasm_place(st, a)
-        else if (vasm_is_place(a)) vasm_fail(arg(a, 0), 'type, f"{symname(f)} takes a value, not a place; read it into a register")
-        else if (vasm_reborrows(p, a, ret)) {
-            vasm_need_init(arg(a, 0), st, arg(a, 1))
+        if (head(a) == 'Reg and member(arg(a, 1), lent)) fail(arg(a, 0), 'borrowed, f"{symname(arg(a, 1))} is borrowed as mut by another argument of the call")
+        t := if (head(p) == 'Place) place(st, a)
+        else if (is_place(a)) fail(arg(a, 0), 'type, f"{symname(f)} takes a value, not a place; read it into a register")
+        else if (reborrows(p, a, ret)) {
+            need_init(arg(a, 0), st, arg(a, 1))
             lent = arg(a, 1) :: lent
-            vasm_type_of(arg(a, 0), arg(a, 1))
+            type_of(arg(a, 0), arg(a, 1))
         } else vasm_use(st, a)
-        if (not vasm_match(arg(a, 0), p, t, rs, rsub, tsub)) vasm_fail(arg(a, 0), 'type, f"the argument is {show_type(t)} but {symname(f)} takes {show_type(p)}")
+        if (not vasm_match(arg(a, 0), p, t, rs, rsub, tsub)) fail(arg(a, 0), 'type, f"the argument is {show_type(t)} but {symname(f)} takes {show_type(p)}")
     }, list.zip(ps, args))
     if (freeing) {
         # what is left in the value is freed with it
-        vasm_set_status(st, arg(args[0], 1), Freed{at})
+        set_status(st, arg(args[0], 1), Freed{at})
     }
-    if (user == none and f == 'alloc and vasm_owning(table.get(tsub, 'T, I64{}))) vasm_fail(at, 'owner, "alloc copies its value to every element, so the value does not own")
+    if (user == none and f == 'alloc and owning(table.get(tsub, 'T, I64{}))) fail(at, 'owner, "alloc copies its value to every element, so the value does not own")
     rmap := table.new()
     each(r -> {
         qs := table.get(rsub, r, [])
-        if (qs != []) table.set(rmap, r, vasm_pick_region(at, f, r, qs))
+        if (qs != []) table.set(rmap, r, pick_region(at, f, r, qs))
     }, rs)
     t := subst(ret, rmap, tsub)
-    if (user == none) vasm_type_ok(at, t)
+    if (user == none) type_ok(at, t)
     t
 }
 
-vasm_int_operand(o, t) := if (not (int(t) or head(t) == 'Lit)) vasm_fail(arg(o, 0), 'type, f"the operand is {show_type(t)}, not an integer")
+int_operand(o, t) := if (not (int(t) or head(t) == 'Lit)) fail(arg(o, 0), 'type, f"the operand is {show_type(t)}, not an integer")
 
 # the type of the right-hand side r
-vasm_rhs(st, r) := match r {
+rhs(st, r) := match r {
     Mov{o} -> vasm_use(st, o)
   | Bin{op, a, b} -> {
         ta := vasm_use(st, a)
         tb := vasm_use(st, b)
         if (head(ta) == 'Lit and int(tb)) {
-            vasm_lit_range(arg(a, 0), arg(ta, 0), tb)
+            lit_range(arg(a, 0), arg(ta, 0), tb)
             ta = tb
         }
         if (head(tb) == 'Lit and int(ta)) {
-            vasm_lit_range(arg(b, 0), arg(tb, 0), ta)
+            lit_range(arg(b, 0), arg(tb, 0), ta)
             tb = ta
         }
         if ((op == 'eq or op == 'ne) and ((ta == Bool{} and tb == Bool{}) or (ta == Val{} and tb == Val{}))) Bool{} else {
-            vasm_int_operand(a, ta)
-            vasm_int_operand(b, tb)
+            int_operand(a, ta)
+            int_operand(b, tb)
             lits := head(ta) == 'Lit and head(tb) == 'Lit
-            if (not lits and ta != tb) vasm_fail(arg(b, 0), 'type, f"the operands are {show_type(ta)} and {show_type(tb)}")
+            if (not lits and ta != tb) fail(arg(b, 0), 'type, f"the operands are {show_type(ta)} and {show_type(tb)}")
             if (member(op, ['lt, 'le, 'gt, 'ge, 'eq, 'ne])) Bool{} else if (lits) Lit{none} else ta
         }
     }
   | Load{at, p} -> vasm_load(at, st, p)
   | Index{at, p, i} -> {
-        u := vasm_elem(at, st, p, i, false)
-        if (vasm_owning(u) and vasm_type_of(at, p) != Val{}) vasm_fail(at, 'owner, f"the elements of {symname(p)} own values and are not copied; use swap({symname(p)}[i], v)")
+        u := elem(at, st, p, i, false)
+        if (owning(u) and type_of(at, p) != Val{}) fail(at, 'owner, f"the elements of {symname(p)} own values and are not copied; use swap({symname(p)}[i], v)")
         u
     }
-  | Get{at, p, f} -> vasm_get(at, st, p, f)
+  | Get{at, p, f} -> get(at, st, p, f)
   | Conv{at, a, t} -> {
         ta := vasm_use(st, a)
         if (t == Val{}) {
-            if (not (int(ta) or head(ta) == 'Lit or ta == Bool{} or ta == Val{} or (head(ta) == 'Ref and arg(ta, 2) == Arr{U8{}}))) vasm_fail(at, 'type, f"{show_type(ta)} is not made a val")
+            if (not (int(ta) or head(ta) == 'Lit or ta == Bool{} or ta == Val{} or (head(ta) == 'Ref and arg(ta, 2) == Arr{U8{}}))) fail(at, 'type, f"{show_type(ta)} is not made a val")
         } else if (ta == Val{}) {
-            if (not (int(t) or t == Bool{} or t == Own{Arr{U8{}}})) vasm_fail(at, 'type, f"a val is not converted to {show_type(t)}")
+            if (not (int(t) or t == Bool{} or t == Own{Arr{U8{}}})) fail(at, 'type, f"a val is not converted to {show_type(t)}")
         } else {
-            if (not int(t)) vasm_fail(at, 'type, f"the value is converted to {show_type(t)}, not an integer type")
-            if (head(ta) == 'Lit) vasm_lit_range(at, arg(ta, 0), t) else vasm_int_operand(a, ta)
+            if (not int(t)) fail(at, 'type, f"the value is converted to {show_type(t)}, not an integer type")
+            if (head(ta) == 'Lit) lit_range(at, arg(ta, 0), t) else int_operand(a, ta)
         }
         t
     }
   | Con{at, _, args} -> {
-        each(a -> vasm_val_operand(st, a), args)
+        each(a -> val_operand(st, a), args)
         Val{}
     }
-  | Clo{at, f, args} -> vasm_closure(at, st, f, args)
+  | Clo{at, f, args} -> closure(at, st, f, args)
   | Make{at, s, inits} -> {
-        sd := table.get(vasm_structs, s, none)
-        if (sd == none) vasm_fail(at, 'undefined, f"struct {symname(s)} is not defined")
+        sd := table.get(structs, s, none)
+        if (sd == none) fail(at, 'undefined, f"struct {symname(s)} is not defined")
         given := []
         each((Init{iat, f, a}) -> {
-            ft := vasm_field_type(iat, s, f)
-            if (member(f, given)) vasm_fail(iat, 'type, f"field {symname(f)} is given twice")
+            ft := field_type(iat, s, f)
+            if (member(f, given)) fail(iat, 'type, f"field {symname(f)} is given twice")
             given = f :: given
             t := vasm_use(st, a)
-            if (not vasm_fits(iat, ft, t)) vasm_fail(iat, 'type, f"field {symname(f)} of {symname(s)} is {show_type(ft)} but the value is {show_type(t)}")
+            if (not fits(iat, ft, t)) fail(iat, 'type, f"field {symname(f)} of {symname(s)} is {show_type(ft)} but the value is {show_type(t)}")
         }, inits)
-        each((Field{_, x, _}) -> if (not member(x, given)) vasm_fail(at, 'type, f"field {symname(x)} of {symname(s)} is not given"), arg(sd, 2))
+        each((Field{_, x, _}) -> if (not member(x, given)) fail(at, 'type, f"field {symname(x)} of {symname(s)} is not given"), arg(sd, 2))
         Named{s}
     }
   | Call{at, f, args} -> {
-        t := vasm_call(at, st, f, args)
-        if (t == Unit{}) vasm_fail(at, 'type, f"{symname(f)} returns no value")
+        t := call(at, st, f, args)
+        if (t == Unit{}) fail(at, 'type, f"{symname(f)} returns no value")
         t
     }
   | Borrow{at, k, r, y} -> {
-        info := vasm_lookup(at, y)
+        info := lookup(at, y)
         yt := arg(info, 0)
-        if (head(yt) != 'Own) vasm_fail(at, 'type, f"{symname(y)} is {show_type(yt)}; only an own value is borrowed")
-        if (not member(r, vasm_regions)) vasm_fail(at, 'region, f"region {symname(r)} is not in scope")
-        if (member(r, arg(info, 1))) vasm_fail(at, 'region, f"{symname(y)} is declared in region {symname(r)} and does not live to its end")
-        vasm_need_init(at, st, y)
-        if (k == 'mut) vasm_no_loans(at, st, y, "borrowed as mut") else vasm_no_mut_loan(at, st, y, "borrowed")
-        vasm_set_loans(st, y, Loan{r, k} :: vasm_loans(st, y))
+        if (head(yt) != 'Own) fail(at, 'type, f"{symname(y)} is {show_type(yt)}; only an own value is borrowed")
+        if (not member(r, regions)) fail(at, 'region, f"region {symname(r)} is not in scope")
+        if (member(r, arg(info, 1))) fail(at, 'region, f"{symname(y)} is declared in region {symname(r)} and does not live to its end")
+        need_init(at, st, y)
+        if (k == 'mut) no_loans(at, st, y, "borrowed as mut") else no_mut_loan(at, st, y, "borrowed")
+        set_loans(st, y, Loan{r, k} :: loans(st, y))
         Ref{k, r, arg(yt, 0)}
     }
 }
 
-vasm_cond(st, c) := {
-    t := vasm_rhs(st, c)
-    if (t != Bool{}) vasm_fail(pos(c), 'type, f"the condition is {show_type(t)}, not bool")
+cond(st, c) := {
+    t := rhs(st, c)
+    if (t != Bool{}) fail(pos(c), 'type, f"the condition is {show_type(t)}, not bool")
 }
 
-vasm_assign(at, st, x, t) := {
-    info := vasm_lookup(at, x)
+assign(at, st, x, t) := {
+    info := lookup(at, x)
     dt := arg(info, 0)
-    if (not vasm_fits(at, dt, t)) {
-        if (vasm_escapes(dt, t)) vasm_fail(at, 'escape, f"a borrow of region {symname(arg(t, 1))} is put in {symname(x)}, which lives outside the region")
-        vasm_fail(at, 'type, f"{symname(x)} is {show_type(dt)} but the value is {show_type(t)}")
+    if (not fits(at, dt, t)) {
+        if (escapes(dt, t)) fail(at, 'escape, f"a borrow of region {symname(arg(t, 1))} is put in {symname(x)}, which lives outside the region")
+        fail(at, 'type, f"{symname(x)} is {show_type(dt)} but the value is {show_type(t)}")
     }
-    vasm_no_loans(at, st, x, "assigned")
+    no_loans(at, st, x, "assigned")
     # what x owned before is released here
-    vasm_set_status(st, x, 'init)
+    set_status(st, x, 'init)
 }
 
 # What an own value still owns at the end of its block or of the function is released there:
 # the contents of a box, the fields of a struct and the elements of an array that are not moved out.
 # So nothing is checked; the function is kept to mark the places where the release happens.
-vasm_leak_all(at, st) := none
+leak_all(at, st) := none
 
 # the state after if: both branches must agree on own values
-vasm_merge(at, a, b) := if (vasm_dead(a)) b else if (vasm_dead(b)) a else {
+merge(at, a, b) := if (dead(a)) b else if (dead(b)) a else {
     m := table.new()
     each(x -> {
         t := arg(table.get(vasm_info, x, none), 0)
-        sa := vasm_status(a, x)
-        sb := vasm_status(b, x)
-        if (vasm_owns(t, sa) != vasm_owns(t, sb)) vasm_fail(at, 'branch, f"{symname(x)} is owned after one branch and not after the other")
-        if (vasm_linear(t) and vasm_key(t, sa) != vasm_key(t, sb)) vasm_fail(at, 'branch, f"{symname(x)} has different parts moved out after the two branches")
+        sa := status(a, x)
+        sb := status(b, x)
+        if (owns(t, sa) != owns(t, sb)) fail(at, 'branch, f"{symname(x)} is owned after one branch and not after the other")
+        if (linear(t) and key(t, sa) != key(t, sb)) fail(at, 'branch, f"{symname(x)} has different parts moved out after the two branches")
         s := if (sb == 'init) sa else sb
-        la := vasm_loans(a, x)
-        table.set(m, x, Vs{s, append(la, filter(l -> not member(l, la), vasm_loans(b, x)))})
-    }, vasm_vars(a))
+        la := loans(a, x)
+        table.set(m, x, Vs{s, append(la, filter(l -> not member(l, la), loans(b, x)))})
+    }, vars(a))
     m
 }
 
-vasm_replace(st, m) := {
-    each(x -> table.set(st, x, table.get(m, x, none)), vasm_vars(st))
-    table.set(st, ".dead", vasm_dead(m))
+replace(st, m) := {
+    each(x -> table.set(st, x, table.get(m, x, none)), vars(st))
+    table.set(st, ".dead", dead(m))
 }
 
 # a loop must give back the own and &mut values it moves
-vasm_loop_same(at, a, b) := each(x -> {
+loop_same(at, a, b) := each(x -> {
     t := arg(table.get(vasm_info, x, none), 0)
-    if (vasm_moves(t) and vasm_key(t, vasm_status(a, x)) != vasm_key(t, vasm_status(b, x))) vasm_fail(at, 'loop, f"{symname(x)} is moved or freed in the loop and not given a value again")
-}, vasm_vars(a))
+    if (moves(t) and key(t, status(a, x)) != key(t, status(b, x))) fail(at, 'loop, f"{symname(x)} is moved or freed in the loop and not given a value again")
+}, vars(a))
 
-vasm_add_loans(st, b) := each(x -> {
-    la := vasm_loans(st, x)
-    vasm_set_loans(st, x, append(la, filter(l -> not member(l, la), vasm_loans(b, x))))
-}, vasm_vars(st))
+add_loans(st, b) := each(x -> {
+    la := loans(st, x)
+    set_loans(st, x, append(la, filter(l -> not member(l, la), loans(b, x))))
+}, vars(st))
 
-vasm_end_region(st, r) := each(x -> vasm_set_loans(st, x, filter(l -> arg(l, 0) != r, vasm_loans(st, x))), vasm_vars(st))
+end_region(st, r) := each(x -> set_loans(st, x, filter(l -> arg(l, 0) != r, loans(st, x))), vars(st))
 
 # check the statements of a block with the state st, which is updated
-vasm_block(ss, st) := {
+block(ss, st) := {
     declared := []
-    for (s in ss) if (not vasm_dead(st)) match s {
+    for (s in ss) if (not dead(st)) match s {
         Decl{at, x, t} -> {
-            vasm_declare(at, st, x, t, false)
+            declare(at, st, x, t, false)
             declared = Tuple{x, at} :: declared
         }
-      | Assign{at, x, r} -> vasm_assign(at, st, x, vasm_rhs(st, r))
+      | Assign{at, x, r} -> assign(at, st, x, rhs(st, r))
       | Store{at, p, a} -> {
-            refill := match vasm_status(st, p) {
+            refill := match status(st, p) {
                 Taken{_} -> true
               | _ -> false
             }
             u := if (refill) {
-                vasm_set_status(st, p, 'init)
-                vasm_cell(at, st, p, true)
-            } else vasm_cell(at, st, p, true)
+                set_status(st, p, 'init)
+                cell(at, st, p, true)
+            } else cell(at, st, p, true)
             t := vasm_use(st, a)
-            if (not vasm_fits(at, u, t)) vasm_fail(at, 'type, f"{symname(p)} points to {show_type(u)} but the value is {show_type(t)}")
+            if (not fits(at, u, t)) fail(at, 'type, f"{symname(p)} points to {show_type(u)} but the value is {show_type(t)}")
         }
       | IStore{at, p, i, a} -> {
-            u := vasm_elem(at, st, p, i, true)
+            u := elem(at, st, p, i, true)
             t := vasm_use(st, a)
-            if (not vasm_fits(at, u, t)) vasm_fail(at, 'type, f"the elements of {symname(p)} are {show_type(u)} but the value is {show_type(t)}")
+            if (not fits(at, u, t)) fail(at, 'type, f"the elements of {symname(p)} are {show_type(u)} but the value is {show_type(t)}")
         }
       | FStore{at, p, f, a} -> {
-            pt := vasm_type_of(at, p)
-            s := if (head(pt) == 'Named) arg(pt, 0) else vasm_struct_of(at, st, p, true)
-            u := vasm_field_type(at, s, f)
+            pt := type_of(at, p)
+            s := if (head(pt) == 'Named) arg(pt, 0) else struct_of(at, st, p, true)
+            u := field_type(at, s, f)
             if (head(pt) == 'Named) {
-                fs := vasm_moved_fields(st, p)
+                fs := moved_fields(st, p)
                 if (member(f, fs)) {
                     rest := filter(x -> x != f, fs)
-                    vasm_set_status(st, p, if (rest == []) 'init else Parts{rest})
+                    set_status(st, p, if (rest == []) 'init else Parts{rest})
                 } else {
-                    vasm_need_field(at, st, p, f)
+                    need_field(at, st, p, f)
                 }
             }
             t := vasm_use(st, a)
-            if (not vasm_fits(at, u, t)) vasm_fail(at, 'type, f"field {symname(f)} of {symname(s)} is {show_type(u)} but the value is {show_type(t)}")
+            if (not fits(at, u, t)) fail(at, 'type, f"field {symname(f)} of {symname(s)} is {show_type(u)} but the value is {show_type(t)}")
         }
       | CallS{at, f, args} -> {
             # a result that owns a value and is not kept is released here
-            vasm_call(at, st, f, args)
+            call(at, st, f, args)
         }
       | IfS{at, c, a, b} -> {
-            vasm_cond(st, c)
-            sa := vasm_copy_state(st)
-            vasm_block(a, sa)
-            sb := vasm_copy_state(st)
-            vasm_block(b, sb)
-            vasm_replace(st, vasm_merge(at, sa, sb))
+            cond(st, c)
+            sa := copy_state(st)
+            block(a, sa)
+            sb := copy_state(st)
+            block(b, sb)
+            replace(st, merge(at, sa, sb))
         }
       | WhileS{at, c, body} -> {
-            vasm_cond(st, c)
-            s1 := vasm_copy_state(st)
-            vasm_block(body, s1)
-            if (not vasm_dead(s1)) {
-                vasm_loop_same(at, st, s1)
-                s2 := vasm_copy_state(st)
-                vasm_add_loans(s2, s1)
-                vasm_cond(s2, c)
-                vasm_block(body, s2)
-                vasm_add_loans(st, s2)
+            cond(st, c)
+            s1 := copy_state(st)
+            block(body, s1)
+            if (not dead(s1)) {
+                loop_same(at, st, s1)
+                s2 := copy_state(st)
+                add_loans(s2, s1)
+                cond(s2, c)
+                block(body, s2)
+                add_loans(st, s2)
             }
         }
       | RegionS{at, r, body} -> {
-            if (member(r, vasm_regions)) vasm_fail(at, 'region, f"region {symname(r)} is already open")
-            outer := vasm_regions
-            vasm_regions = r :: outer
-            vasm_block(body, st)
-            vasm_regions = outer
-            vasm_end_region(st, r)
+            if (member(r, regions)) fail(at, 'region, f"region {symname(r)} is already open")
+            outer := regions
+            regions = r :: outer
+            block(body, st)
+            regions = outer
+            end_region(st, r)
         }
       | Ret{at, a} -> {
             t := if (a == none) Unit{} else vasm_use(st, a)
-            if (not vasm_fits(at, vasm_ret_type, t)) {
-                if (vasm_escapes(vasm_ret_type, t)) vasm_fail(at, 'escape, f"a borrow of region {symname(arg(t, 1))} is returned out of the region")
-                vasm_fail(at, 'type, f"the result is {show_type(vasm_ret_type)} but the value is {show_type(t)}")
+            if (not fits(at, ret_type, t)) {
+                if (escapes(ret_type, t)) fail(at, 'escape, f"a borrow of region {symname(arg(t, 1))} is returned out of the region")
+                fail(at, 'type, f"the result is {show_type(ret_type)} but the value is {show_type(t)}")
             }
-            vasm_leak_all(at, st)
+            leak_all(at, st)
             table.set(st, ".dead", true)
         }
     }
@@ -876,49 +876,49 @@ table.set(builtins, 'mexpr, Sig{[], [Val{}, Val{}], Val{}})
 table.set(builtins, 'intern, Sig{[], [Val{}], Val{}})
 table.set(builtins, 'symname, Sig{[], [Val{}], Val{}})
 
-vasm_check_fn(d) := match d {
+check_fn(d) := match d {
     Fn{at, f, rs, ps, ret, body} -> {
-        if (table.get(builtins, f, none) != none) vasm_fail(at, 'type, f"{symname(f)} is a built-in function")
+        if (table.get(builtins, f, none) != none) fail(at, 'type, f"{symname(f)} is a built-in function")
         vasm_info = table.new()
-        vasm_regions = rs
-        vasm_fn_regions = rs
-        vasm_ret_type = ret
+        regions = rs
+        fn_regions = rs
+        ret_type = ret
         each(r -> {
             given := list.any(p -> head(arg(p, 2)) == 'Ref and arg(arg(p, 2), 1) == r, ps)
-            if (not given) vasm_fail(at, 'region, f"region {symname(r)} is not given by a parameter")
+            if (not given) fail(at, 'region, f"region {symname(r)} is not given by a parameter")
         }, rs)
-        vasm_type_ok(at, ret)
+        type_ok(at, ret)
         st := table.new()
-        each((Param{pat, x, t}) -> vasm_declare(pat, st, x, t, true), ps)
-        vasm_block(body, st)
-        if (not vasm_dead(st)) {
-            if (ret != Unit{}) vasm_fail(at, 'type, f"{symname(f)} can end without returning {show_type(ret)}")
-            vasm_leak_all(at, st)
+        each((Param{pat, x, t}) -> declare(pat, st, x, t, true), ps)
+        block(body, st)
+        if (not dead(st)) {
+            if (ret != Unit{}) fail(at, 'type, f"{symname(f)} can end without returning {show_type(ret)}")
+            leak_all(at, st)
         }
     }
 }
 
 # the struct s has a field of the struct target, directly or in a field of a field
-vasm_reaches(target, s, seen) := list.any((Field{_, _, t}) -> if (head(t) == 'Named) {
+reaches(target, s, seen) := list.any((Field{_, _, t}) -> if (head(t) == 'Named) {
     n := arg(t, 0)
-    sd := table.get(vasm_structs, n, none)
-    n == target or (sd != none and not member(n, seen) and vasm_reaches(target, n, n :: seen))
-} else false, arg(table.get(vasm_structs, s, none), 2))
+    sd := table.get(structs, n, none)
+    n == target or (sd != none and not member(n, seen) and reaches(target, n, n :: seen))
+} else false, arg(table.get(structs, s, none), 2))
 
 # a field is an integer, bool, a struct or own, and does not borrow
-vasm_check_struct(d) := match d {
+check_struct(d) := match d {
     Struct{at, s, fs} -> {
-        if (arg(table.get(vasm_structs, s, none), 0) != at) vasm_fail(at, 'type, f"struct {symname(s)} is already defined")
-        vasm_regions = []
-        vasm_fn_regions = []
+        if (arg(table.get(structs, s, none), 0) != at) fail(at, 'type, f"struct {symname(s)} is already defined")
+        regions = []
+        fn_regions = []
         names := []
         each((Field{fat, x, t}) -> {
-            if (member(x, names)) vasm_fail(fat, 'type, f"field {symname(x)} is declared twice")
+            if (member(x, names)) fail(fat, 'type, f"field {symname(x)} is declared twice")
             names = x :: names
-            if (head(t) == 'Ref) vasm_fail(fat, 'type, f"field {symname(x)} is {show_type(t)}; a field does not borrow")
-            vasm_type_ok(fat, t)
+            if (head(t) == 'Ref) fail(fat, 'type, f"field {symname(x)} is {show_type(t)}; a field does not borrow")
+            type_ok(fat, t)
         }, fs)
-        if (vasm_reaches(s, s, [s])) vasm_fail(at, 'type, f"struct {symname(s)} contains itself")
+        if (reaches(s, s, [s])) fail(at, 'type, f"struct {symname(s)} contains itself")
     }
 }
 
@@ -926,16 +926,16 @@ vasm_check_struct(d) := match d {
 # structs and functions (the bodies of the functions are not read). Only the items of m are checked.
 export check_with(m, imports) := {
     items := arg(m, 0)
-    vasm_sigs = table.new()
-    vasm_structs = table.new()
+    sigs = table.new()
+    structs = table.new()
     each(d -> match d {
-        Fn{_, f, rs, ps, ret, _} -> table.set(vasm_sigs, f, Sig{rs, map(p -> arg(p, 2), ps), ret})
-      | Struct{_, s, _} -> if (table.get(vasm_structs, s, none) == none) table.set(vasm_structs, s, d)
+        Fn{_, f, rs, ps, ret, _} -> table.set(sigs, f, Sig{rs, map(p -> arg(p, 2), ps), ret})
+      | Struct{_, s, _} -> if (table.get(structs, s, none) == none) table.set(structs, s, d)
     }, append(imports, items))
     errs := []
     each(d -> {
         r := handle {
-            if (head(d) == 'Struct) vasm_check_struct(d) else vasm_check_fn(d)
+            if (head(d) == 'Struct) check_struct(d) else check_fn(d)
             none
         } with (VasmFail{at, kind, msg}, k) -> VasmErr{kind, at, msg}
         if (r != none) errs = r :: errs
