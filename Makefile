@@ -75,6 +75,7 @@ test-planck0: planck0
 	./planck0 planck/tests/macro.pk
 	./planck0 planck/tests/define.pk
 	./planck0 planck/tests/module.pk
+	./planck0 planck/tests/import.pk
 	./planck0 planck/tests/builtins.pk one "two words"
 	@for f in planck/tests/errors/*.pk; do \
 		./planck0 $$f > tmp-error.out 2> tmp-error.err && { echo "$$f: should stop"; exit 1; }; \
