@@ -929,6 +929,18 @@ Def{peg_module, none}
 Def{peg_macro, none}
 Def{peg_import, none}
 
+Def{peg_with, none}
+
+Def{peg_names, none}
+
+Def{peg_destruct, none}
+
+Def{peg_compound, none}
+
+Def{peg_index_update, none}
+
+Def{peg_fresh_count, 0}
+
 " _testing is true while the tests in the test blocks of modules run (tools/test.pk) "
 Def{_testing, false}
 
@@ -1485,6 +1497,14 @@ minus ::= same "-" !nospace(">")
 
 " the = of an assignment, not == "
 assign_op ::= "=" !nospace("=")
+            | compound_op
+
+" the operator of x += e: the function that the operator calls "
+compound_op ::= "+=" { '_add }
+              | "-=" { '_sub }
+              | "*=" { '_mul }
+              | "/=" { '_div }
+              | "%=" { '_mod }
 
 " the inside of a[...]: an expression. In t[p -> e | q if c -> g] the functions joined by | "
 " end with a function that gives peg_skip (_peg_rewrite) "
@@ -1608,6 +1628,16 @@ arrow ::= lambda_ahead ps:params "->" e:arrow { peg_lambda(ps, e) }
         | lambda_ahead ps:params 'if c:ternary "->" e:arrow { peg_guard(ps, c, e) }
         | ternary
 
+" the fields of e with { f = v, ... } "
+with_field ::= f:ident "=" !nospace("=") e:expr { Tuple{f, e} }
+
+" a record value with some fields replaced; with can follow with "
+with_expr ::= o:with_expr 'with "{" fs:delimited1(with_field, ",") "}" { peg_with(o, fs) }
+            | postfix
+
+" the names of (a, b, ...) := e and (a, b, ...) = e: two or more "
+destruct_names ::= "(" a:ident "," bs:delimited1(ident, ",") ")" { Tuple{a, bs} }
+
 " the left side of x := e and x = e: a name, or !x which is replaced by the name inside a quasi-quote "
 target ::= ident
          | "!" x:ident { mexpr('UnQuote, Tuple{x}) }
@@ -1617,6 +1647,10 @@ target ::= ident
 branch ::= &(postfix ":=") f:ident nospace("(") ps:delimited(pattern, ",") ")" ":=" e:branch {
                `Do{Declare{!f}, Set{!f, Fusion{!f, !peg_lambda(ps, e)}}}
            }
+         | ns:destruct_names ":=" e:branch { peg_destruct('Def, ns, e) }
+         | ns:destruct_names "=" !nospace("=") e:branch { peg_destruct('Set, ns, e) }
+         | x:ident op:compound_op e:branch { peg_compound(x, op, e) }
+         | a:postfix nospace("[") i:expr "]" op:compound_op v:branch { peg_index_update(a, i, op, v) }
          | x:target ":=" e:branch { `Def{!x, !e} }
          | &(postfix "=" !nospace("=")) f:ident nospace("(") ps:delimited(pattern, ",") ")" "=" !nospace("=") e:branch {
                `Set{!f, Fusion{!f, !peg_lambda(ps, e)}}
@@ -1693,6 +1727,10 @@ expr ::= syntax_decl
        | &(postfix ":=") f:ident nospace("(") ps:delimited(pattern, ",") ")" ":=" e:expr {
              `Do{Declare{!f}, Set{!f, Fusion{!f, !peg_lambda(ps, e)}}}
          }
+       | ns:destruct_names ":=" e:expr { peg_destruct('Def, ns, e) }
+       | ns:destruct_names "=" !nospace("=") e:expr { peg_destruct('Set, ns, e) }
+       | x:ident op:compound_op e:expr { peg_compound(x, op, e) }
+       | a:postfix nospace("[") i:expr "]" op:compound_op v:expr { peg_index_update(a, i, op, v) }
        | x:target ":=" e:expr { `Def{!x, !e} }
        | &(postfix "=" !nospace("=")) f:ident nospace("(") ps:delimited(pattern, ",") ")" "=" !nospace("=") e:expr {
              `Set{!f, Fusion{!f, !peg_lambda(ps, e)}}
@@ -1701,6 +1739,7 @@ expr ::= syntax_decl
        | 'fun f:ident !nospace("(") { `Def{!f, none} }
        | 'macro p:pattern ":=" e:expr { peg_macro(p, e) }
        | a:postfix nospace("[") i:expr "]" "=" !nospace("=") v:expr { `Apply{_index_set, Tuple{!a, !i, !v}} }
+       | &(postfix 'with "{") w:with_expr { w }
        | union
        | 'record n:ident "(" fs:idents ")" { peg_record(n, fs) }
        | module_expr
@@ -1884,4 +1923,96 @@ eval = e -> {
         _macro_steps = saved
         _eval_expanded(x)
     } else _eval_expanded(e)
+}
+
+" e with { f = v, ... } is _record_with(_record_with(e, 'f, v), 'g, w) ... "
+peg_with(o, fs) := {
+    r := o
+    i := 0
+    while (i < arity(fs)) {
+        r = `Apply{_record_with, Tuple{!r, Quote{!arg(arg(fs, i), 0)}, !arg(arg(fs, i), 1)}}
+        i = i + 1
+    }
+    r
+}
+
+_record_with_error(t, name) := {
+    put("no field ")
+    put(symname(name))
+    put(" in ")
+    println(t)
+    exit(1)
+}
+
+" a copy of the record t whose field name is v. The fields are declared by record "
+_record_with(t, name, v) := {
+    if (typeof(t) != 'mexpr) _record_with_error(t, name)
+    i := table_get(record_slots, Tuple{head(t), name}, none)
+    if (i == none) _record_with_error(t, name)
+    args := Tuple{}
+    j := 0
+    while (j < arity(t)) {
+        args = push(args, if (j == i) v else arg(t, j))
+        j = j + 1
+    }
+    mexpr(head(t), args)
+}
+
+" the names of (a, b, ...): Tuple{a, b, ...} "
+peg_names(a, bs) := {
+    names := Tuple{a}
+    i := 0
+    while (i < arity(bs)) {
+        names = push(names, arg(bs, i))
+        i = i + 1
+    }
+    names
+}
+
+" a variable that no program names "
+peg_fresh() := {
+    peg_fresh_count = peg_fresh_count + 1
+    intern(_strcat("%d", peg_itoa(peg_fresh_count)))
+}
+
+" (a, b) := e is a block that defines a and b from the elements of the tuple e, and (a, b) = e "
+" assigns them. kind is Def or Set. "
+peg_destruct(kind, ns, e) := {
+    names := peg_names(arg(ns, 0), arg(ns, 1))
+    t := peg_fresh()
+    items := Tuple{`Def{!t, !e}}
+    i := 0
+    while (i < arity(names)) {
+        v := `Apply{_destructure, Tuple{!t, !i, !arity(names)}}
+        items = push(items, if (kind == 'Def) `Def{!arg(names, i), !v} else `Set{!arg(names, i), !v})
+        i = i + 1
+    }
+    mexpr('Do, items)
+}
+
+" the element i of t, which must be a tuple of n elements "
+_destructure(t, i, n) := {
+    if (typeof(t) != 'mexpr or head(t) != 'Tuple or arity(t) != n) {
+        put("cannot assign ")
+        print(t)
+        put(" to ")
+        put(peg_itoa(n))
+        put(" names\n")
+        exit(1)
+    }
+    arg(t, i)
+}
+
+" x += e is x = x + e, and likewise for the other operators; op is the function of the operator "
+peg_compound(x, op, e) := `Set{!x, Apply{!op, Tuple{!x, !e}}}
+
+" a[i] += e is a[i] = a[i] + e, in which a and i are evaluated once "
+peg_index_update(a, i, op, v) := {
+    ta := peg_fresh()
+    ti := peg_fresh()
+    `Do{
+        Def{!ta, !a},
+        Def{!ti, !i},
+        Apply{_index_set, Tuple{!ta, !ti, Apply{!op, Tuple{Apply{_index_get, Tuple{!ta, !ti}}, !v}}}}
+    }
 }
