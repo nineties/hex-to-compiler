@@ -15,7 +15,7 @@
 # A unit file is made for the word of its target and can be joined only for a target of the same word.
 
 use("vasm/build")
-use("native/expand")
+use("native/compile")
 
 usage() := {
     put("usage: planck0 planck/vasmc.pk <source> <output> [<target>]\n")
@@ -34,7 +34,7 @@ unit_name(path) := {
 
 # stops the compilation with the message msg at the import item i
 import_fail(src_path, i, msg) := {
-    e := native_expand.errors(src_path, [VasmErr{'import, arg(i, 0), msg}])[0]
+    e := native_compile.errors(src_path, [VasmErr{'import, arg(i, 0), msg}])[0]
     put(f"{error.show_loc(arg(e, 1))}: {arg(e, 2)}\n")
     exit(1)
 }
@@ -46,7 +46,7 @@ imported(src_path, m, units) := concat_map(i -> {
     if (found == []) import_fail(src_path, i, f"import {name}: the unit {name} is not among the unit files given")
     if (length(found) > 1) import_fail(src_path, i, f"import {name}: two of the unit files given are the unit {name}")
     vasm_unit.ifaces(found[0])
-}, native_expand.import_items(m))
+}, native_compile.import_items(m))
 
 # the module of the source file src_path, which may use the units: the vasm module that native expands to, checked, with the
 # interfaces that it uses. A native source uses the units it imports and a vasm source uses all of them.
@@ -66,8 +66,8 @@ load(src_path, units) := {
     }
     imports := if (is_native) imported(src_path, m, units) else concat_map(vasm_unit.ifaces, units)
     if (is_native) {
-        expanded := native_expand.expand_all_with(m, imports)
-        perrs := native_expand.errors(src_path, arg(expanded, 1))
+        expanded := native_compile.compile_all_with(m, imports)
+        perrs := native_compile.errors(src_path, arg(expanded, 1))
         if (perrs != []) {
             each((VasmErr{_, loc, msg}) -> put(f"{error.show_loc(loc)}: {msg}\n"), perrs)
             exit(1)
