@@ -362,6 +362,17 @@
     (return (get str 1))
     )
 
+; hash and equality of the strings with a length (the text may hold \0)
+(fun strhash_n (str n)
+    (var hash 5381)
+    (while (> n 0) (do
+        (= hash (+ (+ (<< hash 5) hash) (getb str)))
+        (+= str 1)
+        (-= n 1)
+        ))
+    (return hash)
+    )
+
 (fun strhash (str)
     (var hash 5381)
     (while (getb str) (do
@@ -488,7 +499,7 @@
         (return (^ h (>> h 15)))
         ))
     (if (== t SymbolT) (return (symhash e)))
-    (if (== t StringT) (return (strhash (str_text e))))
+    (if (== t StringT) (return (strhash_n (get e 1) (get_header_arg e))))
     (if (== t MexprT) (return (mexprhash e)))
     ; other objects are hashed by their addresses
     (return (symhash e))
@@ -615,6 +626,20 @@
     (= emptyTuple   (mexpr0 TupleS))
     )
 
+(fun str_values_equal (a b)
+    (var n (get_header_arg a))
+    (var pa (get a 1))
+    (var pb (get b 1))
+    (if (!= n (get_header_arg b)) (return 0))
+    (while (> n 0) (do
+        (if (!= (getb pa) (getb pb)) (return 0))
+        (+= pa 1)
+        (+= pb 1)
+        (-= n 1)
+        ))
+    (return 1)
+    )
+
 ; Interned m-exprs without strings are equal iff they are identical.
 ; Strings are not interned, so m-exprs containing strings are compared
 ; structurally.
@@ -623,7 +648,7 @@
     (var n 0)
     (if (== a b) (return 1))
     (if (&& (== (gettag a) StringT) (== (gettag b) StringT))
-        (return (streq (str_text a) (str_text b))))
+        (return (str_values_equal a b)))
     (if (&& (== (gettag a) MexprT) (== (gettag b) MexprT)) (do
         (if (!= (get a 1) (get b 1)) (return 0))
         (= n (get_header_arg a))
@@ -682,9 +707,11 @@
 (fun fprint_str (chan str)
     (var c 0)
     (var v 0)
+    (var n (str_len str))
     (= str (str_text str))
     (fputs chan "\"")
-    (while (getb str 0) (do
+    (while (> n 0) (do
+        (-= n 1)
         (= c (getb str 0))
         (= v (escape_char c))
         (if (< v 0)
@@ -877,7 +904,7 @@
             ))
         (if (== c (char "\"")) (do
             (+= raw 1)
-            (set ret (str (strndup parse_str_buf (- end parse_str_buf))))
+            (set ret (str_n (strndup parse_str_buf (- end parse_str_buf)) (- end parse_str_buf)))
             (return raw)
             )
         (if (== c (char "\\")) (do
@@ -2250,7 +2277,7 @@
     )
 
 (fun p_put (s)
-    (puts (str_text s))
+    (write STDOUT (str_text s) (str_len s))
     (return noneS)
     )
 
