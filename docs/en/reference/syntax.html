@@ -417,6 +417,68 @@ none</pre>
 }</pre>
 <p>The guard <code>if c</code> of <code>(p, ...) if c -&gt; e | g</code> is evaluated after the parameters matched, with their variables. When it is false, or the arguments do not match the parameters, <code>g</code> is called with the same arguments, so <code>g</code> is the arms after it. Without <code>| g</code> the call fails as a call of a function with no matching pattern does. <code>g</code> is what is joined after the function by <code>|</code> in the text, also when the function is in parentheses: <code>(p if c -&gt; a) | g</code>. A function with a guard that is given by a variable, as <code>h | g</code> after <code>h := p if c -&gt; a</code>, does not call <code>g</code>. The guard and <code>e</code> of <code>match</code> are expressions up to <code>?:</code>, so a lambda needs parentheses. The function binds variables whose names start with <code>%</code>, which no identifier can name.</p>
 
+<h2 id="rest">Rest arguments</h2>
+<p>The last argument of a function can be written <code>x...</code>. <code>x</code> is bound to a <code>Tuple</code> of the remaining arguments after the preceding ones, which is <code>Tuple{}</code> when there are none. <code>x...</code> is the tree <code>_Rest{x}</code>.</p>
+<ul>
+<li>It can be the last argument of a function <code>f(p, x...) := e</code> or <code>(p, x...) -&gt; e</code>, and the last argument of a pattern <code>Head{p, x...}</code>.</li>
+<li>A call with fewer arguments than the preceding ones does not match.</li>
+<li>Writing <code>x...</code> anywhere but last, in the arguments of a call, or in a function with a guard stops the program with a message before the expression runs.</li>
+</ul>
+<div class="example">
+<p class="file">r_rest.pk</p>
+<pre class="pk"><span class="tok-com"># A rest parameter x... takes the remaining arguments as a Tuple</span>
+
+<span class="tok-name">sum_tuple</span><span class="tok-op">(</span><span class="tok-name">t</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-op">{</span>
+    <span class="tok-name">s</span> <span class="tok-op">:=</span> <span class="tok-num">0</span>
+    <span class="tok-name">i</span> <span class="tok-op">:=</span> <span class="tok-num">0</span>
+    <span class="tok-kw">while</span> <span class="tok-op">(</span><span class="tok-name">i</span> <span class="tok-op">&lt;</span> <span class="tok-name">arity</span><span class="tok-op">(</span><span class="tok-name">t</span><span class="tok-op">)</span><span class="tok-op">)</span> <span class="tok-op">{</span>
+        <span class="tok-name">s</span> <span class="tok-op">=</span> <span class="tok-name">s</span> <span class="tok-op">+</span> <span class="tok-name">arg</span><span class="tok-op">(</span><span class="tok-name">t</span><span class="tok-op">,</span> <span class="tok-name">i</span><span class="tok-op">)</span>
+        <span class="tok-name">i</span> <span class="tok-op">=</span> <span class="tok-name">i</span> <span class="tok-op">+</span> <span class="tok-num">1</span>
+    <span class="tok-op">}</span>
+    <span class="tok-name">s</span>
+<span class="tok-op">}</span>
+
+<span class="tok-com"># the last parameter of a function</span>
+<span class="tok-name">total</span><span class="tok-op">(</span><span class="tok-name">xs</span><span class="tok-op">...</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-name">sum_tuple</span><span class="tok-op">(</span><span class="tok-name">xs</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">total</span><span class="tok-op">(</span><span class="tok-op">)</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">total</span><span class="tok-op">(</span><span class="tok-num">1</span><span class="tok-op">,</span> <span class="tok-num">2</span><span class="tok-op">,</span> <span class="tok-num">3</span><span class="tok-op">)</span><span class="tok-op">)</span>
+
+<span class="tok-com"># after the fixed parameters</span>
+<span class="tok-name">scale</span><span class="tok-op">(</span><span class="tok-name">k</span><span class="tok-op">,</span> <span class="tok-name">xs</span><span class="tok-op">...</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-name">k</span> <span class="tok-op">*</span> <span class="tok-name">sum_tuple</span><span class="tok-op">(</span><span class="tok-name">xs</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">scale</span><span class="tok-op">(</span><span class="tok-num">10</span><span class="tok-op">,</span> <span class="tok-num">1</span><span class="tok-op">,</span> <span class="tok-num">2</span><span class="tok-op">,</span> <span class="tok-num">3</span><span class="tok-op">)</span><span class="tok-op">)</span>
+
+<span class="tok-com"># in a function written with -&gt;</span>
+<span class="tok-name">count</span> <span class="tok-op">:=</span> <span class="tok-op">(</span><span class="tok-name">first</span><span class="tok-op">,</span> <span class="tok-name">others</span><span class="tok-op">...</span><span class="tok-op">)</span> <span class="tok-op">-&gt;</span> <span class="tok-num">1</span> <span class="tok-op">+</span> <span class="tok-name">arity</span><span class="tok-op">(</span><span class="tok-name">others</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">count</span><span class="tok-op">(</span><span class="tok-num">7</span><span class="tok-op">,</span> <span class="tok-num">8</span><span class="tok-op">,</span> <span class="tok-num">9</span><span class="tok-op">)</span><span class="tok-op">)</span>
+
+<span class="tok-com"># arms with fewer parameters are chosen by the number of arguments</span>
+<span class="tok-name">describe</span><span class="tok-op">(</span><span class="tok-name">a</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-str">"one"</span>
+<span class="tok-name">describe</span><span class="tok-op">(</span><span class="tok-name">a</span><span class="tok-op">,</span> <span class="tok-name">b</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-str">"two"</span>
+<span class="tok-name">describe</span><span class="tok-op">(</span><span class="tok-name">a</span><span class="tok-op">,</span> <span class="tok-name">b</span><span class="tok-op">,</span> <span class="tok-name">c</span><span class="tok-op">...</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-str">"three or more"</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">describe</span><span class="tok-op">(</span><span class="tok-num">1</span><span class="tok-op">)</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">describe</span><span class="tok-op">(</span><span class="tok-num">1</span><span class="tok-op">,</span> <span class="tok-num">2</span><span class="tok-op">)</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">describe</span><span class="tok-op">(</span><span class="tok-num">1</span><span class="tok-op">,</span> <span class="tok-num">2</span><span class="tok-op">,</span> <span class="tok-num">3</span><span class="tok-op">,</span> <span class="tok-num">4</span><span class="tok-op">)</span><span class="tok-op">)</span>
+
+<span class="tok-com"># in the pattern of an M-expression, the arguments after the fixed ones</span>
+<span class="tok-name">args_of</span><span class="tok-op">(</span><span class="tok-name">Call</span><span class="tok-op">{</span><span class="tok-name">f</span><span class="tok-op">,</span> <span class="tok-name">rest</span><span class="tok-op">...</span><span class="tok-op">}</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-name">rest</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">args_of</span><span class="tok-op">(</span><span class="tok-name">Call</span><span class="tok-op">{</span><span class="tok-num">1</span><span class="tok-op">,</span> <span class="tok-num">2</span><span class="tok-op">,</span> <span class="tok-num">3</span><span class="tok-op">}</span><span class="tok-op">)</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">args_of</span><span class="tok-op">(</span><span class="tok-name">Call</span><span class="tok-op">{</span><span class="tok-num">1</span><span class="tok-op">}</span><span class="tok-op">)</span><span class="tok-op">)</span>
+
+<span class="tok-com"># in match</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-kw">match</span> <span class="tok-name">Call</span><span class="tok-op">{</span><span class="tok-num">1</span><span class="tok-op">,</span> <span class="tok-num">2</span><span class="tok-op">,</span> <span class="tok-num">3</span><span class="tok-op">}</span> <span class="tok-op">{</span> <span class="tok-name">Call</span><span class="tok-op">{</span><span class="tok-name">x</span><span class="tok-op">,</span> <span class="tok-name">ys</span><span class="tok-op">...</span><span class="tok-op">}</span> <span class="tok-op">-&gt;</span> <span class="tok-name">ys</span> <span class="tok-op">}</span><span class="tok-op">)</span></pre>
+<p class="label">Output</p>
+<pre class="out">0
+6
+60
+3
+&quot;one&quot;
+&quot;two&quot;
+&quot;three or more&quot;
+Tuple{2, 3}
+Tuple{}
+Tuple{2, 3}</pre>
+</div>
+
 <h2>Parameter patterns</h2>
 <p>Parameters <code>p</code> and the patterns of <code>for</code> are written as expressions up to <code>or</code>, and are the M-expressions of the table above, matched as the patterns of <a href="values.html#patterns">Values, patterns, M-expressions</a>, with these rules:</p>
 <ul>
@@ -424,6 +486,7 @@ none</pre>
 <li>The other identifiers are variables. The arguments of <code>Head{p, ...}</code> are patterns, so <code>Apply{f, Tuple{x}}</code> matches a call of any function with one argument and binds <code>f</code>.</li>
 <li><code>(f)(p, ...)</code> is <code>Apply{f, Tuple{p, ...}}</code>. The name in parentheses is a variable, not a symbol, so <code>(f)(x)</code> matches a call of any function with one argument and binds <code>f</code>.</li>
 <li><code>'e</code> is <code>Quote{e}</code> for the expression <code>e</code>.</li>
+<li><code>x...</code> can be written only as the last argument (<a href="#rest">Rest arguments</a>).</li>
 <li>The forms are the operators <code>or and not == != &lt;= &gt;= &lt; &gt; :: + - * / %</code>, the unary <code>-</code> and <code>'</code>, <code>f(p, ...)</code>, <code>p @ type</code>, <code>Head{p, ...}</code>, <code>(f)(p, ...)</code>, identifiers, <code>true</code>, <code>false</code>, <code>none</code>, integers, strings, <code>()</code>, <code>(p)</code>, <code>(p, q, ...)</code> and <code>[p, ...]</code>, with the same binding as in expressions: <code>a @ int + b @ int</code> is <code>(a @ int) + (b @ int)</code>.</li>
 </ul>
 <div class="example">

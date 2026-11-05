@@ -318,10 +318,32 @@ Def{
 " (p, ...) if c -> e. The function takes the arguments as %v1, ... and calls %g with them "
 " when the parameters do not match or c is false. %g is _nomatch until peg_fuse puts a function there. "
 
+" the parameters ps end with a rest parameter x... "
+Def{
+    peg_has_rest,
+    Lambda{
+        Tuple{ps},
+        If{
+            Apply{_gt, Tuple{Apply{arity, Tuple{ps}}, 0}},
+            Do{
+                Def{l, Apply{arg, Tuple{ps, Apply{_sub, Tuple{Apply{arity, Tuple{ps}}, 1}}}}},
+                If{
+                    Apply{_eq, Tuple{Apply{typeof, Tuple{l}}, Quote{mexpr}}},
+                    Apply{_eq, Tuple{Apply{head, Tuple{l}}, Quote{_Rest}}},
+                    false
+                }
+            },
+            false
+        }
+    }}
+
+" A function with a guard calls the functions after it with all of its arguments again, so it has no rest parameter: "
+" the tree _Rest{ps} that it gives is an error when it is compiled. "
 Def{
     peg_guard,
     Lambda{
         Tuple{ps, c, e},
+        If{Apply{peg_has_rest, Tuple{ps}}, QuasiQuote{_Rest{UnQuote{ps}}},
         Do{
             Def{vs, Apply{peg_vars, Tuple{Apply{arity, Tuple{ps}}}}},
             Def{f, Apply{peg_lambda, Tuple{ps, QuasiQuote{If{UnQuote{c}, UnQuote{e}, Apply{UnQuote{peg_g}, UnQuote{vs}}}}}}},
@@ -337,7 +359,7 @@ Def{
                     Tuple{_nomatch}
                 }
             }
-        }
+        }}
     }}
 
 " f | g: g goes in the place of the last _nomatch of the functions with a guard in f "
@@ -1401,6 +1423,7 @@ postfix ::= f:postfix nospace("(") args:delimited(expr, ",") ")" { `Apply{!f, !a
           | x:postfix "@" t:ident { `_TypeOf{!x, !t} }
           | t:postfix nospace(".") f:ident { `Apply{_record_get, Tuple{!t, Quote{!f}}} }
           | a:postfix nospace("[") i:index "]" !assign_op { `Apply{_index_get, Tuple{!a, !i}} }
+          | x:ident "..." { `_Rest{!x} }
           | primary
 
 mul_expr ::= a:mul_expr "*" b:unary { `_mul(!a, !b) }
@@ -1454,6 +1477,7 @@ pat_primary ::= f:ident nospace("(") args:delimited(pattern, ",") ")" { `Apply{Q
               | "[" ps:delimited(pattern, ",") "]" { peg_to_list(ps) }
 
 pat_postfix ::= x:pat_postfix "@" t:ident { `_TypeOf{!x, !t} }
+              | x:ident "..." { `_Rest{!x} }
               | pat_primary
 
 " 'e is the value of the expression e "
