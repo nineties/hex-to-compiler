@@ -4,8 +4,10 @@
 # planck0 planck/vasmc.pk <source> <output> [<target>]
 #     compiles one source file to an executable file.
 # planck0 planck/vasmc.pk unit <source> <output> <target> [<import> ...]
-#     compiles one source file to a unit file, which has no function main. The functions and the structs of the unit files
-#     <import> can be used in the source.
+#     compiles one source file to a unit file, which has no function main. The unit is named by the file name of the source
+#     without the directory and the extension (lib.native is lib). In a native source, the functions and the structs of the
+#     unit files <import> can be used when the source has "import <unit name>" for the unit; every import of the source must
+#     be one of the unit files. In a vasm source, those of all the unit files <import> can be used.
 # planck0 planck/vasmc.pk link <output> <target> <unit> ...
 #     joins unit files into an executable file. Exactly one of them has the function main.
 #
@@ -22,8 +24,33 @@ usage() := {
     exit(2)
 }
 
-# the module of the source file src_path, which may use the interfaces imports: the vasm module that native expands to, checked
-load(src_path, imports) := {
+# the name of the unit of the source file path: the file name without the directory and the extension
+unit_name(path) := {
+    base := list.last(string.split(path, "/"))
+    i := strlen(base) - 1
+    while (i >= 0 and substr(base, i, i + 1) != ".") i = i - 1
+    if (i > 0) substr(base, 0, i) else base
+}
+
+# stops the compilation with the message msg at the import item i
+import_fail(src_path, i, msg) := {
+    e := native_expand.errors(src_path, [VasmErr{'import, arg(i, 0), msg}])[0]
+    put(f"{error.show_loc(arg(e, 1))}: {arg(e, 2)}\n")
+    exit(1)
+}
+
+# the interfaces of the units that the native module m imports; a name that is not that of one of the units stops the compilation
+imported(src_path, m, units) := concat_map(i -> {
+    name := symname(arg(i, 1))
+    found := filter(u -> vasm_unit.name(u) == name, units)
+    if (found == []) import_fail(src_path, i, f"import {name}: the unit {name} is not among the unit files given")
+    if (length(found) > 1) import_fail(src_path, i, f"import {name}: two of the unit files given are the unit {name}")
+    vasm_unit.ifaces(found[0])
+}, native_expand.import_items(m))
+
+# the module of the source file src_path, which may use the units: the vasm module that native expands to, checked, with the
+# interfaces that it uses. A native source uses the units it imports and a vasm source uses all of them.
+load(src_path, units) := {
     text := read_file(src_path)
     n := strlen(src_path)
     is_native := n > 7 and substr(src_path, n - 7, n) == ".native"
@@ -37,6 +64,7 @@ load(src_path, imports) := {
         put(f"{src_path}: syntax error: unexpected input\n")
         exit(1)
     }
+    imports := if (is_native) imported(src_path, m, units) else concat_map(vasm_unit.ifaces, units)
     if (is_native) {
         expanded := native_expand.expand_all_with(m, imports)
         perrs := native_expand.errors(src_path, arg(expanded, 1))
@@ -51,7 +79,7 @@ load(src_path, imports) := {
         each((VasmErr{_, loc, msg}) -> put(f"{error.show_loc(loc)}: {msg}\n"), errs)
         exit(1)
     }
-    m
+    Tuple{m, imports}
 }
 
 # the arguments from the index i, as a list
@@ -71,9 +99,8 @@ if (nargs >= 2 and args[1] == "unit") {
     if (nargs < 5) usage()
     src_path := args[2]
     machine := intern(args[4])
-    imports := concat_map(p -> vasm_unit.ifaces(vasm_unit.read(p)), args_from(args, 5))
-    m := load(src_path, imports)
-    vasm_unit.write(args[3], vasm_unit.unit(src_path, m, imports, target.word(target.get(machine))))
+    loaded := load(src_path, map(vasm_unit.read, args_from(args, 5)))
+    vasm_unit.write(args[3], vasm_unit.unit(unit_name(src_path), arg(loaded, 0), arg(loaded, 1), target.word(target.get(machine))))
 } else if (nargs >= 2 and args[1] == "link") {
     if (nargs < 5) usage()
     units := map(vasm_unit.read, args_from(args, 4))
@@ -81,5 +108,5 @@ if (nargs >= 2 and args[1] == "unit") {
 } else {
     if (nargs != 3 and nargs != 4) usage()
     machine := if (nargs == 4) intern(args[3]) else target.default
-    vasm_build.build_for(machine, load(args[1], []), args[2])
+    vasm_build.build_for(machine, arg(load(args[1], []), 0), args[2])
 }

@@ -122,6 +122,12 @@ test-planck0: planck0
 		[ "$$s" = "$$(cat planck/examples/units/main.status)" ] || { echo "planck/examples/units ($$t): exit status $$s"; exit 1; }; \
 		echo "planck/examples/units ($$t): ok"; \
 	done; rm -f tmp-lib.unit tmp-main.unit tmp-units
+	@./planck0 planck/vasmc.pk unit planck/examples/units/lib.native tmp-lib.unit x86_64 || exit 1
+	@for f in planck/tests/units/*.native; do \
+		./planck0 planck/vasmc.pk unit $$f tmp-unit.unit x86_64 tmp-lib.unit > tmp-unit.out && { echo "$$f: should stop"; exit 1; }; \
+		diff -u $${f%.native}.out tmp-unit.out || exit 1; \
+		echo "$$f: stops"; \
+	done; rm -f tmp-lib.unit tmp-unit.unit tmp-unit.out
 	@for f in $(PE_EXAMPLES); do \
 		./planck0 $$f tmp-pe > tmp-pe.out || exit 1; \
 		diff -u $${f%.pk}.out tmp-pe.out || exit 1; \
