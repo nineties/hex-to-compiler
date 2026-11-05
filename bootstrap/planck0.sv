@@ -517,6 +517,7 @@
 (long noneS)
 (long _S)
 (long _TypeOfS)
+(long _RestS)
 (long intS)
 (long stringS)
 (long symbolS)
@@ -584,6 +585,7 @@
     (= noneS    (sym "none"))
     (= _S       (sym "_"))
     (= _TypeOfS (sym "_TypeOf"))
+    (= _RestS   (sym "_Rest"))
     (= intS     (sym "int"))
     (= stringS  (sym "string"))
     (= symbolS  (sym "symbol"))
@@ -1343,15 +1345,33 @@
             (bind_pattern (get p 2))
             (return 0)
             ))
+        (if (== (get p 1) _RestS) (compile_error "a rest pattern x... must be the last argument" p))
         (= n (get_header_arg p))
         (while (< i n) (do
-            (bind_pattern (get p (+ i 2)))
+            (bind_pattern_arg (get p (+ i 2)) (+ i 1) n)
             (+= i 1)
             ))
         (return 0)
         ))
     (if (|| (== t IntT) (== t StringT)) (return 0))
     (compile_error "invalid pattern" p)
+    )
+
+; true when p is a rest pattern _Rest{x}, which takes the remaining arguments
+(fun is_rest_pat (p)
+    (if (!= (gettag p) MexprT) (return 0))
+    (if (== (get p 1) _RestS) (return 1))
+    (return 0)
+    )
+
+; bind the pattern of the argument number pos (counted from 1) of n. A rest pattern is allowed only as the last one.
+(fun bind_pattern_arg (p pos n)
+    (if (is_rest_pat p) (do
+        (if (|| (!= pos n) (!= (get_header_arg p) 1)) (compile_error "a rest pattern x... must be the last argument" p))
+        (bind_pattern (get p 2))
+        (return 0)
+        ))
+    (bind_pattern p)
     )
 
 ; compile Lambda{pats, body} to a code object
@@ -1363,7 +1383,7 @@
     (var code 0)
     (= cctx (new_context 0))
     (while (< i n) (do
-        (bind_pattern (get pats (+ i 2)))
+        (bind_pattern_arg (get pats (+ i 2)) (+ i 1) n)
         (+= i 1)
         ))
     (compile body 1)
@@ -1621,6 +1641,7 @@
         (return 0)
         ))
     (if (== head UnQuoteS) (compile_error "UnQuote outside of QuasiQuote" e))
+    (if (== head _RestS) (compile_error "x... is allowed only as the last parameter of a function without a guard, or as the last argument of a pattern" e))
     (if (== head HandleS) (do
         (if (!= arity 2) (malformed e))
         (emit OP_CLOSURE)
@@ -1822,6 +1843,17 @@
         (if (!= (gettag v) MexprT) (return 0))
         (if (!= (get v 1) h) (return 0))
         (= n (get_header_arg p))
+        (if (&& (> n 0) (is_rest_pat (get p (+ n 1)))) (do
+            ; Head{p1, ..., rest...}: the arguments after the fixed ones are a Tuple
+            (-= n 1)
+            (if (< (get_header_arg v) n) (return 0))
+            (while (< i n) (do
+                (if (! (match_pat (get p (+ i 2)) (get v (+ i 2)) env idx)) (return 0))
+                (+= i 1)
+                ))
+            (return (match_pat (get (get p (+ n 2)) 2)
+                (mexprn TupleS (- (get_header_arg v) n) (+ v (* 4 (+ n 2)))) env idx))
+            ))
         (if (!= (get_header_arg v) n) (return 0))
         (while (< i n) (do
             (if (! (match_pat (get p (+ i 2)) (get v (+ i 2)) env idx)) (return 0))
@@ -1832,10 +1864,24 @@
     (return 0)
     )
 
+; pats is the Tuple of the parameter patterns of a function. When the last one
+; is a rest pattern _Rest{x}, x is matched with the Tuple of the remaining arguments.
 (fun match_args (pats args nargs env)
     (char[] 4 idx)
     (var i 0)
+    (var n (get_header_arg pats))
     (set idx 0 0)
+    (if (&& (> n 0) (is_rest_pat (get pats (+ n 1)))) (do
+        (-= n 1)
+        (if (< nargs n) (return 0))
+        (while (< i n) (do
+            (if (! (match_pat (get pats (+ i 2)) (get args i) env idx)) (return 0))
+            (+= i 1)
+            ))
+        (return (match_pat (get (get pats (+ n 2)) 2)
+            (mexprn TupleS (- nargs n) (+ args (* 4 n))) env idx))
+        ))
+    (if (!= n nargs) (return 0))
     (while (< i nargs) (do
         (if (! (match_pat (get pats (+ i 2)) (get args i) env idx)) (return 0))
         (+= i 1)
@@ -1857,7 +1903,11 @@
         ))
     (if (== t LambdaT) (do
         (= code (get f 1))
-        (if (!= (get code C_ARITY) nargs) (return 0))
+        (= r (get code C_ARITY))
+        (if (!= r nargs) (do
+            ; only a function whose last parameter is a rest pattern takes other numbers of arguments
+            (if (! (&& (> r 0) (is_rest_pat (get (get code C_PATS) (+ r 1))))) (return 0))
+            ))
         (= env (new_env code (get f 2)))
         (if (! (match_args (get code C_PATS) args nargs env)) (return 0))
         (= sel_env env)

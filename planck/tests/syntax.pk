@@ -1158,5 +1158,49 @@ check(('(g(1, 2)))[(f)(a, b) -> f], 'g)
 check(('(k(7)))[(f)(a) -> a], 7)
 check(('(k(7, 8)))[(f)(a) -> a | (f)(a, b) -> b], 8)
 
+# === Rest parameters ===
+check(tree("f(a, rest...)"), 'Apply{f, Tuple{a, _Rest{rest}}})
+check(tree("(a, rest...) -> a"), 'Lambda{Tuple{a, _Rest{rest}}, a})
+check(tree("(rest...) -> rest"), 'Lambda{Tuple{_Rest{rest}}, rest})
+check(tree("F{a, rest...} -> a"), 'Lambda{Tuple{F{a, _Rest{rest}}}, a})
+check(tree("f(a, rest...) -> a"), 'Lambda{Tuple{Apply{Quote{f}, Tuple{a, _Rest{rest}}}}, a})
+check(tree("_..."), '_Rest{_})
+drop_first(t) := {
+    r := Tuple{}
+    i := 1
+    while (i < arity(t)) {
+        r = push(r, arg(t, i))
+        i = i + 1
+    }
+    r
+}
+rest_sum(t) := if (arity(t) == 0) 0 else arg(t, 0) + rest_sum(drop_first(t))
+rest_total(xs...) := rest_sum(xs)
+check(rest_total(), 0)
+check(rest_total(1, 2, 3), 6)
+rest_scale(k, xs...) := k * rest_sum(xs)
+check(rest_scale(10, 1, 2, 3), 60)
+check(((a, r...) -> arity(r))(1), 0)
+check(((a, r...) -> arity(r))(1, 2, 3), 2)
+check(((a, r...) -> r)(1, 2, 3), 'Tuple{2, 3})
+check(((_...) -> 1)(5, 6), 1)
+rest_kind(a) := "one"
+rest_kind(a, b) := "two"
+rest_kind(a, b, c...) := "many"
+check(rest_kind(1), "one")
+check(rest_kind(1, 2), "two")
+check(rest_kind(1, 2, 3), "many")
+check(rest_kind(1, 2, 3, 4), "many")
+check(match 'F{1, 2, 3} { F{a, r...} -> r }, 'Tuple{2, 3})
+check(match 'F{1} { F{a, r...} -> r }, 'Tuple{})
+check(match 'F{1, 2} { F{a, b, r...} -> r | F{a, r...} -> a }, 'Tuple{})
+check(match 'G{1, 2} { F{a, r...} -> 0 | _ -> 1 }, 1)
+check(match 'F{} { F{a, r...} -> 0 | _ -> 1 }, 1)
+check(match 'F{1, 2, 3} { F{a, r1...} -> r1 }, 'Tuple{2, 3})
+check(match ('f(1, 2, 3)) { (g)(a, r...) -> r }, 'Tuple{2, 3})
+check(match ('f(1, 2, 3)) { f(a, r...) -> r }, 'Tuple{2, 3})
+check(match 'F{1, G{2, 3, 4}} { F{a, G{b, r...}} -> r }, 'Tuple{3, 4})
+check(match 'F{1, 2, 3} { F{a, _...} -> a }, 1)
+
 put("Tests passed "); print(passed); put("/"); println(passed + failed)
 if (failed > 0) exit(1)
