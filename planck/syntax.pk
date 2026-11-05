@@ -861,6 +861,14 @@ Def{peg_macro, none}
 
 Def{peg_with, none}
 
+Def{peg_destruct, none}
+
+Def{peg_compound, none}
+
+Def{peg_index_update, none}
+
+Def{peg_fresh_count, 0}
+
 " _testing is true while the tests in the test blocks of modules run (tools/test.pk) "
 Def{_testing, false}
 
@@ -1541,6 +1549,9 @@ with_field ::= f:ident "=" !nospace("=") e:expr { Tuple{f, e} }
 with_expr ::= o:with_expr 'with "{" fs:delimited1(with_field, ",") "}" { peg_with(o, fs) }
             | postfix
 
+" the names of (a, b, ...) := e and (a, b, ...) = e: two or more "
+destruct_names ::= "(" a:ident "," bs:delimited1(ident, ",") ")" { Tuple{a, bs} }
+
 " the left side of x := e and x = e: a name, or !x which is replaced by the name inside a quasi-quote "
 target ::= ident
          | "!" x:ident { mexpr('UnQuote, Tuple{x}) }
@@ -1550,6 +1561,8 @@ target ::= ident
 branch ::= &(postfix ":=") f:ident nospace("(") ps:delimited(pattern, ",") ")" ":=" e:branch {
                `Do{Declare{!f}, Set{!f, Fusion{!f, !peg_lambda(ps, e)}}}
            }
+         | ns:destruct_names ":=" e:branch { peg_destruct('Def, ns, e) }
+         | ns:destruct_names "=" !nospace("=") e:branch { peg_destruct('Set, ns, e) }
          | x:target ":=" e:branch { `Def{!x, !e} }
          | &(postfix "=" !nospace("=")) f:ident nospace("(") ps:delimited(pattern, ",") ")" "=" !nospace("=") e:branch {
                `Set{!f, Fusion{!f, !peg_lambda(ps, e)}}
@@ -1616,6 +1629,8 @@ expr ::= syntax_decl
        | &(postfix ":=") f:ident nospace("(") ps:delimited(pattern, ",") ")" ":=" e:expr {
              `Do{Declare{!f}, Set{!f, Fusion{!f, !peg_lambda(ps, e)}}}
          }
+       | ns:destruct_names ":=" e:expr { peg_destruct('Def, ns, e) }
+       | ns:destruct_names "=" !nospace("=") e:expr { peg_destruct('Set, ns, e) }
        | x:target ":=" e:expr { `Def{!x, !e} }
        | &(postfix "=" !nospace("=")) f:ident nospace("(") ps:delimited(pattern, ",") ")" "=" !nospace("=") e:expr {
              `Set{!f, Fusion{!f, !peg_lambda(ps, e)}}
@@ -1807,4 +1822,49 @@ _record_with(t, name, v) := {
         j = j + 1
     }
     mexpr(head(t), args)
+}
+
+" the names of (a, b, ...): Tuple{a, b, ...} "
+peg_names(a, bs) := {
+    names := Tuple{a}
+    i := 0
+    while (i < arity(bs)) {
+        names = push(names, arg(bs, i))
+        i = i + 1
+    }
+    names
+}
+
+" a variable that no program names "
+peg_fresh() := {
+    peg_fresh_count = peg_fresh_count + 1
+    intern(_strcat("%d", peg_itoa(peg_fresh_count)))
+}
+
+" (a, b) := e is a block that defines a and b from the elements of the tuple e, and (a, b) = e "
+" assigns them. kind is Def or Set. "
+peg_destruct(kind, ns, e) := {
+    names := peg_names(arg(ns, 0), arg(ns, 1))
+    t := peg_fresh()
+    items := Tuple{`Def{!t, !e}}
+    i := 0
+    while (i < arity(names)) {
+        v := `Apply{_destructure, Tuple{!t, !i, !arity(names)}}
+        items = push(items, if (kind == 'Def) `Def{!arg(names, i), !v} else `Set{!arg(names, i), !v})
+        i = i + 1
+    }
+    mexpr('Do, items)
+}
+
+" the element i of t, which must be a tuple of n elements "
+_destructure(t, i, n) := {
+    if (typeof(t) != 'mexpr or head(t) != 'Tuple or arity(t) != n) {
+        put("cannot assign ")
+        print(t)
+        put(" to ")
+        put(peg_itoa(n))
+        put(" names\n")
+        exit(1)
+    }
+    arg(t, i)
 }
