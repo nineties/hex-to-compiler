@@ -1340,6 +1340,59 @@ check(match '(p or q) { If{a, 'true, b} -> b | _ -> 0 }, 'q)
 check(match 5 { 'true or 'false -> 1 | 1 or 2 -> 2 | none or 5 -> 3 | _ -> 4 }, 3)
 check(match 6 { none or true -> 1 | _ -> 2 }, 2)
 
+# a name written twice matches two values that are ==
+same(a, a) := "same"
+same(_, _) := "differ"
+check(same(1, 1), "same")
+check(same(1, 2), "differ")
+check(same([1], [1]), "same")
+check(same([1], [2]), "differ")
+check(same("a", "a"), "same")
+check(match (3, 3, 4) { ((a, a, b)) -> b | _ -> 0 }, 4)
+check(match (3, 4, 3) { ((a, a, b)) -> b | _ -> 0 }, 0)
+check(match F{[1, 2], [1, 2]} { F{a, a} -> a | _ -> 0 }, [1, 2])
+check(match F{1, 2, 1} { F{a, b, a} -> b | _ -> 0 }, 2)
+check(match F{1, 2, 3} { F{a, b, a} -> b | _ -> 0 }, 0)
+check(match (5, 5, 5) { ((a, a, a)) -> a | _ -> 0 }, 5)
+check(match (5, 5, 6) { ((a, a, a)) -> a | _ -> 0 }, 0)
+sg(a, a) if a > 0 := "pos"
+sg(_, _) := "no"
+check(sg(2, 2), "pos")
+check(sg(-2, -2), "no")
+check(sg(2, 3), "no")
+sl := (a, a) -> a
+check(sl(7, 7), 7)
+# a name written twice and an or together
+sor(a, 1 or 2, a) := a
+sor(_, _, _) := "no"
+check(sor(5, 2, 5), 5)
+check(sor(5, 3, 5), "no")
+check(sor(5, 2, 6), "no")
+
+# an or whose alternatives all bind the same variables binds them
+ov((x, 0) or (0, x)) := x
+ov(_) := "no"
+check(ov((3, 0)), 3)
+check(ov((0, 4)), 4)
+check(ov((1, 2)), "no")
+check(match (0, 9) { ((x, 0) or (0, x)) -> x | _ -> 0 }, 9)
+check(match F{1} { F{x} or G{x} -> x | _ -> 0 }, 1)
+check(match G{2} { F{x} or G{x} -> x | _ -> 0 }, 2)
+check(match H{2} { F{x} or G{x} -> x | _ -> 0 }, 0)
+check(match (1, (2, 0)) { ((a, (x, 0) or (0, x))) -> Tuple{a, x} | _ -> 0 }, Tuple{1, 2})
+check(match (1, (0, 5)) { ((a, (x, 0) or (0, x))) -> Tuple{a, x} | _ -> 0 }, Tuple{1, 5})
+check(match F{G{1}, K{2}} { F{G{x} or H{x}, J{y} or K{y}} -> x + y | _ -> 0 }, 3)
+check(match F{K{7}} { F{G{x} or H{x} or K{x}} -> x | _ -> 0 }, 7)
+check(match (4, 0) { (((x, 0) or (0, x)) or (1, x)) -> x | _ -> 0 }, 4)
+check(match (1, 8) { (((x, 0) or (0, x)) or (1, x)) -> x | _ -> 0 }, 8)
+ovg((x, 0) or (0, x)) if x > 2 := "big"
+ovg(_) := "small"
+check(ovg((3, 0)), "big")
+check(ovg((0, 1)), "small")
+check(ovg((0, 5)), "big")
+ovl := ((x, 0) or (0, x)) -> x + 1
+check(ovl((0, 5)), 6)
+
 # a guard on a definition: when it is false the definitions of the same name that follow are tried
 sign(x) if x > 0 := "pos"
 sign(0) := "zero"

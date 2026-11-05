@@ -1572,7 +1572,7 @@ ternary ::= c:or_expr "?" a:or_expr ":" b:ternary { `If{!c, !a, !b} }
 " The names of operators and functions are symbols, the other identifiers are variables. "
 " (f)(p, ...) is Apply{f, Tuple{p, ...}} with the variable f: a call of any function. "
 " p @ type is _TypeOf{p, type}, and the arguments of Head{p, ...} are patterns. "
-" p or q matches what p or q matches (peg_pats). A variable cannot be written twice in the parameters. "
+" p or q matches what p or q matches (peg_pats). A name written twice matches two values that are ==. "
 
 pat_primary ::= f:ident nospace("(") args:delimited(pattern, ",") ")" { `Apply{Quote{!f}, !args} }
               | h:ident nospace("{") args:delimited(pattern, ",") "}" { mexpr(h, args) }
@@ -2033,13 +2033,6 @@ peg_index_update(a, i, op, v) := {
 " every or is replaced by a variable %o1, ... and the test is true when the values of the variables "
 " are among the alternatives. test is none when ps has no or. The alternatives bind no variables. "
 
-peg_not_supported(msg) := {
-    put("not supported: ")
-    put(msg)
-    put("\n")
-    exit(1)
-}
-
 peg_pat_var(p) := typeof(p) == 'symbol and p != '_ and p != 'true and p != 'false and p != 'none
 
 " the variables of a pattern in order, pushed on the tuple acc "
@@ -2113,30 +2106,94 @@ peg_pat_lits(p) := {
     mexpr(head(p), args)
 }
 
-" p with every or replaced by a variable. The tests are pushed on st[0]. "
+peg_pat_error(msg) := {
+    put("error: ")
+    put(msg)
+    put("\n")
+    exit(1)
+}
+
+" a name made for the walk below: %o1, %d2, ... "
+peg_fresh_n := 0
+peg_fresh(pre) := {
+    peg_fresh_n = peg_fresh_n + 1
+    intern(_strcat(pre, peg_itoa(peg_fresh_n)))
+}
+
+peg_has_name(ns, n) := {
+    i := 0
+    while (i < arity(ns)) {
+        if (arg(ns, i) == n) return true
+        i = i + 1
+    }
+    false
+}
+
+" every name of a is in b and every name of b is in a "
+peg_same_names(a, b) := {
+    i := 0
+    while (i < arity(a)) {
+        if (not peg_has_name(b, arg(a, i))) return false
+        i = i + 1
+    }
+    i = 0
+    while (i < arity(b)) {
+        if (not peg_has_name(a, arg(b, i))) return false
+        i = i + 1
+    }
+    true
+}
+
+" p with every or replaced by a variable and every name written a second time by a new variable. "
+" st[0] is the tests, st[1] is Tuple{variable, alternatives} of the or that bind variables, "
+" st[2] is the names seen and st[3] is the names of or. "
 peg_pat_walk(p, st) := {
+    if (typeof(p) == 'symbol) {
+        if (not peg_pat_var(p)) return p
+        if (peg_has_name(st[3], p)) peg_pat_error(_strcat("a variable of or is written more than once: ", symname(p)))
+        if (peg_has_name(st[2], p)) {
+            d := peg_fresh("%d")
+            st[0] = push(st[0], `Apply{_eq, Tuple{!p, !d}})
+            return d
+        }
+        st[2] = push(st[2], p)
+        return p
+    }
     if (typeof(p) != 'mexpr or head(p) == 'Quote) return p
     if (head(p) == peg_or) {
-        alts := peg_or_alts(p, Tuple{})
-        lams := Tuple{}
+        alts := Tuple{}
+        ns := Tuple{}
         i := 0
-        while (i < arity(alts)) {
-            a := arg(alts, i)
-            if (arity(peg_pat_names(a, Tuple{})) > 0) peg_not_supported("a variable in an alternative of or")
-            ist := array(1)
-            ist[0] = Tuple{}
-            a2 := peg_pat_lits(peg_pat_walk(a, ist))
-            lams = push(lams, `Lambda{Tuple{!a2}, !peg_conj(ist[0])})
+        alts0 := peg_or_alts(p, Tuple{})
+        while (i < arity(alts0)) {
+            a := peg_pat_lits(arg(alts0, i))
+            ni := peg_pat_names(a, Tuple{})
+            if (i > 0 and not peg_same_names(ns, ni)) peg_pat_error("every alternative of or must bind the same variables")
+            ns = ni
+            alts = push(alts, a)
             i = i + 1
         }
-        t := intern(_strcat("%o", peg_itoa(arity(st[0]) + 1)))
+        i = 0
+        while (i < arity(ns)) {
+            n := arg(ns, i)
+            if (peg_has_name(st[2], n) and not peg_has_name(st[3], n)) peg_pat_error(_strcat("a variable of or is written more than once: ", symname(n)))
+            if (not peg_has_name(st[3], n)) {
+                st[2] = push(st[2], n)
+                st[3] = push(st[3], n)
+            }
+            i = i + 1
+        }
         chain := `Lambda{Tuple{_}, false}
-        i = arity(lams) - 1
+        i = arity(alts) - 1
         while (i >= 0) {
-            chain = `Fusion{!arg(lams, i), !chain}
+            chain = peg_fuse(peg_lambda(Tuple{arg(alts, i)}, `true), chain)
             i = i - 1
         }
+        t := peg_fresh("%o")
         st[0] = push(st[0], `Apply{!chain, Tuple{!t}})
+        if (arity(ns) > 0) {
+            st[1] = push(st[1], Tuple{t, alts})
+        }
         return t
     }
     n := if (head(p) == '_TypeOf) 1 else arity(p)
@@ -2149,34 +2206,57 @@ peg_pat_walk(p, st) := {
     mexpr(head(p), args)
 }
 
+" Tuple{ps2, test, wraps}: ps2 is ps without or and without a name written twice. The test is true when "
+" the values are among the alternatives of or and the two values of a name are ==. The test is none when "
+" there is nothing to test. wraps is for peg_wrap. "
 peg_pats(ps) := {
-    d := peg_pat_dup(peg_pat_names(ps, Tuple{}))
-    if (d != none) peg_not_supported(_strcat("a name is more than once in the parameters: ", symname(d)))
-    if (not peg_pat_has_or(ps)) return Tuple{ps, none}
-    st := array(1)
+    if (not peg_pat_has_or(ps) and peg_pat_dup(peg_pat_names(ps, Tuple{})) == none) return Tuple{ps, none, Tuple{}}
+    st := array(4)
     st[0] = Tuple{}
+    st[1] = Tuple{}
+    st[2] = Tuple{}
+    st[3] = Tuple{}
     ps2 := peg_pat_walk(ps, st)
-    Tuple{ps2, peg_conj(st[0])}
+    Tuple{ps2, peg_conj(st[0]), st[1]}
 }
 
-" a function whose parameters have or is a function with the guard that the test makes "
+" the variables of an or are bound by matching its value again with each alternative: e is evaluated there "
+peg_wrap(e, wraps) := {
+    i := arity(wraps) - 1
+    while (i >= 0) {
+        t := arg(arg(wraps, i), 0)
+        alts := arg(arg(wraps, i), 1)
+        chain := peg_lambda(Tuple{arg(alts, arity(alts) - 1)}, e)
+        j := arity(alts) - 2
+        while (j >= 0) {
+            chain = peg_fuse(peg_lambda(Tuple{arg(alts, j)}, e), chain)
+            j = j - 1
+        }
+        e = `Apply{!chain, Tuple{!t}}
+        i = i - 1
+    }
+    e
+}
+
+" a function whose parameters have or or a name twice is a function with the guard that the test makes "
 peg_lambda_plain := peg_lambda
 peg_guard_plain := peg_guard
 
 peg_lambda = (ps, body) -> {
     r := peg_pats(ps)
-    if (arg(r, 1) == none) peg_lambda_plain(ps, body) else peg_guard(arg(r, 0), arg(r, 1), body)
+    if (arg(r, 1) == none) peg_lambda_plain(ps, body) else peg_guard_plain(arg(r, 0), arg(r, 1), peg_wrap(body, arg(r, 2)))
 }
 
 peg_guard = (ps, c, e) -> {
     r := peg_pats(ps)
-    if (arg(r, 1) == none) peg_guard_plain(ps, c, e) else peg_guard_plain(arg(r, 0), `If{!arg(r, 1), !c, false}, e)
+    if (arg(r, 1) == none) peg_guard_plain(ps, c, e)
+    else peg_guard_plain(arg(r, 0), `If{!arg(r, 1), !peg_wrap(c, arg(r, 2)), false}, peg_wrap(e, arg(r, 2)))
 }
 
 " f(p, ...) := e and f(p, ...) if c := e. Tuple{f, special, function} where special is true when "
 " the function has a guard or an or, which go on to the arms after it. "
 peg_def_arm(f, ps, g, e) := {
-    sp := peg_pat_has_or(ps) or arity(g) > 0
+    sp := peg_pat_has_or(ps) or peg_pat_dup(peg_pat_names(ps, Tuple{})) != none or arity(g) > 0
     lam := if (arity(g) > 0) peg_guard(ps, arg(arg(g, 0), 1), e) else peg_lambda(ps, e)
     Tuple{f, sp, lam}
 }
