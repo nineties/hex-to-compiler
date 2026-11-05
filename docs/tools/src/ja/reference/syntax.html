@@ -9,6 +9,7 @@
 <tr><td><code>x := e</code></td><td><code>Def{x, e}</code></td></tr>
 <tr><td><code>(x, y, ...) := e</code>・<code>(x, y, ...) = e</code></td><td class="wrap">組 <code>e</code> の要素で変数を定義・代入するブロック。<code>Do{Def{t, e}, Def{x, Apply{_destructure, Tuple{t, 0, n}}}, ...}</code>（<code>t</code> はほかのどの名前とも重ならない変数、<code>n</code> は名前の数、<code>=</code> では <code>Def</code> が <code>Set</code>）</td></tr>
 <tr><td><code>f(p, ...) := e</code></td><td><code>Do{Declare{f}, Set{f, Fusion{f, Lambda{Tuple{p, ...}, e}}}}</code></td></tr>
+<tr><td><code>f(p, ...) if c := e</code></td><td class="wrap">ガード付きの関数 <code>(p, ...) if c -&gt; e</code> を <code>f</code> に足す。<code>c</code> が偽のとき、続けて書いた <code>f</code> の定義を試す</td></tr>
 <tr><td><code>record T(f, ...)</code></td><td><code>Apply{_record_declare, Tuple{Quote{T}, Quote{Tuple{f, ...}}}}</code></td></tr>
 <tr><td><code>x = e</code></td><td><code>Set{x, e}</code></td></tr>
 <tr><td><code>x += e</code> <code>x -= e</code> <code>x *= e</code> <code>x /= e</code> <code>x %= e</code></td><td><code>Set{x, Apply{_add, Tuple{x, e}}}</code>。ほかは <code>_sub</code> <code>_mul</code> <code>_div</code> <code>_mod</code></td></tr>
@@ -95,6 +96,7 @@
 
 <h3>関数に定義が加わるとき</h3>
 <p>関数の定義 <code>f(p, ...) := e</code> は、書いた場所の変数に <code>f</code> がすでにあれば <code>f(p, ...) = e</code> と同じで、なければ <code>fun f</code> と <code>f(p, ...) = e</code> を続けて書いたのと同じです。後者は書いた場所で新しい <code>f</code> を定義します。同じ場所に書いた <code>f</code> の定義は1つの関数になり、書いた順に試されます。</p>
+<p>定義にもガードを付けられます。<code>f(p, ...) if c := e</code> は、引数が <code>p, ...</code> に合って <code>c</code> が真のときに <code>e</code> を返す腕を <code>f</code> に足します。<code>c</code> が偽のときと引数が合わないときは、同じ引数でそのあとの腕を試します。そのあとの腕は、同じ場所に続けて書いた <code>f</code> の定義です。間に別の式を書いた定義は続きません。<code>f(x) if x &gt; 0 := "正"</code> のあとに <code>f(_) := "それ以外"</code> と書くと、<code>f(-1)</code> は <code>"それ以外"</code> です。<code>export</code> を付けた定義と <code>f(p, ...) = e</code> にはガードを付けられません。</p>
 <p>書いた場所の変数は、トップレベルでは同じファイルで定義した大域変数で、関数の中ではその関数の引数とその関数でそれより前に定義した変数です。トップレベルの <code>if</code> の枝や <code>while</code> の本体では、その枝や本体でそれより前に定義した変数です。外側の関数の変数や関数の中から見た大域変数は、書いた場所の変数ではありません。したがって、これらと同じ名前の <code>f(p, ...) := e</code> は新しい <code>f</code> を定義し、外の <code>f</code> を変えません。</p>
 <!--ex r_scope_same-->
 <!--ex t8_place-->
@@ -221,9 +223,11 @@
 <li><code>(f)(p, ...)</code> は <code>Apply{f, Tuple{p, ...}}</code> です。括弧の中の名前はシンボルでなく変数なので、<code>(f)(x)</code> は引数1つの任意の関数の呼び出しに合い、<code>f</code> を束縛します。</li>
 <li><code>'e</code> は式 <code>e</code> の <code>Quote{e}</code> です。</li>
 <li><code>x...</code> は最後の引数にだけ書けます（<a href="#rest">残りの引数</a>）。</li>
+<li><code>p or q</code> は <code>p</code> と <code>q</code> のどちらかに合います。<code>a or b or c</code> のように並べられ、引数の中のどこにでも書けます（<code>F{1 or 2, x}</code>）。どれにも合わなければ、パターンが合わないときと同じです。式の <code>or</code> の M式 <code>If{a, true, b}</code> に合わせるには <code>If{a, 'true, b}</code> と書きます。</li>
 <li>書ける形は、演算子 <code>or and not == != &lt;= &gt;= &lt; &gt; :: + - * / %</code>、単項の <code>-</code> と <code>'</code>、<code>f(p, ...)</code>、<code>p @ type</code>、<code>Head{p, ...}</code>、<code>(f)(p, ...)</code>、識別子・<code>true</code>・<code>false</code>・<code>none</code>・整数・文字列、<code>()</code>・<code>(p)</code>・<code>(p, q, ...)</code>・<code>[p, ...]</code> です。結合は式と同じで、<code>a @ int + b @ int</code> は <code>(a @ int) + (b @ int)</code> です。</li>
 </ul>
 <!--ex r_pattern-->
+<!--ex r_pattern_or-->
 
 <h2 id="macro">macro</h2>
 <p><code>macro p := e</code> は、評価の前に木を書き換える規則を足します。<code>p</code> は引数のパターンと同じ書き方で、木の形を表します。<code>e</code> は <code>p</code> の変数を使って評価され、その値が新しい木です。<code>macro</code> は M式を別の M式に直すもので、文字列を M式にする構文には触れません。</p>

@@ -246,6 +246,14 @@ Def{_nomatch, Lambda{Tuple{_TypeOf{_, nomatch}}, none}}
 
 Def{peg_g, Apply{intern, Tuple{"%g"}}}
 
+" the head of a pattern p or q before peg_pats takes it away: %or{p, q} "
+
+Def{peg_or, Apply{intern, Tuple{"%or"}}}
+
+" def_run is declared with ::= at the end of the file. Until then it matches nothing. "
+
+Apply{_define_rule, Tuple{Quote{def_run}, Lambda{Tuple{p}, Apply{peg_fail, Tuple{p}}}}}
+
 Def{peg_ret_handler, QuasiQuote{Lambda{Tuple{Return{v}, k}, v}}}
 
 Def{peg_break_handler, QuasiQuote{Lambda{Tuple{Break{}, k}, none}}}
@@ -1564,6 +1572,7 @@ ternary ::= c:or_expr "?" a:or_expr ":" b:ternary { `If{!c, !a, !b} }
 " The names of operators and functions are symbols, the other identifiers are variables. "
 " (f)(p, ...) is Apply{f, Tuple{p, ...}} with the variable f: a call of any function. "
 " p @ type is _TypeOf{p, type}, and the arguments of Head{p, ...} are patterns. "
+" p or q matches what p or q matches (peg_pats). A variable cannot be written twice in the parameters. "
 
 pat_primary ::= f:ident nospace("(") args:delimited(pattern, ",") ")" { `Apply{Quote{!f}, !args} }
               | h:ident nospace("{") args:delimited(pattern, ",") "}" { mexpr(h, args) }
@@ -1611,7 +1620,7 @@ pat_not ::= 'not a:pat_not { `Apply{'_not, Tuple{!a}} }
 pat_and ::= a:pat_not 'and b:pat_and { `If{!a, !b, 'false} }
           | pat_not
 
-pattern ::= a:pat_and 'or b:pattern { `If{!a, 'true, !b} }
+pattern ::= a:pat_and 'or b:pattern { mexpr(peg_or, Tuple{a, b}) }
           | pat_and
 
 " === Functions, assignments and the other forms === "
@@ -1724,6 +1733,7 @@ import_expr ::= 'import p:delimited1(ident, "::") a:(same 'as ident)? o:import_o
 
 " f(p, ...) := e adds to f when f is already a variable of the place (Declare) "
 expr ::= syntax_decl
+       | def_run
        | &(postfix ":=") f:ident nospace("(") ps:delimited(pattern, ",") ")" ":=" e:expr {
              `Do{Declare{!f}, Set{!f, Fusion{!f, !peg_lambda(ps, e)}}}
          }
@@ -2016,3 +2026,202 @@ peg_index_update(a, i, op, v) := {
         Apply{_index_set, Tuple{!ta, !ti, Apply{!op, Tuple{Apply{_index_get, Tuple{!ta, !ti}}, !v}}}}
     }
 }
+
+" === or in patterns, and the arms of a definition that goes on to the next === "
+
+" p or q in a pattern is %or{p, q} (pattern). peg_pats takes the parameters ps and gives Tuple{ps2, test}: "
+" every or is replaced by a variable %o1, ... and the test is true when the values of the variables "
+" are among the alternatives. test is none when ps has no or. The alternatives bind no variables. "
+
+peg_not_supported(msg) := {
+    put("not supported: ")
+    put(msg)
+    put("\n")
+    exit(1)
+}
+
+peg_pat_var(p) := typeof(p) == 'symbol and p != '_ and p != 'true and p != 'false and p != 'none
+
+" the variables of a pattern in order, pushed on the tuple acc "
+peg_pat_names(p, acc) := {
+    if (typeof(p) == 'symbol) {
+        if (peg_pat_var(p)) acc = push(acc, p)
+        return acc
+    }
+    if (typeof(p) != 'mexpr or head(p) == 'Quote) return acc
+    n := if (head(p) == '_TypeOf) 1 else arity(p)
+    i := 0
+    while (i < n) {
+        acc = peg_pat_names(arg(p, i), acc)
+        i = i + 1
+    }
+    acc
+}
+
+" a name that is in the tuple twice, or none "
+peg_pat_dup(ns) := {
+    i := 0
+    while (i < arity(ns)) {
+        j := i + 1
+        while (j < arity(ns)) {
+            if (arg(ns, i) == arg(ns, j)) return arg(ns, i)
+            j = j + 1
+        }
+        i = i + 1
+    }
+    none
+}
+
+peg_pat_has_or(p) := {
+    if (typeof(p) != 'mexpr or head(p) == 'Quote) return false
+    if (head(p) == peg_or) return true
+    i := 0
+    while (i < arity(p)) {
+        if (peg_pat_has_or(arg(p, i))) return true
+        i = i + 1
+    }
+    false
+}
+
+" the alternatives of p or q or ... pushed on the tuple acc "
+peg_or_alts(p, acc) :=
+    if (typeof(p) == 'mexpr and head(p) == peg_or) peg_or_alts(arg(p, 1), peg_or_alts(arg(p, 0), acc))
+    else push(acc, p)
+
+" the tests all true "
+peg_conj(ts) := {
+    acc := `true
+    i := arity(ts) - 1
+    while (i >= 0) {
+        acc = `If{!arg(ts, i), !acc, false}
+        i = i - 1
+    }
+    acc
+}
+
+" p with true, false and none written as Quote{true}, Quote{false} and Quote{none} "
+peg_pat_lits(p) := {
+    if (typeof(p) == 'symbol) return if (p == 'true or p == 'false or p == 'none) mexpr('Quote, Tuple{p}) else p
+    if (typeof(p) != 'mexpr or head(p) == 'Quote) return p
+    n := if (head(p) == '_TypeOf) 1 else arity(p)
+    args := Tuple{}
+    i := 0
+    while (i < arity(p)) {
+        args = push(args, if (i < n) peg_pat_lits(arg(p, i)) else arg(p, i))
+        i = i + 1
+    }
+    mexpr(head(p), args)
+}
+
+" p with every or replaced by a variable. The tests are pushed on st[0]. "
+peg_pat_walk(p, st) := {
+    if (typeof(p) != 'mexpr or head(p) == 'Quote) return p
+    if (head(p) == peg_or) {
+        alts := peg_or_alts(p, Tuple{})
+        lams := Tuple{}
+        i := 0
+        while (i < arity(alts)) {
+            a := arg(alts, i)
+            if (arity(peg_pat_names(a, Tuple{})) > 0) peg_not_supported("a variable in an alternative of or")
+            ist := array(1)
+            ist[0] = Tuple{}
+            a2 := peg_pat_lits(peg_pat_walk(a, ist))
+            lams = push(lams, `Lambda{Tuple{!a2}, !peg_conj(ist[0])})
+            i = i + 1
+        }
+        t := intern(_strcat("%o", peg_itoa(arity(st[0]) + 1)))
+        chain := `Lambda{Tuple{_}, false}
+        i = arity(lams) - 1
+        while (i >= 0) {
+            chain = `Fusion{!arg(lams, i), !chain}
+            i = i - 1
+        }
+        st[0] = push(st[0], `Apply{!chain, Tuple{!t}})
+        return t
+    }
+    n := if (head(p) == '_TypeOf) 1 else arity(p)
+    args := Tuple{}
+    i := 0
+    while (i < arity(p)) {
+        args = push(args, if (i < n) peg_pat_walk(arg(p, i), st) else arg(p, i))
+        i = i + 1
+    }
+    mexpr(head(p), args)
+}
+
+peg_pats(ps) := {
+    d := peg_pat_dup(peg_pat_names(ps, Tuple{}))
+    if (d != none) peg_not_supported(_strcat("a name is more than once in the parameters: ", symname(d)))
+    if (not peg_pat_has_or(ps)) return Tuple{ps, none}
+    st := array(1)
+    st[0] = Tuple{}
+    ps2 := peg_pat_walk(ps, st)
+    Tuple{ps2, peg_conj(st[0])}
+}
+
+" a function whose parameters have or is a function with the guard that the test makes "
+peg_lambda_plain := peg_lambda
+peg_guard_plain := peg_guard
+
+peg_lambda = (ps, body) -> {
+    r := peg_pats(ps)
+    if (arg(r, 1) == none) peg_lambda_plain(ps, body) else peg_guard(arg(r, 0), arg(r, 1), body)
+}
+
+peg_guard = (ps, c, e) -> {
+    r := peg_pats(ps)
+    if (arg(r, 1) == none) peg_guard_plain(ps, c, e) else peg_guard_plain(arg(r, 0), `If{!arg(r, 1), !c, false}, e)
+}
+
+" f(p, ...) := e and f(p, ...) if c := e. Tuple{f, special, function} where special is true when "
+" the function has a guard or an or, which go on to the arms after it. "
+peg_def_arm(f, ps, g, e) := {
+    sp := peg_pat_has_or(ps) or arity(g) > 0
+    lam := if (arity(g) > 0) peg_guard(ps, arg(arg(g, 0), 1), e) else peg_lambda(ps, e)
+    Tuple{f, sp, lam}
+}
+
+" a definition of a special arm matches def_run with the definitions that follow it "
+peg_tok_special(p) := {
+    q := peg_call_rule('def_arm, p)
+    if (q < 0) return q
+    v := peg_pv
+    if (arg(v, 1)) {
+        peg_pv = v
+        return q
+    }
+    peg_fail(p)
+}
+
+_define_rule('special_arm, peg_tok_special)
+
+" The arms of the same f in a row are joined by | : f(p, ...) := e, f(q, ...) := e, ... is "
+" Set{f, Fusion{f, p-arm | q-arm | ...}}. A guard or an or that does not apply goes on to the next arm. "
+peg_def_run(a, rest) := {
+    arms := push(Tuple{}, a)
+    i := 0
+    while (i < arity(rest)) {
+        arms = push(arms, arg(arg(rest, i), 1))
+        i = i + 1
+    }
+    stmts := Tuple{}
+    i = 0
+    while (i < arity(arms)) {
+        f := arg(arg(arms, i), 0)
+        j := i + 1
+        while (j < arity(arms) and arg(arg(arms, j), 0) == f) j = j + 1
+        lam := arg(arg(arms, j - 1), 2)
+        k := j - 2
+        while (k >= i) {
+            lam = peg_fuse(arg(arg(arms, k), 2), lam)
+            k = k - 1
+        }
+        stmts = push(stmts, `Do{Declare{!f}, Set{!f, Fusion{!f, !lam}}})
+        i = j
+    }
+    if (arity(stmts) == 1) arg(stmts, 0) else mexpr('Do, stmts)
+}
+
+def_arm ::= &(postfix (":=" | 'if)) f:ident nospace("(") ps:delimited(pattern, ",") ")" g:('if ternary)? ":=" e:expr { peg_def_arm(f, ps, g, e) }
+
+def_run ::= a:special_arm rest:(";"? def_arm)* { peg_def_run(a, rest) }
