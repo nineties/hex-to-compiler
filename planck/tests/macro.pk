@@ -15,8 +15,8 @@ check(actual, expected) := if (actual == expected) {
 tree(s) := arg(peg_parse('toplevel, s), 0)
 
 # === the tree of macro ===
-check(tree("macro Foo{x} := x") ==
-      'Do{Set{_macro_on, true}, Set{_macro, Fusion{Lambda{Tuple{Foo{x}}, x}, _macro}}}, true)
+check(tree("macro Foo{x} := x") == 'Macro{Lambda{Tuple{Foo{x}}, x}}, true)
+check(tree("module m { export macro Foo{x} := x }") != none, true)
 
 # === no macro: nothing changes ===
 check(expand_macro('Foo{1, x}, 0), 'Foo{1, x})
@@ -89,11 +89,45 @@ check(Twice{10}, 30)
 # === eval rewrites the tree it is given ===
 check(eval('Twice{4}), 12)
 
-# === a macro written in a function is defined when the function runs ===
-define() := { macro Late{x} := `Done{!x} }
-check(expand_macro('Late{1}, 0), 'Late{1})
-define()
-check(expand_macro('Late{1}, 0), 'Done{1})
+# === a macro in a function ends with the function ===
+scoped() := {
+    macro Local{x} := `Done{!x}
+    Local{1}
+}
+check(scoped(), Done{1})
+check(expand_macro('Local{1}, 0), 'Local{1})
+
+# === a macro in a module applies inside the module only ===
+module m {
+    macro Inner{x} := `(!x + 100)
+    export get() := Inner{1}
+    export inside(t) := expand_macro(t, 0)
+}
+check(m.get(), 101)
+check(m.inside('Inner{5}), 'Inner{5})
+check(expand_macro('Inner{5}, 0), 'Inner{5})
+
+# === export macro applies outside the module, after it ===
+check(expand_macro('Outer{5}, 0), 'Outer{5})
+module n {
+    export macro Outer{x} := `(!x * 1000)
+    macro Hidden{x} := `none
+    export get() := Outer{2}
+}
+check(n.get(), 2000)
+check(expand_macro('Outer{5}, 0), '(5 * 1000))
+check(expand_macro('Hidden{5}, 0), 'Hidden{5})
+check(Outer{3}, 3000)
+
+# === a module inside a module: exports reach the module around it, and stop there ===
+module p {
+    module q {
+        export macro Deep{x} := `(!x - 1)
+    }
+    export get() := Deep{10}
+}
+check(p.get(), 9)
+check(expand_macro('Deep{1}, 0), 'Deep{1})
 
 println(f"passed {passed}, failed {failed}")
 if (failed > 0) exit(1)
