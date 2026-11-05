@@ -53,7 +53,8 @@ Def{peg_digit_value, Lambda{Tuple{c},
     If{If{Apply{_le, Tuple{65, c}}, Apply{_le, Tuple{c, 70}}, false}, Apply{_sub, Tuple{c, 55}},
         99}}}}}
 
-" integer: -?[0-9]+, 0x.., 0o.., 0b.. "
+" integer: -?[0-9]+, 0x.., 0o.., 0b..; the value is built as a negative number (as much as -2^30) so that it does not wrap around. "
+" A literal that does not fit in 31 bits is Apply{_bigint, Tuple{text}}, with the text as it is written. "
 Def{peg_tok_int, Lambda{Tuple{p}, Do{
     Set{p, Apply{peg_skip_ws, Tuple{p}}},
     Def{q, p},
@@ -61,6 +62,8 @@ Def{peg_tok_int, Lambda{Tuple{p}, Do{
     Def{base, 10},
     Def{v, 0},
     Def{d, 0},
+    Def{low, -1073741823},
+    Def{big, false},
     If{If{Apply{_eq, Tuple{Apply{peg_char_at, Tuple{q}}, 45}}, Apply{peg_is_digit, Tuple{Apply{peg_char_at, Tuple{Apply{peg_inc, Tuple{q}}}}}}, false},
         Do{Set{sign, -1}, Set{q, Apply{peg_inc, Tuple{q}}}}, none},
     If{Apply{peg_is_digit, Tuple{Apply{peg_char_at, Tuple{q}}}}, Do{
@@ -70,12 +73,15 @@ Def{peg_tok_int, Lambda{Tuple{p}, Do{
             If{If{Apply{_eq, Tuple{d, 111}}, true, Apply{_eq, Tuple{d, 79}}}, Set{base, 8},
             If{If{Apply{_eq, Tuple{d, 98}}, true, Apply{_eq, Tuple{d, 66}}}, Set{base, 2}, none}}},
             If{Apply{_ne, Tuple{base, 10}}, Set{q, Apply{_add, Tuple{q, 2}}}, none}}, none},
+        If{Apply{_eq, Tuple{sign, -1}}, Set{low, -1073741824}, none},
         Set{d, Apply{peg_digit_value, Tuple{Apply{peg_char_at, Tuple{q}}}}},
         While{Apply{_lt, Tuple{d, base}}, Do{
-            Set{v, Apply{_add, Tuple{Apply{_mul, Tuple{v, base}}, d}}},
+            If{Apply{_lt, Tuple{v, Apply{_div, Tuple{Apply{_add, Tuple{low, d}}, base}}}}, Set{big, true},
+                Set{v, Apply{_sub, Tuple{Apply{_mul, Tuple{v, base}}, d}}}},
             Set{q, Apply{peg_inc, Tuple{q}}},
             Set{d, Apply{peg_digit_value, Tuple{Apply{peg_char_at, Tuple{q}}}}}}},
-        Set{peg_pv, Apply{_mul, Tuple{sign, v}}},
+        If{big, Set{peg_pv, QuasiQuote{Apply{_bigint, Tuple{UnQuote{Apply{substr, Tuple{peg_src, p, q}}}}}}},
+            Set{peg_pv, If{Apply{_eq, Tuple{sign, -1}}, v, Apply{_sub, Tuple{0, v}}}}},
         q},
         Apply{peg_fail, Tuple{p}}}}}}
 

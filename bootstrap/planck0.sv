@@ -844,7 +844,15 @@
     (return raw)
     )
 
-(fun parse_int (ret raw)
+(fun is_hex_digit (c)
+    (if (&& (<= (char "0") c) (<= c (char "9"))) (return 1))
+    (if (&& (<= (char "a") c) (<= c (char "f"))) (return 1))
+    (if (&& (<= (char "A") c) (<= c (char "F"))) (return 1))
+    (return 0)
+    )
+
+; limit is the largest value of the digits: 2^30 - 1, or 2^30 after a minus sign
+(fun parse_int (ret raw limit)
     (var value 0)
     (var d 0)
     (var base 10)
@@ -881,6 +889,11 @@
         (if (>= d base) (do
             (set ret (syntax_error "malformed integer literal"))
             (return (+ raw 1))
+            ))
+        (if (> value (/ (- limit d) base)) (do
+            (set ret (syntax_error "not supported: integer literal beyond 31 bits"))
+            (while (is_hex_digit (getb raw)) (+= raw 1))
+            (return raw)
             ))
         (= value (+ (* value base) d))
         (+= raw 1)
@@ -1015,10 +1028,10 @@
             )
         )
     (if (is_digit c)
-        (= raw (parse_int ret raw))
+        (= raw (parse_int ret raw (- (<< 1 30) 1)))
     (if (&& (== c (char "-")) (is_digit (getb raw 1))) (do
         ; negative integer literal
-        (= raw (parse_int ret (+ raw 1)))
+        (= raw (parse_int ret (+ raw 1) (<< 1 30)))
         (if (== (gettag (get ret)) IntT)
             (set ret (- 2 (get ret))) ; fixnum(-n) = 2 - fixnum(n)
             )
@@ -2281,29 +2294,62 @@
     (return noneS)
     )
 
+; integers have 31 bits. A result outside the range is not computed: the program stops
+(fun not_supported_int (name)
+    (eputs name)
+    (eputs ": not supported: integer beyond 31 bits\n")
+    (exit 1)
+    )
+
+(fun fits_fixnum (x)
+    (if (&& (>= x (- 0 (<< 1 30))) (<= x (- (<< 1 30) 1))) (return 1))
+    (return 0)
+    )
+
 (fun p_add (a b)
+    (var r 0)
     (check_int "_add" a)
     (check_int "_add" b)
-    (return (+ a (- b 1)))
+    (= r (+ a (- b 1)))
+    (if (< (& (^ a r) (^ (- b 1) r)) 0) (not_supported_int "_add"))
+    (return r)
     )
 
 (fun p_sub (a b)
+    (var d 0)
     (check_int "_sub" a)
     (check_int "_sub" b)
-    (return (+ (- a b) 1))
+    (= d (- a b))
+    (if (< (& (^ a b) (^ a d)) 0) (not_supported_int "_sub"))
+    (return (+ d 1))
     )
 
 (fun p_mul (a b)
+    (var x (fixnum_to_int a))
+    (var y (fixnum_to_int b))
+    (var p 0)
     (check_int "_mul" a)
     (check_int "_mul" b)
-    (return (fixnum (* (fixnum_to_int a) (fixnum_to_int b))))
+    (= p (* x y))
+    (if (&& (!= x 0) (!= (sdiv p x) y)) (not_supported_int "_mul"))
+    (if (! (fits_fixnum p)) (not_supported_int "_mul"))
+    (return (fixnum p))
+    )
+
+; _bigint("123...") is an integer literal that does not fit in 31 bits
+(fun p_bigint (text)
+    (expect StringT text)
+    (runtime_error "_bigint: not supported: integer beyond 31 bits: " text)
     )
 
 (fun p_div (a b)
+    (var q 0)
     (check_int "_div" a)
     (check_int "_div" b)
     (if (== b 1) (runtime_error "division by zero: " a))
-    (return (fixnum (sdiv (fixnum_to_int a) (fixnum_to_int b))))
+    (= q (sdiv (fixnum_to_int a) (fixnum_to_int b)))
+    (if (! (fits_fixnum q)) (not_supported_int "_div"))
+    (return (fixnum q))
     )
 
 ; signed division rounded toward minus infinity
@@ -2779,11 +2825,16 @@
     (return (^ a 0xfffffffe))
     )
 
-; shifted-out bits are dropped, and the result is wrapped to 31 bits
+; the result must stay within 31 bits
 (fun p_bit_shl (a k)
+    (var x 0)
+    (var r 0)
     (check_int "bit_shl" a)
     (check_shift "bit_shl" k)
-    (return (fixnum (<< (fixnum_to_int a) (fixnum_to_int k))))
+    (= x (fixnum_to_int a))
+    (= r (<< x (fixnum_to_int k)))
+    (if (|| (!= (asr r (fixnum_to_int k)) x) (! (fits_fixnum r))) (not_supported_int "bit_shl"))
+    (return (fixnum r))
     )
 
 ; logical shift: a is taken as a 31-bit unsigned integer
@@ -2859,6 +2910,7 @@
     (defprim "_add"     2 p_add     PRIM_NATIVE)
     (defprim "_sub"     2 p_sub     PRIM_NATIVE)
     (defprim "_mul"     2 p_mul     PRIM_NATIVE)
+    (defprim "_bigint"  1 p_bigint  PRIM_NATIVE)
     (defprim "_div"     2 p_div     PRIM_NATIVE)
     (defprim "_quo"     2 p_quo     PRIM_NATIVE)
     (defprim "_mod"     2 p_mod     PRIM_NATIVE)
