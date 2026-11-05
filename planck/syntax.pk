@@ -28,6 +28,7 @@ Apply{table_set, Tuple{peg_reserved, "continue", true}}
 Apply{table_set, Tuple{peg_reserved, "fun", true}}
 Apply{table_set, Tuple{peg_reserved, "module", true}}
 Apply{table_set, Tuple{peg_reserved, "export", true}}
+Apply{table_set, Tuple{peg_reserved, "macro", true}}
 
 " identifier: [A-Za-z_][A-Za-z0-9_]* except the peg_reserved words and the f of f\"...\" "
 Def{peg_tok_ident, Lambda{Tuple{p}, Do{
@@ -856,6 +857,7 @@ Def{
         }}}
 
 Def{peg_module, none}
+Def{peg_macro, none}
 
 " _testing is true while the tests in the test blocks of modules run (tools/test.pk) "
 Def{_testing, false}
@@ -1586,6 +1588,7 @@ module_def ::= &(postfix ":=") f:ident nospace("(") ps:delimited(pattern, ",") "
                    `Do{Declare{!f}, Set{!f, Fusion{!f, !peg_lambda(ps, e)}}}
                }
              | x:ident ":=" e:expr { `Def{!x, !e} }
+             | 'macro p:pattern ":=" e:expr { peg_macro(p, e) }
              | module_expr
 
 module_stmt ::= 'export d:module_def { `Export{!d} }
@@ -1610,6 +1613,7 @@ expr ::= syntax_decl
          }
        | x:target "=" !nospace("=") e:expr { `Set{!x, !e} }
        | 'fun f:ident !nospace("(") { `Def{!f, none} }
+       | 'macro p:pattern ":=" e:expr { peg_macro(p, e) }
        | a:postfix nospace("[") i:expr "]" "=" !nospace("=") v:expr { `Apply{_index_set, Tuple{!a, !i, !v}} }
        | union
        | 'record n:ident "(" fs:idents ")" { peg_record(n, fs) }
@@ -1638,8 +1642,10 @@ peg_module(n, rev) := {
         items = arg(items, 1)
         if (typeof(s) == 'mexpr and head(s) == 'Export) {
             d := arg(s, 0)
-            names = Cons{peg_export_name(d), names}
-            s = d
+            if (head(d) != 'Macro) {
+                names = Cons{peg_export_name(d), names}
+                s = d
+            }
         }
         cur = push(cur, s)
         if (arity(cur) == 32) {
@@ -1651,3 +1657,98 @@ peg_module(n, rev) := {
     blocks = push(blocks, `Apply{_module, Tuple{Quote{!names}, !names}})
     `Def{!n, Apply{Lambda{Tuple{}, !mexpr('Do, blocks)}, Tuple{}}}
 }
+
+" === Macro === "
+" macro p := e is the tree Macro{f}, f being the function p -> e. It is not evaluated: the rewriting below "
+" takes it out of the tree, adds f in front of the macros that apply from there on (the last arm gives the "
+" tree itself), and leaves none in its place. A macro applies to the rest of the body of the innermost "
+" function or module around it, and to the parts inside. export macro in a module also adds f to the "
+" macros of the place around the module, after the module. Before eval takes an expression, each part of "
+" its tree is rewritten by the macros, from the root down: a part is rewritten until it no longer changes, "
+" then the parts inside the result are rewritten. A quote is not rewritten, and in a quasi-quote only what "
+" is unquoted is rewritten. The patterns of a function and the names that Def and Set define are not rewritten. "
+_macro_on := false
+_macro := e -> e
+" the macros that the module being rewritten exports, the last one first "
+_macro_exports := Nil{}
+_eval_expanded := eval
+
+" _macro_on is set when a macro is read, so that nothing is rewritten before the first macro "
+peg_macro(p, e) := {
+    _macro_on = true
+    `Macro{!peg_lambda(Tuple{p}, e)}
+}
+fun expand_macro
+
+" the tree whose arguments from index from on are rewritten at the quasi-quote level lvl "
+expand_macro_args(e, lvl, from) := {
+    n := arity(e)
+    xs := Tuple{}
+    i := 0
+    while (i < n) {
+        a := arg(e, i)
+        xs = push(xs, if (i < from) a else expand_macro(a, lvl))
+        i = i + 1
+    }
+    mexpr(head(e), xs)
+}
+
+" Macro{f}: the function of f is added to the macros, and none stays "
+expand_macro_define(m, exported) := {
+    f := _eval_expanded(expand_macro(arg(m, 0), 0))
+    _macro = Fusion{f, _macro}
+    if (exported) _macro_exports = Cons{f, _macro_exports}
+    none
+}
+
+" a function or module body is a scope: the macros of its inside end with it, except the exported ones "
+expand_macro_scope(e) := {
+    saved := _macro
+    saved_exports := _macro_exports
+    _macro_exports = Nil{}
+    r := expand_macro_args(e, 0, 1)
+    xs := _macro_exports
+    ys := Nil{}
+    while (head(xs) == 'Cons) {
+        ys = Cons{arg(xs, 0), ys}
+        xs = arg(xs, 1)
+    }
+    _macro = saved
+    while (head(ys) == 'Cons) {
+        _macro = Fusion{arg(ys, 0), _macro}
+        ys = arg(ys, 1)
+    }
+    _macro_exports = saved_exports
+    r
+}
+
+expand_macro_sub(e, lvl) := {
+    if (typeof(e) != 'mexpr) e
+    else {
+        h := head(e)
+        if (h == 'QuasiQuote) expand_macro_args(e, lvl + 1, 0)
+        else if (h == 'UnQuote) { if (lvl == 0) e else expand_macro_args(e, lvl - 1, 0) }
+        else if (lvl > 0) expand_macro_args(e, lvl, 0)
+        else if (h == 'Quote) e
+        else if (h == 'Macro) expand_macro_define(e, false)
+        else if (h == 'Export and typeof(arg(e, 0)) == 'mexpr and head(arg(e, 0)) == 'Macro) expand_macro_define(arg(e, 0), true)
+        else if (h == 'Lambda) expand_macro_scope(e)
+        else if (h == 'Def or h == 'Set or h == 'Declare) expand_macro_args(e, 0, 1)
+        else expand_macro_args(e, 0, 0)
+    }
+}
+
+expand_macro = (e, lvl) -> {
+    if (lvl != 0) expand_macro_sub(e, lvl)
+    else {
+        n := _macro(e)
+        while (n != e) {
+            e = n
+            n = _macro(e)
+        }
+        expand_macro_sub(e, 0)
+    }
+}
+
+" eval rewrites the tree by the macros first. Nothing is rewritten until the first macro is read. "
+eval = e -> _eval_expanded(if (_macro_on) expand_macro(e, 0) else e)

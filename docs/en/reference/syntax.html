@@ -513,9 +513,51 @@ Apply{_add, Tuple{2, 1}}
 g</pre>
 </div>
 
+<h2 id="macro">macro</h2>
+<p><code>macro p := e</code> adds a rule that rewrites a tree before it is evaluated. <code>p</code> is written as a parameter pattern and stands for the shape of a tree. <code>e</code> is evaluated with the variables of <code>p</code>, and its value is the new tree. <code>macro</code> turns an M-expression into another M-expression and does not touch the syntax that turns a string into an M-expression.</p>
+<div class="example">
+<p class="file">r_macro.pk</p>
+<pre class="pk"><span class="tok-kw">macro</span> <span class="tok-name">Twice</span><span class="tok-op">{</span><span class="tok-name">x</span><span class="tok-op">}</span> <span class="tok-op">:=</span> <span class="tok-op">`</span><span class="tok-op">(</span><span class="tok-op">!</span><span class="tok-name">x</span> <span class="tok-op">+</span> <span class="tok-op">!</span><span class="tok-name">x</span><span class="tok-op">)</span>
+<span class="tok-kw">macro</span> <span class="tok-name">unless</span><span class="tok-op">(</span><span class="tok-name">c</span><span class="tok-op">,</span> <span class="tok-name">e</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-op">`</span><span class="tok-kw">if</span> <span class="tok-op">(</span><span class="tok-kw">not</span> <span class="tok-op">!</span><span class="tok-name">c</span><span class="tok-op">)</span> <span class="tok-op">!</span><span class="tok-name">e</span>
+
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">Twice</span><span class="tok-op">{</span><span class="tok-num">21</span><span class="tok-op">}</span><span class="tok-op">)</span>
+<span class="tok-name">unless</span><span class="tok-op">(</span><span class="tok-num">1</span> <span class="tok-op">&gt;</span> <span class="tok-num">2</span><span class="tok-op">,</span> <span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-str">"shown"</span><span class="tok-op">)</span><span class="tok-op">)</span>
+<span class="tok-name">unless</span><span class="tok-op">(</span><span class="tok-num">1</span> <span class="tok-op">&lt;</span> <span class="tok-num">2</span><span class="tok-op">,</span> <span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-str">"not shown"</span><span class="tok-op">)</span><span class="tok-op">)</span>
+
+<span class="tok-com"># a quote is not rewritten</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-op">'</span><span class="tok-op">(</span><span class="tok-name">Twice</span><span class="tok-op">{</span><span class="tok-num">1</span><span class="tok-op">}</span><span class="tok-op">)</span><span class="tok-op">)</span></pre>
+<p class="label">Output</p>
+<pre class="out">42
+&quot;shown&quot;
+Twice{1}</pre>
+</div>
+<p>The rewriting is done after an expression is read and before it is evaluated. A tree given to <code>eval</code> is rewritten in the same way. It proceeds in this order.</p>
+<ul>
+<li>Each part of the tree is rewritten by the rules from the root down. The rules added last are tried first, and a part that no rule matches stays as it is.</li>
+<li>The rules are applied to a rewritten part until it no longer changes. Then the parts inside the result are rewritten.</li>
+<li>The inside of a quote <code>'e</code> is not rewritten. The inside of a quasi-quote <code>`e</code> is rewritten only where it is unquoted by <code>!e</code>.</li>
+<li>The parameter patterns of a function and the names that <code>Def</code>, <code>Set</code> and <code>Declare</code> define are not rewritten. The body of a function is rewritten.</li>
+</ul>
+<p>A rule is added from the place of the <code>macro</code> in the expression that was read. It applies, including the parts inside, to the end of the body of the innermost function or module around the <code>macro</code>. When nothing surrounds it, it applies to all the expressions after it. <code>export macro</code> in a module also applies outside the module, after the definition of the module. <code>macro</code> is a reserved word.</p>
+<div class="example">
+<p class="file">r_macro_module.pk</p>
+<pre class="pk"><span class="tok-kw">module</span> <span class="tok-name">shapes</span> <span class="tok-op">{</span>
+    <span class="tok-kw">macro</span> <span class="tok-name">Inside</span><span class="tok-op">{</span><span class="tok-name">x</span><span class="tok-op">}</span> <span class="tok-op">:=</span> <span class="tok-op">`</span><span class="tok-op">(</span><span class="tok-op">!</span><span class="tok-name">x</span> <span class="tok-op">+</span> <span class="tok-num">100</span><span class="tok-op">)</span>
+    <span class="tok-kw">export</span> <span class="tok-kw">macro</span> <span class="tok-name">Double</span><span class="tok-op">{</span><span class="tok-name">x</span><span class="tok-op">}</span> <span class="tok-op">:=</span> <span class="tok-op">`</span><span class="tok-op">(</span><span class="tok-op">!</span><span class="tok-name">x</span> <span class="tok-op">*</span> <span class="tok-num">2</span><span class="tok-op">)</span>
+    <span class="tok-kw">export</span> <span class="tok-name">f</span><span class="tok-op">(</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-name">Inside</span><span class="tok-op">{</span><span class="tok-num">1</span><span class="tok-op">}</span>
+<span class="tok-op">}</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">shapes</span><span class="tok-op">.</span><span class="tok-name">f</span><span class="tok-op">(</span><span class="tok-op">)</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">Double</span><span class="tok-op">{</span><span class="tok-num">21</span><span class="tok-op">}</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-op">'</span><span class="tok-op">(</span><span class="tok-name">Inside</span><span class="tok-op">{</span><span class="tok-num">1</span><span class="tok-op">}</span><span class="tok-op">)</span><span class="tok-op">)</span></pre>
+<p class="label">Output</p>
+<pre class="out">101
+42
+Inside{1}</pre>
+</div>
+
 <h2>Lexical rules</h2>
 <ul>
-<li>Identifiers are <code>[A-Za-z_][A-Za-z0-9_]*</code> except the reserved words<br><code>if else while and or handle with perform match record for in return break continue fun module export</code><br>and the literals <code>true false none</code>.</li>
+<li>Identifiers are <code>[A-Za-z_][A-Za-z0-9_]*</code> except the reserved words<br><code>if else while and or handle with perform match record for in return break continue fun macro module export</code><br>and the literals <code>true false none</code>.</li>
 <li>Integers are decimal (<code>10</code>, <code>-3</code>), <code>0x1f</code>, <code>0o17</code> or <code>0b101</code>.</li>
 <li>Floats are decimal with a point, as <code>1.5</code>.</li>
 <li>Strings are <code>"..."</code> in one line with the escapes <code>\0 \a \b \t \n \v \f \r \" \' \\</code>. <code>f"...{e}..."</code> embeds the value of the expression <code>e</code>, which may contain strings and f-strings; <code>{{</code> and <code>}}</code> are the braces themselves. A string without the prefix <code>f</code> embeds nothing.</li>

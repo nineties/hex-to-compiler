@@ -1,0 +1,47 @@
+# macro p := e rewrites the tree of an expression before it is evaluated.
+# p is a pattern. e is evaluated with the variables of p, and its value is the new tree.
+
+# a form of your own: Twice{x} becomes x + x
+macro Twice{x} := `(!x + !x)
+println(Twice{21})
+
+# a call is a tree too. unless is not a function, so e is not evaluated when c is true
+macro unless(c, e) := `if (not !c) !e
+unless(1 > 2, println("shown"))
+unless(1 < 2, println("not shown"))
+
+# the new tree is rewritten again until it stops changing
+macro Square{x} := `(!x * !x)
+macro Fourth{x} := `Square{Square{!x}}
+println(Fourth{3})
+
+# the parts inside the new tree are rewritten too, and so is the body of a function
+f(n) := Twice{n} + 1
+println(f(5))
+
+# a quote is not rewritten
+println('(Twice{1}))
+
+# in a quasi-quote only what is unquoted is rewritten
+println(`(Twice{1} + !Twice{2}))
+
+# a function's patterns are not rewritten, so Twice{x} here matches the tree Twice{...}
+g(Twice{x}) := x
+println(g('Twice{7}))
+
+# the arm defined last is tried first
+macro Twice{x} := `(!x + !x + !x)
+println(Twice{10})
+
+# the tree of an expression can be handed to eval at run time
+println(eval('(Twice{4})))
+
+# a macro in a module or a function applies there only. export macro also applies after the module
+module shapes {
+    macro Inside{x} := `(!x + 100)
+    export macro Double{x} := `(!x * 2)
+    export f() := Inside{1}
+}
+println(shapes.f())
+println(Double{21})
+println('(Inside{1}))
