@@ -75,6 +75,7 @@ test-planck0: planck0
 	./planck0 planck/tests/macro.pk
 	./planck0 planck/tests/define.pk
 	./planck0 planck/tests/module.pk
+	./planck0 planck/tests/import.pk
 	./planck0 planck/tests/builtins.pk one "two words"
 	./planck0 planck/tests/lib.pk
 	./planck0 planck/tests/unparse.pk

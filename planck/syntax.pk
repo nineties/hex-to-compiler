@@ -29,6 +29,7 @@ Apply{table_set, Tuple{peg_reserved, "fun", true}}
 Apply{table_set, Tuple{peg_reserved, "module", true}}
 Apply{table_set, Tuple{peg_reserved, "export", true}}
 Apply{table_set, Tuple{peg_reserved, "macro", true}}
+Apply{table_set, Tuple{peg_reserved, "import", true}}
 
 " identifier: [A-Za-z_][A-Za-z0-9_]* except the peg_reserved words and the f of f\"...\" "
 Def{peg_tok_ident, Lambda{Tuple{p}, Do{
@@ -858,6 +859,7 @@ Def{
 
 Def{peg_module, none}
 Def{peg_macro, none}
+Def{peg_import, none}
 
 " _testing is true while the tests in the test blocks of modules run (tools/test.pk) "
 Def{_testing, false}
@@ -1602,6 +1604,15 @@ module_stmts ::= xs:module_stmts s:module_stmt ";"? { Cons{s, xs} }
 module_expr ::= 'module n:ident "{" es:module_stmts "}" { peg_module(n, es) }
               | 'module n:ident "{" "}" { peg_module(n, Nil{}) }
 
+" import a::b as m (x, y), import a::b (*), import a::b hiding (x, y): use of the file a/b loads it. "
+" The module that is named like the last name of the path is a variable of the file. as m defines m as that module. "
+" (x, y) defines x and y as the fields of the module, (*) defines all the fields, and hiding (x, y) all of them but x and y. "
+import_opt ::= same "(" "*" ")" { Tuple{'all, Tuple{}} }
+             | same "(" ns:delimited1(ident, ",") ")" { Tuple{'some, ns} }
+             | same 'hiding "(" ns:delimited1(ident, ",") ")" { Tuple{'hiding, ns} }
+
+import_expr ::= 'import p:delimited1(ident, "::") a:(same 'as ident)? o:import_opt? { peg_import(p, a, o) }
+
 " f(p, ...) := e adds to f when f is already a variable of the place (Declare) "
 expr ::= syntax_decl
        | &(postfix ":=") f:ident nospace("(") ps:delimited(pattern, ",") ")" ":=" e:expr {
@@ -1618,9 +1629,43 @@ expr ::= syntax_decl
        | union
        | 'record n:ident "(" fs:idents ")" { peg_record(n, fs) }
        | module_expr
+       | import_expr
 
 " a top-level expression ends with ; or a newline, or another expression follows "
 toplevel ::= e:expr (";" | !same | &expr) { e }
+
+peg_import(p, a, o) := {
+    n := arity(p)
+    file := symname(arg(p, 0))
+    i := 1
+    while (i < n) {
+        file = _strcat(_strcat(file, "/"), symname(arg(p, i)))
+        i = i + 1
+    }
+    m := arg(p, n - 1)
+    load := `Apply{_import_module, Tuple{!file, Quote{!m}}}
+    ds := Tuple{}
+    if (arity(a) > 0) {
+        name := arg(arg(a, 0), 2)
+        ds = push(ds, `Def{!name, !load})
+    } else ds = push(ds, load)
+    if (arity(o) > 0) {
+        kind := arg(arg(o, 0), 0)
+        ns := arg(arg(o, 0), 1)
+        if (kind == 'some) {
+            j := 0
+            while (j < arity(ns)) {
+                x := arg(ns, j)
+                ds = push(ds, `Def{!x, Apply{_record_get, Tuple{!load, Quote{!x}}}})
+                j = j + 1
+            }
+        } else {
+            hidden := if (kind == 'hiding) ns else Tuple{}
+            ds = push(ds, `Apply{eval, Tuple{Apply{_import_defs, Tuple{!load, Quote{!hidden}}}}})
+        }
+    }
+    mexpr('Do, push(ds, none))
+}
 
 " the name that a definition marked export defines: x for Def{x, e}, f for Do{Declare{f}, ...} "
 peg_export_name(d) := if (head(d) == 'Def) arg(d, 0) else arg(arg(d, 0), 0)
