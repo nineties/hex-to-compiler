@@ -79,6 +79,38 @@ Def{peg_tok_int, Lambda{Tuple{p}, Do{
         q},
         Apply{peg_fail, Tuple{p}}}}}}
 
+" float: -?[0-9]+.[0-9]+ and an exponent e or E, an optional -, and [0-9]+ after it. The tree has the text of the token. "
+Def{peg_tok_float, Lambda{Tuple{p}, Do{
+    Set{p, Apply{peg_skip_ws, Tuple{p}}},
+    Def{q, p},
+    Def{ok, true},
+    Def{r, p},
+    If{If{Apply{_eq, Tuple{Apply{peg_char_at, Tuple{q}}, 45}}, Apply{peg_is_digit, Tuple{Apply{peg_char_at, Tuple{Apply{peg_inc, Tuple{q}}}}}}, false},
+        Set{q, Apply{peg_inc, Tuple{q}}}, none},
+    If{Apply{peg_is_digit, Tuple{Apply{peg_char_at, Tuple{q}}}}, none, Set{ok, false}},
+    While{Apply{peg_is_digit, Tuple{Apply{peg_char_at, Tuple{q}}}}, Set{q, Apply{peg_inc, Tuple{q}}}},
+    If{ok,
+        If{If{Apply{_eq, Tuple{Apply{peg_char_at, Tuple{q}}, 46}}, Apply{peg_is_digit, Tuple{Apply{peg_char_at, Tuple{Apply{peg_inc, Tuple{q}}}}}}, false},
+            Set{q, Apply{peg_inc, Tuple{q}}},
+            Set{ok, false}},
+        none},
+    If{ok, While{Apply{peg_is_digit, Tuple{Apply{peg_char_at, Tuple{q}}}}, Set{q, Apply{peg_inc, Tuple{q}}}}, none},
+    If{ok,
+        If{If{Apply{_eq, Tuple{Apply{peg_char_at, Tuple{q}}, 101}}, true, Apply{_eq, Tuple{Apply{peg_char_at, Tuple{q}}, 69}}},
+            Do{
+                Set{r, Apply{peg_inc, Tuple{q}}},
+                If{Apply{_eq, Tuple{Apply{peg_char_at, Tuple{r}}, 45}}, Set{r, Apply{peg_inc, Tuple{r}}}, none},
+                If{Apply{peg_is_digit, Tuple{Apply{peg_char_at, Tuple{r}}}},
+                    Do{
+                        While{Apply{peg_is_digit, Tuple{Apply{peg_char_at, Tuple{r}}}}, Set{r, Apply{peg_inc, Tuple{r}}}},
+                        Set{q, r}},
+                    Set{ok, false}}},
+            none},
+        none},
+    If{ok,
+        Do{Set{peg_pv, Apply{substr, Tuple{peg_src, p, q}}}, q},
+        Apply{peg_fail, Tuple{p}}}}}}
+
 Def{peg_escapes, Apply{table_new, Tuple{}}}
 Apply{table_set, Tuple{peg_escapes, 48, "\0"}}
 Apply{table_set, Tuple{peg_escapes, 97, "\a"}}
@@ -163,6 +195,7 @@ Def{peg_tok_class, Lambda{Tuple{p}, Do{
 
 Apply{_define_rule, Tuple{Quote{ident}, peg_tok_ident}}
 Apply{_define_rule, Tuple{Quote{integer}, peg_tok_int}}
+Apply{_define_rule, Tuple{Quote{float}, peg_tok_float}}
 Apply{_define_rule, Tuple{Quote{string}, peg_tok_str}}
 Apply{_define_rule, Tuple{Quote{keyword}, peg_tok_keyword}}
 Apply{_define_rule, Tuple{Quote{charclass}, peg_tok_class}}
@@ -1615,6 +1648,7 @@ primary ::= if_expr
           | h:ident nospace("{") args:delimited(expr, ",") "}" { mexpr(h, args) }
           | istr_open parts:(istr_text istr_hole expr "}")* last:istr_text istr_close { peg_interp(parts, last) }
           | ident
+          | t:float { `Apply{_float, Tuple{!t}} }
           | integer
           | string
           | "(" ")" { 'Tuple{} }
