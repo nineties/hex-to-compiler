@@ -36,12 +36,10 @@ flags := 16
 
 is_wide(W{z}) := z == 'w64
 
-x64_reg(o) := match o {
-    D{r} -> r
-  | U{r} -> r
-  | DU{r} -> r
-  | _ -> panic("x64: a register is expected")
-}
+x64_reg(D{r}) := r
+x64_reg(U{r}) := r
+x64_reg(DU{r}) := r
+x64_reg(_) := panic("x64: a register is expected")
 
 is_mem(o) := member(head(o), ['M, 'MX, 'MG])
 
@@ -49,14 +47,12 @@ is_mem(o) := member(head(o), ['M, 'MX, 'MG])
 x64_rm(o) := if (is_mem(o)) o else x64_reg(o)
 
 # the registers that rm needs a bit of the prefix for: Tuple{index, base}
-rm_regs(rm) := match rm {
-    r @ int -> Tuple{0, r}
-  | M{U{b}, _} -> Tuple{0, b}
-  | MX{U{b}, U{x}, _, _} -> Tuple{x, b}
-  | MX{'none, U{x}, _, _} -> Tuple{x, 0}
-  | MG{_, _} -> Tuple{0, 0}
-  | _ -> panic("x64: a register or a memory operand is expected")
-}
+rm_regs(r @ int) := Tuple{0, r}
+rm_regs(M{U{b}, _}) := Tuple{0, b}
+rm_regs(MX{U{b}, U{x}, _, _}) := Tuple{x, b}
+rm_regs(MX{'none, U{x}, _, _}) := Tuple{x, 0}
+rm_regs(MG{_, _}) := Tuple{0, 0}
+rm_regs(_) := panic("x64: a register or a memory operand is expected")
 
 # rex(em, w, r, x, b, force) writes the prefix REX when a bit of it is needed: w is true for a 64-bit operand,
 # r extends the register of the reg field, x the index and b the base or the register of the rm field
@@ -69,22 +65,20 @@ scale(s) := if (s == 1) 0 else if (s == 2) 1 else if (s == 4) 2 else if (s == 8)
 
 # modrm(em, reg, rm, trail) writes the ModRM byte, the SIB byte and the displacement. reg is the number in the reg field; rm is a register number
 # or a memory operand. trail is the number of bytes of integers that follow, which a displacement relative to the next instruction counts.
-modrm(em, reg, rm, trail) := match rm {
-    r @ int -> x86enc.u8(em, 192 + (reg % 8) * 8 + r % 8)
-  | M{U{b}, d} -> modrm_base(em, reg, b, none, 0, d)
-  | MX{U{b}, U{x}, s, d} -> modrm_base(em, reg, b, x, s, d)
-  | MX{'none, U{x}, s, d} -> {
-        if (x == 4) panic("x64: rsp cannot be an index")
-        x86enc.u8(em, (reg % 8) * 8 + 4)
-        x86enc.u8(em, scale(s) * 64 + (x % 8) * 8 + 5)
-        x86enc.u32(em, d)
-    }
-  | MG{name, d} -> {
-        x86enc.u8(em, (reg % 8) * 8 + 5)
-        x86enc.sym(em, 'Pc32, name, d - trail)
-    }
-  | _ -> panic("x64: a memory operand is expected")
+modrm(em, reg, r @ int, trail) := x86enc.u8(em, 192 + (reg % 8) * 8 + r % 8)
+modrm(em, reg, M{U{b}, d}, trail) := modrm_base(em, reg, b, none, 0, d)
+modrm(em, reg, MX{U{b}, U{x}, s, d}, trail) := modrm_base(em, reg, b, x, s, d)
+modrm(em, reg, MX{'none, U{x}, s, d}, trail) := {
+    if (x == 4) panic("x64: rsp cannot be an index")
+    x86enc.u8(em, (reg % 8) * 8 + 4)
+    x86enc.u8(em, scale(s) * 64 + (x % 8) * 8 + 5)
+    x86enc.u32(em, d)
 }
+modrm(em, reg, MG{name, d}, trail) := {
+    x86enc.u8(em, (reg % 8) * 8 + 5)
+    x86enc.sym(em, 'Pc32, name, d - trail)
+}
+modrm(em, reg, _, trail) := panic("x64: a memory operand is expected")
 
 modrm_base(em, reg, b, x, s, d) = {
     bl := b % 8

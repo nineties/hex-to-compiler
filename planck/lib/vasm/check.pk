@@ -179,19 +179,17 @@ export int(t) := int_entry(t) != none
 lit_lo(e) := if (not arg(e, 3)) 0 else if (arg(e, 2) == 8) -128 else -32768
 lit_hi(e) := if (arg(e, 2) != 8) 32767 else if (arg(e, 3)) 127 else 255
 
-export show_type(t) := match t {
-    Bool{} -> "bool"
-  | Val{} -> "val"
-  | Unit{} -> "()"
-  | Lit{_} -> "integer"
-  | Own{u} -> _strcat("own ", show_type(u))
-  | Ref{k, r, u} -> _strcat(if (k == 'mut) f"&mut {symname(r)} " else f"&{symname(r)} ", show_type(u))
-  | Arr{u} -> f"[{show_type(u)}]"
-  | Named{s} -> symname(s)
-  | TVar{n} -> symname(n)
-  | Place{u} -> _strcat("a place of ", show_type(u))
-  | _ -> arg(int_entry(t), 1)
-}
+export show_type(Bool{}) := "bool"
+show_type(Val{}) := "val"
+show_type(Unit{}) := "()"
+show_type(Lit{_}) := "integer"
+show_type(Own{u}) := _strcat("own ", show_type(u))
+show_type(Ref{k, r, u}) := _strcat(if (k == 'mut) f"&mut {symname(r)} " else f"&{symname(r)} ", show_type(u))
+show_type(Arr{u}) := f"[{show_type(u)}]"
+show_type(Named{s}) := symname(s)
+show_type(TVar{n}) := symname(n)
+show_type(Place{u}) := _strcat("a place of ", show_type(u))
+show_type(t) := arg(int_entry(t), 1)
 
 # === Checker state ===
 # vasm_info: name -> Info{type, regions open at the declaration}, for the variables in scope
@@ -211,17 +209,15 @@ ret_type := Unit{}
 # A val in a register is copied (linear); a val in a struct, in a box or in an array of own is what own is there.
 fun owning_in
 owning(t) := owning_in(t, [])
-owning_in(t, seen) := match t {
-    Own{_} -> true
-  | Val{} -> true
-  | Arr{u} -> owning_in(u, seen)
-  | Named{s} -> {
-        sd := table.get(structs, s, none)
-        if (sd == none or member(s, seen)) false
-        else list.any((Field{_, _, u}) -> owning_in(u, s :: seen), arg(sd, 2))
-    }
-  | _ -> false
+owning_in(Own{_}, seen) := true
+owning_in(Val{}, seen) := true
+owning_in(Arr{u}, seen) := owning_in(u, seen)
+owning_in(Named{s}, seen) := {
+    sd := table.get(structs, s, none)
+    if (sd == none or member(s, seen)) false
+    else list.any((Field{_, _, u}) -> owning_in(u, s :: seen), arg(sd, 2))
 }
+owning_in(_, seen) := false
 
 # the fields of the struct s that own, in the order of the struct
 own_fields(s) := map((Field{_, x, _}) -> x, filter((Field{_, _, u}) -> owning(u), arg(table.get(structs, s, none), 2)))
@@ -356,12 +352,10 @@ else e == t
 # a borrow that does not fit only because its region is opened inside the function and does not outlive the expected one
 escapes(e, t) := head(e) == 'Ref and head(t) == 'Ref and arg(e, 0) == arg(t, 0) and arg(e, 2) == arg(t, 2) and not member(arg(t, 1), fn_regions)
 
-export mentions(t, r) := match t {
-    Ref{_, q, u} -> q == r or mentions(u, r)
-  | Own{u} -> mentions(u, r)
-  | Arr{u} -> mentions(u, r)
-  | _ -> false
-}
+export mentions(Ref{_, q, u}, r) := q == r or mentions(u, r)
+mentions(Own{u}, r) := mentions(u, r)
+mentions(Arr{u}, r) := mentions(u, r)
+mentions(_, r) := false
 
 export subst(t, rmap, tsub) := match t {
     Ref{k, r, u} -> Ref{k, table.get(rmap, r, r), subst(u, rmap, tsub)}
@@ -373,27 +367,23 @@ export subst(t, rmap, tsub) := match t {
 
 # === Operands and values ===
 
-export pos(o) := match o {
-    Bin{_, a, _} -> arg(a, 0)
-  | Mov{a} -> arg(a, 0)
-  | _ -> arg(o, 0)
-}
+export pos(Bin{_, a, _}) := arg(a, 0)
+pos(Mov{a}) := arg(a, 0)
+pos(o) := arg(o, 0)
 
 # the type of the operand o, which is read. own and &mut are moved.
-vasm_use(st, o) := match o {
-    Imm{at, n} -> if (typeof(n) == 'int) Lit{n} else if (n == true or n == false) Bool{}
-        else fail(at, 'type, f"{arg(n, 0)} is out of the range of a literal, -32768 to 32767; make it with << and |")
-  | Str{_, _} -> Ref{'shr, 'static, Arr{U8{}}}
-  | Sym{_, _} -> Val{}
-  | Reg{at, x} -> {
-        t := type_of(at, x)
-        need_init(at, st, x)
-        if (moves(t)) {
-            no_loans(at, st, x, "moved")
-            set_status(st, x, Moved{at})
-        }
-        t
+vasm_use(st, Imm{at, n}) := if (typeof(n) == 'int) Lit{n} else if (n == true or n == false) Bool{}
+    else fail(at, 'type, f"{arg(n, 0)} is out of the range of a literal, -32768 to 32767; make it with << and |")
+vasm_use(st, Str{_, _}) := Ref{'shr, 'static, Arr{U8{}}}
+vasm_use(st, Sym{_, _}) := Val{}
+vasm_use(st, Reg{at, x}) := {
+    t := type_of(at, x)
+    need_init(at, st, x)
+    if (moves(t)) {
+        no_loans(at, st, x, "moved")
+        set_status(st, x, Moved{at})
     }
+    t
 }
 
 # the type of the contents of the pointer p, to read (write is false) or write
@@ -481,21 +471,19 @@ get(at, st, p, f) := {
 }
 
 # the type of the place a (*p, p[i] or p.f) of swap, which is read and written
-place(st, a) := match a {
-    Load{at, p} -> cell(at, st, p, true)
-  | Index{at, p, i} -> {
-        if (type_of(at, p) == Val{}) fail(at, 'type, f"{symname(p)} is val; write {symname(p)}[i] = v")
-        elem(at, st, p, i, true)
-    }
-  | Get{at, p, f} -> {
-        t := type_of(at, p)
-        if (head(t) == 'Named) {
-            need_field(at, st, p, f)
-            field_type(at, arg(t, 0), f)
-        } else field_type(at, struct_of(at, st, p, true), f)
-    }
-  | _ -> fail(arg(a, 0), 'type, "the first argument of swap is a place: *p, p[i] or p.f")
+place(st, Load{at, p}) := cell(at, st, p, true)
+place(st, Index{at, p, i}) := {
+    if (type_of(at, p) == Val{}) fail(at, 'type, f"{symname(p)} is val; write {symname(p)}[i] = v")
+    elem(at, st, p, i, true)
 }
+place(st, Get{at, p, f}) := {
+    t := type_of(at, p)
+    if (head(t) == 'Named) {
+        need_field(at, st, p, f)
+        field_type(at, arg(t, 0), f)
+    } else field_type(at, struct_of(at, st, p, true), f)
+}
+place(st, a) := fail(arg(a, 0), 'type, "the first argument of swap is a place: *p, p[i] or p.f")
 is_place(a) := member(head(a), ['Load, 'Index, 'Get])
 
 # a parameter type pt of a function matches an argument type t.
@@ -876,25 +864,23 @@ table.set(builtins, 'mexpr, Sig{[], [Val{}, Val{}], Val{}})
 table.set(builtins, 'intern, Sig{[], [Val{}], Val{}})
 table.set(builtins, 'symname, Sig{[], [Val{}], Val{}})
 
-check_fn(d) := match d {
-    Fn{at, f, rs, ps, ret, body} -> {
-        if (table.get(builtins, f, none) != none) fail(at, 'type, f"{symname(f)} is a built-in function")
-        vasm_info = table.new()
-        regions = rs
-        fn_regions = rs
-        ret_type = ret
-        each(r -> {
-            given := list.any(p -> head(arg(p, 2)) == 'Ref and arg(arg(p, 2), 1) == r, ps)
-            if (not given) fail(at, 'region, f"region {symname(r)} is not given by a parameter")
-        }, rs)
-        type_ok(at, ret)
-        st := table.new()
-        each((Param{pat, x, t}) -> declare(pat, st, x, t, true), ps)
-        block(body, st)
-        if (not dead(st)) {
-            if (ret != Unit{}) fail(at, 'type, f"{symname(f)} can end without returning {show_type(ret)}")
-            leak_all(at, st)
-        }
+check_fn(Fn{at, f, rs, ps, ret, body}) := {
+    if (table.get(builtins, f, none) != none) fail(at, 'type, f"{symname(f)} is a built-in function")
+    vasm_info = table.new()
+    regions = rs
+    fn_regions = rs
+    ret_type = ret
+    each(r -> {
+        given := list.any(p -> head(arg(p, 2)) == 'Ref and arg(arg(p, 2), 1) == r, ps)
+        if (not given) fail(at, 'region, f"region {symname(r)} is not given by a parameter")
+    }, rs)
+    type_ok(at, ret)
+    st := table.new()
+    each((Param{pat, x, t}) -> declare(pat, st, x, t, true), ps)
+    block(body, st)
+    if (not dead(st)) {
+        if (ret != Unit{}) fail(at, 'type, f"{symname(f)} can end without returning {show_type(ret)}")
+        leak_all(at, st)
     }
 }
 
@@ -906,20 +892,18 @@ reaches(target, s, seen) := list.any((Field{_, _, t}) -> if (head(t) == 'Named) 
 } else false, arg(table.get(structs, s, none), 2))
 
 # a field is an integer, bool, a struct or own, and does not borrow
-check_struct(d) := match d {
-    Struct{at, s, fs} -> {
-        if (arg(table.get(structs, s, none), 0) != at) fail(at, 'type, f"struct {symname(s)} is already defined")
-        regions = []
-        fn_regions = []
-        names := []
-        each((Field{fat, x, t}) -> {
-            if (member(x, names)) fail(fat, 'type, f"field {symname(x)} is declared twice")
-            names = x :: names
-            if (head(t) == 'Ref) fail(fat, 'type, f"field {symname(x)} is {show_type(t)}; a field does not borrow")
-            type_ok(fat, t)
-        }, fs)
-        if (reaches(s, s, [s])) fail(at, 'type, f"struct {symname(s)} contains itself")
-    }
+check_struct(Struct{at, s, fs}) := {
+    if (arg(table.get(structs, s, none), 0) != at) fail(at, 'type, f"struct {symname(s)} is already defined")
+    regions = []
+    fn_regions = []
+    names := []
+    each((Field{fat, x, t}) -> {
+        if (member(x, names)) fail(fat, 'type, f"field {symname(x)} is declared twice")
+        names = x :: names
+        if (head(t) == 'Ref) fail(fat, 'type, f"field {symname(x)} is {show_type(t)}; a field does not borrow")
+        type_ok(fat, t)
+    }, fs)
+    if (reaches(s, s, [s])) fail(at, 'type, f"struct {symname(s)} contains itself")
 }
 
 # check_with(m, imports) checks m, whose functions may call the functions and use the structs of imports, a list of

@@ -70,25 +70,23 @@ x64_call(emit, number, args, d) := {
     if (d != none) emit(I{'mov, [D{d}, U{x64_reg_number}]})
 }
 
-export select_x64(emit, name, args, d) := match name {
-    'write -> x64_call(emit, x64_write, args, d)
-  | 'read -> x64_call(emit, x64_read, args, d)
-  | 'open -> x64_call(emit, x64_open, append(args, [K{linux_o_rdonly}]), d)
-  | 'create -> x64_call(emit, x64_open, append(args, [K{linux_o_create}, K{linux_mode}]), d)
-  | 'close -> x64_call(emit, x64_close, args, d)
-  | 'exit -> x64_call(emit, x64_exit, args, d)
-  | 'grow -> x64_call(emit, x64_brk, args, d)
-  | 'args -> {
-        emit(I{'mov, [D{d}, U{x64_reg_frame}]})
-        emit(I{'add, [DU{d}, K{x64_frame_to_args}, ID{x64_reg_flags}]})
-    }
-  | 'abort -> {
-        emit(I{'mov, [D{x64_reg_number}, K{x64_exit_group}]})
-        emit(I{'mov, [D{x64_reg_args[0]}, K{abort_status}]})
-        emit(I{'syscall, [IU{x64_reg_number}, IU{x64_reg_args[0]}, ID{x64_reg_number}, ID{x64_reg_rcx}, ID{x64_reg_r11}]})
-        emit(I{'ud2, []})
-    }
-  | _ -> panic(f"os.select_x64: the service {symname(name)} is not known")
+export select_x64(emit, 'write, args, d) := x64_call(emit, x64_write, args, d)
+select_x64(emit, 'read, args, d) := x64_call(emit, x64_read, args, d)
+select_x64(emit, 'open, args, d) := x64_call(emit, x64_open, append(args, [K{linux_o_rdonly}]), d)
+select_x64(emit, 'create, args, d) := x64_call(emit, x64_open, append(args, [K{linux_o_create}, K{linux_mode}]), d)
+select_x64(emit, 'close, args, d) := x64_call(emit, x64_close, args, d)
+select_x64(emit, 'exit, args, d) := x64_call(emit, x64_exit, args, d)
+select_x64(emit, 'grow, args, d) := x64_call(emit, x64_brk, args, d)
+select_x64(emit, 'args, args, d) := {
+    emit(I{'mov, [D{d}, U{x64_reg_frame}]})
+    emit(I{'add, [DU{d}, K{x64_frame_to_args}, ID{x64_reg_flags}]})
 }
+select_x64(emit, 'abort, args, d) := {
+    emit(I{'mov, [D{x64_reg_number}, K{x64_exit_group}]})
+    emit(I{'mov, [D{x64_reg_args[0]}, K{abort_status}]})
+    emit(I{'syscall, [IU{x64_reg_number}, IU{x64_reg_args[0]}, ID{x64_reg_number}, ID{x64_reg_rcx}, ID{x64_reg_r11}]})
+    emit(I{'ud2, []})
+}
+select_x64(emit, name, args, d) := panic(f"os.select_x64: the service {symname(name)} is not known")
 
 }
