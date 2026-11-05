@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vasmc | hex-to-compiler project</title>
+<link rel="alternate" hreflang="ja" href="../../ja/reference/vasmc.html">
+<link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+<header class="site-header"><div class="inner">
+<a class="logo" href="../index.html"><span class="brand"><b>hex-to-compiler <i>project</i></b><small>A compiler that pulls itself up by its bootstraps.</small></span></a>
+<nav class="site-nav">
+<a href="../index.html">Overview</a>
+<a href="../tutorial/index.html">Tutorial</a>
+<a class="here" href="../reference/index.html">Reference</a>
+<a href="../implementation/index.html">Implementation</a>
+<a href="https://github.com/nineties/hex-to-compiler">GitHub</a>
+<a class="lang-switch" lang="ja" hreflang="ja" href="../../ja/reference/vasmc.html">日本語</a>
+</nav>
+</div></header>
+<div class="layout">
+<nav class="toc" aria-label="Reference contents"><details open><summary>Reference contents</summary>
+<h2>Reference</h2>
+<ol>
+<li><a href="index.html">Contents</a></li>
+<li><a href="syntax.html">Syntax</a></li>
+<li><a href="values.html">Values, patterns, M-expressions</a></li>
+<li><a href="grammar.html">Grammar declarations</a></li>
+<li><a href="builtins.html">Builtin functions</a></li>
+<li><a href="library.html">Libraries</a></li>
+<li><a href="vasm.html">vasm</a></li>
+<li><a href="native.html">native</a></li>
+<li><a class="here" href="vasmc.html">vasmc</a></li>
+</ol></details></nav>
+<main>
+<h1>vasmc</h1>
+<p class="lead"><code>planck/vasmc.pk</code> compiles <a href="vasm.html">vasm</a> and <a href="native.html">native</a> source files to executable files for Linux. It checks the program, lowers it, selects instructions for a machine, and writes the executable file. It needs no assembler or linker of another system.</p>
+
+<h2>Source files and targets</h2>
+<p>A file whose name ends in <code>.native</code> is written in native and is expanded to vasm first. Any other file is written in vasm. An error is written as <code>file:line:column: message</code>, with the position in the source file, and stops the compilation.</p>
+<p>A target is a machine. <code>x86_64</code> is the one that exists, and the default when no target is given. Everything up to the choice of instructions is the same for every target except for the width of a word; the part of a machine comes after the choice of instructions. A system call is made by the part of the operating system of the target, so a program does not name it.</p>
+
+<h2>One file to one executable file</h2>
+<pre>planck0 planck/vasmc.pk &lt;source&gt; &lt;output&gt; [&lt;target&gt;]</pre>
+<p>The source must have the function <code>main</code>, which takes no arguments. Its result is the exit status of the program.</p>
+
+<h2>Units</h2>
+<p>A program can be split in several source files and compiled one by one. The result of compiling a file apart is a <em>unit file</em>. It holds the lowered functions of the file and its <em>interface</em>: the structs and the functions of the file, with the bodies left out. It holds no machine code, so the instructions are chosen when units are joined, once for the whole program.</p>
+<pre>planck0 planck/vasmc.pk unit &lt;source&gt; &lt;output&gt; &lt;target&gt; [&lt;import&gt; ...]
+planck0 planck/vasmc.pk link &lt;output&gt; &lt;target&gt; &lt;unit&gt; ...</pre>
+<ul>
+<li><code>unit</code> compiles one source file to the unit file <code>output</code>. Each <code>import</code> is a unit file. The functions and the structs of the imports can be used in the source as if they were declared in it; they are checked against the interfaces. A source file used for a unit need not have <code>main</code>.</li>
+<li><code>link</code> joins the unit files in the order given into the executable file <code>output</code>. Exactly one of them has the function <code>main</code>, which takes no arguments.</li>
+<li>A unit file is made for the width of a word of its target, and is joined only for a target of the same width. Two units cannot define the same function or struct.</li>
+<li>The imports of an import are not imported: a unit uses only the items of the unit files named in its own command.</li>
+<li>The program that is joined from units behaves as the program that is made from all the sources at once.</li>
+</ul>
+<p>In the example, <code>lib.native</code> has no <code>main</code>, and <code>main.native</code> uses its functions and its struct.</p>
+<div class="example">
+<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/examples/units/lib.native#L1-L14">planck/examples/units/lib.native</a></p>
+<pre># a unit with no main: main.native calls these functions and uses the struct
+struct Pair { a: i64, b: i64 }
+
+fn twice(x: i64) -&gt; i64 {
+    x + x
+}
+
+fn make(a: i64, b: i64) -&gt; Pair {
+    Pair{a: a, b: b}
+}
+
+fn sum(p: Pair) -&gt; i64 {
+    p.a + p.b
+}</pre>
+</div>
+<div class="example">
+<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/examples/units/main.native#L1-L5">planck/examples/units/main.native</a></p>
+<pre># compiled apart from lib.native: twice, make, sum and Pair are in the unit of lib.native; the status is 10
+fn main() -&gt; i64 {
+    let p = make(twice(3), 4)
+    sum(p)
+}</pre>
+</div>
+<pre>planck0 planck/vasmc.pk unit planck/examples/units/lib.native lib.unit x86_64
+planck0 planck/vasmc.pk unit planck/examples/units/main.native main.unit x86_64 lib.unit
+planck0 planck/vasmc.pk link prog x86_64 lib.unit main.unit
+./prog; echo $?
+10</pre>
+
+<h2>Units in native</h2>
+<p>In native, the functions and the structs of the imports are used as in the same file. <code>native_expand.expand_with(m, imports)</code> and <code>native_expand.expand_all_with(m, imports)</code> take them as a list of items; <code>expand_all_with</code> gives the errors with the module, as <code>native_expand.expand_all</code> does. <code>imports</code> is the interface of a unit (<code>vasm_unit.iface</code> of a vasm module). The expanded module does not hold them.</p>
+
+<nav class="pager"><a class="prev" href="native.html"><small>Previous</small>native</a></nav>
+</main>
+</div>
+<footer><div class="inner"><a href="https://github.com/nineties/hex-to-compiler">github.com/nineties/hex-to-compiler</a></div></footer>
+<script src="../../assets/page.js"></script>
+</body>
+</html>

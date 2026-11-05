@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vasmc | hex-to-compiler project</title>
+<link rel="alternate" hreflang="en" href="../../en/reference/vasmc.html">
+<link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+<header class="site-header"><div class="inner">
+<a class="logo" href="../index.html"><span class="brand"><b>hex-to-compiler <i>project</i></b><small>自分自身をブートストラップする処理系</small></span></a>
+<nav class="site-nav">
+<a href="../index.html">概要</a>
+<a href="../tutorial/index.html">チュートリアル</a>
+<a class="here" href="../reference/index.html">リファレンス</a>
+<a href="../implementation/index.html">処理系の実装</a>
+<a href="https://github.com/nineties/hex-to-compiler">GitHub</a>
+<a class="lang-switch" lang="en" hreflang="en" href="../../en/reference/vasmc.html">English</a>
+</nav>
+</div></header>
+<div class="layout">
+<nav class="toc" aria-label="リファレンスの目次"><details open><summary>リファレンスの目次</summary>
+<h2>リファレンス</h2>
+<ol>
+<li><a href="index.html">目次</a></li>
+<li><a href="syntax.html">構文</a></li>
+<li><a href="values.html">値・パターン・M式</a></li>
+<li><a href="grammar.html">文法の宣言</a></li>
+<li><a href="builtins.html">組み込み関数</a></li>
+<li><a href="library.html">ライブラリ</a></li>
+<li><a href="vasm.html">vasm</a></li>
+<li><a href="native.html">native</a></li>
+<li><a class="here" href="vasmc.html">vasmc</a></li>
+</ol></details></nav>
+<main>
+<h1>vasmc</h1>
+<p class="lead"><code>planck/vasmc.pk</code> は <a href="vasm.html">vasm</a> と <a href="native.html">native</a> のソースファイルを Linux の実行ファイルにします。プログラムを検査し、下の形に落とし、機械の命令を選び、実行ファイルを書きます。ほかの系のアセンブラやリンカは要りません。</p>
+
+<h2>ソースファイルと対象</h2>
+<p>名前が <code>.native</code> で終わるファイルは native で書かれていて、先に vasm に展開されます。それ以外のファイルは vasm で書かれています。誤りは <code>file:line:column: message</code> の形で、位置はソースファイルのものとして書かれ、コンパイルは止まります。</p>
+<p>対象は機械です。今ある対象は <code>x86_64</code> で、対象を指定しなければこれになります。命令の選択までは、語の幅を除いてどの対象でも同じで、機械ごとの部分は命令の選択より後にあります。システムコールは対象の OS の部分が呼ぶので、プログラムには書きません。</p>
+
+<h2>1つのファイルから1つの実行ファイル</h2>
+<pre>planck0 planck/vasmc.pk &lt;source&gt; &lt;output&gt; [&lt;target&gt;]</pre>
+<p>ソースには引数を取らない関数 <code>main</code> が必要です。その結果がプログラムの終了コードになります。</p>
+
+<h2>単位</h2>
+<p>プログラムを複数のソースファイルに分けて、1つずつコンパイルできます。ファイルを単独でコンパイルした結果が<em>単位ファイル</em>です。単位ファイルは、そのファイルの下の形に落とした関数と<em>インタフェース</em>（構造体と関数の宣言。本体は除く）を持ちます。機械語は持たないので、命令の選択は単位を結合するときに、プログラム全体に対して1回行われます。</p>
+<pre>planck0 planck/vasmc.pk unit &lt;source&gt; &lt;output&gt; &lt;target&gt; [&lt;import&gt; ...]
+planck0 planck/vasmc.pk link &lt;output&gt; &lt;target&gt; &lt;unit&gt; ...</pre>
+<ul>
+<li><code>unit</code> は1つのソースファイルを単位ファイル <code>output</code> にします。<code>import</code> は単位ファイルです。import の関数と構造体は、ソースの中で宣言されているかのように使え、インタフェースに対して検査されます。単位にするソースに <code>main</code> は要りません。</li>
+<li><code>link</code> は単位ファイルを与えた順に結合して実行ファイル <code>output</code> にします。単位のうちちょうど1つが、引数を取らない関数 <code>main</code> を持ちます。</li>
+<li>単位ファイルは対象の語の幅に合わせて作られ、同じ幅の対象にだけ結合できます。2つの単位が同じ関数や構造体を定義することはできません。</li>
+<li>import の import は取り込まれません。単位が使えるのは、自分のコマンドに挙げた単位ファイルの項目だけです。</li>
+<li>単位から結合したプログラムは、すべてのソースを一度にコンパイルしたプログラムと同じに動きます。</li>
+</ul>
+<p>例では、<code>lib.native</code> に <code>main</code> がなく、<code>main.native</code> がその関数と構造体を使います。</p>
+<div class="example">
+<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/examples/units/lib.native#L1-L14">planck/examples/units/lib.native</a></p>
+<pre># a unit with no main: main.native calls these functions and uses the struct
+struct Pair { a: i64, b: i64 }
+
+fn twice(x: i64) -&gt; i64 {
+    x + x
+}
+
+fn make(a: i64, b: i64) -&gt; Pair {
+    Pair{a: a, b: b}
+}
+
+fn sum(p: Pair) -&gt; i64 {
+    p.a + p.b
+}</pre>
+</div>
+<div class="example">
+<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/examples/units/main.native#L1-L5">planck/examples/units/main.native</a></p>
+<pre># compiled apart from lib.native: twice, make, sum and Pair are in the unit of lib.native; the status is 10
+fn main() -&gt; i64 {
+    let p = make(twice(3), 4)
+    sum(p)
+}</pre>
+</div>
+<pre>planck0 planck/vasmc.pk unit planck/examples/units/lib.native lib.unit x86_64
+planck0 planck/vasmc.pk unit planck/examples/units/main.native main.unit x86_64 lib.unit
+planck0 planck/vasmc.pk link prog x86_64 lib.unit main.unit
+./prog; echo $?
+10</pre>
+
+<h2>native の単位</h2>
+<p>native では、import の関数と構造体を同じファイルのもののように使えます。<code>native_expand.expand_with(m, imports)</code> と <code>native_expand.expand_all_with(m, imports)</code> に項目の並びとして渡します。<code>expand_all_with</code> は <code>native_expand.expand_all</code> と同じく、誤りをモジュールとあわせて返します。<code>imports</code> は単位のインタフェース（vasm のモジュールの <code>vasm_unit.iface</code>）です。展開されたモジュールには import の項目は入りません。</p>
+
+<nav class="pager"><a class="prev" href="native.html"><small>前のページ</small>native</a></nav>
+</main>
+</div>
+<footer><div class="inner"><a href="https://github.com/nineties/hex-to-compiler">github.com/nineties/hex-to-compiler</a></div></footer>
+<script src="../../assets/page.js"></script>
+</body>
+</html>
