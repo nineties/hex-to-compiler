@@ -126,10 +126,45 @@ Def{peg_tok_keyword, Lambda{Tuple{p}, Do{
         q},
         Apply{peg_fail, Tuple{p}}}}}}
 
+" character class: [set] or [^set]. The blanks at both ends of the set are not in it. "
+Def{peg_tok_class, Lambda{Tuple{p}, Do{
+    Set{p, Apply{peg_skip_ws, Tuple{p}}},
+    Def{q, p},
+    Def{neg, false},
+    Def{start, 0},
+    Def{endp, 0},
+    Def{spec, ""},
+    Def{c, 0},
+    Def{go, true},
+    If{Apply{_ne, Tuple{Apply{peg_char_at, Tuple{p}}, 91}}, Apply{peg_fail, Tuple{p}}, Do{
+        Set{q, Apply{peg_inc, Tuple{p}}},
+        If{Apply{_eq, Tuple{Apply{peg_char_at, Tuple{q}}, 94}}, Do{Set{neg, true}, Set{q, Apply{peg_inc, Tuple{q}}}}, none},
+        While{Apply{peg_is_blank, Tuple{Apply{peg_char_at, Tuple{q}}}}, Set{q, Apply{peg_inc, Tuple{q}}}},
+        Set{start, q},
+        Set{endp, q},
+        While{go, Do{
+            Set{c, Apply{peg_char_at, Tuple{q}}},
+            If{Apply{_lt, Tuple{c, 0}}, Set{go, false},
+            If{Apply{_eq, Tuple{c, 93}}, Set{go, false},
+            If{Apply{_eq, Tuple{c, 92}},
+                If{Apply{_lt, Tuple{Apply{peg_char_at, Tuple{Apply{peg_inc, Tuple{q}}}}, 0}}, Set{go, false}, Do{
+                    Set{q, Apply{_add, Tuple{q, 2}}},
+                    Set{endp, q}}},
+            If{Apply{peg_is_blank, Tuple{c}}, Set{q, Apply{peg_inc, Tuple{q}}}, Do{
+                Set{q, Apply{peg_inc, Tuple{q}}},
+                Set{endp, q}}}}}}}},
+        Set{spec, Apply{substr, Tuple{peg_src, start, endp}}},
+        If{If{Apply{_eq, Tuple{Apply{peg_char_at, Tuple{q}}, 93}}, Apply{_gt, Tuple{endp, start}}, false},
+            If{Apply{_eq, Tuple{Apply{peg_charset, Tuple{spec}}, none}}, Apply{peg_fail, Tuple{p}}, Do{
+                Set{peg_pv, Apply{mexpr, Tuple{If{neg, Quote{NoneOf}, Quote{OneOf}}, Tuple{spec}}}},
+                Apply{peg_inc, Tuple{q}}}},
+            Apply{peg_fail, Tuple{p}}}}}}}}
+
 Apply{_define_rule, Tuple{Quote{ident}, peg_tok_ident}}
 Apply{_define_rule, Tuple{Quote{integer}, peg_tok_int}}
 Apply{_define_rule, Tuple{Quote{string}, peg_tok_str}}
 Apply{_define_rule, Tuple{Quote{keyword}, peg_tok_keyword}}
+Apply{_define_rule, Tuple{Quote{charclass}, peg_tok_class}}
 
 " === Actions === "
 
@@ -1323,6 +1358,8 @@ Apply{_define_rule, Tuple{Quote{g_suffix}, Quote{Choice{
 Apply{_define_rule, Tuple{Quote{g_primary}, Quote{Choice{
     string,
     keyword,
+    charclass,
+    Act{Seq{".", Not{Tight{"."}}}, Lambda{Tuple{Tuple{_, _}}, Do{Quote{Any{}}}}},
     Act{Seq{Key{"nospace"}, Tight{"("}, string, ")"},
         Lambda{Tuple{Tuple{_, _, s, _}}, Do{QuasiQuote{Tight{UnQuote{s}}}}}},
     Act{Seq{Key{"delimited"}, Tight{"("}, g_choice, ",", g_choice, ")"},
@@ -1395,6 +1432,8 @@ g_suffix ::= e:g_primary nospace("*") { `Many{!e} }
 
 g_primary ::= string
             | keyword
+            | charclass
+            | "." !nospace(".") { 'Any{} }
             | 'nospace nospace("(") s:string ")" { `Tight{!s} }
             | 'delimited nospace("(") e:g_choice "," s:g_choice ")" { `Delimited{!e, !s} }
             | 'delimited1 nospace("(") e:g_choice "," s:g_choice ")" { `Delimited1{!e, !s} }

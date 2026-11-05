@@ -915,6 +915,55 @@ color ::= 'blue { 2 } | ...
 check(arg(peg_parse('color, "red"), 0), 1)
 check(arg(peg_parse('color, "blue"), 0), 2)
 
+# === Any character and character classes ===
+# . is one character and [set] one character of the set. Blanks before them are skipped, and the value is the character
+cc_two ::= a:. b:. { Tuple{a, b} }
+check(arg(peg_parse('cc_two, "xy"), 0), 'Tuple{"x", "y"})
+check(arg(peg_parse('cc_two, "  x\n y rest"), 0), 'Tuple{"x", "y"})
+check(arg(peg_parse('cc_two, "xy rest"), 1), "rest")
+check(head(arg(peg_parse('cc_two, "x"), 0)), 'SyntaxError)
+check(head(arg(peg_parse('cc_two, "x   "), 0)), 'SyntaxError)
+cc_dots ::= a:. "..." { a }
+check(arg(peg_parse('cc_dots, "x ..."), 0), "x")
+cc_digits ::= ds:[0-9]+ { ds }
+check(arg(peg_parse('cc_digits, "123 rest"), 0), 'Tuple{"1", "2", "3"})
+check(arg(peg_parse('cc_digits, "123 rest"), 1), "rest")
+check(arg(peg_parse('cc_digits, "1 2"), 0), 'Tuple{"1", "2"})
+check(head(arg(peg_parse('cc_digits, "x1"), 0)), 'SyntaxError)
+# a class is a set of characters and ranges of letters or digits
+cc_hex ::= ds:[A-Fa-f0-9_]* { ds }
+check(arg(peg_parse('cc_hex, "Fa_9g"), 0), 'Tuple{"F", "a", "_", "9"})
+# [^set] is one character that is not in the set
+cc_str ::= "\"" cs:[^"]* "\"" { cs }
+check(arg(peg_parse('cc_str, "\"ab\""), 0), 'Tuple{"a", "b"})
+check(arg(peg_parse('cc_str, "\"\""), 0), 'Tuple{})
+cc_not ::= a:[^a-c\n] { a }
+check(arg(peg_parse('cc_not, "d"), 0), "d")
+check(head(arg(peg_parse('cc_not, "b"), 0)), 'SyntaxError)
+# blanks before a character are skipped, so a blank is never the character
+check(arg(peg_parse('cc_not, "\n"), 0), 'Eof{})
+# escapes: \a \0 \] \- \\ and a blank. Blanks at both ends of the set are not in it
+cc_esc ::= a:[\]\-\\]+ { a }
+check(arg(peg_parse('cc_esc, "]-\\x"), 0), 'Tuple{"]", "-", "\\"})
+cc_bell ::= a:[\a\0] { a }
+check(arg(peg_parse('cc_bell, "\a"), 0), "\a")
+check(head(arg(peg_parse('cc_bell, "x"), 0)), 'SyntaxError)
+cc_sp ::= a:nospace("<") b:[\ x]+ { b }
+check(arg(peg_parse('cc_sp, "<x x"), 0), 'Tuple{"x", "x"})
+# a letter, a digit or _ before - makes a range. Other characters are themselves
+cc_sym ::= a:[+-*]+ { a }
+check(arg(peg_parse('cc_sym, "+-*/"), 0), 'Tuple{"+", "-", "*"})
+# a class in a sequence with other items and in a choice
+cc_id ::= a:[a-z] bs:[a-z0-9]* { Tuple{a, bs} } | "@" { 0 }
+check(arg(peg_parse('cc_id, "x12"), 0), 'Tuple{"x", Tuple{"1", "2"}})
+check(arg(peg_parse('cc_id, "@"), 0), 0)
+# invalid sets are syntax errors
+check(head(tree("cc_bad ::= [c-a]")), 'SyntaxError)
+check(head(tree("cc_bad ::= [a-]")), 'SyntaxError)
+check(head(tree("cc_bad ::= []")), 'SyntaxError)
+check(head(tree("cc_bad ::= [ ]")), 'SyntaxError)
+check(head(tree("cc_bad ::= [abc")), 'SyntaxError)
+
 # === Text of a rule: name{| text |} ===
 # the rule reads the text when the expression is parsed, and the value is a constant
 check(num{| 12 |}, 12)
