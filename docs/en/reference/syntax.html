@@ -31,6 +31,7 @@
 <li><a href="library.html">Libraries</a></li>
 <li><a href="vasm.html">vasm</a></li>
 <li><a href="native.html">native</a></li>
+<li><a href="vasmc.html">vasmc</a></li>
 </ol></details></nav>
 <main>
 <h1>Syntax</h1>
@@ -324,6 +325,24 @@ outer.inner.g(3)</pre>
 <h3>Adding definitions from outside a module</h3>
 <p>A case cannot be added to a function from outside a module by writing <code>m.f(p, ...) = e</code>. To let the outside add cases, <code>export</code> a function that adds them inside the module.</p>
 
+<h3 id="test">test</h3>
+<p><code>test { ... }</code> can be written directly in the body of a module. <code>test { e }</code> is sugar for <code>if (_testing) { e }</code>, and the variable <code>_testing</code> is <code>false</code> at first. Nothing runs when a library is loaded as usual. <code>planck0 tools/test.pk &lt;library&gt; ...</code> sets <code>_testing</code> to <code>true</code> and then loads the libraries, and the expressions in <code>test</code> run. The <code>test</code> blocks of the libraries that a loaded library uses run too.</p>
+<p>The inside of <code>test</code> has the scope of the module body, so the functions that are not marked <code>export</code> can be called. <code>test</code> runs while the body is being evaluated, so it sees the variables defined before it, and <code>m</code> is not defined yet. <code>assert(c, msg)</code> writes <code>msg</code> and stops with status 1 unless <code>c</code> is true. The <code>{ ... }</code> of <code>test</code> is an ordinary block, so one block holds at most 64 expressions. Split <code>test</code> when there are more. <code>test</code> is a keyword only directly in the body of a module, and is an ordinary name elsewhere.</p>
+<pre>module bitset {
+    export new(n) := i32_array(n / 30 + 1)
+    helper(i) := i / 30
+    export add(s, i) := {
+        w := helper(i)
+        s[w] = bit_or(s[w], bit_shl(1, i % 30))
+    }
+    test {
+        assert(helper(65) == 2, &quot;helper&quot;)
+        s := new(100)
+        add(s, 3)
+        assert(s[0] == 8, &quot;add&quot;)
+    }
+}</pre>
+
 <h2 id="names">Names the sugar calls</h2>
 <p>The functions a piece of sugar expands to have a name starting with <code>_</code>, and there is no function of the same name without <code>_</code>. A variable named <code>add</code> or <code>index_get</code> in a program therefore does not change the meaning of <code>a + b</code> or <code>a[i]</code>.</p>
 <table>
@@ -346,7 +365,7 @@ outer.inner.g(3)</pre>
 <tr><td>plain array</td><td>integer</td><td><code>plain_get(a, i)</code></td><td><code>plain_set(a, i, e)</code></td></tr>
 <tr><td>string</td><td>integer</td><td>the character at <code>i</code>, a string of length 1</td><td>stops</td></tr>
 <tr><td>table</td><td>any value</td><td><code>table_get(a, i, none)</code>: <code>none</code> for a missing key</td><td><code>table_set(a, i, e)</code></td></tr>
-<tr><td>vector (added in front by <code>use("vector")</code>)</td><td>integer</td><td><code>vec_get(a, i)</code></td><td><code>vec_set(a, i, e)</code></td></tr>
+<tr><td>vector (added in front by <code>use("vector")</code>)</td><td>integer</td><td><code>vector.get(a, i)</code></td><td><code>vector.set(a, i, e)</code></td></tr>
 <tr><td>any value</td><td>function</td><td><code>subst(a, i)</code></td><td></td></tr>
 <tr><td>list</td><td>integer</td><td>the element at <code>i</code>, counted from 0</td><td>stops</td></tr>
 <tr><td>M-expression</td><td>symbol</td><td><code>_record_get(a, i)</code>, the field</td><td>stops</td></tr>
@@ -373,10 +392,10 @@ none</pre>
 <p class="file">r_rewrite.pk</p>
 <pre class="pk"><span class="tok-name">use</span><span class="tok-op">(</span><span class="tok-str">"unparse"</span><span class="tok-op">)</span>
 <span class="tok-name">t</span> <span class="tok-op">:=</span> <span class="tok-op">'</span><span class="tok-op">(</span><span class="tok-name">x</span> <span class="tok-op">*</span> <span class="tok-num">1</span> <span class="tok-op">+</span> <span class="tok-num">0</span> <span class="tok-op">*</span> <span class="tok-name">y</span><span class="tok-op">)</span>
-<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">unparse</span><span class="tok-op">(</span><span class="tok-name">t</span><span class="tok-op">[</span><span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-op">'</span><span class="tok-name">_mul</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">a</span><span class="tok-op">,</span> <span class="tok-num">1</span><span class="tok-op">}</span><span class="tok-op">}</span> <span class="tok-op">-&gt;</span> <span class="tok-name">a</span> <span class="tok-op">|</span> <span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-op">'</span><span class="tok-name">_mul</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-num">0</span><span class="tok-op">,</span> <span class="tok-name">_</span><span class="tok-op">}</span><span class="tok-op">}</span> <span class="tok-op">-&gt;</span> <span class="tok-num">0</span><span class="tok-op">]</span><span class="tok-op">)</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">unparse</span><span class="tok-op">.</span><span class="tok-name">text</span><span class="tok-op">(</span><span class="tok-name">t</span><span class="tok-op">[</span><span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-op">'</span><span class="tok-name">_mul</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">a</span><span class="tok-op">,</span> <span class="tok-num">1</span><span class="tok-op">}</span><span class="tok-op">}</span> <span class="tok-op">-&gt;</span> <span class="tok-name">a</span> <span class="tok-op">|</span> <span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-op">'</span><span class="tok-name">_mul</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-num">0</span><span class="tok-op">,</span> <span class="tok-name">_</span><span class="tok-op">}</span><span class="tok-op">}</span> <span class="tok-op">-&gt;</span> <span class="tok-num">0</span><span class="tok-op">]</span><span class="tok-op">)</span><span class="tok-op">)</span>
 <span class="tok-com"># with a guard: 1 * 2 is skipped and its parts are tried</span>
 <span class="tok-name">u</span> <span class="tok-op">:=</span> <span class="tok-op">'</span><span class="tok-op">(</span><span class="tok-num">1</span> <span class="tok-op">*</span> <span class="tok-num">2</span> <span class="tok-op">+</span> <span class="tok-num">3</span> <span class="tok-op">*</span> <span class="tok-num">4</span><span class="tok-op">)</span>
-<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">unparse</span><span class="tok-op">(</span><span class="tok-name">u</span><span class="tok-op">[</span><span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-op">'</span><span class="tok-name">_mul</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">a</span> <span class="tok-op">@</span> <span class="tok-name">int</span><span class="tok-op">,</span> <span class="tok-name">b</span> <span class="tok-op">@</span> <span class="tok-name">int</span><span class="tok-op">}</span><span class="tok-op">}</span> <span class="tok-kw">if</span> <span class="tok-name">a</span> <span class="tok-op">&gt;</span> <span class="tok-num">1</span> <span class="tok-op">-&gt;</span> <span class="tok-name">a</span> <span class="tok-op">*</span> <span class="tok-name">b</span><span class="tok-op">]</span><span class="tok-op">)</span><span class="tok-op">)</span></pre>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">unparse</span><span class="tok-op">.</span><span class="tok-name">text</span><span class="tok-op">(</span><span class="tok-name">u</span><span class="tok-op">[</span><span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-op">'</span><span class="tok-name">_mul</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">a</span> <span class="tok-op">@</span> <span class="tok-name">int</span><span class="tok-op">,</span> <span class="tok-name">b</span> <span class="tok-op">@</span> <span class="tok-name">int</span><span class="tok-op">}</span><span class="tok-op">}</span> <span class="tok-kw">if</span> <span class="tok-name">a</span> <span class="tok-op">&gt;</span> <span class="tok-num">1</span> <span class="tok-op">-&gt;</span> <span class="tok-name">a</span> <span class="tok-op">*</span> <span class="tok-name">b</span><span class="tok-op">]</span><span class="tok-op">)</span><span class="tok-op">)</span></pre>
 <p class="label">Output</p>
 <pre class="out">&quot;x + 0&quot;
 &quot;1 * 2 + 12&quot;</pre>
@@ -432,7 +451,7 @@ g</pre>
 
 <h2>Lexical rules</h2>
 <ul>
-<li>Identifiers are <code>[A-Za-z_][A-Za-z0-9_]*</code> except the reserved words<br><code>if else while and or handle with perform match record for in return break continue fun</code><br>and the literals <code>true false none</code>.</li>
+<li>Identifiers are <code>[A-Za-z_][A-Za-z0-9_]*</code> except the reserved words<br><code>if else while and or handle with perform match record for in return break continue fun module export</code><br>and the literals <code>true false none</code>.</li>
 <li>Integers are decimal (<code>10</code>, <code>-3</code>), <code>0x1f</code>, <code>0o17</code> or <code>0b101</code>.</li>
 <li>Floats are decimal with a point, as <code>1.5</code>.</li>
 <li>Strings are <code>"..."</code> in one line with the escapes <code>\a \b \t \n \v \f \r \" \' \\</code>. <code>f"...{e}..."</code> embeds the value of the expression <code>e</code>, which may contain strings and f-strings; <code>{{</code> and <code>}}</code> are the braces themselves. A string without the prefix <code>f</code> embeds nothing.</li>

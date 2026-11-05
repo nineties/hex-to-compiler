@@ -49,6 +49,7 @@ SECTIONS = {
             ("library", "ライブラリ"),
             ("vasm", "vasm"),
             ("native", "native"),
+            ("vasmc", "vasmc"),
         ]),
         ("implementation", "処理系の実装", [
             ("index", "構成"),
@@ -86,6 +87,7 @@ SECTIONS = {
             ("library", "Libraries"),
             ("vasm", "vasm"),
             ("native", "native"),
+            ("vasmc", "vasmc"),
         ]),
         ("implementation", "Implementation", [
             ("index", "Overview"),
