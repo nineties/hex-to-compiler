@@ -31,13 +31,20 @@ Apply{table_set, Tuple{peg_reserved, "export", true}}
 Apply{table_set, Tuple{peg_reserved, "macro", true}}
 Apply{table_set, Tuple{peg_reserved, "import", true}}
 
-" identifier: [A-Za-z_][A-Za-z0-9_]* except the peg_reserved words and the f of f\"...\" "
-Def{peg_tok_ident, Lambda{Tuple{p}, Do{
+" identifier: [A-Za-z_][A-Za-z0-9_]*[?!]? except the peg_reserved words and the f of f\"...\". "
+" A ? or ! right after the name is part of it, but ! is not when = follows (x!=y is x != y). "
+" rule_name is the same without the ? and !, for the names in a grammar, where x? is an optional x. "
+Def{peg_scan_ident, Lambda{Tuple{p, suffix}, Do{
     Set{p, Apply{peg_skip_ws, Tuple{p}}},
     Def{q, Apply{peg_inc, Tuple{p}}},
     Def{name, ""},
     If{Apply{peg_is_alpha, Tuple{Apply{peg_char_at, Tuple{p}}}}, Do{
         While{Apply{peg_is_alnum, Tuple{Apply{peg_char_at, Tuple{q}}}}, Set{q, Apply{peg_inc, Tuple{q}}}},
+        If{suffix, Do{
+            Def{c, Apply{peg_char_at, Tuple{q}}},
+            If{If{Apply{_eq, Tuple{c, 63}}, true,
+                  If{Apply{_eq, Tuple{c, 33}}, Apply{_ne, Tuple{Apply{peg_char_at, Tuple{Apply{peg_inc, Tuple{q}}}}, 61}}, false}},
+                Set{q, Apply{peg_inc, Tuple{q}}}, none}}, none},
         Set{name, Apply{substr, Tuple{peg_src, p, q}}},
         If{If{Apply{table_get, Tuple{peg_reserved, name, false}}, true,
               If{Apply{_eq, Tuple{q, Apply{_add, Tuple{p, 1}}}},
@@ -46,6 +53,9 @@ Def{peg_tok_ident, Lambda{Tuple{p}, Do{
             Apply{peg_fail, Tuple{p}},
             Do{Set{peg_pv, Apply{intern, Tuple{name}}}, q}}},
         Apply{peg_fail, Tuple{p}}}}}}
+
+Def{peg_tok_ident, Lambda{Tuple{p}, Apply{peg_scan_ident, Tuple{p, true}}}}
+Def{peg_tok_rule_name, Lambda{Tuple{p}, Apply{peg_scan_ident, Tuple{p, false}}}}
 
 Def{peg_digit_value, Lambda{Tuple{c},
     If{Apply{peg_is_digit, Tuple{c}}, Apply{_sub, Tuple{c, 48}},
@@ -200,6 +210,7 @@ Def{peg_tok_class, Lambda{Tuple{p}, Do{
             Apply{peg_fail, Tuple{p}}}}}}}}
 
 Apply{_define_rule, Tuple{Quote{ident}, peg_tok_ident}}
+Apply{_define_rule, Tuple{Quote{rule_name}, peg_tok_rule_name}}
 Apply{_define_rule, Tuple{Quote{integer}, peg_tok_int}}
 Apply{_define_rule, Tuple{Quote{float}, peg_tok_float}}
 Apply{_define_rule, Tuple{Quote{string}, peg_tok_str}}
@@ -1400,7 +1411,7 @@ Def{peg_alt, Lambda{Tuple{items, act}, Do{
 Apply{_define_rule, Tuple{Quote{same}, Quote{Same{}}}}
 
 Apply{_define_rule, Tuple{Quote{syntax_decl}, Quote{
-    Act{Seq{ident, "::=", g_choice},
+    Act{Seq{rule_name, "::=", g_choice},
         Lambda{Tuple{Tuple{n, _, e}},
             Do{QuasiQuote{Apply{_define_rule, Tuple{Quote{UnQuote{n}}, Quote{UnQuote{e}}}}}}}}}}}
 
@@ -1438,7 +1449,7 @@ Apply{_define_rule, Tuple{Quote{g_primary}, Quote{Choice{
         Lambda{Tuple{Tuple{_, _, e, _, s, _}}, Do{QuasiQuote{Delimited{UnQuote{e}, UnQuote{s}}}}}},
     Act{Seq{Key{"delimited1"}, Tight{"("}, g_choice, ",", g_choice, ")"},
         Lambda{Tuple{Tuple{_, _, e, _, s, _}}, Do{QuasiQuote{Delimited1{UnQuote{e}, UnQuote{s}}}}}},
-    Act{Seq{ident, Not{Choice{"::=", Tight{":"}}}}, Lambda{Tuple{Tuple{n, _}}, Do{n}}},
+    Act{Seq{rule_name, Not{Choice{"::=", Tight{":"}}}}, Lambda{Tuple{Tuple{n, _}}, Do{n}}},
     Act{Seq{"(", g_choice, ")"}, Lambda{Tuple{Tuple{_, e, _}}, Do{e}}}}}}}
 
 " === The expressions of an action === "
@@ -1485,7 +1496,7 @@ Set{parse, Lambda{Tuple{s}, Apply{peg_parse, Tuple{Quote{toplevel}, s}}}}
 " The rules above declare themselves again, in the form that they make. "
 " A rule declared again replaces the rule that read this text. "
 
-syntax_decl ::= n:ident "::=" e:g_choice { `Apply{_define_rule, Tuple{Quote{!n}, Quote{!e}}} }
+syntax_decl ::= n:rule_name "::=" e:g_choice { `Apply{_define_rule, Tuple{Quote{!n}, Quote{!e}}} }
 
 g_choice ::= es:delimited1(g_alt, "|") { peg_choice(es) }
 
@@ -1509,7 +1520,7 @@ g_primary ::= string
             | 'nospace nospace("(") s:string ")" { `Tight{!s} }
             | 'delimited nospace("(") e:g_choice "," s:g_choice ")" { `Delimited{!e, !s} }
             | 'delimited1 nospace("(") e:g_choice "," s:g_choice ")" { `Delimited1{!e, !s} }
-            | n:ident !("::=" | nospace(":")) { n }
+            | n:rule_name !("::=" | nospace(":")) { n }
             | "(" e:g_choice ")" { e }
 
 " === The rules of planck === "
@@ -2320,6 +2331,6 @@ peg_def_run(a, rest) := {
     if (arity(stmts) == 1) arg(stmts, 0) else mexpr('Do, stmts)
 }
 
-def_arm ::= &(postfix (":=" | 'if)) f:ident nospace("(") ps:delimited(pattern, ",") ")" g:('if ternary)? ":=" e:expr { peg_def_arm(f, ps, g, e) }
+def_arm ::= &(postfix (":=" | 'if)) f:ident nospace("(") ps:delimited(pattern, ",") ")" g:('if or_expr)? ":=" e:expr { peg_def_arm(f, ps, g, e) }
 
 def_run ::= a:special_arm rest:(";"? def_arm)* { peg_def_run(a, rest) }
