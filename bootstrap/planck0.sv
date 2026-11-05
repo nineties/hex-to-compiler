@@ -2306,6 +2306,25 @@
     (return (fixnum (sdiv (fixnum_to_int a) (fixnum_to_int b))))
     )
 
+; signed division rounded toward minus infinity
+(fun fdiv (a b)
+    (var q 0)
+    (= q (sdiv a b))
+    (if (!= (- a (* b q)) 0) (do
+        (if (< a 0) (if (>= b 0) (= q (- q 1))))
+        (if (>= a 0) (if (< b 0) (= q (- q 1))))
+        ))
+    (return q)
+    )
+
+; a // b rounds the quotient toward minus infinity, and a % b is the remainder that goes with it
+(fun p_quo (a b)
+    (check_int "_quo" a)
+    (check_int "_quo" b)
+    (if (== b 1) (runtime_error "division by zero: " a))
+    (return (fixnum (fdiv (fixnum_to_int a) (fixnum_to_int b))))
+    )
+
 (fun p_mod (a b)
     (var x 0)
     (var y 0)
@@ -2314,7 +2333,7 @@
     (if (== b 1) (runtime_error "division by zero: " a))
     (= x (fixnum_to_int a))
     (= y (fixnum_to_int b))
-    (return (fixnum (- x (* y (sdiv x y)))))
+    (return (fixnum (- x (* y (fdiv x y)))))
     )
 
 (fun p_lt (a b)
@@ -2841,6 +2860,7 @@
     (defprim "_sub"     2 p_sub     PRIM_NATIVE)
     (defprim "_mul"     2 p_mul     PRIM_NATIVE)
     (defprim "_div"     2 p_div     PRIM_NATIVE)
+    (defprim "_quo"     2 p_quo     PRIM_NATIVE)
     (defprim "_mod"     2 p_mod     PRIM_NATIVE)
     (defprim "_float"   1 p_float   PRIM_NATIVE)
     (defprim "_lt"      2 p_lt      PRIM_NATIVE)
