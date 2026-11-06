@@ -6,6 +6,9 @@
 import mem
 import obj
 import big
+import flt
+import num
+import hsh
 
 fn bool_val[r](h: &r [u32], c: bool) -> i64 {
     if c { return g(h, 2) }
@@ -58,8 +61,11 @@ fn exec_arith[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], op: i64, w
         var sc: i64
         sc = c
         if sc > 127 { sc = sc - 256 }
-        if not is_integer(h, x) { die("ADDI: not an integer") }
-        p(rs, base + a, int_add(h, st, x, small(sc), 0))
+        if is_int(x) {
+            p(rs, base + a, int_from_i64(h, st, int_of(x) + sc))
+        } else {
+            p(rs, base + a, num_arith(h, st, 37, x, small(sc)))
+        }
         return
     }
     let y = g(rs, base + c)
@@ -71,47 +77,18 @@ fn exec_arith[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], op: i64, w
         p(rs, base + a, bool_val(h, not equal(h, x, y)))
         return
     }
-    if not is_integer(h, x) { die("arithmetic: not an integer") }
-    if not is_integer(h, y) { die("arithmetic: not an integer") }
     if op == 43 {
-        p(rs, base + a, bool_val(h, cmp_int(h, x, y) < 0))
+        p(rs, base + a, bool_val(h, num_lt(h, x, y)))
         return
     }
     if op == 44 {
-        p(rs, base + a, bool_val(h, cmp_int(h, x, y) >= 0))
+        p(rs, base + a, bool_val(h, num_ge(h, x, y)))
         return
     }
-    if (op == 40 or op == 41) and y == 1 { die("division by zero") }
-    if is_int(x) and is_int(y) {
-        let m = int_of(x)
-        let n = int_of(y)
-        if op == 37 {
-            p(rs, base + a, int_from_i64(h, st, m + n))
-        } else if op == 38 {
-            p(rs, base + a, int_from_i64(h, st, m - n))
-        } else if op == 39 {
-            p(rs, base + a, int_from_i64(h, st, m * n))
-        } else if op == 40 {
-            p(rs, base + a, int_from_i64(h, st, m / n))
-        } else {
-            p(rs, base + a, int_from_i64(h, st, m - n * (m / n)))
-        }
-        return
-    }
-    if op == 37 {
-        p(rs, base + a, int_add(h, st, x, y, 0))
-    } else if op == 38 {
-        p(rs, base + a, int_add(h, st, x, y, 1))
-    } else if op == 39 {
-        p(rs, base + a, int_mul(h, st, x, y))
-    } else if op == 40 {
-        p(rs, base + a, int_divmod(h, st, x, y, 0))
-    } else {
-        p(rs, base + a, int_divmod(h, st, x, y, 1))
-    }
+    p(rs, base + a, num_arith(h, st, op, x, y))
 }
 
-# TUPLE CONS BUILD FIELD HEAD ARITY ARG ARGI PUSH TYPEOF STRLEN ORD
+# TUPLE CONS BUILD FIELD HEAD ARITY ARG ARGI PUSH TYPEOF STRLEN ORD HASH
 fn exec_obj[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], op: i64, w: i64, base: i64) {
     let a = (w >> 8) & 255
     let b = (w >> 16) & 255
@@ -137,6 +114,8 @@ fn exec_obj[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], op: i64, w: 
         p(rs, base + a, m)
     } else if op == 30 {
         p(rs, base + a, mexpr_arg(h, g(rs, base + b), c))
+    } else if op == 59 {
+        p(rs, base + a, small(hash_value(h, st, g(rs, base + b))))
     } else if op == 51 {
         let m = g(rs, base + b)
         if not is_mexpr(h, m) { die("PUSH: not a m-expr") }
@@ -203,7 +182,7 @@ fn exec_op[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], op: i64, w: i
         exec_arith(h, st, rs, op, w, base)
         return -1
     }
-    if (op >= 27 and op <= 30) or (op >= 47 and op <= 54) {
+    if (op >= 27 and op <= 30) or (op >= 47 and op <= 54) or op == 59 {
         exec_obj(h, st, rs, op, w, base)
         return -1
     }
