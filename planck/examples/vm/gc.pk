@@ -1,0 +1,23 @@
+# The collector of planckvm: the program is written with the instructions and run by planck/vm; the image path is the first argument
+use("pvm/image")
+
+# println of R[x]
+show(x) := [GETGLOBAL{30, 1}, MOVE{31, x}, CALL{30, 30, 1}]
+
+# R[1] is an array of 8 elements and R[14] holds a tuple made at the start. A million times a tuple is made, the 8 elements are written in turn, and
+# another tuple is dropped, so that the nursery is full many times: the live tuples are copied, and the array written with a tuple of the nursery is in the remembered set
+body := concat_map(x -> x, [
+    [GETGLOBAL{30, 0}, LOADI{31, 8}, CALL{1, 30, 1}],
+    [LOADI{10, 7}, LOADI{11, 8}, LOADI{12, 9}, TUPLE{14, 10, 3}],
+    [LOADI{2, 0}, LOADK{3, 2}, LOADI{5, 8}],
+    [Label{'loop}, TGE{2, 3, 1}, JMP{'done}],
+    [MOD{4, 2, 5}, MOVE{10, 2}, ADDI{11, 2, 1}, ADDI{12, 2, 2}, TUPLE{8, 10, 3}, ASET{1, 4, 8}, TUPLE{9, 10, 3}],
+    [ADDI{2, 2, 1}, JMP{'loop}, Label{'done}],
+    concat_map(k -> concat_map(x -> x, [[AGETI{8, 1, k}, FIELD{9, 8, 0}], show(9)]), list.range(0, 8)),
+    [FIELD{9, 14, 1}], show(9),
+    [LOADNONE{0, 1}, RET{0}]
+])
+
+main := Code{"main", 0, 40, body, [C{"array"}, C{"println"}, I{1000000}]}
+
+write_file(array_get(argv(), 1), bytes.to_u8(pvm_image.build([main], "main")))

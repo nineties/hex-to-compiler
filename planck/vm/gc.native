@@ -1,0 +1,201 @@
+# gc: the generational copying collector of planckvm
+#
+# The nursery is collected by a minor collection: the live objects of the nursery are copied to the end of the old generation. The roots are the
+# registers, the frames, ln2 and pi in the machine state, and the objects of the remembered set (the old objects that were written with a
+# reference to the nursery). A major collection copies the live objects of both generations to the scratch array t and then back to the heap array h,
+# so that the old generation is compact again. A collection is done only between two instructions: no reference is held by the code of the
+# instructions then, and the loop of vm.native reads the code, the pc and the base again from the top frame.
+# A forwarded object has the header (new index << 2) | 3 (the bit 1 of a header is never set otherwise).
+# The state of the collector in st: 16 the first free word of t, 19 the index in h of the word 0 of t, 20 and 21 the numbers of the minor and the major collections.
+import mem
+
+# whether the word j (1 to size) after the header of the object at the index at of the array a holds a value
+fn is_slot[r](a: &r [u32], at: i64, kind: i64, size: i64, j: i64) -> bool {
+    if kind == 5 or kind == 12 { return true }
+    if kind == 6 or kind == 8 or kind == 9 { return j >= 2 }
+    if kind == 4 { return j == 1 }
+    if kind == 10 { return j == 4 }
+    if kind == 13 { return j <= 2 }
+    if kind == 11 {
+        if j <= 3 { return false }
+        let k = j - 4
+        if k < 7 * g(a, at + 3) { return (k % 7) < 3 }
+        return true
+    }
+    if kind == 14 {
+        let ni = g(a, at + 2)
+        return j >= 5 + ni and j < 5 + ni + g(a, at + 3)
+    }
+    false
+}
+
+fn has_slots(kind: i64) -> bool {
+    kind != 0 and kind != 1 and kind != 2 and kind != 3 and kind != 7
+}
+
+# fwd gives the new value of the value v: the object is copied to t when it was not yet
+fn fwd[r](h: &mut r [u32], t: &mut r [u32], st: &mut r [u32], v: i64, major: i64) -> i64 {
+    if (v & 1) == 1 { return v }
+    let idx = v >> 1
+    if idx < 16 { return v }
+    if major == 0 and idx < g(st, 6) { return v }
+    let hd = g(h, idx)
+    if (hd & 2) != 0 { return (hd >> 2) * 2 }
+    let n = 1 + (hd >> 6)
+    let tc = g(st, 16)
+    for i in 0 as i64..n {
+        p(t, tc + i, g(h, idx + i))
+    }
+    let ni = g(st, 19) + tc
+    p(st, 16, tc + n)
+    p(h, idx, ni * 4 + 3)
+    ni * 2
+}
+
+# scan_t makes the values of the object at the index at of t new; the result is the number of its words
+fn scan_t[r](h: &mut r [u32], t: &mut r [u32], st: &mut r [u32], at: i64, major: i64) -> i64 {
+    let hd = g(t, at)
+    let kind = (hd >> 2) & 15
+    let size = hd >> 6
+    if has_slots(kind) {
+        for j in 1 as i64..size + 1 {
+            if is_slot(t, at, kind, size, j) {
+                p(t, at + j, fwd(h, t, st, g(t, at + j), major))
+            }
+        }
+    }
+    1 + size
+}
+
+# scan_h is scan_t for the object at the index at of h
+fn scan_h[r](h: &mut r [u32], t: &mut r [u32], st: &mut r [u32], at: i64, major: i64) -> i64 {
+    let hd = g(h, at)
+    let kind = (hd >> 2) & 15
+    let size = hd >> 6
+    if has_slots(kind) {
+        for j in 1 as i64..size + 1 {
+            if is_slot(h, at, kind, size, j) {
+                p(h, at + j, fwd(h, t, st, g(h, at + j), major))
+            }
+        }
+    }
+    1 + size
+}
+
+# the end of the registers that the frame stack may use: the registers above are none
+fn regs_end[r](rs: &r [u32], fs: &r [u32], fp: i64) -> i64 {
+    let e = g(fs, fp + 4) + 512
+    if e > len(rs) { return len(rs) }
+    e
+}
+
+fn scan_roots[r](h: &mut r [u32], t: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], fs: &mut r [u32], fp: i64, major: i64) {
+    if major == 1 {
+        for i in 0 as i64..16 {
+            p(t, i, fwd(h, t, st, g(h, i), 1))
+        }
+    }
+    if g(st, 4) != 0 { p(st, 4, fwd(h, t, st, g(st, 4), major)) }
+    if g(st, 5) != 0 { p(st, 5, fwd(h, t, st, g(st, 5), major)) }
+    let e = regs_end(rs, fs, fp)
+    for i in 0 as i64..e {
+        p(rs, i, fwd(h, t, st, g(rs, i), major))
+    }
+    var q: i64
+    q = 0
+    while q <= fp {
+        p(fs, q, fwd(h, t, st, g(fs, q), major))
+        p(fs, q + 1, fwd(h, t, st, g(fs, q + 1), major))
+        p(fs, q + 2, fwd(h, t, st, g(fs, q + 2), major))
+        q += 7
+    }
+}
+
+fn gc_minor[r](h: &mut r [u32], t: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], fs: &mut r [u32], fp: i64) {
+    let ot = g(st, 8)
+    p(st, 16, 0)
+    p(st, 19, ot)
+    scan_roots(h, t, st, rs, fs, fp, 0)
+    if g(st, 11) != 0 {
+        var at: i64
+        at = 16
+        while at < ot {
+            at += scan_h(h, t, st, at, 0)
+        }
+    } else {
+        let n = g(st, 9)
+        for i in 0 as i64..n {
+            scan_h(h, t, st, g(h, len(h) - 262144 + i), 0)
+        }
+    }
+    var sp: i64
+    sp = 0
+    while sp < g(st, 16) {
+        sp += scan_t(h, t, st, sp, 0)
+    }
+    let tc = g(st, 16)
+    for i in 0 as i64..tc {
+        p(h, ot + i, g(t, i))
+    }
+    p(st, 8, ot + tc)
+    p(st, 20, g(st, 20) + 1)
+}
+
+fn gc_major[r](h: &mut r [u32], t: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], fs: &mut r [u32], fp: i64) {
+    p(st, 16, 16)
+    p(st, 19, 0)
+    scan_roots(h, t, st, rs, fs, fp, 1)
+    var sp: i64
+    sp = 16
+    while sp < g(st, 16) {
+        sp += scan_t(h, t, st, sp, 1)
+    }
+    let tc = g(st, 16)
+    for i in 0 as i64..tc {
+        p(h, i, g(t, i))
+    }
+    p(st, 8, tc)
+    p(st, 21, g(st, 21) + 1)
+}
+
+# collect is called between two instructions, with the top frame fp
+fn collect[r](h: &mut r [u32], t: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], fs: &mut r [u32], fp: i64) {
+    let used = g(st, 0) - g(st, 6)
+    var big: i64
+    big = 0
+    if g(st, 8) + used >= g(st, 6) { big = 1 }
+    if g(st, 8) > g(st, 14) { big = 1 }
+    let ext = regs_end(rs, fs, fp)
+    if big == 1 {
+        gc_major(h, t, st, rs, fs, fp)
+    } else {
+        gc_minor(h, t, st, rs, fs, fp)
+    }
+    # the registers above the end that were used are none
+    let nv = g(h, 3)
+    var e2: i64
+    e2 = g(st, 10) + 1100
+    if e2 > len(rs) { e2 = len(rs) }
+    for i in ext..e2 {
+        p(rs, i, nv)
+    }
+    p(st, 10, g(fs, fp + 4))
+    p(st, 0, g(st, 6))
+    p(st, 9, 0)
+    p(st, 11, 0)
+    p(st, 12, 0)
+    if big == 1 {
+        let top = g(st, 8)
+        var slack: i64
+        slack = g(st, 18)
+        if slack == 0 { slack = (g(st, 6) - top) / 2 }
+        var thr: i64
+        thr = top + slack
+        let cap = g(st, 6) - g(st, 17)
+        if thr > cap { thr = cap }
+        if thr < top { thr = top }
+        p(st, 14, thr)
+    } else if g(st, 8) > g(st, 14) {
+        p(st, 12, 1)
+    }
+}

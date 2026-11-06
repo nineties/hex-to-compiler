@@ -107,9 +107,10 @@ fn a_get[r](h: &r [u32], a: i64, i: i64) -> i64 {
     g(h, (a >> 1) + 2 + k)
 }
 
-fn a_set[r](h: &mut r [u32], a: i64, i: i64, v: i64) {
+fn a_set[r](h: &mut r [u32], st: &mut r [u32], a: i64, i: i64, v: i64) {
     check_kind(h, a, 6, "array_set: not an array")
     let k = index_of(i, array_len(h, a), "array_set: out of range")
+    wb(h, st, a, v)
     p(h, (a >> 1) + 2 + k, v)
 }
 
@@ -351,7 +352,6 @@ fn pl_set[r](h: &mut r [u32], st: &mut r [u32], a: i64, i: i64, x: i64) {
     let k = index_of(i, pl_count(h, a), "plain_set: out of range")
     let t = pl_type(h, a)
     let base = (a >> 1) + 4
-    let mark = g(st, 0)
     if t == 0 {
         set_raw32(h, base, t, k, truthy(h, x))
         return
@@ -375,7 +375,6 @@ fn pl_set[r](h: &mut r [u32], st: &mut r [u32], a: i64, i: i64, x: i64) {
             die("plain_set: not an integer")
         }
         store_int(h, a, k, t, iv)
-        p(st, 0, mark)
         return
     }
     var rh: i64
@@ -419,7 +418,6 @@ fn pl_set[r](h: &mut r [u32], st: &mut r [u32], a: i64, i: i64, x: i64) {
         p(h, base + 4 * k + 2, il)
         p(h, base + 4 * k + 3, ih)
     }
-    p(st, 0, mark)
 }
 
 # ---- the instructions AGET AGETI ASET ALEN PLAINGET PLAINSET and the builtins
@@ -433,7 +431,7 @@ fn exec_arr[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], op: i64, w: 
     } else if op == 56 {
         p(rs, base + a, a_get(h, g(rs, base + b), small(c)))
     } else if op == 57 {
-        a_set(h, g(rs, base + a), g(rs, base + b), g(rs, base + c))
+        a_set(h, st, g(rs, base + a), g(rs, base + b), g(rs, base + c))
     } else if op == 58 {
         let v = g(rs, base + b)
         check_kind(h, v, 6, "ALEN: not an array")
@@ -521,7 +519,7 @@ fn call_abuiltin[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], id: i64, a:
     }
     if id == 34 { return a_get(h, g(rs, a), g(rs, a + 1)) }
     if id == 35 {
-        a_set(h, g(rs, a), g(rs, a + 1), g(rs, a + 2))
+        a_set(h, st, g(rs, a), g(rs, a + 1), g(rs, a + 2))
         return g(h, 3)
     }
     if id == 36 {
