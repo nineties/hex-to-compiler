@@ -1,0 +1,484 @@
+# arr: arrays and plain arrays of planckvm
+#
+# An array is an object of the kind 6: the number (the identity), then the elements, each a value.
+# A plain array is an object of the kind 7: the number, the type, the count n and the elements packed from the low end of the words after them.
+# An element has no tag. The types, in the order of the type numbers: 0 bool, 1 i8, 2 i16, 3 i32, 4 i64, 5 u8, 6 u16, 7 u32, 8 u64,
+# 9 f16, 10 f32, 11 f64, 12 c64, 13 c128. The bytes of an element: 1 1 2 4 8 1 2 4 8 2 4 8 8 16. A new plain array is all zero bits, which is
+# false, 0, 0.0 or complex(0, 0).
+# The builtin ids: 30 array, 31 plain_array, 32 plain_len, 33 plain_kind, 34 array_get, 35 array_set, 36 array_len, 37 plain_get, 38 plain_set.
+import mem
+import obj
+import big
+import flt
+import num
+
+# the bytes of the name of a type packed from the low end of a word (the data word of the string), and its length
+fn tn_code(t: i64) -> i64 {
+    if t == 0 { return 1819242338 }
+    if t == 1 { return 14441 }
+    if t == 2 { return 3551593 }
+    if t == 3 { return 3289961 }
+    if t == 4 { return 3421801 }
+    if t == 5 { return 14453 }
+    if t == 6 { return 3551605 }
+    if t == 7 { return 3289973 }
+    if t == 8 { return 3421813 }
+    if t == 9 { return 3551590 }
+    if t == 10 { return 3289958 }
+    if t == 11 { return 3421798 }
+    if t == 12 { return 3421795 }
+    942813539
+}
+
+fn tn_len(t: i64) -> i64 {
+    if t == 0 { return 4 }
+    if t == 1 or t == 5 { return 2 }
+    if t == 13 { return 4 }
+    3
+}
+
+fn t_size(t: i64) -> i64 {
+    if t <= 1 { return 1 }
+    if t == 2 { return 2 }
+    if t == 3 { return 4 }
+    if t == 4 { return 8 }
+    if t == 5 { return 1 }
+    if t == 6 { return 2 }
+    if t == 7 { return 4 }
+    if t == 8 { return 8 }
+    if t == 9 { return 2 }
+    if t == 10 { return 4 }
+    if t == 11 { return 8 }
+    if t == 12 { return 8 }
+    16
+}
+
+# the type number of a symbol, or -1
+fn type_of_symbol[r](h: &r [u32], sym: i64) -> i64 {
+    let s = g(h, (sym >> 1) + 1)
+    let n = str_len(h, s)
+    for t in 0 as i64..14 {
+        if n == tn_len(t) {
+            if g(h, (s >> 1) + 2) == tn_code(t) { return t }
+        }
+    }
+    -1
+}
+
+fn type_symbol_of[r](h: &mut r [u32], st: &mut r [u32], t: i64) -> i64 {
+    let s = new_string(h, st, tn_len(t))
+    p(h, (s >> 1) + 2, tn_code(t))
+    intern_sym(h, st, s)
+}
+
+fn check_kind[r](h: &r [u32], v: i64, k: i64, m: &static [u8]) {
+    if is_int(v) { die(m) }
+    if kind_of(h, v) != k { die(m) }
+}
+
+fn index_of(i: i64, n: i64, m: &static [u8]) -> i64 {
+    if not is_int(i) { die(m) }
+    let k = int_of(i)
+    if k < 0 or k >= n { die(m) }
+    k
+}
+
+# ---- arrays
+
+fn new_array[r](h: &mut r [u32], st: &mut r [u32], n: i64) -> i64 {
+    if n < 0 { die("array: negative length") }
+    let a = alloc_obj(h, st, 6, 1 + n)
+    let nv = g(h, 3)
+    for k in 0 as i64..n {
+        p(h, (a >> 1) + 2 + k, nv)
+    }
+    a
+}
+
+fn array_len[r](h: &r [u32], a: i64) -> i64 {
+    size_of(h, a) - 1
+}
+
+fn a_get[r](h: &r [u32], a: i64, i: i64) -> i64 {
+    check_kind(h, a, 6, "array_get: not an array")
+    let k = index_of(i, array_len(h, a), "array_get: out of range")
+    g(h, (a >> 1) + 2 + k)
+}
+
+fn a_set[r](h: &mut r [u32], a: i64, i: i64, v: i64) {
+    check_kind(h, a, 6, "array_set: not an array")
+    let k = index_of(i, array_len(h, a), "array_set: out of range")
+    p(h, (a >> 1) + 2 + k, v)
+}
+
+# ---- plain arrays: the packed words
+
+fn pl_type[r](h: &r [u32], a: i64) -> i64 {
+    g(h, (a >> 1) + 2)
+}
+
+fn pl_count[r](h: &r [u32], a: i64) -> i64 {
+    g(h, (a >> 1) + 3)
+}
+
+fn new_plain[r](h: &mut r [u32], st: &mut r [u32], t: i64, n: i64) -> i64 {
+    if n < 0 { die("plain_array: negative length") }
+    let words = (n * t_size(t) + 3) / 4
+    let a = alloc_obj(h, st, 7, 3 + words)
+    p(h, (a >> 1) + 2, t)
+    p(h, (a >> 1) + 3, n)
+    a
+}
+
+# the element i of a type of at most 4 bytes, as the bits
+fn raw32[r](h: &r [u32], base: i64, t: i64, i: i64) -> i64 {
+    let sz = t_size(t)
+    let off = i * sz
+    let w = g(h, base + off / 4)
+    let mask = ((1 as i64) << (sz * 8)) - 1
+    (w >> ((off % 4) * 8)) & mask
+}
+
+fn set_raw32[r](h: &mut r [u32], base: i64, t: i64, i: i64, x: i64) {
+    let sz = t_size(t)
+    let off = i * sz
+    let at = base + off / 4
+    let sh = (off % 4) * 8
+    let mask = ((1 as i64) << (sz * 8)) - 1
+    p(h, at, (g(h, at) & (4294967295 - (mask << sh))) | ((x & mask) << sh))
+}
+
+# the value of the bits x in the signed field of n bits
+fn sext(x: i64, n: i64) -> i64 {
+    if x >= ((1 as i64) << (n - 1)) { return x - ((1 as i64) << n) }
+    x
+}
+
+# the integer of the sign and the magnitude of two words
+fn int_of_mag[r](h: &mut r [u32], st: &mut r [u32], sign: i64, hi: i64, lo: i64) -> i64 {
+    let v = alloc_big(h, st, sign, 4)
+    let rb = (v >> 1) + 3
+    p(h, rb, lo & 65535)
+    p(h, rb + 1, lo >> 16)
+    p(h, rb + 2, hi & 65535)
+    p(h, rb + 3, hi >> 16)
+    fin(h, v)
+}
+
+# the integer of a 64-bit element; signed is 1 for i64
+fn int_of_64[r](h: &mut r [u32], st: &mut r [u32], hi: i64, lo: i64, signed: i64) -> i64 {
+    if signed == 1 and hi >= 2147483648 {
+        let nlo = (4294967296 - lo) & 4294967295
+        var carry: i64
+        carry = 0
+        if lo == 0 { carry = 1 }
+        let nhi = (4294967295 - hi + carry) & 4294967295
+        return int_of_mag(h, st, 1, nhi, nlo)
+    }
+    int_of_mag(h, st, 0, hi, lo)
+}
+
+# the magnitude (without the sign) of the binary64 that a small float of eb exponent bits and fb fraction bits stands for
+fn widen(x: i64, eb: i64, fb: i64) -> i64 {
+    let bias = (((1 as i64) << (eb - 1)) - 1)
+    let mag = x & (((1 as i64) << (eb + fb)) - 1)
+    let ex = mag >> fb
+    let fr = mag & (((1 as i64) << fb) - 1)
+    if ex == ((1 as i64) << eb) - 1 { return (2047 << 52) | (fr << (52 - fb)) }
+    if ex == 0 {
+        if fr == 0 { return 0 }
+        let pos = nbits(fr) - 1
+        let e64 = 1023 + pos + 1 - bias - fb
+        return (e64 << 52) | ((fr - ((1 as i64) << pos)) << (52 - pos))
+    }
+    ((ex - bias + 1023) << 52) | (fr << (52 - fb))
+}
+
+fn w_hi(x: i64, eb: i64, fb: i64) -> i64 {
+    (((x >> (eb + fb)) & 1) << 31) | (widen(x, eb, fb) >> 32)
+}
+
+fn w_lo(x: i64, eb: i64, fb: i64) -> i64 {
+    widen(x, eb, fb) & 4294967295
+}
+
+# the bits of the float of eb exponent bits and fb fraction bits that is nearest to the binary64 of the two words (round to nearest even)
+fn narrow(hi: i64, lo: i64, eb: i64, fb: i64) -> i64 {
+    let sbit = (hi >> 31) << (eb + fb)
+    let emax = ((1 as i64) << eb) - 1
+    if f_is_nan(hi, lo) { return sbit | (emax << fb) | ((1 as i64) << (fb - 1)) }
+    if f_is_inf(hi, lo) { return sbit | (emax << fb) }
+    if f_is_zero(hi, lo) { return sbit }
+    let m = f_man(hi, lo)
+    let e = f_exp(hi, lo)
+    let bias = (((1 as i64) << (eb - 1)) - 1)
+    let ue = e + 52
+    var eu: i64
+    eu = ue
+    if eu < 1 - bias { eu = 1 - bias }
+    let sh = eu - fb - e
+    var q: i64
+    q = 0
+    if sh <= 62 {
+        q = m >> sh
+        let rem = m & (((1 as i64) << sh) - 1)
+        let half = (1 as i64) << (sh - 1)
+        if rem > half {
+            q += 1
+        } else if rem == half {
+            if (q & 1) == 1 { q += 1 }
+        }
+    }
+    var ebs: i64
+    ebs = ue + bias
+    if ebs < 1 { ebs = 1 }
+    let bits = ((ebs - 1) << fb) + q
+    if (bits >> fb) >= emax { return sbit | (emax << fb) }
+    sbit | bits
+}
+
+# ---- reading an element as a value
+
+fn pl_get[r](h: &mut r [u32], st: &mut r [u32], a: i64, i: i64) -> i64 {
+    check_kind(h, a, 7, "plain_get: not a plain array")
+    let k = index_of(i, pl_count(h, a), "plain_get: out of range")
+    let t = pl_type(h, a)
+    let base = (a >> 1) + 4
+    if t == 0 {
+        if raw32(h, base, t, k) != 0 { return g(h, 2) }
+        return g(h, 1)
+    }
+    if t >= 1 and t <= 3 { return int_from_i64(h, st, sext(raw32(h, base, t, k), t_size(t) * 8)) }
+    if t >= 5 and t <= 7 { return int_from_i64(h, st, raw32(h, base, t, k)) }
+    if t == 4 or t == 8 {
+        var sg: i64
+        sg = 0
+        if t == 4 { sg = 1 }
+        return int_of_64(h, st, g(h, base + 2 * k + 1), g(h, base + 2 * k), sg)
+    }
+    if t == 9 {
+        let x = raw32(h, base, t, k)
+        return mk_float(h, st, w_hi(x, 5, 10), w_lo(x, 5, 10))
+    }
+    if t == 10 {
+        let x = raw32(h, base, t, k)
+        return mk_float(h, st, w_hi(x, 8, 23), w_lo(x, 8, 23))
+    }
+    if t == 11 { return mk_float(h, st, g(h, base + 2 * k + 1), g(h, base + 2 * k)) }
+    if t == 12 {
+        let rx = g(h, base + 2 * k)
+        let ix = g(h, base + 2 * k + 1)
+        return mk_complex(h, st, w_hi(rx, 8, 23), w_lo(rx, 8, 23), w_hi(ix, 8, 23), w_lo(ix, 8, 23))
+    }
+    mk_complex(h, st, g(h, base + 4 * k + 1), g(h, base + 4 * k), g(h, base + 4 * k + 3), g(h, base + 4 * k + 2))
+}
+
+# ---- writing a value into an element
+
+# whether the value x is true as a bool element: 1 or 0
+fn truthy[r](h: &r [u32], x: i64) -> i64 {
+    if x == g(h, 2) { return 1 }
+    if x == g(h, 1) { return 0 }
+    let c = num_class(h, x)
+    if c == 0 { die("plain_set: not a number") }
+    if c == 1 {
+        if x == 1 { return 0 }
+        return 1
+    }
+    if c == 2 {
+        if f_is_zero(fl_hi(h, x), fl_lo(h, x)) { return 0 }
+        return 1
+    }
+    if f_is_zero(cx_rh(h, x), cx_rl(h, x)) and f_is_zero(cx_ih(h, x), cx_il(h, x)) { return 0 }
+    1
+}
+
+# store_int checks that the integer iv is in the range of the integer type t and writes it
+fn store_int[r](h: &mut r [u32], a: i64, i: i64, t: i64, iv: i64) {
+    if i_nd(h, iv) > 4 { die("plain_set: out of range") }
+    let neg = i_sign(h, iv)
+    let lo = i_dig(h, iv, 0) | (i_dig(h, iv, 1) << 16)
+    let hi = i_dig(h, iv, 2) | (i_dig(h, iv, 3) << 16)
+    let nbit = t_size(t) * 8
+    var signed: i64
+    signed = 0
+    if t >= 1 and t <= 4 { signed = 1 }
+    if signed == 0 and neg == 1 { die("plain_set: out of range") }
+    if nbit <= 32 {
+        if hi != 0 { die("plain_set: out of range") }
+        if signed == 0 {
+            if lo >= ((1 as i64) << nbit) { die("plain_set: out of range") }
+        } else {
+            let lim = (1 as i64) << (nbit - 1)
+            if neg == 1 {
+                if lo > lim { die("plain_set: out of range") }
+            } else {
+                if lo >= lim { die("plain_set: out of range") }
+            }
+        }
+    } else if signed == 1 {
+        if neg == 0 {
+            if hi >= 2147483648 { die("plain_set: out of range") }
+        } else {
+            if hi > 2147483648 { die("plain_set: out of range") }
+            if hi == 2147483648 and lo != 0 { die("plain_set: out of range") }
+        }
+    }
+    var tlo: i64
+    var thi: i64
+    tlo = lo
+    thi = hi
+    if neg == 1 {
+        tlo = (4294967296 - lo) & 4294967295
+        var carry: i64
+        carry = 0
+        if lo == 0 { carry = 1 }
+        thi = (4294967295 - hi + carry) & 4294967295
+    }
+    let base = (a >> 1) + 4
+    if nbit <= 32 {
+        set_raw32(h, base, t, i, tlo)
+    } else {
+        p(h, base + 2 * i, tlo)
+        p(h, base + 2 * i + 1, thi)
+    }
+}
+
+fn pl_set[r](h: &mut r [u32], st: &mut r [u32], a: i64, i: i64, x: i64) {
+    check_kind(h, a, 7, "plain_set: not a plain array")
+    let k = index_of(i, pl_count(h, a), "plain_set: out of range")
+    let t = pl_type(h, a)
+    let base = (a >> 1) + 4
+    let mark = g(st, 0)
+    if t == 0 {
+        set_raw32(h, base, t, k, truthy(h, x))
+        return
+    }
+    let c = num_class(h, x)
+    let is_t = x == g(h, 2)
+    let is_f = x == g(h, 1)
+    if t <= 8 {
+        var iv: i64
+        iv = 1
+        if is_t {
+            iv = small(1)
+        } else if is_f {
+            iv = small(0)
+        } else if c == 1 {
+            iv = x
+        } else if c == 2 {
+            if f_ex(fl_hi(h, x)) == 2047 { die("plain_set: not a finite number") }
+            iv = f_to_int(h, st, fl_hi(h, x), fl_lo(h, x))
+        } else {
+            die("plain_set: not an integer")
+        }
+        store_int(h, a, k, t, iv)
+        p(st, 0, mark)
+        return
+    }
+    var rh: i64
+    var rl: i64
+    var ih: i64
+    var il: i64
+    rh = 0
+    rl = 0
+    ih = 0
+    il = 0
+    if is_t {
+        rh = 1072693248
+    } else if is_f {
+        rh = 0
+    } else if c == 1 or c == 2 {
+        let f = to_float(h, st, x)
+        rh = fl_hi(h, f)
+        rl = fl_lo(h, f)
+    } else if c == 3 {
+        if t < 12 { die("plain_set: a complex number into a float array") }
+        rh = cx_rh(h, x)
+        rl = cx_rl(h, x)
+        ih = cx_ih(h, x)
+        il = cx_il(h, x)
+    } else {
+        die("plain_set: not a number")
+    }
+    if t == 9 {
+        set_raw32(h, base, t, k, narrow(rh, rl, 5, 10))
+    } else if t == 10 {
+        set_raw32(h, base, t, k, narrow(rh, rl, 8, 23))
+    } else if t == 11 {
+        p(h, base + 2 * k, rl)
+        p(h, base + 2 * k + 1, rh)
+    } else if t == 12 {
+        p(h, base + 2 * k, narrow(rh, rl, 8, 23))
+        p(h, base + 2 * k + 1, narrow(ih, il, 8, 23))
+    } else {
+        p(h, base + 4 * k, rl)
+        p(h, base + 4 * k + 1, rh)
+        p(h, base + 4 * k + 2, il)
+        p(h, base + 4 * k + 3, ih)
+    }
+    p(st, 0, mark)
+}
+
+# ---- the instructions AGET AGETI ASET ALEN PLAINGET PLAINSET and the builtins
+
+fn exec_arr[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], op: i64, w: i64, base: i64) {
+    let a = (w >> 8) & 255
+    let b = (w >> 16) & 255
+    let c = w >> 24
+    if op == 55 {
+        p(rs, base + a, a_get(h, g(rs, base + b), g(rs, base + c)))
+    } else if op == 56 {
+        p(rs, base + a, a_get(h, g(rs, base + b), small(c)))
+    } else if op == 57 {
+        a_set(h, g(rs, base + a), g(rs, base + b), g(rs, base + c))
+    } else if op == 58 {
+        let v = g(rs, base + b)
+        check_kind(h, v, 6, "ALEN: not an array")
+        p(rs, base + a, small(array_len(h, v)))
+    } else if op == 60 {
+        p(rs, base + a, pl_get(h, st, g(rs, base + b), g(rs, base + c)))
+    } else {
+        pl_set(h, st, g(rs, base + a), g(rs, base + b), g(rs, base + c))
+    }
+}
+
+fn arg_count(v: i64, m: &static [u8]) -> i64 {
+    if not is_int(v) { die(m) }
+    int_of(v)
+}
+
+fn call_abuiltin[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], id: i64, a: i64) -> i64 {
+    if id == 30 { return new_array(h, st, arg_count(g(rs, a), "array: not an integer")) }
+    if id == 31 {
+        let sym = g(rs, a)
+        if not is_symbol(h, sym) { die("plain_array: not a type") }
+        let t = type_of_symbol(h, sym)
+        if t < 0 { die("plain_array: unknown type") }
+        return new_plain(h, st, t, arg_count(g(rs, a + 1), "plain_array: not an integer"))
+    }
+    if id == 32 {
+        check_kind(h, g(rs, a), 7, "plain_len: not a plain array")
+        return small(pl_count(h, g(rs, a)))
+    }
+    if id == 33 {
+        check_kind(h, g(rs, a), 7, "plain_kind: not a plain array")
+        return type_symbol_of(h, st, pl_type(h, g(rs, a)))
+    }
+    if id == 34 { return a_get(h, g(rs, a), g(rs, a + 1)) }
+    if id == 35 {
+        a_set(h, g(rs, a), g(rs, a + 1), g(rs, a + 2))
+        return g(h, 3)
+    }
+    if id == 36 {
+        check_kind(h, g(rs, a), 6, "array_len: not an array")
+        return small(array_len(h, g(rs, a)))
+    }
+    if id == 37 { return pl_get(h, st, g(rs, a), g(rs, a + 1)) }
+    if id == 38 {
+        pl_set(h, st, g(rs, a), g(rs, a + 1), g(rs, a + 2))
+        return g(h, 3)
+    }
+    die("unknown builtin")
+    1
+}
