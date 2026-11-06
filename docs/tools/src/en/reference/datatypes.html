@@ -3,63 +3,58 @@
 <p class="lead">This page defines the types of values of planck, immutability, and equality and identity. Expressions, patterns and special forms are in <a href="values.html">Values, patterns and M-expressions</a>.</p>
 
 <h2 id="kinds">Types of values</h2>
-<p>There are nine types of values.</p>
+<p>There are eight builtin types. In addition, a user can make new types (user data).</p>
 <table>
 <tr><th>Type</th><th>Value</th><th>Literal</th><th><code>head</code></th></tr>
 <tr><td>integer</td><td>Arbitrary precision. No limit on the range</td><td><code>42</code> <code>-1</code> <code>0x1f</code> <code>0b101</code></td><td><code>Int</code></td></tr>
 <tr><td>float</td><td>IEEE 754 binary64</td><td><code>1.5</code></td><td><code>Float</code></td></tr>
-<tr><td>complex</td><td>A pair of floats</td><td>None. Made by <code>complex(re, im)</code></td><td><code>Complex</code></td></tr>
 <tr><td>string</td><td>A sequence of bytes, including 0 bytes. Up to 65535 bytes</td><td><code>"abc"</code></td><td><code>String</code></td></tr>
 <tr><td>symbol</td><td>Unique for each name</td><td><code>x</code>. A name that starts with a letter, <code>_</code> or <code>%</code>. <code>true</code>, <code>false</code> and <code>none</code> are literals whose values are the symbols of the same names</td><td><code>Symbol</code></td></tr>
-<tr><td>M-expression</td><td>A head symbol and 0 to 64 arguments</td><td><code>Head{a, b}</code>. Sugar: <code>(a, b)</code> (<code>Tuple</code>), <code>[a, b]</code> and <code>::</code> (<code>Cons</code>), <code>[]</code> (<code>Nil</code>)</td><td>The head of each M-expression</td></tr>
+<tr><td>M-expression</td><td>A head symbol and any number of arguments. An argument cannot be a mutable value</td><td><code>Head{a, b}</code>. Sugar: <code>(a, b)</code> (<code>Tuple</code>), <code>[a, b]</code> and <code>::</code> (<code>Cons</code>), <code>[]</code> (<code>Nil</code>)</td><td>The head of each M-expression</td></tr>
 <tr><td>function</td><td>Lambda, Fusion, builtin function, continuation</td><td><code>(p) -&gt; e</code> (Lambda). <code>f | g</code> (Fusion)</td><td><code>Function</code></td></tr>
 <tr><td>array</td><td>A mutable array of fixed length. All elements are <code>none</code> at first</td><td>None. Made by <code>array(n)</code></td><td><code>Array</code></td></tr>
 <tr><td>plain array</td><td>A mutable array whose elements have one type. The element type is <code>'bool</code>, <code>'i8</code> to <code>'u64</code>, <code>'f16</code> to <code>'f64</code>, <code>'c64</code> or <code>'c128</code></td><td>None. Made by <code>plain_array(kind, n)</code>, <code>u8_array(n)</code> and so on</td><td><code>Plain</code></td></tr>
+<tr><td>user data</td><td>A type that a user makes. It can be specified as immutable or mutable</td><td>Not defined on this page</td><td>Not defined on this page</td></tr>
 </table>
-<p>Table, Vector and the types that a user adds (for example <code>Matrix{w, h, d}</code>) are not types. They are M-expressions that wrap an array.</p>
-<p>The type of a value is told by <code>head</code>. The pattern <code>x @ Int</code> matches a value whose <code>head</code> is <code>Int</code>. The symbol of a type name cannot be the head of an M-expression.</p>
+<p>Complex is not a builtin type. It is user data, defined by the standard library. Table and Vector are no longer M-expressions that wrap an array.</p>
+<p>The type of a value is told by <code>head</code>. The pattern <code>x @ Int</code> matches a value whose <code>head</code> is <code>Int</code>. The symbol of a type name cannot be the head of an M-expression. There is no limit on the number of arguments of an M-expression.</p>
 
 <h2 id="immutability">Immutability</h2>
-<p>The mutable values are arrays and plain arrays. All other values are immutable.</p>
+<p>A value is either immutable or mutable. Arrays and plain arrays are mutable. Integers, floats, strings, symbols, M-expressions and functions are immutable. When a user makes user data, the user can specify whether it is immutable or mutable.</p>
 <table>
 <tr><th>Type</th><th>Mutable?</th><th><code>a[i] = e</code></th></tr>
-<tr><td>integer, float, complex</td><td>immutable</td><td>Stops</td></tr>
+<tr><td>integer, float</td><td>immutable</td><td>Stops</td></tr>
 <tr><td>string</td><td>immutable</td><td>Stops. <code>a[i]</code> can be read (a string of length 1)</td></tr>
 <tr><td>symbol</td><td>immutable</td><td>Stops</td></tr>
 <tr><td>M-expression (including <code>Cons</code>, <code>Tuple</code> and <code>Nil</code>)</td><td>immutable</td><td>Stops. <code>a[i]</code> can be read</td></tr>
 <tr><td>array</td><td>mutable</td><td>Works. An error when out of range</td></tr>
 <tr><td>plain array</td><td>mutable</td><td>Works. An error when out of range or when the value cannot be converted</td></tr>
+<tr><td>user data</td><td>specified when it is made</td><td>Not defined on this page</td></tr>
 </table>
-<p>Table, Vector and the types that a user adds are M-expressions that wrap an array. The M-expression itself is immutable. <code>a[i] = e</code> writes the contents of the wrapped array.</p>
-<table>
-<tr><th>M-expression</th><th>Wraps</th><th><code>a[i]</code> and <code>a[i] = e</code></th></tr>
-<tr><td><code>Table{a}</code></td><td>the array <code>a</code></td><td>A key is any value. A missing key gives <code>none</code></td></tr>
-<tr><td><code>Vector{v}</code></td><td>An array of variable length. Added by <code>use("vector")</code></td><td>An integer index. Stops when out of range</td></tr>
-<tr><td>A type that a user adds</td><td>Decided by the user</td><td>Decided by the functions added at the front of <code>_index_get</code> and <code>_index_set</code></td></tr>
-</table>
+<p>A mutable value cannot be an argument of an M-expression. An attempt is an error.</p>
 <p>The rules of indexing are in <a href="syntax.html#index">Indexing and rewriting</a>.</p>
 
 <h2 id="equality">Equality and identity</h2>
 <p>Equality is tested by <code>a == b</code> (<code>_eq</code>). <code>a != b</code> (<code>_ne</code>) is its opposite.</p>
-<p>Identity means that two values are the same object. Arrays, plain arrays and functions are equal only when their identity is the same. There is no builtin function that tests only identity.</p>
+<p>Identity means that two values are the same object. Arrays, plain arrays and functions are equal only when their identity is the same. The equality of user data is not defined on this page. There is no builtin function that tests only identity.</p>
 
 <h3>How each type is compared</h3>
 <table>
 <tr><th>Type</th><th><code>==</code></th><th>Pattern</th><th><code>hash</code></th></tr>
 <tr><td>integer</td><td>Compared by value</td><td>An integer literal matches an equal value</td><td>Decided by the value alone</td></tr>
 <tr><td>float</td><td>Compared by value. NaN is not equal even to itself</td><td>—</td><td>The same as the integer if it is equal to an integer. Otherwise decided by the contents</td></tr>
-<tr><td>complex</td><td>Equal when the real parts and the imaginary parts are both equal. If the imaginary part is 0 it can be compared with a real number</td><td>—</td><td>The same as the integer if the imaginary part is 0 and the real part is equal to an integer. Otherwise decided by the contents</td></tr>
 <tr><td>string</td><td>Compared by contents, over the whole length including 0 bytes</td><td>A string literal matches an equal value</td><td>Decided by the contents</td></tr>
 <tr><td>symbol</td><td>Compared by identity. It is unique for each name, so the same name is equal</td><td><code>true</code>, <code>false</code>, <code>none</code> and <code>Quote{x}</code> match the same symbol</td><td>Decided by the name</td></tr>
 <tr><td>M-expression</td><td>Head and arguments are compared recursively</td><td><code>Head{p, ...}</code> matches an M-expression with the same head and the same number of arguments, and recurses for each argument. <code>Quote{v}</code> matches an equal value</td><td>Decided by the contents</td></tr>
 <tr><td>array</td><td>Identity only. Different arrays are not equal even if the contents are the same</td><td>—</td><td>Decided for each object and does not change while the object lives</td></tr>
 <tr><td>plain array</td><td>Identity only</td><td>—</td><td>The same as array</td></tr>
 <tr><td>function</td><td>Identity only</td><td>—</td><td>The same as array</td></tr>
+<tr><td>user data</td><td>—</td><td>—</td><td>—</td></tr>
 </table>
 <p>— means that this page does not define it. The exact values of <code>hash</code> are not defined.</p>
 
 <h3>Equality across number types</h3>
-<p>Integers, floats and complex numbers are equal if the values are the same, even when the types differ. <code>1 == 1.0</code> and <code>1 == complex(1, 0)</code> are true.</p>
+<p>Integers and floats are equal if the values are the same, even when the types differ. <code>1 == 1.0</code> is true. Equality with a complex number is not defined on this page.</p>
 <p>NaN is not equal even to itself. <code>x == x</code> is false when x is NaN.</p>
 <p>The ordering comparisons <code>&lt;</code> <code>&lt;=</code> <code>&gt;</code> <code>&gt;=</code> are not equality. They compare integers and floats by their mathematical values. They are false if NaN is involved. See <a href="values.html#numbers">Numbers</a>.</p>
 
