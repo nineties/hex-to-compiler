@@ -67,7 +67,7 @@ test: pforth bootstrap/plisp.fs $(shell find bootstrap/plisp -name "*.lisp")
 
 # parse the libraries that planck/vasmc.pk uses in advance (planck/lib/*/*.pkm)
 preprocess: planck0
-	./planck0 tools/preprocess.pk vasm/build native/compile
+	./planck0 tools/preprocess.pk vasm/build native/compile pvm/image
 
 # run the core tests of planck0: tests of the language and the examples in tests/errors
 test-planck0: planck0
@@ -85,15 +85,19 @@ test-planck0: planck0
 		echo "$$f: stops"; \
 	done; rm -f tmp-error.out tmp-error.err
 
-# build planck/vm/vm.native and run the programs of planck/examples/vm on it
+# build planck/vm as units and run the programs of planck/examples/vm on it
+VM_UNITS := mem obj builtin ops vm
 test-vm: planck0
-	./planck0 planck/vasmc.pk planck/vm/vm.native tmp-vm x86_64
+	@done=; for u in $(VM_UNITS); do \
+		./planck0 planck/vasmc.pk unit planck/vm/$$u.native tmp-vm-$$u.unit x86_64 $$done || exit 1; \
+		done="$$done tmp-vm-$$u.unit"; \
+	done; ./planck0 planck/vasmc.pk link tmp-vm x86_64 $$done || exit 1
 	@for f in $(VM_EXAMPLES); do \
 		./planck0 $$f tmp-vm.img || exit 1; \
 		./tmp-vm tmp-vm.img > tmp-vm.out || exit 1; \
 		diff -u $${f%.pk}.out tmp-vm.out || exit 1; \
 		echo "$$f: ok"; \
-	done; rm -f tmp-vm tmp-vm.img tmp-vm.out
+	done; rm -f tmp-vm tmp-vm-*.unit tmp-vm.img tmp-vm.out
 
 # run everything: test-planck0 and then the libraries, the tools, the vasm, native and backend tests, and the examples
 test-all: test-planck0

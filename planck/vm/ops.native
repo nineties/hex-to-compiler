@@ -1,0 +1,194 @@
+# ops: the instructions that do not change the control of planckvm
+#
+# exec_op runs one instruction word w that is not a jump, a call or a return. base is the first register of the window and kb the index of the constant table.
+# The result tells the loop what to do with the word after the instruction:
+#   -1 nothing   0 or 1 a condition (the loop compares it with k)   2 skip the next word (a match succeeded)   3 run the next word (a match failed)
+import mem
+import obj
+
+fn bool_val[r](h: &r [u32], c: bool) -> i64 {
+    if c { return g(h, 2) }
+    g(h, 1)
+}
+
+fn flag(c: bool) -> i64 {
+    if c { return 1 }
+    0
+}
+
+# TEQ TNE TEQK TNEK
+fn exec_cond[r](h: &r [u32], rs: &r [u32], op: i64, w: i64, base: i64, kb: i64) -> i64 {
+    let x = g(rs, base + ((w >> 8) & 255))
+    let b = (w >> 16) & 255
+    if op == 11 { return flag(equal(h, x, g(rs, base + b))) }
+    if op == 12 { return flag(not equal(h, x, g(rs, base + b))) }
+    if op == 15 { return flag(equal(h, x, g(h, kb + b))) }
+    flag(not equal(h, x, g(h, kb + b)))
+}
+
+# MATCHEQ MATCHHEAD MATCHTYPE
+fn exec_match[r](h: &r [u32], rs: &r [u32], op: i64, w: i64, base: i64, kb: i64) -> i64 {
+    let v = g(rs, base + ((w >> 8) & 255))
+    let b = (w >> 16) & 255
+    var ok: bool
+    ok = false
+    if op == 31 {
+        ok = equal(h, v, g(h, kb + ((w >> 16) & 65535)))
+    } else if op == 32 {
+        if is_mexpr(h, v) {
+            if mexpr_head(h, v) == g(h, kb + b) {
+                ok = mexpr_arity(h, v) == (w >> 24)
+            }
+        }
+    } else {
+        ok = type_symbol(h, v) == g(h, kb + ((w >> 16) & 65535))
+    }
+    if ok { return 2 }
+    3
+}
+
+# ADD SUB MUL DIV MOD ADDI LT GE EQ NE
+fn exec_arith[r](h: &r [u32], rs: &mut r [u32], op: i64, w: i64, base: i64) {
+    let a = (w >> 8) & 255
+    let b = (w >> 16) & 255
+    let c = w >> 24
+    let x = g(rs, base + b)
+    if op == 42 {
+        var sc: i64
+        sc = c
+        if sc > 127 { sc = sc - 256 }
+        if not is_int(x) { die("ADDI: not an integer") }
+        p(rs, base + a, mk_int(int_of(x) + sc))
+        return
+    }
+    let y = g(rs, base + c)
+    if op == 45 {
+        p(rs, base + a, bool_val(h, equal(h, x, y)))
+        return
+    }
+    if op == 46 {
+        p(rs, base + a, bool_val(h, not equal(h, x, y)))
+        return
+    }
+    if not is_int(x) { die("arithmetic: not an integer") }
+    if not is_int(y) { die("arithmetic: not an integer") }
+    let m = int_of(x)
+    let n = int_of(y)
+    if op == 37 {
+        p(rs, base + a, mk_int(m + n))
+    } else if op == 38 {
+        p(rs, base + a, mk_int(m - n))
+    } else if op == 39 {
+        p(rs, base + a, mk_int(m * n))
+    } else if op == 40 {
+        if n == 0 { die("division by zero") }
+        p(rs, base + a, mk_int(m / n))
+    } else if op == 41 {
+        if n == 0 { die("division by zero") }
+        p(rs, base + a, mk_int(m - n * (m / n)))
+    } else if op == 43 {
+        p(rs, base + a, bool_val(h, m < n))
+    } else {
+        p(rs, base + a, bool_val(h, m >= n))
+    }
+}
+
+# TUPLE CONS BUILD FIELD HEAD ARITY ARG ARGI PUSH TYPEOF STRLEN ORD
+fn exec_obj[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], op: i64, w: i64, base: i64) {
+    let a = (w >> 8) & 255
+    let b = (w >> 16) & 255
+    let c = w >> 24
+    if op == 27 {
+        let m = new_mexpr(h, st, g(h, 4), c)
+        for i in 0 as i64..c {
+            set_arg(h, m, i, g(rs, base + b + i))
+        }
+        p(rs, base + a, m)
+    } else if op == 28 {
+        let m = new_mexpr(h, st, g(h, 5), 2)
+        set_arg(h, m, 0, g(rs, base + b))
+        set_arg(h, m, 1, g(rs, base + c))
+        p(rs, base + a, m)
+    } else if op == 29 {
+        let hd = g(rs, base + b)
+        if not is_symbol(h, hd) { die("BUILD: the head is not a symbol") }
+        let m = new_mexpr(h, st, hd, c)
+        for i in 0 as i64..c {
+            set_arg(h, m, i, g(rs, base + b + 1 + i))
+        }
+        p(rs, base + a, m)
+    } else if op == 30 {
+        p(rs, base + a, mexpr_arg(h, g(rs, base + b), c))
+    } else if op == 51 {
+        let m = g(rs, base + b)
+        if not is_mexpr(h, m) { die("PUSH: not a m-expr") }
+        let n = mexpr_arity(h, m)
+        let t = new_mexpr(h, st, mexpr_head(h, m), n + 1)
+        for i in 0 as i64..n {
+            set_arg(h, t, i, mexpr_arg(h, m, i))
+        }
+        set_arg(h, t, n, g(rs, base + c))
+        p(rs, base + a, t)
+    } else {
+        exec_read(h, rs, op, w, base)
+    }
+}
+
+# HEAD ARITY ARG ARGI TYPEOF STRLEN ORD
+fn exec_read[r](h: &r [u32], rs: &mut r [u32], op: i64, w: i64, base: i64) {
+    let a = (w >> 8) & 255
+    let b = (w >> 16) & 255
+    let c = w >> 24
+    let v = g(rs, base + b)
+    if op == 52 {
+        p(rs, base + a, type_symbol(h, v))
+    } else if op == 53 {
+        if not is_string(h, v) { die("STRLEN: not a string") }
+        p(rs, base + a, mk_int(str_len(h, v)))
+    } else if op == 54 {
+        if not is_string(h, v) { die("ORD: not a string") }
+        let i = g(rs, base + c)
+        if not is_int(i) { die("ORD: not an integer") }
+        let k = int_of(i)
+        if k < 0 or k >= str_len(h, v) {
+            p(rs, base + a, mk_int(-1))
+        } else {
+            p(rs, base + a, mk_int(str_byte(h, v, k)))
+        }
+    } else {
+        if not is_mexpr(h, v) { die("not a m-expr") }
+        if op == 47 {
+            p(rs, base + a, mexpr_head(h, v))
+        } else if op == 48 {
+            p(rs, base + a, mk_int(mexpr_arity(h, v)))
+        } else if op == 49 {
+            let i = g(rs, base + c)
+            if not is_int(i) { die("ARG: not an integer") }
+            exec_arg(h, rs, base + a, v, int_of(i))
+        } else if op == 50 {
+            exec_arg(h, rs, base + a, v, c)
+        } else {
+            die("unknown instruction")
+        }
+    }
+}
+
+fn exec_arg[r](h: &r [u32], rs: &mut r [u32], dst: i64, m: i64, i: i64) {
+    if i < 0 or i >= mexpr_arity(h, m) { die("ARG: out of range") }
+    p(rs, dst, mexpr_arg(h, m, i))
+}
+
+fn exec_op[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], op: i64, w: i64, base: i64, kb: i64) -> i64 {
+    if op == 11 or op == 12 or op == 15 or op == 16 { return exec_cond(h, rs, op, w, base, kb) }
+    if op >= 31 and op <= 33 { return exec_match(h, rs, op, w, base, kb) }
+    if op >= 37 and op <= 46 {
+        exec_arith(h, rs, op, w, base)
+        return -1
+    }
+    if (op >= 27 and op <= 30) or (op >= 47 and op <= 54) {
+        exec_obj(h, st, rs, op, w, base)
+        return -1
+    }
+    die("unknown instruction")
+    return -1
+}

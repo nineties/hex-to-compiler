@@ -2,13 +2,15 @@
 # Copyright (C) 2026 nineties
 #
 # The image is the initial heap of planckvm as 32-bit little-endian words; the word index in the file is the heap index.
-# Words 0 to 7 are the roots: word 0 is the Lambda that is run first, 1 is false, 2 is true, 3 is none. The objects follow.
+# Words 0 to 15 are the roots: 0 is the Lambda that is run first, 1 false, 2 true, 3 none, 4 Tuple, 5 Cons, 6 Nil, and 7 to 15 the symbols
+# that typeof gives (int string symbol mexpr function array plain float complex). The objects follow.
 #
 # pvm_image.build(codes, entry) is the buffer of bytes of the image (bytes.pk). codes is a list of
 # Code{name, arity, nregs, instrs, consts}. entry is the name of the code that is run first; its arity is 0.
 # instrs is a list of Name{operands} with the mnemonics of the table in planckvm-isa, and Label{'l} that gives a position a name; a jump takes the name.
 # consts is a list of
 #   I{n}  integer       S{"text"}  string       Y{"name"}  symbol       C{"name"}  cell of the global variable
+#   (the cell of a builtin name has the builtin as the value)
 #   K{"code"}  code     M{"head", [consts]}  m-expr whose arguments are constants       T{}  true, F{}  false, N{}  none
 # An integer is a small integer here: |n| < 2^29.
 
@@ -43,6 +45,14 @@ module pvm_image {
         ["ALEN", 58, 'abc, ['a, 'b]], ["HASH", 59, 'abc, ['a, 'b]], ["PLAINGET", 60, 'abc, ['a, 'b, 'c]],
         ["PLAINSET", 61, 'abc, ['a, 'b, 'c]]
     ]
+
+    # the builtins that planckvm calls without a frame: [name, id, number of arguments]
+    builtins := [
+        ["put", 0, 1], ["print", 1, 1], ["println", 2, 1], ["mexpr", 3, 2], ["substr", 4, 3],
+        ["_strcat", 5, 2], ["intern", 6, 1], ["symname", 7, 1], ["exit", 8, 1]
+    ]
+
+    type_names := ["int", "string", "symbol", "mexpr", "function", "array", "plain", "float", "complex"]
 
     find_op(name) := {
         r := list.find(e -> e[0] == name, isa)
@@ -100,10 +110,10 @@ module pvm_image {
     }
 
     # lays the objects out after the 8 root words and writes them
-    layout(objs, lam, f_, t_, n_) := {
+    layout(objs, roots) := {
         n := vector.len(objs)
         addr := array(n)
-        at := 8
+        at := 16
         i := 0
         while (i < n) {
             array_set(addr, i, at)
@@ -112,11 +122,7 @@ module pvm_image {
         }
         out := bytes.new()
         value(id) := bit_shl(array_get(addr, id), 1)
-        bytes.u32(out, value(lam))
-        bytes.u32(out, value(f_))
-        bytes.u32(out, value(t_))
-        bytes.u32(out, value(n_))
-        bytes.zeros(out, 16)
+        each(r -> bytes.u32(out, value(r)), roots)
         i = 0
         while (i < n) {
             o := vector.get(objs, i)
@@ -163,9 +169,18 @@ module pvm_image {
         f_ := symbol("false")
         t_ := symbol("true")
         n_ := symbol("none")
+        tuple_ := symbol("Tuple")
+        cons_ := symbol("Cons")
+        nil_ := symbol("Nil")
+        types := map(symbol, type_names)
+        builtin_obj(e) := once(['builtin, e[0]], () -> {
+            add(['builtin, e[0]], Obj{10, [W{0}, V{e[1]}, V{e[2]}, R{symbol(e[0])}]})
+        })
         cell(s) := once(['cell, s], () -> {
             sym := symbol(s)
-            add(['cell, s], Obj{13, [R{n_}, R{sym}, V{-1}]})
+            b := list.find(e -> e[0] == s, builtins)
+            val := if (b == none) R{n_} else R{builtin_obj(b)}
+            add(['cell, s], Obj{13, [val, R{sym}, V{-1}]})
         })
         # reserve the code objects so that they can refer to each other
         each(c -> add(['code, c[0]], Obj{14, []}), codes)
@@ -198,6 +213,6 @@ module pvm_image {
             vector.set(objs, table.get(names, ['code, c[0]], none), Obj{14, append(hdr, append(reverse(words), consts))})
         }, codes)
         lam := add(['lambda], Obj{8, [W{0}, R{table.get(names, ['code, entry], none)}, R{n_}]})
-        layout(objs, lam, f_, t_, n_)
+        layout(objs, append([lam, f_, t_, n_, tuple_, cons_, nil_], types))
     }
 }

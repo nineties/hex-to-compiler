@@ -1,0 +1,93 @@
+# strings, symbols and m-exprs on planckvm: the program is written with the instructions and run by planck/vm; the image path is the first argument
+use("pvm/image")
+
+# println of R[x]
+show(x) := [GETGLOBAL{8, 0}, MOVE{9, x}, CALL{8, 8, 1}]
+
+# prints "matched" or "not matched": the test is a match instruction, and the word after it is JMP to the not-matched part
+match_case(n, t) := {
+    no := intern(f"no{n}")
+    lend := intern(f"end{n}")
+    concat_map(x -> x, [t, [JMP{no}, LOADK{1, 21}], show(1), [JMP{lend}, Label{no}, LOADK{1, 22}], show(1), [Label{lend}]])
+}
+
+# prints the same for a condition instruction with k = 1, which jumps when it is true
+cond_case(n, t) := {
+    yes := intern(f"yes{n}")
+    lend := intern(f"end{n}")
+    concat_map(x -> x, [t, [JMP{yes}, LOADK{1, 22}], show(1), [JMP{lend}, Label{yes}, LOADK{1, 21}], show(1), [Label{lend}]])
+}
+
+# a list of at most 64 elements can be written in a program; body joins the parts
+part1 := concat_map(x -> x, [
+    # put writes the bytes as they are
+    [GETGLOBAL{8, 6}, LOADK{9, 7}, CALL{8, 8, 1}],
+    [GETGLOBAL{8, 6}, LOADK{9, 8}, CALL{8, 8, 1}],
+    [GETGLOBAL{8, 6}, LOADK{9, 16}, CALL{8, 8, 1}],
+    # _strcat and substr
+    [GETGLOBAL{0, 1}, LOADK{1, 7}, LOADK{2, 8}, CALL{0, 0, 2}], show(0),
+    [GETGLOBAL{0, 2}, LOADK{1, 9}, LOADI{2, 0}, LOADI{3, 6}, CALL{0, 0, 3}], show(0),
+    # STRLEN and ORD
+    [LOADK{1, 9}, STRLEN{0, 1}], show(0),
+    [LOADI{2, 1}, ORD{0, 1, 2}], show(0),
+    [LOADI{2, 100}, ORD{0, 1, 2}], show(0)
+])
+
+part2 := concat_map(x -> x, [
+    # symbols: the same name is the same symbol, also for a symbol made at run time
+    [LOADK{0, 10}], show(0),
+    [GETGLOBAL{0, 3}, LOADK{1, 15}, CALL{0, 0, 1}, LOADK{1, 10}, EQ{2, 0, 1}], show(2),
+    [GETGLOBAL{0, 3}, LOADK{1, 17}, CALL{0, 0, 1}, LOADK{1, 10}, EQ{2, 0, 1}], show(2),
+    [GETGLOBAL{3, 3}, LOADK{4, 17}, CALL{3, 3, 1}, EQ{2, 0, 3}], show(2),
+    [GETGLOBAL{1, 4}, MOVE{2, 0}, CALL{1, 1, 1}], show(1),
+    # strings are equal by the bytes
+    [LOADK{0, 13}, GETGLOBAL{1, 1}, LOADK{2, 18}, LOADK{3, 19}, CALL{1, 1, 2}, EQ{2, 0, 1}], show(2),
+    [NE{2, 0, 1}], show(2)
+])
+
+part3 := concat_map(x -> x, [
+    # m-exprs
+    [LOADK{0, 11}], show(0),
+    [ARITY{1, 0}], show(1),
+    [HEAD{1, 0}], show(1),
+    [ARGI{1, 0, 1}], show(1),
+    [LOADI{2, 0}, ARG{1, 0, 2}], show(1),
+    [TYPEOF{1, 0}], show(1),
+    [LOADI{2, 5}, TYPEOF{1, 2}], show(1),
+    [LOADK{2, 13}, TYPEOF{1, 2}], show(1),
+    [LOADK{2, 10}, TYPEOF{1, 2}], show(1)
+])
+
+part4 := concat_map(x -> x, [
+    [LOADK{0, 11}, LOADI{2, 9}, PUSH{1, 0, 2}], show(1),
+    [LOADK{2, 12}, LOADI{3, 1}, LOADI{4, 2}, BUILD{1, 2, 2}], show(1),
+    [LOADI{3, 1}, LOADI{4, 2}, TUPLE{1, 3, 2}], show(1),
+    [LOADK{2, 14}, BUILD{3, 2, 0}, LOADI{4, 7}, CONS{1, 4, 3}], show(1),
+    [FIELD{2, 1, 1}], show(2),
+    [GETGLOBAL{0, 5}, LOADK{1, 12}, LOADI{3, 5}, LOADI{4, 6}, TUPLE{2, 3, 2}, CALL{0, 0, 2}], show(0)
+])
+
+part5 := concat_map(x -> x, [
+    # matching
+    [LOADK{0, 11}],
+    match_case(1, [MATCHHEAD{0, 20, 3}]),
+    match_case(2, [MATCHHEAD{0, 12, 3}]),
+    match_case(3, [MATCHHEAD{0, 20, 2}]),
+    match_case(4, [MATCHTYPE{0, 23}]),
+    [GETGLOBAL{0, 1}, LOADK{1, 18}, LOADK{2, 19}, CALL{0, 0, 2}],
+    match_case(5, [MATCHEQ{0, 13}]),
+    cond_case(6, [TEQK{0, 13, 1}]),
+    cond_case(7, [TNEK{0, 13, 1}]),
+    cond_case(8, [LOADK{3, 13}, TEQ{0, 3, 1}]),
+    [LOADNONE{0, 1}, RET{0}]
+])
+
+body := concat_map(x -> x, [part1, part2, part3, part4, part5])
+
+main := Code{"main", 0, 12, body, [
+    C{"println"}, C{"_strcat"}, C{"substr"}, C{"intern"}, C{"symname"}, C{"mexpr"}, C{"put"},
+    S{"Hello, "}, S{"world"}, S{"planckvm"}, Y{"foo"}, M{"Point", [I{1}, S{"x\ny \"q\""}, M{"Nil", []}]}, Y{"Foo"}, S{"ab"}, Y{"Nil"},
+    S{"foo"}, S{"\n"}, S{"bar"}, S{"a"}, S{"b"}, Y{"Point"}, S{"matched"}, S{"not matched"}, Y{"mexpr"}
+]}
+
+write_file(array_get(argv(), 1), bytes.to_u8(pvm_image.build([main], "main")))
