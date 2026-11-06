@@ -49,10 +49,11 @@ planck0: bootstrap/planck0.sv plisp2 $(SASM_LIBS)
 VASM_EXAMPLES := $(wildcard planck/examples/vasm/*.vasm)
 NATIVE_EXAMPLES := $(wildcard planck/examples/native/*.native)
 VASM_TARGETS := x86_64
+VM_EXAMPLES := $(wildcard planck/examples/vm/*.pk)
 BACKEND_EXAMPLES := $(wildcard planck/examples/backend/*.pk)
 PARTIAL_EVAL_EXAMPLES := $(wildcard planck/examples/partial_eval/*.pk)
 
-.PHONY: clean test test-planck0 test-all preprocess
+.PHONY: clean test test-planck0 test-all test-vm preprocess
 clean:
 	rm -f planck/lib/*.pkm planck/lib/*/*.pkm
 	rm -f pforth
@@ -84,6 +85,16 @@ test-planck0: planck0
 		echo "$$f: stops"; \
 	done; rm -f tmp-error.out tmp-error.err
 
+# build planck/vm/vm.native and run the programs of planck/examples/vm on it
+test-vm: planck0
+	./planck0 planck/vasmc.pk planck/vm/vm.native tmp-vm x86_64
+	@for f in $(VM_EXAMPLES); do \
+		./planck0 $$f tmp-vm.img || exit 1; \
+		./tmp-vm tmp-vm.img > tmp-vm.out || exit 1; \
+		diff -u $${f%.pk}.out tmp-vm.out || exit 1; \
+		echo "$$f: ok"; \
+	done; rm -f tmp-vm tmp-vm.img tmp-vm.out
+
 # run everything: test-planck0 and then the libraries, the tools, the vasm, native and backend tests, and the examples
 test-all: test-planck0
 	./planck0 planck/tests/lib.pk
@@ -95,6 +106,7 @@ test-all: test-planck0
 	tools/test_preprocess.sh
 	./planck0 planck/tests/vasm.pk
 	./planck0 planck/tests/native.pk
+	$(MAKE) test-vm
 	./planck0 planck/tests/partial_eval.pk
 	@for f in $(PLANCK_EXAMPLES); do \
 		./planck0 $$f > tmp-example.out || exit 1; \
