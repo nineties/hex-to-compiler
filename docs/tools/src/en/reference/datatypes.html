@@ -1,0 +1,84 @@
+<!--title Data types-->
+<h1>Data types</h1>
+<p class="lead">Types of values, immutability, equality and identity.</p>
+
+<h2 id="kinds">Types of values</h2>
+<p>There are eight builtin types. A user can make new types (user data).</p>
+<table>
+<tr><th>Type</th><th>Value</th><th>Literal</th><th><code>head</code></th></tr>
+<tr><td>integer</td><td>Arbitrary precision. No limit on the range</td><td><code>42</code> <code>-1</code> <code>0x1f</code> <code>0b101</code></td><td><code>Int</code></td></tr>
+<tr><td>float</td><td>IEEE 754 binary64</td><td><code>1.5</code></td><td><code>Float</code></td></tr>
+<tr><td>string</td><td>A sequence of bytes, including 0 bytes. Up to 65535 bytes</td><td><code>"abc"</code></td><td><code>String</code></td></tr>
+<tr><td>symbol</td><td>Unique for each name</td><td><code>x</code>. A name that starts with a letter, <code>_</code> or <code>%</code>. <code>true</code>, <code>false</code> and <code>none</code> are literals whose values are the symbols of the same names</td><td><code>Symbol</code></td></tr>
+<tr><td>M-expression</td><td>A head symbol and any number of arguments. An argument cannot be a mutable value</td><td><code>Head{a, b}</code>. Sugar: <code>(a, b)</code> (<code>Tuple</code>), <code>[a, b]</code> and <code>::</code> (<code>Cons</code>), <code>[]</code> (<code>Nil</code>)</td><td>The head of each M-expression</td></tr>
+<tr><td>function</td><td>Lambda, Fusion, builtin function, continuation</td><td><code>(p) -&gt; e</code> (Lambda). <code>f | g</code> (Fusion)</td><td><code>Function</code></td></tr>
+<tr><td>array</td><td>A mutable array of fixed length. All elements are <code>none</code> at first</td><td>None. Made by <code>array(n)</code></td><td><code>Array</code></td></tr>
+<tr><td>plain array</td><td>A mutable array whose elements have one type. The element type is <code>'bool</code>, <code>'i8</code> to <code>'u64</code>, <code>'f16</code> to <code>'f64</code>, <code>'c64</code> or <code>'c128</code></td><td>None. Made by <code>plain_array(kind, n)</code>, <code>u8_array(n)</code> and so on</td><td><code>Plain</code></td></tr>
+<tr><td>user data</td><td>A type that a user makes. Whether it is immutable or mutable must be specified when it is made</td><td>None. Made by a builtin function</td><td>The symbol of the type name</td></tr>
+</table>
+<p>Complex, Table and Vector are user data. Complex is immutable; Table and Vector are mutable.</p>
+<p>The type of a value is told by <code>head</code>. The pattern <code>x @ Int</code> matches a value whose <code>head</code> is <code>Int</code>. The symbols of the eight builtin type names and of user data type names cannot be the head of an M-expression. Making user data whose type name is the same as a builtin type name or another user data type name is an error.</p>
+
+<h2 id="immutability">Immutability</h2>
+<p>A value is either immutable or mutable. Arrays and plain arrays are mutable. Integers, floats, strings, symbols, M-expressions and functions are immutable. When a user makes user data, the user must specify whether it is immutable or mutable. There is no default.</p>
+<table>
+<tr><th>Type</th><th>Mutable?</th><th><code>a[i] = e</code></th></tr>
+<tr><td>integer, float</td><td>immutable</td><td>Stops</td></tr>
+<tr><td>string</td><td>immutable</td><td>Stops. <code>a[i]</code> can be read (a string of length 1)</td></tr>
+<tr><td>symbol</td><td>immutable</td><td>Stops</td></tr>
+<tr><td>M-expression (including <code>Cons</code>, <code>Tuple</code> and <code>Nil</code>)</td><td>immutable</td><td>Stops. <code>a[i]</code> can be read</td></tr>
+<tr><td>array</td><td>mutable</td><td>Works. An error when out of range</td></tr>
+<tr><td>plain array</td><td>mutable</td><td>Works. An error when out of range or when the value cannot be converted</td></tr>
+<tr><td>user data</td><td>specified when it is made</td><td>—</td></tr>
+</table>
+<p>A mutable value cannot be an argument of an M-expression. Neither can immutable user data that holds a mutable value. Making such an M-expression is a runtime error.</p>
+
+<h2 id="equality">Equality and identity</h2>
+<p>Equality is tested by <code>a == b</code> (<code>_eq</code>). <code>a != b</code> (<code>_ne</code>) is its opposite.</p>
+
+<h3>How each type is compared</h3>
+<table>
+<tr><th>Type</th><th><code>==</code></th><th>Pattern</th><th><code>hash</code></th></tr>
+<tr><td>integer</td><td>Compared by value</td><td>An integer literal matches an equal value</td><td>Decided by the value alone</td></tr>
+<tr><td>float</td><td>Compared by value. NaN is not equal even to itself</td><td>—</td><td>The same as the integer if it is equal to an integer. Otherwise decided by the contents</td></tr>
+<tr><td>string</td><td>Compared by contents, over the whole length including 0 bytes</td><td>A string literal matches an equal value</td><td>Decided by the contents</td></tr>
+<tr><td>symbol</td><td>Compared by name</td><td><code>true</code>, <code>false</code>, <code>none</code> and <code>Quote{x}</code> match the same symbol</td><td>Decided by the name</td></tr>
+<tr><td>M-expression</td><td>Head and arguments are compared recursively</td><td><code>Head{p, ...}</code> matches an M-expression with the same head and the same number of arguments, and recurses for each argument. <code>Quote{v}</code> matches an equal value</td><td>Decided by the contents</td></tr>
+<tr><td>array</td><td>Compared element by element. A different array with the same contents is equal but not identical</td><td>—</td><td>Cannot be a key</td></tr>
+<tr><td>plain array</td><td>Compared element by element. A different plain array with the same contents is equal but not identical</td><td>—</td><td>Cannot be a key</td></tr>
+<tr><td>user data</td><td>Immutable: compared by contents. Mutable: compared by identity</td><td>—</td><td>Immutable: decided by the contents. Mutable: decided for each object</td></tr>
+<tr><td>function</td><td>Equal only when identical</td><td>—</td><td>Decided for each object and does not change while the object lives</td></tr>
+</table>
+<p>The exact values of <code>hash</code> are not defined.</p>
+
+<h3 id="identity">Identity and <code>is</code></h3>
+<p><code>a is b</code> is true if a and b are identical, and false otherwise. Its negation is written <code>a is not b</code>. It has the same precedence as <code>==</code>, at the level of the comparison operators. Like the comparisons it does not group, so <code>a is b is c</code> is an error. <code>is</code> cannot be written in a pattern.</p>
+<ul>
+<li>Identical values are equal, except NaN. NaN is identical to itself but is not equal even to itself.</li>
+<li>Values of a type that is interned are identical if they are equal to a value of the same type. All types other than float are interned.</li>
+<li>Values of different types are not identical. <code>1 == 1.0</code> is true, but <code>1 is 1.0</code> is false.</li>
+<li>Testing whether values are identical is O(1) except for arbitrary precision integers.</li>
+</ul>
+<table>
+<tr><th>Type</th><th><code>is</code></th></tr>
+<tr><td>integer</td><td>Identical if the values are the same. The same for arbitrary precision integers</td></tr>
+<tr><td>float</td><td>Per object. Only the same object is identical; a different object with the same value is not identical. The object of a NaN is identical to itself</td></tr>
+<tr><td>string</td><td>Interned. Identical if equal</td></tr>
+<tr><td>symbol</td><td>Interned. Identical if the names are the same</td></tr>
+<tr><td>M-expression</td><td>Interned. Identical if equal</td></tr>
+<tr><td>immutable user data</td><td>Interned. Identical if equal to a value of the same type</td></tr>
+<tr><td>array</td><td>Per object. Only the same object is identical</td></tr>
+<tr><td>plain array</td><td>Per object. Only the same object is identical</td></tr>
+<tr><td>mutable user data</td><td>Per object. Only the same object is identical</td></tr>
+<tr><td>function</td><td>Per object. Only the same object is identical</td></tr>
+</table>
+
+<h3>Equality across number types</h3>
+<p>Integers, floats and complex numbers are equal if the values are the same, even when the types differ. <code>1 == 1.0</code> and <code>1 == complex(1, 0)</code> are true, and the hash is the same.</p>
+
+<h3>Where equality is used</h3>
+<ul>
+<li>A pattern that writes the same name twice (<code>f(a, a)</code>) matches only when the two values are equal by <code>==</code>.</li>
+<li>The builtin table (<code>table_get</code>, <code>table_set</code> and <code>t[key]</code>) treats two keys as the same if they are identical or equal. A NaN object can be looked up by using that same object as the key. An array or a plain array as the key is an error.</li>
+<li><code>hash(x)</code> is an integer of 0 or more. Values that are equal by <code>==</code> give the same value.</li>
+</ul>
