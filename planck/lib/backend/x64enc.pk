@@ -5,7 +5,10 @@
 # An instruction of an operand width starts with W{'w32} or W{'w64}. The operations are:
 #   mov ALU(add bor band sub bxor cmp adc sbb) test imul neg not mul div idiv cqo shl shr sar lea movzxb movsxb movzxw movsxw
 # and movl (a 32-bit move that clears the upper half and is never taken out), movsxd, movb and movw (stores of the low 8 and 16 bits), push pop call ret jmp jcc
-# setcc syscall ud2, and a label instruction I{'label, [L{l}]}. A shift by cl is I{op, [W, DU{d}]}. A memory operand is M, MX or MG (relative to the
+# setcc syscall ud2, and a label instruction I{'label, [L{l}]}. A shift by cl is I{op, [W, DU{d}]}.
+# The instructions of SSE2 work on xmm0 and xmm1, which the instruction does not name: xin and xout move a value of a 32-bit or 64-bit register to and from
+# xmm0 or xmm1, sse is a scalar operation of the opcode K on xmm0 and xmm1, ucomi compares them, cvtsi2f, cvttf2si and cvtf2f convert xmm0, and movabs
+# loads a 64-bit integer given as four parts of 16 bits, the greatest first. W{'w64} selects the double (sd) and W{'w32} the single (ss). A memory operand is M, MX or MG (relative to the
 # next instruction); the stack slots (MF) are replaced by M with rbp before. An integer operand is a 32-bit field that is sign extended in a 64-bit
 # operation. The emitter is that of x86enc.pk.
 
@@ -116,6 +119,9 @@ alu_entry(op) := find(e -> arg(e, 0) == op, alu)
 
 shift_digit(op) := if (op == 'shl) 4 else if (op == 'shr) 5 else 7
 
+# the prefix of the scalar instructions of SSE2 for a double (F2) and for a single (F3)
+sse_prefix(z) := if (z == 'w64) 242 else 243
+
 # emit(em, i) writes the instruction i. A jump to the label that follows is left out by emit_code.
 emit(em, i) := match I{ir.op(i), ir.explicit(i)} {
     I{'label, [L{l}]} -> x86enc.label(em, l)
@@ -195,6 +201,18 @@ emit(em, i) := match I{ir.op(i), ir.explicit(i)} {
         x86enc.rel32(em, l)
     }
   | I{'setcc, [Cc{c}, D{d}]} -> x64_op(em, 0, false, [15, 144 + x86enc.cc_code(c)], 0, d, 0, byte(d))
+  | I{'xin, [W{z}, K{n}, U{r}]} -> x64_op(em, 102, z == 'w64, [15, 110], n, r, 0, false)
+  | I{'xout, [W{z}, D{r}, K{n}]} -> x64_op(em, 102, z == 'w64, [15, 126], n, r, 0, false)
+  | I{'sse, [W{z}, K{opc}]} -> x64_op(em, sse_prefix(z), false, [15, opc], 0, 1, 0, false)
+  | I{'ucomi, [W{z}]} -> x64_op(em, if (z == 'w64) 102 else 0, false, [15, 46], 0, 1, 0, false)
+  | I{'cvtsi2f, [W{z}, U{r}]} -> x64_op(em, sse_prefix(z), true, [15, 42], 0, r, 0, false)
+  | I{'cvttf2si, [W{z}, D{r}]} -> x64_op(em, sse_prefix(z), true, [15, 44], r, 0, 0, false)
+  | I{'cvtf2f, [W{z}]} -> x64_op(em, sse_prefix(z), false, [15, 90], 0, 0, 0, false)
+  | I{'movabs, [D{d}, K{p3}, K{p2}, K{p1}, K{p0}]} -> {
+        rex(em, true, 0, 0, d, false)
+        x86enc.u8(em, 184 + d % 8)
+        x86enc.u8s(em, [p0 % 256, p0 / 256, p1 % 256, p1 / 256, p2 % 256, p2 / 256, p3 % 256, p3 / 256])
+    }
   | I{'syscall, []} -> x86enc.u8s(em, [15, 5])
   | I{'ud2, []} -> x86enc.u8s(em, [15, 11])
   | I{op, [W{z}, DU{d}, s]} if alu_entry(op) != none -> alu_op(em, z, op, d, s)
@@ -284,6 +302,28 @@ test {
     assert(code([I{'setcc, [Cc{'eq}, D{0}]}]) == [15, 148, 192], "setcc")
     assert(code([I{'call, [U{0}]}]) == [255, 208], "call a register")
     assert(code([I{'syscall, []}, I{'ud2, []}]) == [15, 5, 15, 11], "syscall; ud2")
+    # SSE2 on xmm0 and xmm1
+    assert(code([I{'xin, [w64, K{0}, U{1}]}]) == [102, 72, 15, 110, 193], "movq xmm0, rcx")
+    assert(code([I{'xin, [w64, K{1}, U{9}]}]) == [102, 73, 15, 110, 201], "movq xmm1, r9")
+    assert(code([I{'xin, [w32, K{0}, U{2}]}]) == [102, 15, 110, 194], "movd xmm0, edx")
+    assert(code([I{'xout, [w64, D{0}, K{0}]}]) == [102, 72, 15, 126, 192], "movq rax, xmm0")
+    assert(code([I{'xout, [w32, D{10}, K{0}]}]) == [102, 65, 15, 126, 194], "movd r10d, xmm0")
+    assert(code([I{'sse, [w64, K{88}]}]) == [242, 15, 88, 193], "addsd xmm0, xmm1")
+    assert(code([I{'sse, [w32, K{89}]}]) == [243, 15, 89, 193], "mulss xmm0, xmm1")
+    assert(code([I{'sse, [w64, K{81}]}]) == [242, 15, 81, 193], "sqrtsd xmm0, xmm1")
+    assert(code([I{'ucomi, [w64]}]) == [102, 15, 46, 193], "ucomisd xmm0, xmm1")
+    assert(code([I{'ucomi, [w32]}]) == [15, 46, 193], "ucomiss xmm0, xmm1")
+    assert(code([I{'cvtsi2f, [w64, U{0}]}]) == [242, 72, 15, 42, 192], "cvtsi2sd xmm0, rax")
+    assert(code([I{'cvtsi2f, [w32, U{8}]}]) == [243, 73, 15, 42, 192], "cvtsi2ss xmm0, r8")
+    assert(code([I{'cvttf2si, [w64, D{0}]}]) == [242, 72, 15, 44, 192], "cvttsd2si rax, xmm0")
+    assert(code([I{'cvttf2si, [w32, D{9}]}]) == [243, 76, 15, 44, 200], "cvttss2si r9, xmm0")
+    assert(code([I{'cvtf2f, [w64]}]) == [242, 15, 90, 192], "cvtsd2ss xmm0, xmm0")
+    assert(code([I{'cvtf2f, [w32]}]) == [243, 15, 90, 192], "cvtss2sd xmm0, xmm0")
+    assert(code([I{'setcc, [Cc{'p}, D{1}]}]) == [15, 154, 193], "setp cl")
+    assert(code([I{'setcc, [Cc{'np}, D{1}]}]) == [15, 155, 193], "setnp cl")
+    # a 64-bit integer: the bytes of the value, and a negative one as the two's complement
+    assert(code([I{'movabs, [D{0}, K{16368}, K{0}, K{0}, K{0}]}]) == [72, 184, 0, 0, 0, 0, 0, 0, 240, 63], "movabs rax, 1.0")
+    assert(code([I{'movabs, [D{9}, K{49152}, K{4660}, K{22136}, K{43981}]}]) == [73, 185, 205, 171, 120, 86, 52, 18, 0, 192], "movabs r9, four parts")
     # the address of a symbol is relative to the next instruction
     o2 := obj.new("r")
     e2 := x86enc.new(o2, ".text")

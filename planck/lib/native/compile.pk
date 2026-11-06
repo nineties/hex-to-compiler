@@ -13,6 +13,7 @@
 # - let x = e declares x with the type of e, or the type written after x.
 # - for i in a..b, compound assignments and the short-circuit and / or become while and if.
 # - An integer literal beyond -32768 to 32767 is made with << and | from parts of 15 bits, in the integer type that the context gives.
+# - A floating point literal has the type f64 when nothing else gives it a type. -e of a floating point number is e * -1.0.
 # - An index of an integer type other than i64 is converted with as i64.
 # - The last expression of a function that gives a value is its result.
 
@@ -104,10 +105,14 @@ declare(at, src, t, bind) := {
 
 pos(e) := arg(e, 0)
 
-known(t) := not (head(t) == 'Lit or head(t) == 'Unk)
+known(t) := not (head(t) == 'Lit or head(t) == 'FLit or head(t) == 'Unk)
+
+# the types that give a literal its type: the integer types and the floating point types
+numt(t) := vasm_check.int(t) or vasm_check.flt(t)
 
 # the type of a value that is kept in a variable. A literal has the type that the context gives.
 keep(at, Lit{_}, want) := if (vasm_check.int(want)) want else fail(at, 'type, "the type of this value is not known; write the type, as in let x: i32 = ... or e as i32")
+keep(at, FLit{}, want) := if (vasm_check.flt(want)) want else F64{}
 keep(at, Unk{msg}, want) := fail(at, 'type, msg)
 keep(at, Unit{}, want) := fail(at, 'type, "this call gives no value")
 keep(at, t, want) := t
@@ -217,7 +222,7 @@ big(at, s, t) := {
 
 litlike(e) := head(e) == 'ELit or (head(e) == 'ENeg and head(arg(e, 1)) == 'ELit)
 
-simple(e) := member(head(e), ['ELit, 'EBool, 'EStr, 'ESym, 'EVar]) or (head(e) == 'ENeg and head(arg(e, 1)) == 'ELit)
+simple(e) := member(head(e), ['ELit, 'EFlt, 'EBool, 'EStr, 'ESym, 'EVar]) or (head(e) == 'ENeg and head(arg(e, 1)) == 'ELit)
 
 var(at, x) := {
     b := table.get(env, x, none)
@@ -230,6 +235,7 @@ lit(at, n, want) := if (typeof(n) == 'int) Tuple{Imm{at, n}, Lit{n}}
     else fail(at, 'type, f"the type of {arg(n, 0)} is not known; write it as {arg(n, 0)} as i32 or give the type of the variable")
 
 simple_ex(ELit{at, n}, want) := lit(at, n, want)
+simple_ex(EFlt{at, x}, want) := Tuple{FImm{at, x}, FLit{}}
 simple_ex(EBool{at, b}, want) := Tuple{Imm{at, b}, Bool{}}
 simple_ex(EStr{at, s}, want) := Tuple{Str{at, s}, Ref{'shr, 'static, Arr{U8{}}}}
 simple_ex(ESym{at, s}, want) := Tuple{Sym{at, s}, Val{}}
@@ -339,7 +345,7 @@ call(at, f, args) := {
             p := arg(pa, 0)
             a := arg(pa, 1)
             v := if (head(p) == 'Place) place(a) else {
-                want := if (vasm_check.int(p)) p else if (head(p) == 'TVar) table.get(tsub, arg(p, 0), none) else none
+                want := if (numt(p)) p else if (head(p) == 'TVar) table.get(tsub, arg(p, 0), none) else none
                 ex(a, want)
             }
             q := if (head(p) == 'Place) arg(p, 0) else p
@@ -362,12 +368,16 @@ px_rhs(e, want) = if (simple(e)) {
         vb := arg(two, 1)
         ta := arg(va, 1)
         tb := arg(vb, 1)
-        t := if (cmp(op)) Bool{} else if (head(ta) == 'Lit) (if (head(tb) == 'Lit) Lit{none} else tb) else ta
+        islit := t -> head(t) == 'Lit or head(t) == 'FLit
+        t := if (cmp(op)) Bool{} else if (islit(ta)) (if (islit(tb)) (if (ta == FLit{} or tb == FLit{}) FLit{} else Lit{none}) else tb) else ta
         Tuple{Bin{op, arg(va, 0), arg(vb, 0)}, t}
     }
   | ENeg{at, a} -> {
         v := ex(a, want)
-        Tuple{Bin{'sub, Imm{at, 0}, arg(v, 0)}, if (head(arg(v, 1)) == 'Lit) Lit{none} else arg(v, 1)}
+        t := arg(v, 1)
+        # -e of a floating point number is e * -1.0, which also gives the sign of a zero
+        if (vasm_check.flt(t) or t == FLit{}) Tuple{Bin{'mul, arg(v, 0), FImm{at, "-1.0"}}, t}
+        else Tuple{Bin{'sub, Imm{at, 0}, arg(v, 0)}, if (head(t) == 'Lit) Lit{none} else t}
     }
   | ENot{at, a} -> {
         v := ex(a, Bool{})
@@ -397,7 +407,7 @@ px_rhs(e, want) = if (simple(e)) {
   | EMake{at, s, inits} -> {
         is := map((PInit{iat, f, a}) -> {
             ft := field(iat, s, f)
-            v := ex(a, if (vasm_check.int(ft)) ft else none)
+            v := ex(a, if (numt(ft)) ft else none)
             Init{iat, f, arg(v, 0)}
         }, inits)
         Tuple{Make{at, s, is}, Named{s}}
@@ -445,7 +455,7 @@ target_type(tg) := fail(pos(tg), 'type, "the left of = is a variable, *p, p[i] o
 
 px_set(at, tg, op, e) := {
     ty := target_type(tg)
-    want := if (vasm_check.int(ty)) ty else none
+    want := if (numt(ty)) ty else none
     match tg {
         EVar{vat, x} -> {
             b := var(vat, x)
@@ -538,7 +548,7 @@ stmt(SRegion{at, r, body}) = {
     emit(RegionS{at, r, b})
 }
 stmt(SRet{at, e}) = if (e == none) emit(Ret{at, none}) else {
-    v := ex(e, if (vasm_check.int(px_ret)) px_ret else none)
+    v := ex(e, if (numt(px_ret)) px_ret else none)
     emit(Ret{at, arg(v, 0)})
 }
 stmt(SSet{at, tg, op, e}) = px_set(at, tg, op, e)

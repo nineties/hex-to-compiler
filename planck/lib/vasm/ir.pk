@@ -14,6 +14,7 @@
 #   its value is the address, and the same literal is stored once (vasm_ir.strings)
 # Values:
 #   i8 i16 u8 u16 and bool are kept in 32-bit registers in the sign or zero extended form of their type
+#   f64 is kept in a 64-bit register and f32 in a 32-bit register, as the bits of the number (backend/ir.pk has the operations on them)
 #   a struct value is kept in one register for each of its scalar fields, in the order of the fields (a register holds an own value as an address, 0 when moved)
 #   a function takes the words of its arguments in order (getarg), returns a scalar as its first result (and the high half as the second for 64 bits),
 #   and takes the address of the place for the result as the first argument when it returns a struct;
@@ -39,6 +40,7 @@ use("string")
 use("bytes")
 use("backend/ir")
 use("vasm/rt")
+use("vasm/float")
 
 module vasm_ir {
     # === State ===
@@ -81,6 +83,9 @@ module vasm_ir {
     fun from_val
     fun wrapper_name
     fun call_system
+    fun fconst
+    fun flt_sqrt
+    fun reinterpret
 
     table_get_pair(ps, k) := arg(find((Tuple{f, _}) -> f == k, ps), 1)
 
@@ -91,9 +96,14 @@ module vasm_ir {
 
     int_entry(t) := find(e -> arg(e, 0) == t, ints)
     is_int(t) := int_entry(t) != none and t != Bool{}
+    bits(F32{}) := 32
+    bits(F64{}) := 64
     bits(t) := arg(int_entry(t), 1)
     vi_signed(t) := arg(int_entry(t), 2)
     wide(t) := t == I64{} or t == U64{}
+    is_flt(t) := t == F32{} or t == F64{}
+    # the width of the operations on a floating point number of type t
+    fw(t) := if (t == F64{}) 'w64 else 'w32
 
     align_up(n, a) := (n + a - 1) / a * a
 
@@ -158,6 +168,8 @@ module vasm_ir {
     key(Val{}) := "val"
     key(Arr{u}) := f"arr({key(u)})"
     key(Named{s}) := f"S.{symname(s)}"
+    key(F32{}) := "f32"
+    key(F64{}) := "f64"
     key(t) := if (is_int(t)) f"i{bits(t)}" else "bool"
 
     ldw(I8{}) := 's8
@@ -167,6 +179,7 @@ module vasm_ir {
     ldw(U16{}) := 'u16
     ldw(I64{}) := 'w64
     ldw(U64{}) := 'w64
+    ldw(F64{}) := 'w64
     ldw(Own{_}) := pw()
     ldw(Val{}) := pw()
     ldw(Ref{_, _, _}) := pw()
@@ -181,7 +194,7 @@ module vasm_ir {
     # A variable is Var{type, leaves}: leaves are [Tuple{offset, type, register}, ...].
     # A value is a list of Tuple{offset, type, operand}, where the operand is U{register} or K{n}.
     ve(i) := ir.emit(vi_f, i)
-    reg(t) := ir.vreg(vi_f, if (wide(t)) 64 else if (is_ptr(t)) vi_word * 8 else 32)
+    reg(t) := ir.vreg(vi_f, if (wide(t) or t == F64{}) 64 else if (is_ptr(t)) vi_word * 8 else 32)
 
     # the 32-bit register r as a register of the width of an address; a word of 4 bytes needs no instruction
     zx(r) := if (vi_word == 4) r else {
@@ -340,7 +353,9 @@ module vasm_ir {
     pair_type(a, b, expected) := {
         ta := otype(a)
         tb := otype(b)
-        if (ta != none) ta else if (tb != none) tb else if (expected != none and is_int(expected)) expected else I64{}
+        if (ta != none) ta else if (tb != none) tb
+        else if (head(a) == 'FImm or head(b) == 'FImm) (if (expected != none and is_flt(expected)) expected else F64{})
+        else if (expected != none and is_int(expected)) expected else I64{}
     }
 
     # the value of the operand o of type t (the expected type for a literal); an own value is moved
@@ -351,12 +366,24 @@ module vasm_ir {
         call_fn("__val_inc", [r], [])
         val1(Val{}, U{r})
     } else if (linear(var_type(x))) take(x) else var_val(x)
+    vi_use(FImm{_, x}, t) = fconst(vasm_float.bits(x), if (t == F32{}) F32{} else F64{})
     vi_use(Str{_, s}, t) = {
         r := preg()
         ve(I{'la, [D{r}, S{string_name(s), 0}]})
         val1(Ref{'shr, 'static, Arr{U8{}}}, U{r})
     }
     vi_use(Sym{_, s}, t) = val1(Val{}, U{symbol_reg(s)})
+
+    # the number whose bits as a double are the parts of 16 bits ps (vasm_float.bits), in a register of the type t (f32 or f64); a single is the double rounded
+    fconst(ps, t) = {
+        d := reg(F64{})
+        ve(I{'li64, [D{d}, K{ps[0]}, K{ps[1]}, K{ps[2]}, K{ps[3]}]})
+        if (t == F64{}) val1(F64{}, U{d}) else {
+            r := reg(F32{})
+            ve(I{'cvtf2f, [W{'w64}, D{r}, U{d}]})
+            val1(F32{}, U{r})
+        }
+    }
 
     # a register that holds the address of the symbol s, which is made when it is first asked for
     symbol_reg(s) = {
@@ -474,7 +501,17 @@ module vasm_ir {
     dst(into, t) := if (into == none) reg(t) else into
 
     # d = a op b for integers of type t; the result of a comparison is 0 or 1
-    arith(op, a, b, t, d) := {
+    arith(op, a, b, t, d) := if (is_flt(t)) {
+        ra := ureg(opnd(a, t), t)
+        rb := ureg(opnd(b, t), t)
+        if (is_cmp(op)) ve(I{'fcmp, [Cc{op}, W{fw(t)}, D{d}, U{ra}, U{rb}]})
+        else ve(I{match op {
+            'add -> 'fadd
+          | 'sub -> 'fsub
+          | 'mul -> 'fmul
+          | 'div -> 'fdiv
+        }, [W{fw(t)}, D{d}, U{ra}, U{rb}]})
+    } else {
         ra := ureg(opnd(a, t), t)
         ob := opnd(b, t)
         if (is_cmp(op)) ve(I{'cmp, [Cc{vi_cc(op, t)}, D{d}, U{ra}, ob]})
@@ -497,8 +534,76 @@ module vasm_ir {
         }
     }
 
+    # d (f32 or f64) = the unsigned integer in the 64-bit register r. A number with the top bit set is halved, keeping the lowest bit so that the rounding is right,
+    # converted and doubled.
+    u64_to_flt(r, t, d) := {
+        small := vi_label()
+        big := vi_label()
+        done := vi_label()
+        ve(I{'br, [Cc{'lt}, U{r}, K{0}, L{big}, L{small}]})
+        vi_place(small)
+        ve(I{'cvti2f, [W{fw(t)}, D{d}, U{r}]})
+        ve(I{'jmp, [L{done}]})
+        vi_place(big)
+        h := ir.vreg(vi_f, 64)
+        l := ir.vreg(vi_f, 64)
+        ve(I{'shr, [D{h}, U{r}, K{1}]})
+        ve(I{'band, [D{l}, U{r}, K{1}]})
+        ve(I{'bor, [D{h}, U{h}, U{l}]})
+        ve(I{'cvti2f, [W{fw(t)}, D{d}, U{h}]})
+        ve(I{'fadd, [W{fw(t)}, D{d}, U{d}, U{d}]})
+        vi_place(done)
+    }
+
+    # d (64 bits) = the number in the register r of type ta (f32 or f64) as an unsigned integer. A number from 2^63 on is converted without 2^63 and the top bit is set.
+    flt_to_u64(r, ta, d) := {
+        lim := arg(scalar(fconst([17376, 0, 0, 0], ta)), 0)
+        c := ir.vreg(vi_f, 32)
+        ve(I{'fcmp, [Cc{'lt}, W{fw(ta)}, D{c}, U{r}, U{lim}]})
+        small := vi_label()
+        big := vi_label()
+        done := vi_label()
+        ve(I{'br, [Cc{'ne}, U{c}, K{0}, L{small}, L{big}]})
+        vi_place(small)
+        ve(I{'cvtf2i, [W{fw(ta)}, D{d}, U{r}]})
+        ve(I{'jmp, [L{done}]})
+        vi_place(big)
+        m := reg(ta)
+        top := ir.vreg(vi_f, 64)
+        ve(I{'fsub, [W{fw(ta)}, D{m}, U{r}, U{lim}]})
+        ve(I{'cvtf2i, [W{fw(ta)}, D{d}, U{m}]})
+        ve(I{'li64, [D{top}, K{32768}, K{0}, K{0}, K{0}]})
+        ve(I{'bxor, [D{d}, U{d}, U{top}]})
+        vi_place(done)
+    }
+
+    # d = a as t where one of ta and t is f32 or f64
+    fconv(a, ta, t, d) := {
+        o := opnd(a, ta)
+        if (is_flt(ta) and is_flt(t)) {
+            r := ureg(o, ta)
+            if (ta == t) ve(I{'mov, [D{d}, U{r}]}) else ve(I{'cvtf2f, [W{fw(ta)}, D{d}, U{r}]})
+        } else if (is_flt(t)) {
+            # an integer: in a 64-bit register, sign or zero extended
+            w := ir.vreg(vi_f, 64)
+            if (head(o) == 'K) ve(I{'li, [D{w}, o]})
+            else if (wide(ta)) ve(I{'mov, [D{w}, o]})
+            else ve(I{if (vi_signed(ta)) 'sext64 else 'zext64, [D{w}, o]})
+            if (ta == U64{}) u64_to_flt(w, t, d) else ve(I{'cvti2f, [W{fw(t)}, D{d}, U{w}]})
+        } else {
+            r := ureg(o, ta)
+            if (t == U64{}) flt_to_u64(r, ta, d) else if (wide(t)) ve(I{'cvtf2i, [W{fw(ta)}, D{d}, U{r}]})
+            else {
+                w := ir.vreg(vi_f, 64)
+                ve(I{'cvtf2i, [W{fw(ta)}, D{w}, U{r}]})
+                ve(I{'trunc, [D{d}, U{w}]})
+                normalize(d, t)
+            }
+        }
+    }
+
     # d = a as t
-    conv(a, ta, t, d) := {
+    conv(a, ta, t, d) := if (is_flt(ta) or is_flt(t)) fconv(a, ta, t, d) else {
         o := opnd(a, ta)
         if (head(o) == 'K) ve(I{'li, [D{d}, o]})
         else {
@@ -911,6 +1016,29 @@ module vasm_ir {
         []
     }
     call_system('swap, args, expected) = vi_swap(args)
+    call_system('f64_sqrt, args, expected) = flt_sqrt(args[0], F64{})
+    call_system('f32_sqrt, args, expected) = flt_sqrt(args[0], F32{})
+    call_system('f64_bits, args, expected) = reinterpret(args[0], F64{}, U64{})
+    call_system('f64_from_bits, args, expected) = reinterpret(args[0], U64{}, F64{})
+    call_system('f32_bits, args, expected) = reinterpret(args[0], F32{}, U32{})
+    call_system('f32_from_bits, args, expected) = reinterpret(args[0], U32{}, F32{})
+
+    # the square root of the operand a of type t (f32 or f64)
+    flt_sqrt(a, t) = {
+        r := ureg(opnd(a, t), t)
+        d := reg(t)
+        ve(I{'fsqrt, [W{fw(t)}, D{d}, U{r}]})
+        val1(t, U{d})
+    }
+
+    # the bits of the operand a of type from as a value of type to, which has the same width: a floating point number and an unsigned integer
+    # are kept in registers the same way
+    reinterpret(a, from, to) = {
+        r := ureg(opnd(a, from), from)
+        d := reg(to)
+        ve(I{'mov, [D{d}, U{r}]})
+        val1(to, U{d})
+    }
 
     vi_swap(args) = {
         place := args[0]
@@ -991,6 +1119,13 @@ module vasm_ir {
     cond(Bin{op, a, b}, lt, lf) := if (pair_type(a, b, I64{}) == Val{}) {
         r := ir.vreg(vi_f, 32)
         val_eq(op, a, b, r)
+        ve(I{'br, [Cc{'ne}, U{r}, K{0}, L{lt}, L{lf}]})
+    } else if (is_flt(pair_type(a, b, I64{}))) {
+        t := pair_type(a, b, I64{})
+        ra := ureg(opnd(a, t), t)
+        rb := ureg(opnd(b, t), t)
+        r := ir.vreg(vi_f, 32)
+        ve(I{'fcmp, [Cc{op}, W{fw(t)}, D{r}, U{ra}, U{rb}]})
         ve(I{'br, [Cc{'ne}, U{r}, K{0}, L{lt}, L{lf}]})
     } else {
         t := pair_type(a, b, I64{})

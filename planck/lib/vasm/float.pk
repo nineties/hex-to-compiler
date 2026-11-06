@@ -1,0 +1,304 @@
+# vasm/float: the bits of a floating point literal
+# Copyright (C) 2026 nineties
+#
+# vasm_float.bits(text) is the binary64 number that the literal text (-1.5, 0.1, 1.0e-3) denotes, correctly rounded to the nearest and to even on a tie, as
+# [p3, p2, p1, p0]: the four parts of 16 bits of its bits (sign, exponent, fraction), the greatest first. A literal beyond the range is infinity and one
+# below it is zero. The arithmetic is on natural numbers of any size, kept as lists of limbs of 15 bits, the least first, because an integer has 31 bits here.
+
+use("base")
+use("list")
+
+module vasm_float {
+
+# === Natural numbers: lists of limbs of 15 bits, the least first, without a zero limb at the end ===
+
+limb := 32768
+
+trim(a) := {
+    r := reverse(a)
+    while (r != [] and r[0] == 0) r = list.drop(r, 1)
+    reverse(r)
+}
+
+# a * m for 0 <= m <= 32767
+mul_small(a, m) := {
+    out := []
+    carry := 0
+    each(l -> {
+        v := l * m + carry
+        out = (v % limb) :: out
+        carry = v / limb
+    }, a)
+    while (carry > 0) {
+        out = (carry % limb) :: out
+        carry = carry / limb
+    }
+    trim(reverse(out))
+}
+
+# a + d for 0 <= d <= 32767
+add_small(a, d) := {
+    out := []
+    carry := d
+    each(l -> {
+        v := l + carry
+        out = (v % limb) :: out
+        carry = v / limb
+    }, a)
+    if (carry > 0) out = carry :: out
+    reverse(out)
+}
+
+# the number of bits of a limb
+limb_bits(n) := {
+    k := 0
+    while (n > 0) {
+        k = k + 1
+        n = n / 2
+    }
+    k
+}
+
+nbits(a) := if (a == []) 0 else 15 * (length(a) - 1) + limb_bits(list.last(a))
+
+# the bit i of a, 0 or 1
+bit(a, i) := {
+    k := i / 15
+    if (k >= length(a) or i < 0) 0 else bit_and(bit_sar(a[k], i % 15), 1)
+}
+
+# some of the lowest k bits of a is set
+low_nonzero(a, k) := {
+    q := k / 15
+    r := k % 15
+    found := false
+    i := 0
+    xs := a
+    while (xs != [] and i < q) {
+        if (xs[0] != 0) found = true
+        xs = list.drop(xs, 1)
+        i = i + 1
+    }
+    if (xs != [] and r > 0 and bit_and(xs[0], bit_shl(1, r) - 1) != 0) found = true
+    found
+}
+
+# a * 2^k
+shl(a, k) := if (a == []) [] else {
+    zeros := []
+    i := 0
+    while (i < k / 15) {
+        zeros = 0 :: zeros
+        i = i + 1
+    }
+    append(zeros, mul_small(a, bit_shl(1, k % 15)))
+}
+
+# a / 2^k rounded down
+shr(a, k) := {
+    b := list.drop(a, k / 15)
+    r := k % 15
+    if (r == 0) b else {
+        out := []
+        xs := b
+        while (xs != []) {
+            lo := bit_sar(xs[0], r)
+            hi := if (length(xs) > 1) bit_shl(bit_and(xs[1], bit_shl(1, r) - 1), 15 - r) else 0
+            out = (lo + hi) :: out
+            xs = list.drop(xs, 1)
+        }
+        trim(reverse(out))
+    }
+}
+
+# -1, 0 or 1 for a < b, a == b and a > b
+cmp(a, b) := {
+    la := length(a)
+    lb := length(b)
+    if (la != lb) (if (la < lb) -1 else 1) else {
+        r := 0
+        ra := reverse(a)
+        rb := reverse(b)
+        while (r == 0 and ra != []) {
+            if (ra[0] != rb[0]) r = if (ra[0] < rb[0]) -1 else 1
+            ra = list.drop(ra, 1)
+            rb = list.drop(rb, 1)
+        }
+        r
+    }
+}
+
+# a - b for b <= a
+sub(a, b) := {
+    out := []
+    borrow := 0
+    xs := a
+    ys := b
+    while (xs != []) {
+        y := if (ys != []) ys[0] else 0
+        v := xs[0] - y - borrow
+        if (v < 0) {
+            v = v + limb
+            borrow = 1
+        } else borrow = 0
+        out = v :: out
+        xs = list.drop(xs, 1)
+        if (ys != []) ys = list.drop(ys, 1)
+    }
+    trim(reverse(out))
+}
+
+# m * 10^k
+mul_pow10(m, k) := {
+    r := m
+    while (k >= 4) {
+        r = mul_small(r, 10000)
+        k = k - 4
+    }
+    while (k > 0) {
+        r = mul_small(r, 10)
+        k = k - 1
+    }
+    r
+}
+
+pow10(k) := mul_pow10([1], k)
+
+# the bits n of a from lo, as an integer
+field(a, lo, n) := {
+    v := 0
+    j := n - 1
+    while (j >= 0) {
+        v = v * 2 + bit(a, lo + j)
+        j = j - 1
+    }
+    v
+}
+
+# === The literal ===
+
+# the sign, the digits (without the leading zeros) as a number, the number of them and the exponent of ten of the last digit
+read(text) := {
+    n := strlen(text)
+    i := 0
+    neg := false
+    if (ord(text, 0) == 45) {
+        neg = true
+        i = 1
+    }
+    m := []
+    nd := 0
+    frac := 0
+    seen_dot := false
+    exp := 0
+    expneg := false
+    done := false
+    while (i < n and not done) {
+        c := ord(text, i)
+        if (c == 46) seen_dot = true
+        else if (c == 101 or c == 69) done = true
+        else {
+            if (m != [] or c != 48) {
+                m = add_small(mul_small(m, 10), c - 48)
+                nd = nd + 1
+            }
+            if (seen_dot) frac = frac + 1
+        }
+        i = i + 1
+    }
+    if (done) {
+        if (i < n and ord(text, i) == 45) {
+            expneg = true
+            i = i + 1
+        }
+        while (i < n) {
+            if (exp < 100000) exp = exp * 10 + (ord(text, i) - 48)
+            i = i + 1
+        }
+    }
+    Tuple{neg, m, nd, (if (expneg) 0 - exp else exp) - frac}
+}
+
+# the parts of the bits for the sign, the biased exponent and the fraction (a number)
+assemble(neg, biased, frac) := [
+    field(frac, 48, 4) + biased * 16 + (if (neg) 32768 else 0),
+    field(frac, 32, 16),
+    field(frac, 16, 16),
+    field(frac, 0, 16)]
+
+# m * 10^e10, the nearest double
+export bits(text) := {
+    r := read(text)
+    neg := r[0]
+    m := r[1]
+    nd := r[2]
+    e10 := r[3]
+    mag := nd - 1 + e10
+    if (m == [] or mag < -330) assemble(neg, 0, []) else if (mag > 310) assemble(neg, 2047, []) else {
+        # q = the value / 2^e rounded down, with 55 or 56 bits, and rem is whether the value has more below
+        q := []
+        e := 0
+        rem := false
+        if (e10 >= 0) {
+            n := mul_pow10(m, e10)
+            e = nbits(n) - 56
+            if (e >= 0) {
+                q = shr(n, e)
+                rem = low_nonzero(n, e)
+            } else q = shl(n, 0 - e)
+        } else {
+            n := m
+            d := pow10(0 - e10)
+            e = nbits(n) - nbits(d) - 55
+            if (e <= 0) n = shl(n, 0 - e) else d = shl(d, e)
+            i := 55
+            while (i >= 0) {
+                t := shl(d, i)
+                bitv := 0
+                if (cmp(n, t) >= 0) {
+                    n = sub(n, t)
+                    bitv = 1
+                }
+                q = add_small(mul_small(q, 2), bitv)
+                i = i - 1
+            }
+            rem = n != []
+        }
+        nb := nbits(q)
+        drop := nb - 53
+        ex := e + drop
+        if (ex < -1074) {
+            drop = drop + (-1074 - ex)
+            ex = -1074
+        }
+        kept := shr(q, drop)
+        guard := bit(q, drop - 1)
+        sticky := low_nonzero(q, drop - 1) or rem
+        if (guard == 1 and (sticky or bit(kept, 0) == 1)) kept = add_small(kept, 1)
+        if (nbits(kept) > 53) {
+            kept = shr(kept, 1)
+            ex = ex + 1
+        }
+        if (kept == []) assemble(neg, 0, [])
+        else {
+            biased := if (nbits(kept) == 53) ex + 1075 else 0
+            if (biased >= 2047) assemble(neg, 2047, []) else assemble(neg, biased, kept)
+        }
+    }
+}
+
+test {
+    # the bits of well known numbers
+    assert(bits("1.5") == [16376, 0, 0, 0], "1.5")
+    assert(bits("-2.0") == [49152, 0, 0, 0], "-2.0")
+    assert(bits("0.1") == [16313, 39321, 39321, 39322], "0.1")
+    assert(bits("0.0") == [0, 0, 0, 0], "zero")
+    assert(bits("-0.0") == [32768, 0, 0, 0], "negative zero")
+    assert(bits("1.0e400") == [32752, 0, 0, 0], "overflow")
+    assert(bits("1.0e-400") == [0, 0, 0, 0], "underflow")
+    assert(bits("5.0e-324") == [0, 0, 0, 1], "the least subnormal")
+    assert(bits("1.7976931348623157e308") == [32751, 65535, 65535, 65535], "the greatest number")
+    assert(bits("2.2250738585072014e-308") == [16, 0, 0, 0], "the least normal number")
+}
+
+}
