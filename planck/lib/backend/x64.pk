@@ -15,6 +15,14 @@
 #   ret [Us values], jmp [L], br [Cc, U a, U or K b, L yes, L no], trap, label [L]
 #   zext64 sext64            [D 64-bit, U 32-bit]
 #   trunc                    [D 32-bit, U 64-bit]
+#   fadd fsub fmul fdiv      [W, D d, U a, U b]: a floating point number is kept in a register as its bits, 64 bits for the width w64 (a double)
+#                            and 32 bits for w32 (a single); the operation works on xmm0 and xmm1, which no register of the code names
+#   fsqrt                    [W, D, U]
+#   fcmp                     [Cc{eq ne lt le gt ge}, W, D, U a, U b]: d is 1 when a cc b, otherwise 0; a comparison with a NaN is 0 except for ne
+#   cvti2f                   [W of the result, D, U 64-bit signed integer]
+#   cvtf2i                   [W of the operand, D 64-bit, U]: toward zero; the value that x86 gives (the least 64-bit integer) for a NaN or out of range
+#   cvtf2f                   [W of the operand, D, U]: a double to a single, or a single to a double
+#   li64                     [D 64-bit, K p3, K p2, K p1, K p0]: the integer p3 * 2^48 + p2 * 2^32 + p1 * 2^16 + p0, each part from 0 to 65535 (an integer of planck0 has 31 bits)
 # ld and st with the width w64 take the memory operand of the register that holds the value.
 # Memory operands are M{U base, disp}, MG{name, disp} and MF{'slot, n, disp}.
 # A 32-bit value lives in a 64-bit register with its upper half 0, which every instruction that gives a 32-bit value keeps: a move of the 32-bit value from a physical
@@ -52,6 +60,13 @@ select(f, code) := {
 }
 
 flags_def := ID{16}
+
+# xmm0 and xmm1 are the registers 17 and 18 of the code; they are not given out, and only the sequences of one operation use them
+xmm_def(n) := ID{17 + n}
+xmm_use(n) := IU{17 + n}
+
+# the opcodes of the scalar operations of SSE2
+sse_ops := [Tuple{'fadd, 88}, Tuple{'fmul, 89}, Tuple{'fsub, 92}, Tuple{'fdiv, 94}]
 
 # the width of a register: 'w64 for a physical register and a virtual register of 64 bits
 x64_wd(f, r) := if (ir.is_vreg(r) and ir.width(f, r) == 32) 'w32 else 'w64
@@ -110,6 +125,11 @@ select_one(f, emit, i) = {
         I{'label, _} -> emit(i)
       | I{'mov, [D{d}, U{s}]} -> mov(d, s)
       | I{'li, [D{d}, K{n}]} -> emit(I{'mov, [W{wd(d)}, D{d}, K{n}]})
+      | I{'li64, [D{d}, K{p3}, K{p2}, K{p1}, K{p0}]} -> {
+            # up to 30 bits it is a 32-bit move, which clears the upper half
+            if (p3 == 0 and p2 == 0 and p1 < 16384) emit(I{'mov, [W{'w32}, D{d}, K{p1 * 65536 + p0}]})
+            else emit(I{'movabs, [D{d}, K{p3}, K{p2}, K{p1}, K{p0}]})
+        }
       | I{'la, [D{d}, S{name, off}]} -> emit(I{'lea, [W{'w64}, D{d}, MG{name, off}]})
       | I{'slota, [D{d}, K{n}]} -> emit(I{'lea, [W{'w64}, D{d}, MF{'slot, n, 0}]})
       | I{op, [D{d}, U{a}, b]} if member(op, ['add, 'sub, 'mul, 'band, 'bor, 'bxor, 'shl, 'shr, 'sar]) -> bin(op, d, a, b)
@@ -157,6 +177,50 @@ select_one(f, emit, i) = {
           | 'w32 -> emit(I{'mov, [W{'w32}, m, v]})
           | 'w16 -> emit(I{'movw, [m, v]})
           | _ -> emit(I{'movb, [m, v]})
+        }
+      | I{op, [W{z}, D{d}, U{a}, U{b}]} if member(op, ['fadd, 'fsub, 'fmul, 'fdiv]) -> {
+            emit(I{'xin, [W{z}, K{0}, U{a}, xmm_def(0)]})
+            emit(I{'xin, [W{z}, K{1}, U{b}, xmm_def(1)]})
+            emit(I{'sse, [W{z}, K{arg(find(e -> arg(e, 0) == op, sse_ops), 1)}, xmm_def(0), xmm_use(0), xmm_use(1)]})
+            emit(I{'xout, [W{z}, D{d}, K{0}, xmm_use(0)]})
+        }
+      | I{'fsqrt, [W{z}, D{d}, U{a}]} -> {
+            emit(I{'xin, [W{z}, K{1}, U{a}, xmm_def(1)]})
+            emit(I{'sse, [W{z}, K{81}, xmm_def(0), xmm_use(1)]})
+            emit(I{'xout, [W{z}, D{d}, K{0}, xmm_use(0)]})
+        }
+      | I{'fcmp, [Cc{c}, W{z}, D{d}, U{a}, U{b}]} -> {
+            # ucomis sets the flags of an unsigned comparison; with a NaN it sets zero, parity and carry. The above and above-or-equal
+            # conditions are false with a NaN, so a < b is b > a with the operands exchanged.
+            swap := c == 'lt or c == 'le
+            emit(I{'xin, [W{z}, K{0}, U{if (swap) b else a}, xmm_def(0)]})
+            emit(I{'xin, [W{z}, K{1}, U{if (swap) a else b}, xmm_def(1)]})
+            emit(I{'ucomi, [W{z}, xmm_use(0), xmm_use(1), flags_def]})
+            t := nv('w32)
+            emit(I{'setcc, [Cc{if (c == 'gt or c == 'lt) 'gtu else if (c == 'ge or c == 'le) 'geu else c}, D{t}, IU{16}]})
+            if (c == 'eq or c == 'ne) {
+                # equal and ordered, or unequal or unordered
+                p := nv('w32)
+                emit(I{'setcc, [Cc{if (c == 'eq) 'np else 'p}, D{p}, IU{16}]})
+                t1 := nv('w32)
+                p1 := nv('w32)
+                emit(I{'movzxb, [W{'w32}, D{t1}, U{t}]})
+                emit(I{'movzxb, [W{'w32}, D{p1}, U{p}]})
+                bin(if (c == 'eq) 'band else 'bor, d, t1, U{p1})
+            } else emit(I{'movzxb, [W{'w32}, D{d}, U{t}]})
+        }
+      | I{'cvti2f, [W{z}, D{d}, U{a}]} -> {
+            emit(I{'cvtsi2f, [W{z}, U{a}, xmm_def(0)]})
+            emit(I{'xout, [W{z}, D{d}, K{0}, xmm_use(0)]})
+        }
+      | I{'cvtf2i, [W{z}, D{d}, U{a}]} -> {
+            emit(I{'xin, [W{z}, K{0}, U{a}, xmm_def(0)]})
+            emit(I{'cvttf2si, [W{z}, D{d}, xmm_use(0)]})
+        }
+      | I{'cvtf2f, [W{z}, D{d}, U{a}]} -> {
+            emit(I{'xin, [W{z}, K{0}, U{a}, xmm_def(0)]})
+            emit(I{'cvtf2f, [W{z}, xmm_def(0), xmm_use(0)]})
+            emit(I{'xout, [W{if (z == 'w64) 'w32 else 'w64}, D{d}, K{0}, xmm_use(0)]})
         }
       | I{'getarg, [D{d}, K{n}]} -> emit(I{'mov, [W{wd(d)}, D{d}, MF{'arg, n, 0}]})
       | I{'call, [callee, Us{args}, Ds{rets}]} -> {
@@ -282,6 +346,15 @@ test {
     assert(sel([I{'ld, [W{'w32}, D{a}, M{U{b}, 4}]}]) == [I{'mov, [w32, D{a}, M{U{b}, 4}]}], "a 32-bit load")
     assert(sel([I{'ld, [W{'w64}, D{b}, M{U{b}, 8}]}]) == [I{'mov, [w64, D{b}, M{U{b}, 8}]}], "a 64-bit load")
     assert(sel([I{'getarg, [D{b}, K{2}]}]) == [I{'mov, [w64, D{b}, MF{'arg, 2, 0}]}], "getarg")
+    # an integer of 64 bits in four parts: a move of 32 bits when it is small, and movabs otherwise
+    assert(sel([I{'li64, [D{b}, K{16368}, K{0}, K{0}, K{0}]}]) == [I{'movabs, [D{b}, K{16368}, K{0}, K{0}, K{0}]}], "li64")
+    assert(sel([I{'li64, [D{b}, K{0}, K{0}, K{5}, K{7}]}]) == [I{'mov, [w32, D{b}, K{327687}]}], "li64 of a small integer")
+    # a floating point operation moves the operands to xmm0 and xmm1, which the instructions do not name, and the result back
+    c := ir.vreg(f, 64)
+    assert(sel([I{'fadd, [w64, D{c}, U{b}, U{b + 0}]}]) == [I{'xin, [w64, K{0}, U{b}, ID{17}]}, I{'xin, [w64, K{1}, U{b}, ID{18}]},
+        I{'sse, [w64, K{88}, ID{17}, IU{17}, IU{18}]}, I{'xout, [w64, D{c}, K{0}, IU{17}]}], "fadd")
+    assert(ir.explicit(sel([I{'fsqrt, [w32, D{a}, U{a + 0}]}])[1]) == [w32, K{81}], "fsqrt")
+    assert(list.any(i -> ir.op(i) == 'ucomi, sel([I{'fcmp, [Cc{'eq}, w64, D{a}, U{b}, U{b + 0}]}])), "fcmp")
 }
 
 # the loads start first so that the additions do not wait

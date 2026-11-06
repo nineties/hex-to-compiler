@@ -36,7 +36,7 @@ _define_rule('vasm_here, p -> {
 _define_rule('vasm_same, 'Same{})
 _define_rule('vasm_newline, 'Not{Same{}})
 
-vasm_kw ::= ('fn | 'struct | 'var | 'region | 'own | 'mut | 'i8 | 'i16 | 'i32 | 'i64 | 'u8 | 'u16 | 'u32 | 'u64 | 'bool | 'val | 'true | 'false | 'if | 'else | 'while | 'return | 'as | 'static)
+vasm_kw ::= ('fn | 'struct | 'var | 'region | 'own | 'mut | 'i8 | 'i16 | 'i32 | 'i64 | 'u8 | 'u16 | 'u32 | 'u64 | 'f32 | 'f64 | 'bool | 'val | 'true | 'false | 'if | 'else | 'while | 'return | 'as | 'static)
 vasm_name ::= !vasm_kw x:ident { x }
 
 # the value of the text s of an integer literal, or Big{s} if it is out of -32768 to 32767.
@@ -78,6 +78,7 @@ _define_rule('vasm_int_lit, p -> {
 
 vasm_type ::= 'i8 { I8{} } | 'i16 { I16{} } | 'i32 { I32{} } | 'i64 { I64{} }
     | 'u8 { U8{} } | 'u16 { U16{} } | 'u32 { U32{} } | 'u64 { U64{} }
+    | 'f32 { F32{} } | 'f64 { F64{} }
     | 'bool { Bool{} }
     | 'val { Val{} }
     | 'own t:vasm_type { Own{t} }
@@ -87,7 +88,9 @@ vasm_type ::= 'i8 { I8{} } | 'i16 { I16{} } | 'i32 { I32{} } | 'i64 { I64{} }
     | "[" t:vasm_type "]" { Arr{t} }
     | s:vasm_name { Named{s} }
 
-vasm_operand ::= at:vasm_here n:vasm_int_lit { Imm{at, n} }
+# a floating point literal 1.5, -0.25 or 1.0e-3: FImm{at, its text}
+vasm_operand ::= at:vasm_here x:float { FImm{at, x} }
+    | at:vasm_here n:vasm_int_lit { Imm{at, n} }
     | at:vasm_here s:string { Str{at, s} }
     | at:vasm_here "'" s:ident { Sym{at, s} }
     | at:vasm_here 'true { Imm{at, true} }
@@ -174,12 +177,18 @@ export ints := [
 export int_entry(t) := find(e -> arg(e, 0) == t, ints)
 export int(t) := int_entry(t) != none
 
+# the floating point types
+export flt(t) := t == F32{} or t == F64{}
+
 # A literal is from -32768 to 32767. A type of 16 bits or more holds all of them but the negative ones
 # for an unsigned type, so these are the bounds of a literal of the type e of ints.
 lit_lo(e) := if (not arg(e, 3)) 0 else if (arg(e, 2) == 8) -128 else -32768
 lit_hi(e) := if (arg(e, 2) != 8) 32767 else if (arg(e, 3)) 127 else 255
 
 export show_type(Bool{}) := "bool"
+show_type(F32{}) := "f32"
+show_type(F64{}) := "f64"
+show_type(FLit{}) := "float"
 show_type(Val{}) := "val"
 show_type(Unit{}) := "()"
 show_type(Lit{_}) := "integer"
@@ -238,6 +247,15 @@ table.set(builtins, 'free, Sig{[], [Own{TVar{'T}}], Unit{}})
 table.set(builtins, 'alloc, Sig{[], [I64{}, TVar{'T}], Own{Arr{TVar{'T}}}})
 table.set(builtins, 'len, Sig{['r], [Ref{'shr, 'r, Arr{TVar{'T}}}], I64{}})
 table.set(builtins, 'swap, Sig{[], [Place{TVar{'T}}, TVar{'T}], TVar{'T}})
+
+# Floating point. f64_sqrt(x) and f32_sqrt(x) are the square roots. The bits of a number are read and made again by f64_bits, f64_from_bits,
+# f32_bits and f32_from_bits, which give the number its bits as an unsigned integer of the same width and back.
+table.set(builtins, 'f64_sqrt, Sig{[], [F64{}], F64{}})
+table.set(builtins, 'f32_sqrt, Sig{[], [F32{}], F32{}})
+table.set(builtins, 'f64_bits, Sig{[], [F64{}], U64{}})
+table.set(builtins, 'f64_from_bits, Sig{[], [U64{}], F64{}})
+table.set(builtins, 'f32_bits, Sig{[], [F32{}], U32{}})
+table.set(builtins, 'f32_from_bits, Sig{[], [U32{}], F32{}})
 
 fail(at, kind, msg) := perform VasmFail{at, kind, msg}
 
@@ -344,7 +362,8 @@ lit_range(at, n, t) := if (n != none) {
 fits(at, e, t) := if (head(t) == 'Lit and int(e)) {
     lit_range(at, arg(t, 0), e)
     true
-} else if (head(e) == 'Own and head(t) == 'Own) fits(at, arg(e, 0), arg(t, 0))
+} else if (t == FLit{} and flt(e)) true
+else if (head(e) == 'Own and head(t) == 'Own) fits(at, arg(e, 0), arg(t, 0))
 else if (head(e) == 'Arr and head(t) == 'Arr) fits(at, arg(e, 0), arg(t, 0))
 else if (head(e) == 'Ref and head(t) == 'Ref) arg(e, 0) == arg(t, 0) and outlives(arg(t, 1), arg(e, 1)) and fits(at, arg(e, 2), arg(t, 2))
 else e == t
@@ -374,6 +393,7 @@ pos(o) := arg(o, 0)
 # the type of the operand o, which is read. own and &mut are moved.
 vasm_use(st, Imm{at, n}) := if (typeof(n) == 'int) Lit{n} else if (n == true or n == false) Bool{}
     else fail(at, 'type, f"{arg(n, 0)} is out of the range of a literal, -32768 to 32767; make it with << and |")
+vasm_use(st, FImm{_, _}) := FLit{}
 vasm_use(st, Str{_, _}) := Ref{'shr, 'static, Arr{U8{}}}
 vasm_use(st, Sym{_, _}) := Val{}
 vasm_use(st, Reg{at, x}) := {
@@ -618,7 +638,14 @@ rhs(st, r) := match r {
             lit_range(arg(b, 0), arg(tb, 0), ta)
             tb = ta
         }
-        if ((op == 'eq or op == 'ne) and ((ta == Bool{} and tb == Bool{}) or (ta == Val{} and tb == Val{}))) Bool{} else {
+        if (ta == FLit{} and flt(tb)) ta = tb
+        if (tb == FLit{} and flt(ta)) tb = ta
+        if ((op == 'eq or op == 'ne) and ((ta == Bool{} and tb == Bool{}) or (ta == Val{} and tb == Val{}))) Bool{}
+        else if (flt(ta) or flt(tb) or ta == FLit{} or tb == FLit{}) {
+            if (ta != tb) fail(arg(b, 0), 'type, f"the operands are {show_type(ta)} and {show_type(tb)}")
+            if (not member(op, ['add, 'sub, 'mul, 'div, 'lt, 'le, 'gt, 'ge, 'eq, 'ne])) fail(arg(a, 0), 'type, f"the operator is not for {show_type(ta)}; a floating point number has + - * / and the comparisons")
+            if (member(op, ['lt, 'le, 'gt, 'ge, 'eq, 'ne])) Bool{} else ta
+        } else {
             int_operand(a, ta)
             int_operand(b, tb)
             lits := head(ta) == 'Lit and head(tb) == 'Lit
@@ -640,8 +667,11 @@ rhs(st, r) := match r {
         } else if (ta == Val{}) {
             if (not (int(t) or t == Bool{} or t == Own{Arr{U8{}}})) fail(at, 'type, f"a val is not converted to {show_type(t)}")
         } else {
-            if (not int(t)) fail(at, 'type, f"the value is converted to {show_type(t)}, not an integer type")
-            if (head(ta) == 'Lit) lit_range(at, arg(ta, 0), t) else int_operand(a, ta)
+            if (not (int(t) or flt(t))) fail(at, 'type, f"the value is converted to {show_type(t)}, not a number type")
+            if (head(ta) == 'Lit and int(t)) lit_range(at, arg(ta, 0), t)
+            else if (flt(ta) or ta == FLit{}) none
+            else if (int(t)) int_operand(a, ta)
+            else if (not (int(ta) or head(ta) == 'Lit)) fail(arg(a, 0), 'type, f"the operand is {show_type(ta)}, not a number")
         }
         t
     }
