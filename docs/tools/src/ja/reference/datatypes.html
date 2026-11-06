@@ -5,72 +5,86 @@
 <h2 id="kinds">値の型</h2>
 <p>組み込みの型は次の8つです。利用者は新しい型（ユーザーデータ）を作れます。</p>
 <table>
-<tr><th>型</th><th>値</th><th>リテラル</th><th><code>head</code></th></tr>
-<tr><td>整数</td><td>多倍長。範囲の制限なし</td><td><code>42</code> <code>-1</code> <code>0x1f</code> <code>0b101</code></td><td><code>Int</code></td></tr>
-<tr><td>float</td><td>IEEE 754 の binary64</td><td><code>1.5</code> <code>2.5e-3</code></td><td><code>Float</code></td></tr>
-<tr><td>文字列</td><td>バイト列。0 のバイトも含む。65535バイトまで</td><td><code>"abc"</code></td><td><code>String</code></td></tr>
-<tr><td>symbol</td><td>名前ごとに一意</td><td><code>x</code>。英字・<code>_</code>・<code>%</code> で始まる名前。<code>true</code> <code>false</code> <code>none</code> は <a href="syntax.html#lexical">字句</a></td><td><code>Symbol</code></td></tr>
-<tr><td>M式</td><td>head の symbol と任意の個数の引数。引数に mutable な値は入れられない</td><td><code>Head{a, b}</code>。糖衣は <code>(a, b)</code>（<code>Tuple</code>）・<code>[a, b]</code> と <code>::</code>（<code>Cons</code>）・<code>[]</code>（<code>Nil</code>）</td><td>M式ごとの head</td></tr>
-<tr><td>function</td><td>Lambda・Fusion・組み込み関数・継続</td><td><code>(p) -&gt; e</code>（Lambda）。<code>f | g</code>（Fusion）</td><td><code>Function</code></td></tr>
-<tr><td>array</td><td>固定長の mutable な array。全要素は初め <code>none</code></td><td>なし。<code>array(n)</code> で作る</td><td><code>Array</code></td></tr>
-<tr><td>plain array</td><td>要素の型が1つの mutable な array。要素の型は <code>'bool</code> <code>'i8</code> から <code>'u64</code> まで・<code>'f16</code> から <code>'f64</code> まで・<code>'c64</code> <code>'c128</code></td><td>なし。<code>plain_array(kind, n)</code>・<code>u8_array(n)</code> などで作る</td><td><code>Plain</code></td></tr>
-<tr><td>ユーザーデータ</td><td>利用者が作る型。作るときに immutable か mutable かを必ず指定する</td><td>なし。組み込み関数で作る</td><td>型名の symbol</td></tr>
+<tr><th>型</th><th><code>head</code></th><th>リテラル</th><th>mutable か</th><th><code>==</code></th><th><code>is</code></th><th>table の key</th></tr>
+<tr><td>整数</td><td><code>Int</code></td><td><code>42</code> <code>0x1f</code> <code>0b101</code></td><td>immutable</td><td>値</td><td>値</td><td>可</td></tr>
+<tr><td>float</td><td><code>Float</code></td><td><code>1.5</code> <code>2.5e-3</code></td><td>immutable</td><td>値</td><td>object</td><td>可</td></tr>
+<tr><td>文字列</td><td><code>String</code></td><td><code>"abc"</code></td><td>immutable</td><td>中身</td><td>intern</td><td>可</td></tr>
+<tr><td>symbol</td><td><code>Symbol</code></td><td><code>x</code></td><td>immutable</td><td>名前</td><td>intern</td><td>可</td></tr>
+<tr><td>M式</td><td>M式ごと</td><td><code>Head{a, b}</code> <code>(a, b)</code> <code>[a, b]</code> <code>[]</code></td><td>immutable</td><td>head と引数</td><td>intern</td><td>可</td></tr>
+<tr><td>function</td><td><code>Function</code></td><td><code>(p) -&gt; e</code> <code>f | g</code></td><td>immutable</td><td>identity</td><td>object</td><td>可</td></tr>
+<tr><td>array</td><td><code>Array</code></td><td>—</td><td>mutable</td><td>要素ごと</td><td>object</td><td>不可</td></tr>
+<tr><td>plain array</td><td><code>Plain</code></td><td>—</td><td>mutable</td><td>要素ごと</td><td>object</td><td>不可</td></tr>
+<tr><td>ユーザーデータ</td><td>型名の symbol</td><td>—</td><td>作るときに指定</td><td>immutable は中身、mutable は identity</td><td>immutable は intern、mutable は object</td><td>可</td></tr>
 </table>
-<p>値の型は <code>head</code> で調べます。パターンの <code>x @ Int</code> は <code>head</code> が <code>Int</code> の値に合います。組み込みの8つの型名の symbol とユーザーデータの型名の symbol は、M式の head にできません。ユーザーデータの型名が組み込みの型名や別のユーザーデータの型名と同じときは、型を作るときにエラーです。</p>
+<p>値の型は <code>head</code> で調べます。パターンの <code>x @ Int</code> は <code>head</code> が <code>Int</code> の値に合います。</p>
 
-<h2 id="immutability">immutability</h2>
-<p>値は immutable か mutable のどちらかです。array と plain array は mutable です。整数・float・文字列・symbol・M式・function は immutable です。ユーザーデータは、作るときに immutable か mutable かを必ず指定します。既定はありません。</p>
-<table>
-<tr><th>型</th><th>mutable か</th><th><code>a[i] = e</code></th></tr>
-<tr><td>整数・float</td><td>immutable</td><td>止まる</td></tr>
-<tr><td>文字列</td><td>immutable</td><td>止まる。<code>a[i]</code> は読める（長さ1の文字列）</td></tr>
-<tr><td>symbol</td><td>immutable</td><td>止まる</td></tr>
-<tr><td>M式（<code>Cons</code>・<code>Tuple</code>・<code>Nil</code> を含む）</td><td>immutable</td><td>止まる。<code>a[i]</code> は読める</td></tr>
-<tr><td>array</td><td>mutable</td><td>通る。範囲外はエラー</td></tr>
-<tr><td>plain array</td><td>mutable</td><td>通る。範囲外と変換できない値はエラー</td></tr>
-<tr><td>ユーザーデータ</td><td>作るときに指定する</td><td>—</td></tr>
-</table>
-<p>M式の引数に mutable な値は入れられません。mutable な値を中に持つ immutable なユーザーデータも入れられません。M式を作るときに実行時エラーになります。</p>
+<h2 id="notes">型ごとの補足</h2>
 
-<h2 id="equality">equality と identity</h2>
-<p>equality は <code>a == b</code>（<code>_eq</code>）で調べます。<code>a != b</code>（<code>_ne</code>）はその逆です。</p>
-
-<h3>型ごとの比べ方</h3>
-<table>
-<tr><th>型</th><th><code>==</code></th><th>パターン</th><th><code>hash</code></th></tr>
-<tr><td>整数</td><td>値で比べる</td><td>整数リテラルは equal な値に合う</td><td>値だけで決まる</td></tr>
-<tr><td>float</td><td>値で比べる。NaN は自分自身とも equal でない</td><td>—</td><td>整数に equal なら、その整数と同じ。それ以外は中身で決まる</td></tr>
-<tr><td>文字列</td><td>中身で比べる。0 のバイトも含めた全長</td><td>文字列リテラルは equal な値に合う</td><td>中身で決まる</td></tr>
-<tr><td>symbol</td><td>名前で比べる</td><td><code>true</code> <code>false</code> <code>none</code> と <code>Quote{x}</code> は同じ symbol に合う</td><td>名前で決まる</td></tr>
-<tr><td>M式</td><td>head と引数を再帰的に比べる</td><td><code>Head{p, ...}</code> は head と引数の数が同じ M式に合い、引数ごとに再帰する。<code>Quote{v}</code> は equal な値に合う</td><td>中身で決まる</td></tr>
-<tr><td>array</td><td>要素ごとに比べる。中身が同じ別の array は equal だが identical ではない</td><td>—</td><td>key にできない</td></tr>
-<tr><td>plain array</td><td>要素ごとに比べる。中身が同じ別の plain array は equal だが identical ではない</td><td>—</td><td>key にできない</td></tr>
-<tr><td>ユーザーデータ</td><td>immutable は中身で比べる。mutable は identity で比べる</td><td>—</td><td>immutable は中身で決まる。mutable はオブジェクトごとに決まる</td></tr>
-<tr><td>function</td><td>identical なときだけ equal</td><td>—</td><td>オブジェクトごとに決まり、そのオブジェクトの間は変わらない</td></tr>
-</table>
-<p><code>hash</code> の具体的な値は定めません。</p>
-
-<h3 id="identity">identity と <code>is</code></h3>
-<p><code>a is b</code> は、a と b が identical なら true、そうでなければ false です。否定は <code>a is not b</code> と書きます。優先順位は <code>==</code> と同じ比較演算子の段です。比較と同じく結合しないので、<code>a is b is c</code> はエラーです。パターンの中に <code>is</code> は書けません。</p>
+<h3>整数</h3>
 <ul>
-<li>identical な値は equal です。ただし NaN は除きます。NaN は自分自身と identical ですが、自分自身とも equal ではありません。</li>
-<li>intern する型の値は、同じ型の値と equal なら identical です。float 以外の型はすべて intern します。</li>
-<li>型が違う値は identical ではありません。<code>1 == 1.0</code> は true ですが、<code>1 is 1.0</code> は false です。</li>
-<li>identical の判定は多倍長整数を除き O(1) です。</li>
+<li>多倍長で、範囲の制限はありません。</li>
+<li>多倍長整数も、値が同じなら identical です。</li>
 </ul>
-<table>
-<tr><th>型</th><th><code>is</code></th></tr>
-<tr><td>整数</td><td>値が同じなら identical。多倍長整数も同じ</td></tr>
-<tr><td>float</td><td>object ごと。同じ object だけが identical で、値が同じでも別の object は identical ではない。NaN の object は自分自身と identical</td></tr>
-<tr><td>文字列</td><td>intern する。equal なら identical</td></tr>
-<tr><td>symbol</td><td>intern する。同じ名前なら identical</td></tr>
-<tr><td>M式</td><td>intern する。equal なら identical</td></tr>
-<tr><td>immutable なユーザーデータ</td><td>intern する。同じ型の値と equal なら identical</td></tr>
-<tr><td>array</td><td>object ごと。同じ object だけが identical</td></tr>
-<tr><td>plain array</td><td>object ごと。同じ object だけが identical</td></tr>
-<tr><td>mutable なユーザーデータ</td><td>object ごと。同じ object だけが identical</td></tr>
-<tr><td>function</td><td>object ごと。同じ object だけが identical</td></tr>
-</table>
+
+<h3>float</h3>
+<ul>
+<li>IEEE 754 の binary64 です。</li>
+<li>NaN は自分自身とも equal ではありません。NaN の object は自分自身と identical です。</li>
+<li>同じ値でも別の object は identical ではありません。</li>
+<li>整数と equal な float の hash は、その整数と同じです。それ以外は中身で決まります。</li>
+</ul>
+
+<h3>文字列</h3>
+<ul>
+<li>バイト列で、0 のバイトも含みます。65535バイトまでです。</li>
+<li><code>==</code> は 0 のバイトも含めた全長で比べます。</li>
+<li><code>a[i]</code> は読めます（長さ1の文字列）。</li>
+</ul>
+
+<h3>symbol</h3>
+<ul>
+<li>名前ごとに一意です。英字・<code>_</code>・<code>%</code> で始まる名前です。<code>true</code> <code>false</code> <code>none</code> は <a href="syntax.html#lexical">字句</a>を参照してください。</li>
+</ul>
+
+<h3>M式</h3>
+<ul>
+<li>head の symbol と任意の個数の引数を持ちます。</li>
+<li>糖衣は <code>(a, b)</code>（<code>Tuple</code>）・<code>[a, b]</code> と <code>::</code>（<code>Cons</code>）・<code>[]</code>（<code>Nil</code>）です。</li>
+<li>引数に mutable な値は入れられません。mutable な値を中に持つ immutable なユーザーデータも入れられません。M式を作るときに実行時エラーになります。</li>
+<li><code>a[i]</code> は読めます。</li>
+</ul>
+
+<h3>function</h3>
+<ul>
+<li>Lambda・Fusion・組み込み関数・継続です。</li>
+<li>equal になるのは identical なときだけです。</li>
+<li>hash はオブジェクトごとに決まり、そのオブジェクトの間は変わりません。</li>
+</ul>
+
+<h3>array</h3>
+<ul>
+<li>固定長で、全要素は初め <code>none</code> です。<code>array(n)</code> で作ります。</li>
+<li>中身が同じ別の array は equal ですが identical ではありません。</li>
+<li><code>a[i] = e</code> は通ります。範囲外はエラーです。</li>
+</ul>
+
+<h3>plain array</h3>
+<ul>
+<li>要素の型が1つです。要素の型は <code>'bool</code> <code>'i8</code> から <code>'u64</code> まで・<code>'f16</code> から <code>'f64</code> まで・<code>'c64</code> <code>'c128</code> です。</li>
+<li><code>plain_array(kind, n)</code>・<code>u8_array(n)</code> などで作ります。</li>
+<li>中身が同じ別の plain array は equal ですが identical ではありません。</li>
+<li><code>a[i] = e</code> は通ります。範囲外と変換できない値はエラーです。</li>
+</ul>
+
+<h3>ユーザーデータ</h3>
+<ul>
+<li>組み込み関数で作ります。作るときに immutable か mutable かを必ず指定します。既定はありません。</li>
+<li>型名が組み込みの型名や別のユーザーデータの型名と同じときは、型を作るときにエラーです。組み込みの8つの型名の symbol とユーザーデータの型名の symbol は、M式の head にできません。</li>
+<li>immutable は hash が中身で決まります。mutable はオブジェクトごとに決まります。</li>
+</ul>
+
+<h2 id="equality">equality</h2>
+<p>equality は <code>a == b</code>（<code>_eq</code>）で調べます。<code>a != b</code>（<code>_ne</code>）はその逆です。</p>
 
 <h3>数の型をまたぐ equality</h3>
 <p>整数・float・complex は、型が違っても値が同じなら equal です。<code>1 == 1.0</code> も <code>1 == complex(1, 0)</code> も true で、hash も同じ値です。</p>
@@ -79,5 +93,14 @@
 <ul>
 <li>同じ名前を2回書いたパターン（<code>f(a, a)</code>）は、2つの値が <code>==</code> で equal なときだけ合います。</li>
 <li>table（<code>table_get</code>・<code>table_set</code>・<code>t[key]</code>）は、key が identical か equal なら同じ key とみなします。同じ NaN の object を key にすれば引けます。array と plain array を key にするとエラーです。</li>
-<li><code>hash(x)</code> は 0 以上の整数です。<code>==</code> で equal な値は同じ値になります。</li>
+<li><code>hash(x)</code> は 0 以上の整数です。<code>==</code> で equal な値は同じ値になります。<code>hash</code> の具体的な値は定めません。</li>
+</ul>
+
+<h2 id="identity">identity と <code>is</code></h2>
+<p><code>a is b</code> は、a と b が identical なら true、そうでなければ false です。否定は <code>a is not b</code> と書きます。優先順位は <code>==</code> と同じ比較演算子の段です。比較と同じく結合しないので、<code>a is b is c</code> はエラーです。パターンの中に <code>is</code> は書けません。</p>
+<ul>
+<li>identical な値は equal です。ただし NaN は除きます。</li>
+<li>intern する型の値は、同じ型の値と equal なら identical です。float 以外の型はすべて intern します。</li>
+<li>型が違う値は identical ではありません。<code>1 == 1.0</code> は true ですが、<code>1 is 1.0</code> は false です。</li>
+<li>identical の判定は多倍長整数を除き O(1) です。</li>
 </ul>
