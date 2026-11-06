@@ -5,6 +5,7 @@
 #   -1 nothing   0 or 1 a condition (the loop compares it with k)   2 skip the next word (a match succeeded)   3 run the next word (a match failed)
 import mem
 import obj
+import big
 
 fn bool_val[r](h: &r [u32], c: bool) -> i64 {
     if c { return g(h, 2) }
@@ -48,7 +49,7 @@ fn exec_match[r](h: &r [u32], rs: &r [u32], op: i64, w: i64, base: i64, kb: i64)
 }
 
 # ADD SUB MUL DIV MOD ADDI LT GE EQ NE
-fn exec_arith[r](h: &r [u32], rs: &mut r [u32], op: i64, w: i64, base: i64) {
+fn exec_arith[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], op: i64, w: i64, base: i64) {
     let a = (w >> 8) & 255
     let b = (w >> 16) & 255
     let c = w >> 24
@@ -57,8 +58,8 @@ fn exec_arith[r](h: &r [u32], rs: &mut r [u32], op: i64, w: i64, base: i64) {
         var sc: i64
         sc = c
         if sc > 127 { sc = sc - 256 }
-        if not is_int(x) { die("ADDI: not an integer") }
-        p(rs, base + a, mk_int(int_of(x) + sc))
+        if not is_integer(h, x) { die("ADDI: not an integer") }
+        p(rs, base + a, int_add(h, st, x, small(sc), 0))
         return
     }
     let y = g(rs, base + c)
@@ -70,26 +71,43 @@ fn exec_arith[r](h: &r [u32], rs: &mut r [u32], op: i64, w: i64, base: i64) {
         p(rs, base + a, bool_val(h, not equal(h, x, y)))
         return
     }
-    if not is_int(x) { die("arithmetic: not an integer") }
-    if not is_int(y) { die("arithmetic: not an integer") }
-    let m = int_of(x)
-    let n = int_of(y)
+    if not is_integer(h, x) { die("arithmetic: not an integer") }
+    if not is_integer(h, y) { die("arithmetic: not an integer") }
+    if op == 43 {
+        p(rs, base + a, bool_val(h, cmp_int(h, x, y) < 0))
+        return
+    }
+    if op == 44 {
+        p(rs, base + a, bool_val(h, cmp_int(h, x, y) >= 0))
+        return
+    }
+    if (op == 40 or op == 41) and y == 1 { die("division by zero") }
+    if is_int(x) and is_int(y) {
+        let m = int_of(x)
+        let n = int_of(y)
+        if op == 37 {
+            p(rs, base + a, int_from_i64(h, st, m + n))
+        } else if op == 38 {
+            p(rs, base + a, int_from_i64(h, st, m - n))
+        } else if op == 39 {
+            p(rs, base + a, int_from_i64(h, st, m * n))
+        } else if op == 40 {
+            p(rs, base + a, int_from_i64(h, st, m / n))
+        } else {
+            p(rs, base + a, int_from_i64(h, st, m - n * (m / n)))
+        }
+        return
+    }
     if op == 37 {
-        p(rs, base + a, mk_int(m + n))
+        p(rs, base + a, int_add(h, st, x, y, 0))
     } else if op == 38 {
-        p(rs, base + a, mk_int(m - n))
+        p(rs, base + a, int_add(h, st, x, y, 1))
     } else if op == 39 {
-        p(rs, base + a, mk_int(m * n))
+        p(rs, base + a, int_mul(h, st, x, y))
     } else if op == 40 {
-        if n == 0 { die("division by zero") }
-        p(rs, base + a, mk_int(m / n))
-    } else if op == 41 {
-        if n == 0 { die("division by zero") }
-        p(rs, base + a, mk_int(m - n * (m / n)))
-    } else if op == 43 {
-        p(rs, base + a, bool_val(h, m < n))
+        p(rs, base + a, int_divmod(h, st, x, y, 0))
     } else {
-        p(rs, base + a, bool_val(h, m >= n))
+        p(rs, base + a, int_divmod(h, st, x, y, 1))
     }
 }
 
@@ -182,7 +200,7 @@ fn exec_op[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], op: i64, w: i
     if op == 11 or op == 12 or op == 15 or op == 16 { return exec_cond(h, rs, op, w, base, kb) }
     if op >= 31 and op <= 33 { return exec_match(h, rs, op, w, base, kb) }
     if op >= 37 and op <= 46 {
-        exec_arith(h, rs, op, w, base)
+        exec_arith(h, st, rs, op, w, base)
         return -1
     }
     if (op >= 27 and op <= 30) or (op >= 47 and op <= 54) {

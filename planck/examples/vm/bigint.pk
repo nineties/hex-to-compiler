@@ -1,0 +1,65 @@
+# big integers on planckvm: the program is written with the instructions and run by planck/vm; the image path is the first argument
+use("pvm/image")
+
+# println of R[x]
+show(x) := [GETGLOBAL{20, 0}, MOVE{21, x}, CALL{20, 20, 1}]
+cat(xs) := concat_map(x -> x, xs)
+
+# prints yes or no: the test t is a condition instruction with k = 1 and the word after it is JMP to the yes part
+cond_case(n, t) := {
+    yes := intern(f"yes{n}")
+    lend := intern(f"end{n}")
+    cat([t, [JMP{yes}, LOADK{10, 3}], show(10), [JMP{lend}, Label{yes}, LOADK{10, 2}], show(10), [Label{lend}]])
+}
+
+part1 := cat([
+    # K[1] = 2^29 - 1; the squares and the products grow into big integers
+    [LOADK{0, 1}, MUL{1, 0, 0}, MUL{2, 1, 1}, MUL{3, 2, 1}, MUL{4, 3, 3}], show(1), show(2), show(3), show(4),
+    # the division with a divisor of two digits or more, and the check q * d + r = n
+    [DIV{5, 4, 2}, MOD{6, 4, 2}], show(5), show(6),
+    [MUL{7, 5, 2}, ADD{7, 7, 6}, EQ{8, 7, 4}], show(8),
+    # signs: the quotient is cut toward zero and the remainder has the sign of the dividend
+    [SUB{9, 2, 3}], show(9),
+    [DIV{10, 9, 1}, MOD{11, 9, 1}], show(10), show(11),
+    [SUB{12, 3, 2}, DIV{10, 12, 1}, MOD{11, 12, 1}], show(10), show(11),
+    [LOADI{13, 0}, SUB{14, 13, 1}, DIV{10, 4, 14}, MOD{11, 4, 14}], show(10), show(11),
+    # the divisor of one digit
+    [LOADI{13, 12345}, DIV{10, 4, 13}, MOD{11, 4, 13}], show(10), show(11),
+    # the result that fits in 31 bits is a small integer again
+    [SUB{10, 2, 2}], show(10),
+    [ADDI{10, 1, 1}, ADDI{11, 10, -1}, EQ{12, 11, 1}], show(12),
+    [LOADI{13, 1}, EQ{12, 13, 13}], show(12)
+])
+
+part2 := cat([
+    # the edge of the small integers
+    [ADD{0, 0, 0}, ADDI{1, 0, 1}], show(1),
+    [ADDI{2, 1, 1}], show(2),
+    [LOADI{3, 0}, SUB{4, 3, 2}], show(4),
+    [ADDI{5, 4, -1}], show(5),
+    [SUB{6, 5, 4}], show(6),
+    # the order
+    [LOADK{0, 1}, MUL{1, 0, 0}, MUL{2, 1, 1}, LOADI{3, 0}, SUB{4, 3, 2}, LT{5, 1, 2}], show(5),
+    [GE{5, 1, 2}], show(5),
+    [LT{5, 4, 1}], show(5),
+    [LT{5, 2, 4}], show(5),
+    [GE{5, 4, 4}], show(5),
+    [NE{5, 1, 2}], show(5)
+])
+
+part3 := cat([
+    cond_case(1, [TLT{1, 2, 1}]),
+    cond_case(2, [TLT{2, 1, 1}]),
+    cond_case(3, [TGE{2, 4, 1}]),
+    cond_case(4, [TLTI{4, 0, 1}]),
+    cond_case(5, [TLTI{2, 0, 1}]),
+    cond_case(6, [TGEI{2, 100, 1}]),
+    cond_case(7, [TEQ{1, 1, 1}]),
+    # a factorial of 30
+    [LOADI{6, 1}, LOADI{7, 1}, Label{'loop}, TGEI{7, 31, 1}, JMP{'done}, MUL{6, 6, 7}, ADDI{7, 7, 1}, JMP{'loop}, Label{'done}], show(6),
+    [LOADNONE{0, 1}, RET{0}]
+])
+
+main := Code{"main", 0, 24, cat([part1, part2, part3]), [C{"println"}, I{536870911}, S{"yes"}, S{"no"}]}
+
+write_file(array_get(argv(), 1), bytes.to_u8(pvm_image.build([main], "main")))

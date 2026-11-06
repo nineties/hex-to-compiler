@@ -1,0 +1,353 @@
+# big: the integers of planckvm
+#
+# An integer is a small value (31 bits, 2n+1) or a big integer, an object of the kind 0: the sign (0 or 1), the number of digits and the digits,
+# 16 bits in a word from the low end. A big integer is always normal: no digit of zero at the top and the value does not fit in 31 bits.
+# So two integers are equal if and only if the values are equal or the sign and the digits of the big integers are equal.
+# The functions work on a small or a big integer through i_sign, i_nd and i_dig; they allocate only the result (and the temporaries of the division).
+import mem
+
+fn small(n: i64) -> i64 {
+    (n * 2 + 1) & 4294967295
+}
+
+fn is_big[r](h: &r [u32], v: i64) -> bool {
+    if is_int(v) { return false }
+    kind_of(h, v) == 0
+}
+
+# whether v is an integer, small or big
+fn is_integer[r](h: &r [u32], v: i64) -> bool {
+    if is_int(v) { return true }
+    kind_of(h, v) == 0
+}
+
+fn i_sign[r](h: &r [u32], v: i64) -> i64 {
+    if is_int(v) {
+        if int_of(v) < 0 { return 1 }
+        return 0
+    }
+    g(h, (v >> 1) + 1)
+}
+
+fn small_abs(v: i64) -> i64 {
+    let n = int_of(v)
+    if n < 0 { return 0 - n }
+    n
+}
+
+fn i_nd[r](h: &r [u32], v: i64) -> i64 {
+    if is_int(v) {
+        let a = small_abs(v)
+        if a == 0 { return 0 }
+        if a < 65536 { return 1 }
+        return 2
+    }
+    g(h, (v >> 1) + 2)
+}
+
+fn i_dig[r](h: &r [u32], v: i64, i: i64) -> i64 {
+    if i >= i_nd(h, v) { return 0 }
+    if is_int(v) {
+        let a = small_abs(v)
+        if i == 0 { return a & 65535 }
+        return (a >> 16) & 65535
+    }
+    g(h, (v >> 1) + 3 + i)
+}
+
+# alloc_big makes a big integer object of the sign and room for cap digits; it is not normal yet
+fn alloc_big[r](h: &mut r [u32], st: &mut r [u32], sign: i64, cap: i64) -> i64 {
+    let v = alloc_obj(h, st, 0, 2 + cap)
+    p(h, (v >> 1) + 1, sign)
+    p(h, (v >> 1) + 2, cap)
+    v
+}
+
+# fin trims the digits of the object v and gives a small value if the value fits in 31 bits
+fn fin[r](h: &mut r [u32], v: i64) -> i64 {
+    let b = v >> 1
+    var nd: i64
+    nd = g(h, b + 2)
+    while nd > 0 and g(h, b + 2 + nd) == 0 {
+        nd -= 1
+    }
+    p(h, b + 2, nd)
+    if nd == 0 { return 1 }
+    if nd <= 2 {
+        var m: i64
+        m = g(h, b + 3)
+        if nd == 2 { m = m + g(h, b + 4) * 65536 }
+        let sg = g(h, b + 1)
+        if sg == 0 and m <= 1073741823 { return small(m) }
+        if sg == 1 and m <= 1073741824 { return small(0 - m) }
+    }
+    v
+}
+
+# int_from_i64 makes the integer of n (|n| < 2^62)
+fn int_from_i64[r](h: &mut r [u32], st: &mut r [u32], n: i64) -> i64 {
+    if n >= -1073741824 and n <= 1073741823 { return small(n) }
+    var a: i64
+    var sg: i64
+    a = n
+    sg = 0
+    if n < 0 {
+        a = 0 - n
+        sg = 1
+    }
+    let v = alloc_big(h, st, sg, 4)
+    for i in 0 as i64..4 {
+        p(h, (v >> 1) + 3 + i, (a >> (i * 16)) & 65535)
+    }
+    fin(h, v)
+}
+
+fn cmp_mag[r](h: &r [u32], x: i64, y: i64) -> i64 {
+    let nx = i_nd(h, x)
+    let ny = i_nd(h, y)
+    if nx > ny { return 1 }
+    if nx < ny { return -1 }
+    var i: i64
+    i = nx - 1
+    while i >= 0 {
+        let a = i_dig(h, x, i)
+        let b = i_dig(h, y, i)
+        if a > b { return 1 }
+        if a < b { return -1 }
+        i -= 1
+    }
+    0
+}
+
+# the order of two integers: -1, 0 or 1
+fn cmp_int[r](h: &r [u32], x: i64, y: i64) -> i64 {
+    let sx = i_sign(h, x)
+    let sy = i_sign(h, y)
+    if sx != sy {
+        if sx == 1 { return -1 }
+        return 1
+    }
+    let m = cmp_mag(h, x, y)
+    if sx == 1 { return 0 - m }
+    m
+}
+
+# the order of two values that must be integers
+fn num_cmp[r](h: &r [u32], x: i64, y: i64) -> i64 {
+    if is_int(x) and is_int(y) {
+        let a = int_of(x)
+        let b = int_of(y)
+        if a < b { return -1 }
+        if a > b { return 1 }
+        return 0
+    }
+    if not is_integer(h, x) { die("comparison: not an integer") }
+    if not is_integer(h, y) { die("comparison: not an integer") }
+    cmp_int(h, x, y)
+}
+
+fn big_eq[r](h: &r [u32], x: i64, y: i64) -> bool {
+    if g(h, (x >> 1) + 1) != g(h, (y >> 1) + 1) { return false }
+    let n = g(h, (x >> 1) + 2)
+    if n != g(h, (y >> 1) + 2) { return false }
+    for i in 0 as i64..n {
+        if g(h, (x >> 1) + 3 + i) != g(h, (y >> 1) + 3 + i) { return false }
+    }
+    true
+}
+
+fn add_mag[r](h: &mut r [u32], st: &mut r [u32], x: i64, y: i64, sign: i64) -> i64 {
+    let nx = i_nd(h, x)
+    let ny = i_nd(h, y)
+    var n: i64
+    n = nx
+    if ny > n { n = ny }
+    let v = alloc_big(h, st, sign, n + 1)
+    var carry: i64
+    carry = 0
+    for i in 0 as i64..n {
+        let t = i_dig(h, x, i) + i_dig(h, y, i) + carry
+        p(h, (v >> 1) + 3 + i, t & 65535)
+        carry = t >> 16
+    }
+    p(h, (v >> 1) + 3 + n, carry)
+    fin(h, v)
+}
+
+# |x| - |y| where |x| >= |y|
+fn sub_mag[r](h: &mut r [u32], st: &mut r [u32], x: i64, y: i64, sign: i64) -> i64 {
+    let nx = i_nd(h, x)
+    let v = alloc_big(h, st, sign, nx)
+    var borrow: i64
+    borrow = 0
+    for i in 0 as i64..nx {
+        var t: i64
+        t = i_dig(h, x, i) - i_dig(h, y, i) - borrow
+        borrow = 0
+        if t < 0 {
+            t = t + 65536
+            borrow = 1
+        }
+        p(h, (v >> 1) + 3 + i, t)
+    }
+    fin(h, v)
+}
+
+# x + y, or x - y if neg is 1
+fn int_add[r](h: &mut r [u32], st: &mut r [u32], x: i64, y: i64, neg: i64) -> i64 {
+    let sx = i_sign(h, x)
+    var sy: i64
+    sy = i_sign(h, y)
+    if neg == 1 { sy = 1 - sy }
+    if sx == sy { return add_mag(h, st, x, y, sx) }
+    let c = cmp_mag(h, x, y)
+    if c == 0 { return 1 }
+    if c > 0 { return sub_mag(h, st, x, y, sx) }
+    sub_mag(h, st, y, x, sy)
+}
+
+fn int_mul[r](h: &mut r [u32], st: &mut r [u32], x: i64, y: i64) -> i64 {
+    let nx = i_nd(h, x)
+    let ny = i_nd(h, y)
+    let v = alloc_big(h, st, i_sign(h, x) ^ i_sign(h, y), nx + ny)
+    let rb = (v >> 1) + 3
+    for i in 0 as i64..nx {
+        let a = i_dig(h, x, i)
+        var carry: i64
+        carry = 0
+        for j in 0 as i64..ny {
+            let t = g(h, rb + i + j) + a * i_dig(h, y, j) + carry
+            p(h, rb + i + j, t & 65535)
+            carry = t >> 16
+        }
+        p(h, rb + i + ny, carry)
+    }
+    fin(h, v)
+}
+
+# Knuth's algorithm D: the digits of x / y into the object q and of x % y into the object r; |x| >= |y| and y has 2 digits or more
+fn knuth[r](h: &mut r [u32], st: &mut r [u32], x: i64, y: i64, q: i64, rm: i64) {
+    let nx = i_nd(h, x)
+    let ny = i_nd(h, y)
+    let un = alloc_big(h, st, 0, nx + 1)
+    let vn = alloc_big(h, st, 0, ny)
+    let ub = (un >> 1) + 3
+    let vb = (vn >> 1) + 3
+    var s: i64
+    var top: i64
+    s = 0
+    top = i_dig(h, y, ny - 1)
+    while top < 32768 {
+        top = top * 2
+        s += 1
+    }
+    for i in 0 as i64..ny {
+        var lo: i64
+        lo = 0
+        if i > 0 { lo = i_dig(h, y, i - 1) >> (16 - s) }
+        p(h, vb + i, ((i_dig(h, y, i) << s) | lo) & 65535)
+    }
+    p(h, ub + nx, i_dig(h, x, nx - 1) >> (16 - s))
+    for i in 0 as i64..nx {
+        var lo: i64
+        lo = 0
+        if i > 0 { lo = i_dig(h, x, i - 1) >> (16 - s) }
+        p(h, ub + i, ((i_dig(h, x, i) << s) | lo) & 65535)
+    }
+    let vt = g(h, vb + ny - 1)
+    let vs = g(h, vb + ny - 2)
+    var j: i64
+    j = nx - ny
+    while j >= 0 {
+        let num = g(h, ub + j + ny) * 65536 + g(h, ub + j + ny - 1)
+        var qhat: i64
+        var rhat: i64
+        qhat = num / vt
+        rhat = num - qhat * vt
+        var go: i64
+        go = 1
+        while go == 1 {
+            if qhat >= 65536 or qhat * vs > rhat * 65536 + g(h, ub + j + ny - 2) {
+                qhat -= 1
+                rhat += vt
+                if rhat >= 65536 { go = 0 }
+            } else {
+                go = 0
+            }
+        }
+        var borrow: i64
+        var carry: i64
+        borrow = 0
+        carry = 0
+        for i in 0 as i64..ny {
+            let pr = qhat * g(h, vb + i) + carry
+            carry = pr >> 16
+            var t: i64
+            t = g(h, ub + i + j) - (pr & 65535) - borrow
+            borrow = 0
+            if t < 0 {
+                t = t + 65536
+                borrow = 1
+            }
+            p(h, ub + i + j, t)
+        }
+        var t2: i64
+        t2 = g(h, ub + j + ny) - carry - borrow
+        borrow = 0
+        if t2 < 0 {
+            t2 = t2 + 65536
+            borrow = 1
+        }
+        p(h, ub + j + ny, t2)
+        if borrow == 1 {
+            qhat -= 1
+            var c2: i64
+            c2 = 0
+            for i in 0 as i64..ny {
+                let t = g(h, ub + i + j) + g(h, vb + i) + c2
+                p(h, ub + i + j, t & 65535)
+                c2 = t >> 16
+            }
+            p(h, ub + j + ny, (g(h, ub + j + ny) + c2) & 65535)
+        }
+        p(h, (q >> 1) + 3 + j, qhat)
+        j -= 1
+    }
+    for i in 0 as i64..ny {
+        p(h, (rm >> 1) + 3 + i, ((g(h, ub + i) >> s) | (g(h, ub + i + 1) << (16 - s))) & 65535)
+    }
+}
+
+# x / y (want 0) or x % y (want 1), truncated toward zero; the remainder has the sign of x. y is not zero.
+fn int_divmod[r](h: &mut r [u32], st: &mut r [u32], x: i64, y: i64, want: i64) -> i64 {
+    let sx = i_sign(h, x)
+    let sq = sx ^ i_sign(h, y)
+    if cmp_mag(h, x, y) < 0 {
+        if want == 0 { return 1 }
+        return x
+    }
+    let nx = i_nd(h, x)
+    let ny = i_nd(h, y)
+    if ny == 1 {
+        let dv = i_dig(h, y, 0)
+        let q = alloc_big(h, st, sq, nx)
+        var rem: i64
+        rem = 0
+        var i: i64
+        i = nx - 1
+        while i >= 0 {
+            let cur = rem * 65536 + i_dig(h, x, i)
+            p(h, (q >> 1) + 3 + i, cur / dv)
+            rem = cur - (cur / dv) * dv
+            i -= 1
+        }
+        if want == 0 { return fin(h, q) }
+        if sx == 1 { return small(0 - rem) }
+        return small(rem)
+    }
+    let q = alloc_big(h, st, sq, nx - ny + 1)
+    let rm = alloc_big(h, st, sx, ny)
+    knuth(h, st, x, y, q, rm)
+    if want == 0 { return fin(h, q) }
+    fin(h, rm)
+}

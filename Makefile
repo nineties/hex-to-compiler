@@ -86,7 +86,7 @@ test-planck0: planck0
 	done; rm -f tmp-error.out tmp-error.err
 
 # build planck/vm as units and run the programs of planck/examples/vm on it
-VM_UNITS := mem obj builtin ctl ops vm
+VM_UNITS := mem big obj builtin ctl ops vm
 test-vm: planck0
 	@done=; for u in $(VM_UNITS); do \
 		./planck0 planck/vasmc.pk unit planck/vm/$$u.native tmp-vm-$$u.unit x86_64 $$done || exit 1; \
