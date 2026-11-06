@@ -7,7 +7,7 @@
 <table>
 <tr><th>Type</th><th><code>head</code></th><th>Literal</th><th>Mutable?</th><th><code>==</code></th><th><code>is</code></th><th>Table key</th></tr>
 <tr><td>integer</td><td><code>Int</code></td><td><code>42</code> <code>0x1f</code> <code>0b101</code></td><td>immutable</td><td>value</td><td>value</td><td>yes</td></tr>
-<tr><td>float</td><td><code>Float</code></td><td><code>1.5</code> <code>2.5e-3</code></td><td>immutable</td><td>value</td><td>object</td><td>yes</td></tr>
+<tr><td>float</td><td><code>Float</code></td><td><code>1.5</code> <code>2.5e-3</code></td><td>immutable</td><td>value</td><td>object</td><td>yes, except NaN</td></tr>
 <tr><td>string</td><td><code>String</code></td><td><code>"abc"</code></td><td>immutable</td><td>contents</td><td>intern</td><td>yes</td></tr>
 <tr><td>symbol</td><td><code>Symbol</code></td><td><code>x</code></td><td>immutable</td><td>name</td><td>intern</td><td>yes</td></tr>
 <tr><td>M-expression</td><td>each M-expression</td><td><code>Head{a, b}</code> <code>(a, b)</code> <code>[a, b]</code> <code>[]</code></td><td>immutable</td><td>head and arguments</td><td>intern</td><td>yes</td></tr>
@@ -29,7 +29,8 @@
 <h3>float</h3>
 <ul>
 <li>IEEE 754 binary64.</li>
-<li>NaN is not equal even to itself. The object of a NaN is identical to itself.</li>
+<li>NaN is not equal to anything, itself included, and not identical to anything either. If <code>x</code> is NaN, <code>x == x</code> and <code>x is x</code> are both false.</li>
+<li>NaN cannot be a table key. Using a NaN as a key is an error.</li>
 <li>A different object with the same value is not identical.</li>
 <li>The hash of a float equal to an integer is the same as the integer. Otherwise it is decided by the contents.</li>
 </ul>
@@ -50,7 +51,8 @@
 <ul>
 <li>A head symbol and any number of arguments.</li>
 <li>Sugar: <code>(a, b)</code> (<code>Tuple</code>), <code>[a, b]</code> and <code>::</code> (<code>Cons</code>), <code>[]</code> (<code>Nil</code>).</li>
-<li>A mutable value cannot be an argument. Neither can immutable user data that holds a mutable value. Making such an M-expression is a runtime error.</li>
+<li>A mutable value cannot be an argument. Neither can immutable user data that holds a mutable value. Neither can a NaN. Making such an M-expression is a runtime error.</li>
+<li>Because M-expressions have no NaN, <code>==</code> and <code>is</code> are the same test and O(1).</li>
 <li><code>a[i]</code> can be read.</li>
 </ul>
 
@@ -92,14 +94,14 @@
 <h3>Where equality is used</h3>
 <ul>
 <li>A pattern that writes the same name twice (<code>f(a, a)</code>) matches only when the two values are equal by <code>==</code>.</li>
-<li>The builtin table (<code>table_get</code>, <code>table_set</code> and <code>t[key]</code>) treats two keys as the same if they are identical or equal. A NaN object can be looked up by using that same object as the key. An array or a plain array as the key is an error.</li>
+<li>The builtin table (<code>table_get</code>, <code>table_set</code> and <code>t[key]</code>) treats two keys as the same if they are identical or equal. An array, a plain array or a NaN as the key is an error.</li>
 <li><code>hash(x)</code> is an integer of 0 or more. Values that are equal by <code>==</code> give the same value. The exact values of <code>hash</code> are not defined.</li>
 </ul>
 
 <h2 id="identity">Identity and <code>is</code></h2>
 <p><code>a is b</code> is true if a and b are identical, and false otherwise. Its negation is written <code>a is not b</code>. It has the same precedence as <code>==</code>, at the level of the comparison operators. Like the comparisons it does not group, so <code>a is b is c</code> is an error. <code>is</code> cannot be written in a pattern.</p>
 <ul>
-<li>Identical values are equal, except NaN.</li>
+<li>Identical values are always equal: if <code>a is b</code>, then <code>a == b</code>. A NaN is not identical even to itself.</li>
 <li>Values of a type that is interned are identical if they are equal to a value of the same type. All types other than float are interned.</li>
 <li>Values of different types are not identical. <code>1 == 1.0</code> is true, but <code>1 is 1.0</code> is false.</li>
 <li>Testing whether values are identical is O(1) except for arbitrary precision integers.</li>
