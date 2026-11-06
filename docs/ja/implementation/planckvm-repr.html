@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>planckvm の値の表し方 | hex-to-compiler project</title>
+<title>planckvm の内部表現 | hex-to-compiler project</title>
 <link rel="alternate" hreflang="en" href="../../en/implementation/planckvm-repr.html">
 <link rel="stylesheet" href="../../assets/style.css">
 </head>
@@ -37,11 +37,11 @@
 <li><a href="planckvm-internals.html">planckvm の内部仕様</a></li>
 </ol></details></nav>
 <main>
-<h1>planckvm の値の表し方</h1>
-<p class="lead">planckvm の値のヒープ上の表し方を定めます。語の表し方、ヘッダ、種類ごとの中身、GC から見た扱いです。言語としての値の種類・等しさ・ハッシュは<a href="planckvm-types.html">planckvm のデータ型</a>にあります。この頁は内部仕様で、イメージを書く側と処理系の実装が従います。</p>
+<h1>planckvm の内部表現</h1>
+<p class="lead">ヒープ上の値の word、ヘッダ、種類ごとの中身、GC から見た扱い。</p>
 
-<h2>語</h2>
-<p>ヒープ・レジスタ・フレームの語はすべて 32 ビットで、ビットの番号は最下位を 0 とします。語の下位 1 ビットが値の種別を分けます。</p>
+<h2>word</h2>
+<p>ヒープ・レジスタ・フレームの word はすべて 32 ビットで、ビットの番号は最下位を 0 とします。word の下位 1 ビットが値の種別を分けます。</p>
 <table class="bits">
 <colgroup><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col></colgroup>
 <tr class="ruler"><td>3<br>1</td><td>3<br>0</td><td>2<br>9</td><td>2<br>8</td><td>2<br>7</td><td>2<br>6</td><td>2<br>5</td><td>2<br>4</td><td>2<br>3</td><td>2<br>2</td><td>2<br>1</td><td>2<br>0</td><td>1<br>9</td><td>1<br>8</td><td>1<br>7</td><td>1<br>6</td><td>1<br>5</td><td>1<br>4</td><td>1<br>3</td><td>1<br>2</td><td>1<br>1</td><td>1<br>0</td><td><br>9</td><td><br>8</td><td><br>7</td><td><br>6</td><td><br>5</td><td><br>4</td><td><br>3</td><td><br>2</td><td><br>1</td><td><br>0</td></tr>
@@ -51,18 +51,18 @@
 <tr class="fld"><td colspan="31">ヒープの添字 (31)</td><td colspan="1">0</td></tr>
 </table>
 <table>
-<tr><th>種別</th><th>下位ビット</th><th>語の値</th></tr>
+<tr><th>種別</th><th>下位ビット</th><th>word の値</th></tr>
 <tr><td>整数の即値</td><td>1</td><td><code>2n+1</code>。n は 31 ビットの 2 の補数で、-2<sup>30</sup> 以上 2<sup>30</sup>-1 以下</td></tr>
-<tr><td>オブジェクトへの参照</td><td>0</td><td>オブジェクトのヘッダの、ヒープの先頭からの語単位の添字の 2 倍</td></tr>
+<tr><td>オブジェクトへの参照</td><td>0</td><td>オブジェクトのヘッダの、ヒープの先頭からの word 単位の添字の 2 倍</td></tr>
 </table>
 <ul>
 <li>言語の整数は 1 種類です。即値に収まる値は必ず即値で表し、収まらない値だけを多倍長整数のオブジェクトで表します。</li>
-<li>即値は整数だけです。浮動小数点数・複素数・文字列・シンボルはすべてオブジェクトです。</li>
-<li>語の中にオブジェクトの種類は入りません。種類はオブジェクトのヘッダを読んで知ります。</li>
+<li>即値は整数だけです。float・complex・文字列・symbol はすべてオブジェクトです。</li>
+<li>word の中にオブジェクトの種類は入りません。種類はオブジェクトのヘッダを読んで知ります。</li>
 </ul>
 
 <h2>ヘッダ</h2>
-<p>オブジェクトの先頭の語はヘッダです。オブジェクトはヘッダとそれに続く語でできています。</p>
+<p>オブジェクトの先頭の word はヘッダです。オブジェクトはヘッダとそれに続く word でできています。</p>
 <table class="bits">
 <colgroup><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col></colgroup>
 <tr class="ruler"><td>3<br>1</td><td>3<br>0</td><td>2<br>9</td><td>2<br>8</td><td>2<br>7</td><td>2<br>6</td><td>2<br>5</td><td>2<br>4</td><td>2<br>3</td><td>2<br>2</td><td>2<br>1</td><td>2<br>0</td><td>1<br>9</td><td>1<br>8</td><td>1<br>7</td><td>1<br>6</td><td>1<br>5</td><td>1<br>4</td><td>1<br>3</td><td>1<br>2</td><td>1<br>1</td><td>1<br>0</td><td><br>9</td><td><br>8</td><td><br>7</td><td><br>6</td><td><br>5</td><td><br>4</td><td><br>3</td><td><br>2</td><td><br>1</td><td><br>0</td></tr>
@@ -71,23 +71,23 @@
 </table>
 <table>
 <tr><th>欄</th><th>意味</th></tr>
-<tr><td><code>size</code></td><td>ヘッダの後に続く語数。オブジェクトの大きさはヘッダを含めて <code>size + 1</code> 語</td></tr>
+<tr><td><code>size</code></td><td>ヘッダの後に続く word 数。オブジェクトの大きさはヘッダを含めて <code>size + 1</code> word</td></tr>
 <tr><td><code>kind</code></td><td>オブジェクトの種類。下の表のとおり</td></tr>
 <tr><td><code>m</code></td><td>GC が使う印。イメージでは 0</td></tr>
 <tr><td>下位ビット</td><td>ヘッダでは 1</td></tr>
 </table>
-<p>ヘッダの語は値ではなく、レジスタにもオブジェクトの欄にも入りません。下位ビットが 0 の語がヘッダの位置にあるときは、GC がそのオブジェクトを移した先の参照です。イメージにはありません。</p>
 <p><code>kind</code> は 0 から 14 を使い、15 は使いません。</p>
+<p>ヘッダの word は値ではなく、レジスタにもオブジェクトの欄にも入りません。下位ビットが 0 の word がヘッダの位置にあるときは、GC がそのオブジェクトを移した先の参照です。イメージにはありません。</p>
 <table>
-<tr><th>kind</th><th>オブジェクト</th><th>頭</th></tr>
+<tr><th>kind</th><th>オブジェクト</th><th>head</th></tr>
 <tr><td>0</td><td>多倍長整数</td><td><code>Int</code></td></tr>
-<tr><td>1</td><td>浮動小数点数</td><td><code>Float</code></td></tr>
-<tr><td>2</td><td>複素数</td><td><code>Complex</code></td></tr>
+<tr><td>1</td><td>float</td><td><code>Float</code></td></tr>
+<tr><td>2</td><td>complex</td><td><code>Complex</code></td></tr>
 <tr><td>3</td><td>文字列</td><td><code>String</code></td></tr>
-<tr><td>4</td><td>シンボル</td><td><code>Symbol</code></td></tr>
-<tr><td>5</td><td>M式</td><td>M式ごとの頭</td></tr>
-<tr><td>6</td><td>配列</td><td><code>Array</code></td></tr>
-<tr><td>7</td><td>plain 配列</td><td><code>Plain</code></td></tr>
+<tr><td>4</td><td>symbol</td><td><code>Symbol</code></td></tr>
+<tr><td>5</td><td>M式</td><td>M式ごとの head</td></tr>
+<tr><td>6</td><td>array</td><td><code>Array</code></td></tr>
+<tr><td>7</td><td>plain array</td><td><code>Plain</code></td></tr>
 <tr><td>8</td><td>Lambda</td><td><code>Function</code></td></tr>
 <tr><td>9</td><td>Fusion</td><td><code>Function</code></td></tr>
 <tr><td>10</td><td>組み込み</td><td><code>Function</code></td></tr>
@@ -99,14 +99,14 @@
 <p>整数の即値の <code>head</code> は <code>Int</code> です。環境・セル・コードは値としてプログラムに渡りません。</p>
 
 <h2>オブジェクトの中身</h2>
-<p>以降の表の「語」は、ヘッダの次の語を 0 とした位置です。「値」と書いた欄には値の語（即値か参照）を置きます。「生」と書いた欄は、値でなく語そのものの数です。64 ビットの量を 2 語に分けるときは、下位の語を先に置きます。</p>
+<p>以降の表の「word」は、ヘッダの次の word を 0 とした位置です。「値」と書いた欄には値の word（即値か参照）を置きます。「生」と書いた欄は、値でなく word そのものの数です。64 ビットの量を 2 word に分けるときは、下位の word を先に置きます。</p>
 
 <h3>多倍長整数</h3>
 <table>
-<tr><th>語</th><th>中身</th></tr>
+<tr><th>word</th><th>中身</th></tr>
 <tr><td>0</td><td>符号（生。0 は 0 以上、1 は負）</td></tr>
 <tr><td>1</td><td>桁数 n（生。1 以上）</td></tr>
-<tr><td>2〜3</td><td>桁 0（64 ビット。下位の語が先）</td></tr>
+<tr><td>2〜3</td><td>桁 0（64 ビット。下位の word が先）</td></tr>
 <tr><td>4〜5</td><td>桁 1</td></tr>
 <tr><td>…</td><td>桁 n-1</td></tr>
 </table>
@@ -116,52 +116,52 @@
 <li>最上位の桁は 0 ではありません。値が即値の範囲に収まる整数は、多倍長整数にしません。0 は即値です。</li>
 </ul>
 
-<h3>浮動小数点数と複素数</h3>
+<h3>float と complex</h3>
 <table>
-<tr><th>kind</th><th>語</th><th>中身</th></tr>
-<tr><td>浮動小数点数（1）</td><td>0〜1</td><td>binary64 のビット列（下位の語が先。生）</td></tr>
-<tr><td rowspan="2">複素数（2）</td><td>0〜1</td><td>実部の binary64（下位の語が先。生）</td></tr>
-<tr><td>2〜3</td><td>虚部の binary64（下位の語が先。生）</td></tr>
+<tr><th>kind</th><th>word</th><th>中身</th></tr>
+<tr><td>float（1）</td><td>0〜1</td><td>binary64 のビット列（下位の word が先。生）</td></tr>
+<tr><td rowspan="2">complex（2）</td><td>0〜1</td><td>実部の binary64（下位の word が先。生）</td></tr>
+<tr><td>2〜3</td><td>虚部の binary64（下位の word が先。生）</td></tr>
 </table>
 
 <h3>文字列</h3>
 <table>
-<tr><th>語</th><th>中身</th></tr>
+<tr><th>word</th><th>中身</th></tr>
 <tr><td>0</td><td>バイト数 n（生）</td></tr>
-<tr><td>1〜</td><td>バイト列。語 <code>1 + i/4</code> の下位から <code>i mod 4</code> 番目のバイトに、i 番目のバイトを置く。語数は n を 4 で割って切り上げた値。最後の語の使わないバイトは 0</td></tr>
+<tr><td>1〜</td><td>バイト列。word <code>1 + i/4</code> の下位から <code>i mod 4</code> 番目のバイトに、i 番目のバイトを置く。word 数は n を 4 で割って切り上げた値。最後の word の使わないバイトは 0</td></tr>
 </table>
 <p>バイト列は 0 バイトを含められます。<code>size</code> は <code>1 + ceil(n/4)</code> です。</p>
 
-<h3>シンボル</h3>
+<h3>symbol</h3>
 <table>
-<tr><th>語</th><th>中身</th></tr>
+<tr><th>word</th><th>中身</th></tr>
 <tr><td>0</td><td>名前（値。文字列への参照）</td></tr>
 </table>
-<p>同じ名前のシンボルは 1 つのオブジェクトで、名前ごとに一意です。名前の文字列は変わりません。</p>
+<p>同じ名前の symbol は 1 つのオブジェクトで、名前ごとに一意です。名前の文字列は変わりません。</p>
 
 <h3>M式</h3>
 <table>
-<tr><th>語</th><th>中身</th></tr>
-<tr><td>0</td><td>頭（値。シンボルへの参照）</td></tr>
+<tr><th>word</th><th>中身</th></tr>
+<tr><td>0</td><td>head（値。symbol への参照）</td></tr>
 <tr><td>1〜</td><td>引数（値）</td></tr>
 </table>
-<p>引数の個数は <code>size - 1</code> です。M式は不変です。</p>
+<p>引数の個数は <code>size - 1</code> です。M式は immutable です。</p>
 
-<h3>配列</h3>
+<h3>array</h3>
 <table>
-<tr><th>語</th><th>中身</th></tr>
-<tr><td>0</td><td>同一性の番号（生。下の「同一性の番号」を参照）</td></tr>
+<tr><th>word</th><th>中身</th></tr>
+<tr><td>0</td><td>identity の番号（生。下の「identity の番号」を参照）</td></tr>
 <tr><td>1〜</td><td>要素（値）</td></tr>
 </table>
 <p>要素数は <code>size - 1</code> で、作ったときから変わりません。</p>
 
-<h3>plain 配列</h3>
+<h3>plain array</h3>
 <table>
-<tr><th>語</th><th>中身</th></tr>
-<tr><td>0</td><td>同一性の番号（生）</td></tr>
+<tr><th>word</th><th>中身</th></tr>
+<tr><td>0</td><td>identity の番号（生）</td></tr>
 <tr><td>1</td><td>要素の型の番号（生）</td></tr>
 <tr><td>2</td><td>要素数 n（生）</td></tr>
-<tr><td>3〜</td><td>要素を詰めた語</td></tr>
+<tr><td>3〜</td><td>要素を詰めた word</td></tr>
 </table>
 <table>
 <tr><th>型の番号</th><th>型</th><th>要素のバイト数</th></tr>
@@ -172,54 +172,54 @@
 <tr><td>12〜13</td><td><code>'c64</code> <code>'c128</code></td><td>8 16</td></tr>
 </table>
 <ul>
-<li>要素はタグを持たないビット列で、リトルエンディアンで隙間なく並べます。i 番目の要素はバイト位置 <code>i * (要素のバイト数)</code> から始まり、バイト位置 <code>b</code> は語 <code>3 + b/4</code> の下位から <code>b mod 4</code> 番目のバイトです。</li>
-<li>整数型は 2 の補数です。<code>'bool</code> は <code>true</code> が 1、<code>false</code> が 0 です。浮動小数点型は IEEE 754 のビット列で、複素数型は実部、虚部の順に並べます。</li>
-<li><code>size</code> は <code>2 + ceil(n * 要素のバイト数 / 4)</code> です。最後の語の使わないバイトは 0 です。</li>
+<li>要素はタグを持たないビット列で、リトルエンディアンで隙間なく並べます。i 番目の要素はバイト位置 <code>i * (要素のバイト数)</code> から始まり、バイト位置 <code>b</code> は word <code>3 + b/4</code> の下位から <code>b mod 4</code> 番目のバイトです。</li>
+<li>整数型は 2 の補数です。<code>'bool</code> は <code>true</code> が 1、<code>false</code> が 0 です。浮動小数点型は IEEE 754 のビット列で、complex 型は実部、虚部の順に並べます。</li>
+<li><code>size</code> は <code>2 + ceil(n * 要素のバイト数 / 4)</code> です。最後の word の使わないバイトは 0 です。</li>
 <li>作った直後の要素は全ビットが 0 で、<code>false</code>・<code>0</code>・<code>0.0</code>・<code>complex(0, 0)</code> を表します。</li>
 </ul>
 
 <h3>Lambda・Fusion・組み込み・継続</h3>
 <table>
-<tr><th>kind</th><th>語</th><th>中身</th></tr>
-<tr><td rowspan="3">Lambda（8）</td><td>0</td><td>同一性の番号（生）</td></tr>
+<tr><th>kind</th><th>word</th><th>中身</th></tr>
+<tr><td rowspan="3">Lambda（8）</td><td>0</td><td>identity の番号（生）</td></tr>
 <tr><td>1</td><td>コード（値。コードへの参照）</td></tr>
 <tr><td>2</td><td>作られた場所の環境（値。無ければ <code>none</code>）</td></tr>
-<tr><td rowspan="2">Fusion（9）</td><td>0</td><td>同一性の番号（生）</td></tr>
+<tr><td rowspan="2">Fusion（9）</td><td>0</td><td>identity の番号（生）</td></tr>
 <tr><td>1〜</td><td>選択肢（値。Lambda・組み込み・継続のいずれか。試す順に並べる）</td></tr>
-<tr><td rowspan="4">組み込み（10）</td><td>0</td><td>同一性の番号（生）</td></tr>
+<tr><td rowspan="4">組み込み（10）</td><td>0</td><td>identity の番号（生）</td></tr>
 <tr><td>1</td><td>組み込みの番号（生）</td></tr>
 <tr><td>2</td><td>arity（生）</td></tr>
-<tr><td>3</td><td>名前（値。シンボルへの参照）</td></tr>
-<tr><td rowspan="5">継続（11）</td><td>0</td><td>同一性の番号（生）</td></tr>
+<tr><td>3</td><td>名前（値。symbol への参照）</td></tr>
+<tr><td rowspan="5">継続（11）</td><td>0</td><td>identity の番号（生）</td></tr>
 <tr><td>1</td><td><code>PERFORM</code> の <code>reg</code>（生）</td></tr>
 <tr><td>2</td><td>フレーム数 f（生）</td></tr>
-<tr><td>3〜</td><td>フレームの切片（f 個。1 つのフレームは 7 語で、欄は<a href="planckvm-internals.html">内部仕様</a>のとおり）</td></tr>
-<tr><td>続き</td><td>レジスタの切片（値。語数は <code>size</code> から決まる）</td></tr>
+<tr><td>3〜</td><td>フレームの切片（f 個。1 つのフレームは 7 word で、欄は<a href="planckvm-internals.html">内部仕様</a>のとおり）</td></tr>
+<tr><td>続き</td><td>レジスタの切片（値。word 数は <code>size</code> から決まる）</td></tr>
 </table>
 <p>Fusion は Fusion を選択肢に持ちません。<code>FUSION</code> は両側の選択肢を連結して新しい Fusion を作ります。</p>
 
 <h3>環境・セル・コード</h3>
 <table>
-<tr><th>kind</th><th>語</th><th>中身</th></tr>
+<tr><th>kind</th><th>word</th><th>中身</th></tr>
 <tr><td rowspan="2">環境（12）</td><td>0</td><td>親の環境（値。無ければ <code>none</code>）</td></tr>
 <tr><td>1〜</td><td>スロット（値）</td></tr>
 <tr><td rowspan="3">セル（13）</td><td>0</td><td>大域変数の値</td></tr>
-<tr><td>1</td><td>名前（値。シンボルへの参照）</td></tr>
+<tr><td>1</td><td>名前（値。symbol への参照）</td></tr>
 <tr><td>2</td><td>組み込みの上書きを調べるビットの番号（整数の即値。無ければ -1）</td></tr>
-<tr><td>コード（14）</td><td>0〜</td><td><a href="planckvm-isa.html#format">バイトコードのフォーマット</a>の語 0 から定数表までの全体（生と値が混ざる。定数表の語は値）</td></tr>
+<tr><td>コード（14）</td><td>0〜</td><td><a href="planckvm-isa.html#format">バイトコードのフォーマット</a>の word 0 から定数表までの全体（生と値が混ざる。定数表の word は値）</td></tr>
 </table>
 
-<h3>同一性の番号</h3>
-<p>配列・plain 配列・Lambda・Fusion・組み込み・継続は、語 0 に同一性の番号を持ちます。作った直後は 0 で、番号を割り当てるまで 0 のままです。最初の <code>HASH</code> が 1 以上の番号を割り当て、以降は変わりません。同じ機械で割り当てる番号は互いに異なります。</p>
+<h3>identity の番号</h3>
+<p>array・plain array・Lambda・Fusion・組み込み・継続は、word 0 に identity の番号を持ちます。作った直後は 0 で、番号を割り当てるまで 0 のままです。最初の <code>HASH</code> が 1 以上の番号を割り当て、以降は変わりません。同じ機械で割り当てる番号は互いに異なります。</p>
 
 <h2>GC から見た扱い</h2>
 <p>GC はヘッダの <code>kind</code> を見て、値の欄だけをたどります。生の欄はたどりません。</p>
 <table>
 <tr><th>kind</th><th>たどる欄</th></tr>
-<tr><td>多倍長整数・浮動小数点数・複素数・文字列・plain 配列</td><td>なし（中身は数とバイト列）</td></tr>
-<tr><td>シンボル</td><td>名前</td></tr>
-<tr><td>M式</td><td>頭、引数</td></tr>
-<tr><td>配列</td><td>要素</td></tr>
+<tr><td>多倍長整数・float・complex・文字列・plain array</td><td>なし（中身は数とバイト列）</td></tr>
+<tr><td>symbol</td><td>名前</td></tr>
+<tr><td>M式</td><td>head、引数</td></tr>
+<tr><td>array</td><td>要素</td></tr>
 <tr><td>Lambda</td><td>コード、環境</td></tr>
 <tr><td>Fusion</td><td>選択肢</td></tr>
 <tr><td>組み込み</td><td>名前</td></tr>
@@ -228,7 +228,7 @@
 <tr><td>セル</td><td>値、名前</td></tr>
 <tr><td>コード</td><td>定数表（命令列は読み飛ばす）</td></tr>
 </table>
-<p>GC はオブジェクトを動かすので、参照の語はオブジェクトの同一性を保ったまま変わります。</p>
+<p>GC はオブジェクトを動かすので、参照の word はオブジェクトの identity を保ったまま変わります。</p>
 
 <nav class="pager"><a class="prev" href="planckvm-types.html"><small>前のページ</small>planckvm のデータ型</a><a class="next" href="planckvm-internals.html"><small>次のページ</small>planckvm の内部仕様</a></nav>
 </main>
