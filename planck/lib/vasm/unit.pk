@@ -11,7 +11,7 @@
 # vasm_unit.units_merge(units, word) joins units in the order given: the functions of the units, then the functions of gens (each once, in the order
 # they are first made), and the data of the strings and the symbols (each once, in the order they are first named). The result is the one that the whole of the units as a
 # module gives. The merged form has main and its type, which the start of the program needs.
-# A unit is saved as the text of one M-expression (vasm_unit.text), whose lists are written Lst{...} and whose symbols are written by their names.
+# A unit is saved as the text of one M-expression (vasm_unit.text), whose lists are written Lst{...} (Cat{...} of the groups for more than 64 elements) and whose symbols are written by their names.
 
 use("base")
 use("list")
@@ -26,6 +26,8 @@ module vasm_unit {
     format := 1
 
     fun copy
+    fun list_text
+    fun vu_text
 
     # the structs and the functions of m, without the bodies
     export iface(Module{items}) := map(d -> match d {
@@ -131,21 +133,42 @@ module vasm_unit {
         strbuf.str(out)
     }
 
-    vu_text(out, v) := {
+    # a list of more than 64 elements is Cat{...} of the groups that are written the same way, as an M-expression has at most 64 arguments
+    list_text(out, xs) = {
+        n := length(xs)
+        if (n <= 64) {
+            strbuf.add(out, "Lst{")
+            first := true
+            each(x -> {
+                if (not first) strbuf.add(out, ", ")
+                first = false
+                vu_text(out, x)
+            }, xs)
+            strbuf.add(out, "}")
+        } else {
+            size := 64
+            while (size * 64 < n) size = size * 64
+            strbuf.add(out, "Cat{")
+            rest := xs
+            first := true
+            while (rest != []) {
+                if (not first) strbuf.add(out, ", ")
+                first = false
+                list_text(out, list.take(rest, size))
+                rest = list.drop(rest, size)
+            }
+            strbuf.add(out, "}")
+        }
+    }
+
+    vu_text(out, v) = {
         t := typeof(v)
         if (t == 'int) strbuf.add(out, string.int_to_str(v))
         else if (t == 'string) strbuf.add(out, string_text(v))
         else if (t == 'symbol) strbuf.add(out, symname(v))
         else if (t == 'mexpr) {
             if (head(v) == 'Cons or head(v) == 'Nil) {
-                strbuf.add(out, "Lst{")
-                first := true
-                each(x -> {
-                    if (not first) strbuf.add(out, ", ")
-                    first = false
-                    vu_text(out, x)
-                }, v)
-                strbuf.add(out, "}")
+                list_text(out, v)
             } else {
                 strbuf.add(out, symname(head(v)))
                 strbuf.add(out, "{")
@@ -205,6 +228,7 @@ module vasm_unit {
                 i = i - 1
             }
             if (head(e) == 'Lst) xs
+            else if (head(e) == 'Cat) list.concat(xs)
             else foldl((acc, x) -> push(acc, x), mexpr(head(e), Tuple{}), xs)
         } else e
     }

@@ -1,0 +1,223 @@
+# planckvm: the bytecode machine of planck, written in native
+#
+# Usage: vm <image>. The image is written by pvm/image.pk. The words, the objects and the instructions that do not change the control are in the
+# units mem, obj, builtin and ops; this unit has the loop, the calls and the returns.
+# The heap, the registers and the frames are arrays of u32. The machine state st: st[0] is the first free word of the heap.
+import mem
+import obj
+import builtin
+import big
+import num
+import ctl
+import ops
+
+# the file is read into the heap from the index 0, 4 bytes for a word; the number of words is the result
+fn load[r](h: &mut r [u32], path: &static [u8]) -> i64 {
+    let fd = open(path)
+    if fd < 0 { die("cannot open the image") }
+    let chunk = alloc(4096, 0 as u8)
+    var words: i64
+    var carry: i64
+    var ncarry: i64
+    var acc: i64
+    words = 0
+    ncarry = 0
+    acc = 0
+    carry = 1
+    region q {
+    var cb: &mut q [u8]
+    cb = &mut q chunk
+    while carry != 0 {
+        let n = read(fd, cb)
+        if n <= 0 {
+            carry = 0
+        } else {
+            for i in 0 as i64..n {
+                acc = acc | ((cb[i] as i64) << (ncarry * 8))
+                ncarry += 1
+                if ncarry == 4 {
+                    p(h, words, acc)
+                    words += 1
+                    acc = 0
+                    ncarry = 0
+                }
+            }
+        }
+    }
+    }
+    close(fd)
+    free(chunk)
+    words
+}
+
+
+# run runs the code of the Lambda entry in a stub frame whose code is the Lambda stub, and gives the value that HALT has
+fn run[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], fs: &mut r [u32], stub: i64, entry: i64) -> i64 {
+    let vfalse = g(h, 1)
+    var fp: i64
+    var base: i64
+    var code: i64
+    var ip: i64
+    var kb: i64
+    var running: i64
+    var result: i64
+    var w: i64
+    var op: i64
+    var a: i64
+    var b: i64
+    var c: i64
+    var cond: i64
+    result = 0
+    running = 1
+    # the stub frame: CALL R0 R0 0 and HALT R0
+    p(rs, 0, entry)
+    fp = 0
+    base = 0
+    p(fs, 0, stub)
+    p(fs, 1, g(h, 3))
+    p(fs, 2, g(h, 3))
+    p(fs, 3, 0)
+    p(fs, 4, 0)
+    p(fs, 5, 0)
+    p(fs, 6, 0)
+    code = g(h, (stub >> 1) + 2) >> 1
+    ip = code + 5
+    kb = code + 5 + g(h, code + 2)
+    while running == 1 {
+        w = g(h, ip)
+        ip += 1
+        op = w & 255
+        a = (w >> 8) & 255
+        b = (w >> 16) & 255
+        c = (w >> 24) & 255
+        cond = -1
+        if op == 0 {
+            p(rs, base + a, g(rs, base + b))
+        } else if op == 1 {
+            p(rs, base + a, s16(w >> 16) * 2 + 1)
+        } else if op == 2 {
+            p(rs, base + a, g(h, kb + ((w >> 16) & 65535)))
+        } else if op == 3 {
+            for i in 0 as i64..b {
+                p(rs, base + a + i, g(h, 3))
+            }
+        } else if op == 4 {
+            p(rs, base + a, g(h, (g(h, kb + ((w >> 16) & 65535)) >> 1) + 1))
+        } else if op == 5 {
+            p(h, (g(h, kb + ((w >> 16) & 65535)) >> 1) + 1, g(rs, base + a))
+        } else if op == 9 {
+            ip += s24(w >> 8)
+        } else if op == 10 {
+            cond = 0
+            if g(rs, base + a) != vfalse { cond = 1 }
+        } else if op == 13 {
+            cond = 0
+            if num_lt(h, g(rs, base + a), g(rs, base + b)) { cond = 1 }
+        } else if op == 14 {
+            cond = 0
+            if num_ge(h, g(rs, base + a), g(rs, base + b)) { cond = 1 }
+        } else if op == 17 {
+            # TEQI: the immediate b is signed 8 bits
+            var sb: i64
+            sb = b
+            if sb > 127 { sb = sb - 256 }
+            cond = 0
+            if s32(g(rs, base + a)) == sb * 2 + 1 { cond = 1 }
+        } else if op == 18 {
+            var sb: i64
+            sb = b
+            if sb > 127 { sb = sb - 256 }
+            cond = 0
+            if num_lt(h, g(rs, base + a), small(sb)) { cond = 1 }
+        } else if op == 19 {
+            var sb: i64
+            sb = b
+            if sb > 127 { sb = sb - 256 }
+            cond = 0
+            if num_ge(h, g(rs, base + a), small(sb)) { cond = 1 }
+        } else if op == 6 or op == 7 or op == 8 {
+            exec_env(h, st, rs, fs, fp, op, w, base)
+        } else if op == 26 {
+            exec_fusion(h, st, rs, w, base)
+        } else if op == 20 or op == 21 or op == 22 or op == 23 or op == 34 or op == 35 {
+            # the control: the frames change, so the code, the pc and the base are read again from the top frame
+            fp = exec_ctl(h, st, rs, fs, fp, op, w, ip - (code + 5))
+            base = g(fs, fp + 4)
+            code = g(h, (g(fs, fp) >> 1) + 2) >> 1
+            ip = code + 5 + g(fs, fp + 5)
+            kb = code + 5 + g(h, code + 2)
+        } else if op == 24 {
+            result = g(rs, base + a)
+            running = 0
+        } else if op == 25 {
+            # CLOSURE A D: a Lambda of the code K[D] and the current environment
+            let lam = alloc_obj(h, st, 8, 3)
+            p(h, (lam >> 1) + 2, g(h, kb + ((w >> 16) & 65535)))
+            p(h, (lam >> 1) + 3, g(fs, fp + 1))
+            p(rs, base + a, lam)
+        } else {
+            cond = exec_op(h, st, rs, op, w, base, kb)
+        }
+        if cond >= 0 {
+            if cond >= 2 {
+                # a match instruction: skip the next word when it matched
+                if cond == 2 { ip += 1 }
+            } else if cond != c {
+                # a condition instruction: the next word is JMP; run it when the condition equals k (the field c), else skip it
+                ip += 1
+            }
+        }
+    }
+    result
+}
+
+fn main() -> i64 {
+    if argc() < 2 { die("usage: vm <image>") }
+    var heap: own [u32]
+    var machine: own [u32]
+    var regs: own [u32]
+    var frames: own [u32]
+    heap = alloc(33554432, 0 as u32)
+    machine = alloc(16, 0 as u32)
+    regs = alloc(1048576, 0 as u32)
+    frames = alloc(458752, 0 as u32)
+    var result: i64
+    region r {
+        var h: &mut r [u32]
+        var st: &mut r [u32]
+        var rs: &mut r [u32]
+        var fs: &mut r [u32]
+        h = &mut r heap
+        st = &mut r machine
+        rs = &mut r regs
+        fs = &mut r frames
+        var n: i64
+        n = load(h, argv(1))
+        # the entry stub: a code of 2 instructions CALL R0 R0 0 and HALT R0, and its Lambda
+        p(h, n, (2 + 4) * 64 + 14 * 4 + 1)
+        p(h, n + 1, 65536)
+        p(h, n + 2, 2)
+        p(h, n + 3, 0)
+        p(h, n + 4, -1)
+        p(h, n + 5, 20)
+        p(h, n + 6, 24)
+        p(h, n + 7, 3 * 64 + 8 * 4 + 1)
+        p(h, n + 8, 0)
+        p(h, n + 9, n * 2)
+        p(h, n + 10, g(h, 3))
+        p(st, 0, n + 11)
+        for i in 0 as i64..len(rs) {
+            p(rs, i, g(h, 3))
+        }
+        result = run(h, st, rs, fs, (n + 7) * 2, g(h, 0))
+    }
+    free(heap)
+    free(machine)
+    free(regs)
+    free(frames)
+    if (result & 1) == 1 {
+        out_int(int_of(result))
+        out_lit("\n")
+    }
+    0
+}

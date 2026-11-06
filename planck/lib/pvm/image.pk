@@ -1,0 +1,227 @@
+# pvm/image: writes the image file that planckvm reads
+# Copyright (C) 2026 nineties
+#
+# The image is the initial heap of planckvm as 32-bit little-endian words; the word index in the file is the heap index.
+# Words 0 to 15 are the roots: 0 is the Lambda that is run first, 1 false, 2 true, 3 none, 4 Tuple, 5 Cons, 6 Nil, and 7 to 15 the symbols
+# that typeof gives (int string symbol mexpr function array plain float complex). The objects follow.
+#
+# pvm_image.build(codes, entry) is the buffer of bytes of the image (bytes.pk). codes is a list of
+# Code{name, arity, nregs, instrs, consts}. entry is the name of the code that is run first; its arity is 0.
+# instrs is a list of Name{operands} with the mnemonics of the table in planckvm-isa, and Label{'l} that gives a position a name; a jump takes the name.
+# consts is a list of
+#   I{n}  integer       S{"text"}  string       Y{"name"}  symbol       C{"name"}  cell of the global variable
+#   (the cell of a builtin name has the builtin as the value)
+#   Fl{hi, lo}  float of the two words of its binary64 (each 0 to 2^32-1)
+#   K{"code"}  code     M{"head", [consts]}  m-expr whose arguments are constants       T{}  true, F{}  false, N{}  none
+# An integer is a small integer here: |n| < 2^29.
+
+use("base")
+use("list")
+use("table")
+use("vector")
+use("bytes")
+
+module pvm_image {
+    # mnemonic: [opcode, form, fields]; the fields are placed in the order of the operands
+    isa := [
+        ["MOVE", 0, 'abc, ['a, 'b]], ["LOADI", 1, 'ad, ['a, 'd]], ["LOADK", 2, 'ad, ['a, 'd]], ["LOADNONE", 3, 'abc, ['a, 'b]],
+        ["GETGLOBAL", 4, 'ad, ['a, 'd]], ["SETGLOBAL", 5, 'ad, ['a, 'd]], ["NEWENV", 6, 'ad, ['d]],
+        ["ENVGET", 7, 'abc, ['a, 'b, 'c]], ["ENVSET", 8, 'abc, ['a, 'b, 'c]], ["JMP", 9, 'j, ['j]],
+        ["TEST", 10, 'abc, ['a, 'c]], ["TEQ", 11, 'abc, ['a, 'b, 'c]], ["TNE", 12, 'abc, ['a, 'b, 'c]],
+        ["TLT", 13, 'abc, ['a, 'b, 'c]], ["TGE", 14, 'abc, ['a, 'b, 'c]], ["TEQK", 15, 'abc, ['a, 'b, 'c]],
+        ["TNEK", 16, 'abc, ['a, 'b, 'c]], ["TEQI", 17, 'abc, ['a, 'b, 'c]], ["TLTI", 18, 'abc, ['a, 'b, 'c]],
+        ["TGEI", 19, 'abc, ['a, 'b, 'c]], ["CALL", 20, 'abc, ['a, 'b, 'c]], ["TCALL", 21, 'abc, ['b, 'c]],
+        ["RET", 22, 'abc, ['a]], ["NEXT", 23, 'abc, []], ["HALT", 24, 'abc, ['a]], ["CLOSURE", 25, 'ad, ['a, 'd]],
+        ["FUSION", 26, 'abc, ['a, 'b, 'c]], ["TUPLE", 27, 'abc, ['a, 'b, 'c]], ["CONS", 28, 'abc, ['a, 'b, 'c]],
+        ["BUILD", 29, 'abc, ['a, 'b, 'c]], ["FIELD", 30, 'abc, ['a, 'b, 'c]], ["MATCHEQ", 31, 'ad, ['a, 'd]],
+        ["MATCHHEAD", 32, 'abc, ['a, 'b, 'c]], ["MATCHTYPE", 33, 'ad, ['a, 'd]], ["HANDLE", 34, 'abc, ['a, 'b]],
+        ["PERFORM", 35, 'abc, ['a, 'b]], ["EXT", 36, 'j, ['j]],
+        ["ADD", 37, 'abc, ['a, 'b, 'c]], ["SUB", 38, 'abc, ['a, 'b, 'c]], ["MUL", 39, 'abc, ['a, 'b, 'c]],
+        ["DIV", 40, 'abc, ['a, 'b, 'c]], ["MOD", 41, 'abc, ['a, 'b, 'c]], ["ADDI", 42, 'abc, ['a, 'b, 'c]],
+        ["LT", 43, 'abc, ['a, 'b, 'c]], ["GE", 44, 'abc, ['a, 'b, 'c]], ["EQ", 45, 'abc, ['a, 'b, 'c]],
+        ["NE", 46, 'abc, ['a, 'b, 'c]], ["HEAD", 47, 'abc, ['a, 'b]], ["ARITY", 48, 'abc, ['a, 'b]],
+        ["ARG", 49, 'abc, ['a, 'b, 'c]], ["ARGI", 50, 'abc, ['a, 'b, 'c]], ["PUSH", 51, 'abc, ['a, 'b, 'c]],
+        ["TYPEOF", 52, 'abc, ['a, 'b]], ["STRLEN", 53, 'abc, ['a, 'b]], ["ORD", 54, 'abc, ['a, 'b, 'c]],
+        ["AGET", 55, 'abc, ['a, 'b, 'c]], ["AGETI", 56, 'abc, ['a, 'b, 'c]], ["ASET", 57, 'abc, ['a, 'b, 'c]],
+        ["ALEN", 58, 'abc, ['a, 'b]], ["HASH", 59, 'abc, ['a, 'b]], ["PLAINGET", 60, 'abc, ['a, 'b, 'c]],
+        ["PLAINSET", 61, 'abc, ['a, 'b, 'c]]
+    ]
+
+    # the builtins that planckvm calls without a frame: [name, id, number of arguments]
+    builtins := [
+        ["put", 0, 1], ["print", 1, 1], ["println", 2, 1], ["mexpr", 3, 2], ["substr", 4, 3],
+        ["_strcat", 5, 2], ["intern", 6, 1], ["symname", 7, 1], ["exit", 8, 1],
+        ["fsqrt", 9, 1], ["ffloor", 10, 1], ["ftoi", 11, 1], ["ftobits", 12, 1], ["bitstof", 13, 1], ["ftos", 14, 1], ["stof", 15, 1],
+        ["fexp", 16, 1], ["flog", 17, 1], ["fsin", 18, 1], ["fcos", 19, 1], ["fpow", 20, 2], ["fatan2", 21, 2],
+        ["complex", 22, 2], ["real", 23, 1], ["imag", 24, 1],
+        ["bit_and", 25, 2], ["bit_or", 26, 2], ["bit_xor", 27, 2], ["bit_shl", 28, 2], ["bit_sar", 29, 2]
+    ]
+
+    type_names := ["int", "string", "symbol", "mexpr", "function", "array", "plain", "float", "complex"]
+
+    find_op(name) := {
+        r := list.find(e -> e[0] == name, isa)
+        if (r == none) panic(_strcat("pvm_image: unknown mnemonic ", name))
+        r
+    }
+
+    # the sizes of the instructions are one word; labels take no space
+    is_label(Label{_}) := true
+    is_label(_) := false
+
+    label_table(instrs) := {
+        t := table.new()
+        pc := 0
+        each(i -> if (is_label(i)) table.set(t, arg(i, 0), pc) else pc = pc + 1, instrs)
+        t
+    }
+
+    list_of_args(m) := {
+        r := []
+        k := arity(m) - 1
+        while (k >= 0) {
+            r = arg(m, k) :: r
+            k = k - 1
+        }
+        r
+    }
+
+    byte(n) := bit_and(n, 255)
+
+    # one instruction as 4 bytes [op, a, b, c]; pc is the index of the next word
+    encode(labels, pc, i) := {
+        e := find_op(symname(head(i)))
+        form := e[2]
+        ops := map(x -> if (typeof(x) == 'symbol) table.get(labels, x, none) - pc else x, list_of_args(i))
+        fs := e[3]
+        if (length(fs) != length(ops)) panic(_strcat("pvm_image: operand count of ", e[0]))
+        a := 0
+        b := 0
+        c := 0
+        d := 0
+        j := 0
+        each(p -> {
+            f := p[0]
+            v := p[1]
+            if (f == 'a) a = byte(v)
+            else if (f == 'b) b = byte(v)
+            else if (f == 'c) c = byte(v)
+            else if (f == 'd) d = v
+            else j = v
+        }, list.zip(fs, ops))
+        if (form == 'abc) [e[1], a, b, c]
+        else if (form == 'ad) [e[1], a, byte(d), byte(bit_sar(d, 8))]
+        else [e[1], byte(j), byte(bit_sar(j, 8)), byte(bit_sar(j, 16))]
+    }
+
+    # lays the objects out after the 8 root words and writes them
+    layout(objs, roots) := {
+        n := vector.len(objs)
+        addr := array(n)
+        at := 16
+        i := 0
+        while (i < n) {
+            array_set(addr, i, at)
+            at = at + 1 + length(vector.get(objs, i)[1])
+            i = i + 1
+        }
+        out := bytes.new()
+        value(id) := bit_shl(array_get(addr, id), 1)
+        each(r -> bytes.u32(out, value(r)), roots)
+        i = 0
+        while (i < n) {
+            o := vector.get(objs, i)
+            kind := arg(o, 0)
+            items := arg(o, 1)
+            bytes.u32(out, length(items) * 64 + kind * 4 + 1)
+            each(it -> match it {
+                W{x} -> bytes.u32(out, x)
+              | B{bs} -> each(b -> bytes.u8(out, b), bs)
+              | R{id} -> bytes.u32(out, value(id))
+              | V{x} -> bytes.u32(out, x * 2 + 1)
+            }, items)
+            i = i + 1
+        }
+        out
+    }
+
+    # an object is Obj{kind, items}; an item is W{n} (a word, a small integer in the low 30 bits), B{[b0, b1, b2, b3]} (bytes), R{id} (a reference), V{n} (a small integer value)
+    export build(codes, entry) := {
+        objs := vector.new()
+        names := table.new()
+        add(key, o) := {
+            id := vector.len(objs)
+            vector.push(objs, o)
+            table.set(names, key, id)
+            id
+        }
+        once(key, mk) := if (table.has(names, key)) table.get(names, key, none) else mk()
+        string_obj(s) := once(['str, s], () -> {
+            n := strlen(s)
+            words := []
+            i := 0
+            while (i < n) {
+                words = [ord(s, i), if (i + 1 < n) ord(s, i + 1) else 0, if (i + 2 < n) ord(s, i + 2) else 0, if (i + 3 < n) ord(s, i + 3) else 0] :: words
+                i = i + 4
+            }
+            add(['str, s], Obj{3, W{n} :: map(w -> B{w}, reverse(words))})
+        })
+        symbol(s) := once(['sym, s], () -> {
+            str := string_obj(s)
+            add(['sym, s], Obj{4, [R{str}, V{0}]})
+        })
+        # the roots first: false, true, none; they are symbols
+        f_ := symbol("false")
+        t_ := symbol("true")
+        n_ := symbol("none")
+        tuple_ := symbol("Tuple")
+        cons_ := symbol("Cons")
+        nil_ := symbol("Nil")
+        types := map(symbol, type_names)
+        builtin_obj(e) := once(['builtin, e[0]], () -> {
+            add(['builtin, e[0]], Obj{10, [W{0}, V{e[1]}, V{e[2]}, R{symbol(e[0])}]})
+        })
+        cell(s) := once(['cell, s], () -> {
+            sym := symbol(s)
+            b := list.find(e -> e[0] == s, builtins)
+            val := if (b == none) R{n_} else R{builtin_obj(b)}
+            add(['cell, s], Obj{13, [val, R{sym}, V{-1}]})
+        })
+        # reserve the code objects so that they can refer to each other
+        each(c -> add(['code, c[0]], Obj{14, []}), codes)
+        value_of(x) := match x {
+            K{n} -> R{table.get(names, ['code, n], none)}
+          | I{n} -> V{n}
+          | S{s} -> R{string_obj(s)}
+          | Y{s} -> R{symbol(s)}
+          | C{s} -> R{cell(s)}
+          | T{} -> R{t_}
+          | F{} -> R{f_}
+          | N{} -> R{n_}
+          | Fl{hi, lo} -> {
+                add(['float, hi, lo, vector.len(objs)], Obj{1, [W{lo}, W{hi}]})
+                R{vector.len(objs) - 1}
+            }
+          | M{h, xs} -> {
+                hs := symbol(h)
+                args := map(value_of, xs)
+                add(['mexpr, h, xs], Obj{5, R{hs} :: args})
+                R{vector.len(objs) - 1}
+            }
+        }
+        each(c -> {
+            labels := label_table(c[3])
+            words := []
+            pc := 0
+            each(i -> if (not is_label(i)) {
+                words = B{encode(labels, pc + 1, i)} :: words
+                pc = pc + 1
+            }, c[3])
+            consts := map(value_of, c[4])
+            hdr := [W{bit_shl(c[2], 16) + bit_shl(c[1], 8)}, W{pc}, W{length(consts)}, W{-1}]
+            vector.set(objs, table.get(names, ['code, c[0]], none), Obj{14, append(hdr, append(reverse(words), consts))})
+        }, codes)
+        lam := add(['lambda], Obj{8, [W{0}, R{table.get(names, ['code, entry], none)}, R{n_}]})
+        layout(objs, append([lam, f_, t_, n_, tuple_, cons_, nil_], types))
+    }
+}

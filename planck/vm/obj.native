@@ -1,0 +1,149 @@
+# obj: strings, symbols and m-exprs on the heap of planckvm
+#
+# Object kinds: 0 big integer (big.native), 3 string, 4 symbol, 5 m-expr, 8 Lambda, 9 Fusion, 10 builtin, 11 continuation.
+# A string is its number of bytes and the bytes packed from the low end of the words.
+# A symbol is its name (a string) and a number. A m-expr is its head (a symbol) and the arguments.
+# The roots of the image are the words 0 to 15 of the heap: 0 the Lambda that is run first, 1 false, 2 true, 3 none,
+# 4 Tuple, 5 Cons, 6 Nil, and 7 to 15 the symbols that typeof gives: int string symbol mexpr function array plain float complex.
+import mem
+import big
+import flt
+import num
+
+fn str_len[r](h: &r [u32], s: i64) -> i64 {
+    g(h, (s >> 1) + 1)
+}
+
+fn str_byte[r](h: &r [u32], s: i64, i: i64) -> i64 {
+    let w = g(h, (s >> 1) + 2 + i / 4)
+    (w >> ((i % 4) * 8)) & 255
+}
+
+fn new_string[r](h: &mut r [u32], st: &mut r [u32], n: i64) -> i64 {
+    let s = alloc_obj(h, st, 3, 1 + (n + 3) / 4)
+    p(h, (s >> 1) + 1, n)
+    s
+}
+
+# set_byte puts the byte b at i of a string that was made by new_string and has 0 there
+fn set_byte[r](h: &mut r [u32], s: i64, i: i64, b: i64) {
+    let at = (s >> 1) + 2 + i / 4
+    p(h, at, g(h, at) | (b << ((i % 4) * 8)))
+}
+
+fn str_eq[r](h: &r [u32], x: i64, y: i64) -> bool {
+    let n = str_len(h, x)
+    if n != str_len(h, y) { return false }
+    var i: i64
+    i = 0
+    while i < n {
+        if str_byte(h, x, i) != str_byte(h, y, i) { return false }
+        i += 1
+    }
+    true
+}
+
+fn mexpr_arity[r](h: &r [u32], m: i64) -> i64 {
+    size_of(h, m) - 1
+}
+
+fn mexpr_head[r](h: &r [u32], m: i64) -> i64 {
+    g(h, (m >> 1) + 1)
+}
+
+fn mexpr_arg[r](h: &r [u32], m: i64, i: i64) -> i64 {
+    g(h, (m >> 1) + 2 + i)
+}
+
+# equal is the equality of the values: numbers by the value (1 == 1.0, NaN is not equal to itself), strings by the bytes, m-exprs by the head and the arguments, the others by the identity
+fn equal[r](h: &r [u32], x: i64, y: i64) -> bool {
+    let cx = num_class(h, x)
+    let cy = num_class(h, y)
+    if cx != 0 and cy != 0 { return num_equal(h, x, y) }
+    if cx != 0 or cy != 0 { return false }
+    if x == y { return true }
+    if (x & 1) == 1 { return false }
+    if (y & 1) == 1 { return false }
+    let kx = kind_of(h, x)
+    if kx != kind_of(h, y) { return false }
+    if kx == 3 { return str_eq(h, x, y) }
+    if kx == 5 {
+        let n = mexpr_arity(h, x)
+        if n != mexpr_arity(h, y) { return false }
+        if mexpr_head(h, x) != mexpr_head(h, y) { return false }
+        var i: i64
+        i = 0
+        while i < n {
+            if not equal(h, mexpr_arg(h, x, i), mexpr_arg(h, y, i)) { return false }
+            i += 1
+        }
+        return true
+    }
+    false
+}
+
+# find_symbol walks the objects of the heap from the first after the roots; it is the symbol of the name s, or 0
+fn find_symbol[r](h: &r [u32], st: &r [u32], s: i64) -> i64 {
+    let top = g(st, 0)
+    var at: i64
+    at = 16
+    while at < top {
+        let hd = g(h, at)
+        if ((hd >> 2) & 15) == 4 {
+            if str_eq(h, g(h, at + 1), s) { return at * 2 }
+        }
+        at += 1 + (hd >> 6)
+    }
+    0
+}
+
+fn intern_sym[r](h: &mut r [u32], st: &mut r [u32], s: i64) -> i64 {
+    let found = find_symbol(h, st, s)
+    if found != 0 { return found }
+    let sym = alloc_obj(h, st, 4, 2)
+    p(h, (sym >> 1) + 1, s)
+    p(h, (sym >> 1) + 2, 1)
+    sym
+}
+
+# new_mexpr makes a m-expr of the head and n arguments that are 0
+fn new_mexpr[r](h: &mut r [u32], st: &mut r [u32], head: i64, n: i64) -> i64 {
+    if n > 64 { die("too many arguments of a m-expr") }
+    let m = alloc_obj(h, st, 5, 1 + n)
+    p(h, (m >> 1) + 1, head)
+    m
+}
+
+fn set_arg[r](h: &mut r [u32], m: i64, i: i64, v: i64) {
+    p(h, (m >> 1) + 2 + i, v)
+}
+
+# the value of typeof: the symbol of the kind of the value
+fn type_symbol[r](h: &r [u32], v: i64) -> i64 {
+    if (v & 1) == 1 { return g(h, 7) }
+    let k = kind_of(h, v)
+    if k == 3 { return g(h, 8) }
+    if k == 4 { return g(h, 9) }
+    if k == 5 { return g(h, 10) }
+    if k == 6 { return g(h, 12) }
+    if k == 7 { return g(h, 13) }
+    if k == 1 { return g(h, 14) }
+    if k == 2 { return g(h, 15) }
+    if k == 0 { return g(h, 7) }
+    g(h, 11)
+}
+
+fn is_mexpr[r](h: &r [u32], v: i64) -> bool {
+    if (v & 1) == 1 { return false }
+    kind_of(h, v) == 5
+}
+
+fn is_string[r](h: &r [u32], v: i64) -> bool {
+    if (v & 1) == 1 { return false }
+    kind_of(h, v) == 3
+}
+
+fn is_symbol[r](h: &r [u32], v: i64) -> bool {
+    if (v & 1) == 1 { return false }
+    kind_of(h, v) == 4
+}

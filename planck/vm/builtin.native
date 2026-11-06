@@ -1,0 +1,330 @@
+# builtin: the builtin functions that planckvm calls without a frame, and the output
+#
+# A builtin is an object of the kind 10 (the number, the id, the number of arguments, the name symbol). The id is the index of the table of
+# pvm/image.pk: 0 put, 1 print, 2 println, 3 mexpr, 4 substr, 5 _strcat, 6 intern, 7 symname, 8 exit.
+import mem
+import obj
+import big
+import flt
+import dec
+import num
+import nb
+
+fn out_lit(m: &static [u8]) {
+    write(1, m)
+}
+
+fn out_byte(b: i64) {
+    let buf = alloc(1, 0 as u8)
+    buf[0] = b as u8
+    region q {
+        var x: &q [u8]
+        x = &q buf
+        write(1, x)
+    }
+    free(buf)
+}
+
+# out_bytes writes the bytes of the string s from lo to hi-1
+fn out_bytes[r](h: &r [u32], s: i64, lo: i64, hi: i64) {
+    let n = hi - lo
+    if n <= 0 { return }
+    let buf = alloc(n, 0 as u8)
+    for i in 0 as i64..n {
+        buf[i] = str_byte(h, s, lo + i) as u8
+    }
+    region q {
+        var x: &q [u8]
+        x = &q buf
+        write(1, x)
+    }
+    free(buf)
+}
+
+fn digits(n: i64) -> i64 {
+    var k: i64
+    var x: i64
+    k = 1
+    x = n
+    while x >= 10 {
+        x = x / 10
+        k += 1
+    }
+    k
+}
+
+# out_int writes the decimal digits of n
+fn out_int(n: i64) {
+    var neg: i64
+    var x: i64
+    neg = 0
+    x = n
+    if x < 0 {
+        neg = 1
+        x = 0 - x
+    }
+    let len2 = digits(x) + neg
+    let buf = alloc(len2, 0 as u8)
+    if neg == 1 { buf[0] = 45 as u8 }
+    var i: i64
+    i = len2 - 1
+    while i >= neg {
+        buf[i] = ((x % 10) + 48) as u8
+        x = x / 10
+        i -= 1
+    }
+    region q {
+        var b: &q [u8]
+        b = &q buf
+        write(1, b)
+    }
+    free(buf)
+}
+
+# the letter after the backslash for a byte that print escapes, or -1
+fn escape_code(c: i64) -> i64 {
+    if c == 0 { return 48 }
+    if c == 7 { return 97 }
+    if c == 8 { return 98 }
+    if c == 9 { return 116 }
+    if c == 10 { return 110 }
+    if c == 11 { return 118 }
+    if c == 12 { return 102 }
+    if c == 13 { return 114 }
+    if c == 34 { return 34 }
+    if c == 92 { return 92 }
+    return -1
+}
+
+fn out_quoted[r](h: &r [u32], s: i64) {
+    let n = str_len(h, s)
+    out_lit("\"")
+    var start: i64
+    var i: i64
+    start = 0
+    i = 0
+    while i < n {
+        let e = escape_code(str_byte(h, s, i))
+        if e >= 0 {
+            out_bytes(h, s, start, i)
+            out_byte(92)
+            out_byte(e)
+            start = i + 1
+        }
+        i += 1
+    }
+    out_bytes(h, s, start, n)
+    out_lit("\"")
+}
+
+fn out_symbol[r](h: &r [u32], sym: i64) {
+    let name = g(h, (sym >> 1) + 1)
+    out_bytes(h, name, 0, str_len(h, name))
+}
+
+# out_big writes the decimal digits of a big integer: the digits are divided by 10000 again and again
+fn out_big[r](h: &r [u32], v: i64) {
+    let nd = g(h, (v >> 1) + 2)
+    let t = alloc(nd, 0 as i64)
+    let chunks = alloc(2 * nd + 2, 0 as i64)
+    for i in 0 as i64..nd {
+        t[i] = g(h, (v >> 1) + 3 + i)
+    }
+    var n: i64
+    var nc: i64
+    n = nd
+    nc = 0
+    while n > 0 {
+        var rem: i64
+        rem = 0
+        var i: i64
+        i = n - 1
+        while i >= 0 {
+            let cur = rem * 65536 + t[i]
+            t[i] = cur / 10000
+            rem = cur - t[i] * 10000
+            i -= 1
+        }
+        chunks[nc] = rem
+        nc += 1
+        while n > 0 and t[n - 1] == 0 {
+            n -= 1
+        }
+    }
+    if g(h, (v >> 1) + 1) == 1 { out_lit("-") }
+    var k: i64
+    k = nc - 1
+    out_int(chunks[k])
+    k -= 1
+    while k >= 0 {
+        let c = chunks[k]
+        out_int(c / 1000)
+        out_int((c / 100) % 10)
+        out_int((c / 10) % 10)
+        out_int(c % 10)
+        k -= 1
+    }
+    free(t)
+    free(chunks)
+}
+
+# out_float writes the text of a float
+fn out_float(hi: i64, lo: i64) {
+    let buf = alloc(40, 0 as u8)
+    var n: i64
+    region q {
+        var b: &mut q [u8]
+        b = &mut q buf
+        n = fmt_float(hi, lo, b)
+    }
+    let exact = alloc(n, 0 as u8)
+    for i in 0 as i64..n {
+        exact[i] = buf[i]
+    }
+    region q2 {
+        var x: &q2 [u8]
+        x = &q2 exact
+        write(1, x)
+    }
+    free(buf)
+    free(exact)
+}
+
+# print_value writes the text of a value like print does
+fn print_value[r](h: &r [u32], v: i64) {
+    if is_int(v) {
+        out_int(int_of(v))
+        return
+    }
+    let k = kind_of(h, v)
+    if k == 0 {
+        out_big(h, v)
+    } else if k == 1 {
+        out_float(fl_hi(h, v), fl_lo(h, v))
+    } else if k == 2 {
+        out_lit("complex(")
+        out_float(cx_rh(h, v), cx_rl(h, v))
+        out_lit(", ")
+        out_float(cx_ih(h, v), cx_il(h, v))
+        out_lit(")")
+    } else if k == 3 {
+        out_quoted(h, v)
+    } else if k == 4 {
+        out_symbol(h, v)
+    } else if k == 5 {
+        let n = mexpr_arity(h, v)
+        out_symbol(h, mexpr_head(h, v))
+        out_lit("{")
+        for i in 0 as i64..n {
+            if i > 0 { out_lit(", ") }
+            print_value(h, mexpr_arg(h, v, i))
+        }
+        out_lit("}")
+    } else if k == 10 {
+        out_lit("<prim:")
+        out_symbol(h, g(h, (v >> 1) + 4))
+        out_lit(">")
+    } else if k == 9 {
+        let n = size_of(h, v) - 1
+        for i in 0 as i64..n {
+            if i > 0 { out_lit("|") }
+            print_value(h, g(h, (v >> 1) + 2 + i))
+        }
+    } else if k == 8 {
+        out_lit("<lambda>")
+    } else if k == 11 {
+        out_lit("<cont>")
+    } else if k == 6 {
+        out_lit("<array>")
+    } else {
+        out_lit("<?>")
+    }
+}
+
+fn arg_string[r](h: &r [u32], rs: &r [u32], a: i64, k: i64, m: &static [u8]) -> i64 {
+    let v = g(rs, a + k)
+    if not is_string(h, v) { die(m) }
+    v
+}
+
+fn arg_int[r](rs: &r [u32], a: i64, k: i64, m: &static [u8]) -> i64 {
+    let v = g(rs, a + k)
+    if not is_int(v) { die(m) }
+    int_of(v)
+}
+
+fn do_substr[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], a: i64) -> i64 {
+    let s = arg_string(h, rs, a, 0, "substr: not a string")
+    let i = arg_int(rs, a, 1, "substr: not an integer")
+    let j = arg_int(rs, a, 2, "substr: not an integer")
+    if i < 0 { die("substr: out of range") }
+    if j < i { die("substr: out of range") }
+    if j > str_len(h, s) { die("substr: out of range") }
+    let t = new_string(h, st, j - i)
+    for k in 0 as i64..j - i {
+        set_byte(h, t, k, str_byte(h, s, i + k))
+    }
+    t
+}
+
+fn do_strcat[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], a: i64) -> i64 {
+    let x = arg_string(h, rs, a, 0, "_strcat: not a string")
+    let y = arg_string(h, rs, a, 1, "_strcat: not a string")
+    let nx = str_len(h, x)
+    let ny = str_len(h, y)
+    let t = new_string(h, st, nx + ny)
+    for k in 0 as i64..nx {
+        set_byte(h, t, k, str_byte(h, x, k))
+    }
+    for k in 0 as i64..ny {
+        set_byte(h, t, nx + k, str_byte(h, y, k))
+    }
+    t
+}
+
+fn do_mexpr[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], a: i64) -> i64 {
+    let hd = g(rs, a)
+    let t = g(rs, a + 1)
+    if not is_symbol(h, hd) { die("mexpr: the head is not a symbol") }
+    if not is_mexpr(h, t) { die("mexpr: not a m-expr") }
+    let n = mexpr_arity(h, t)
+    let m = new_mexpr(h, st, hd, n)
+    for k in 0 as i64..n {
+        set_arg(h, m, k, mexpr_arg(h, t, k))
+    }
+    m
+}
+
+# call_builtin runs the builtin id with the arguments in the registers from a; the result is a value
+fn call_builtin[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], id: i64, a: i64) -> i64 {
+    let nv = g(h, 3)
+    if id == 0 {
+        let s = arg_string(h, rs, a, 0, "put: not a string")
+        out_bytes(h, s, 0, str_len(h, s))
+        return nv
+    }
+    if id == 1 {
+        print_value(h, g(rs, a))
+        return nv
+    }
+    if id == 2 {
+        print_value(h, g(rs, a))
+        out_lit("\n")
+        return nv
+    }
+    if id == 3 { return do_mexpr(h, st, rs, a) }
+    if id == 4 { return do_substr(h, st, rs, a) }
+    if id == 5 { return do_strcat(h, st, rs, a) }
+    if id == 6 { return intern_sym(h, st, arg_string(h, rs, a, 0, "intern: not a string")) }
+    if id == 7 {
+        let sym = g(rs, a)
+        if not is_symbol(h, sym) { die("symname: not a symbol") }
+        return g(h, (sym >> 1) + 1)
+    }
+    if id == 8 {
+        exit(arg_int(rs, a, 0, "exit: not an integer"))
+    }
+    if id >= 9 { return call_nbuiltin(h, st, rs, id, a) }
+    die("unknown builtin")
+    nv
+}

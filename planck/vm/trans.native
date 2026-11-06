@@ -1,0 +1,483 @@
+# trans: exp, log, sin, cos, pow and atan2 of planckvm
+#
+# The functions compute in fixed point on the integers of the heap: an integer x stands for x / 2^256, with series and the argument reductions
+# whose errors are far below 2^-200, and the result is rounded once to a float (so it is the nearest float except for a value that lies
+# within about 2^-190 of the middle of two floats). pi at 1280 bits reduces the argument of sin and cos in the whole range of floats.
+# ln2 and pi are made at the first call and kept in the words 4 and 5 of the machine state (the collector must treat them as roots).
+import mem
+import big
+import flt
+import bit
+import num
+
+fn fx_one[r](h: &mut r [u32], st: &mut r [u32]) -> i64 {
+    int_shl(h, st, small(1), 256)
+}
+
+fn int_neg[r](h: &mut r [u32], st: &mut r [u32], x: i64) -> i64 {
+    int_add(h, st, small(0), x, 1)
+}
+
+fn fx_mul[r](h: &mut r [u32], st: &mut r [u32], a: i64, b: i64) -> i64 {
+    int_sar(h, st, int_mul(h, st, a, b), 256)
+}
+
+fn fx_div[r](h: &mut r [u32], st: &mut r [u32], a: i64, b: i64) -> i64 {
+    int_divmod(h, st, int_shl(h, st, a, 256), b, 0)
+}
+
+# the integer v divided by the small number d (0 < d < 65536), truncated toward 0
+fn div_small[r](h: &mut r [u32], st: &mut r [u32], v: i64, d: i64) -> i64 {
+    int_divmod(h, st, v, small(d), 0)
+}
+
+fn is_zero_int[r](h: &r [u32], v: i64) -> bool {
+    i_nd(h, v) == 0
+}
+
+# the fixed point of the float words (finite), with pp fractional bits
+fn fx_of_float[r](h: &mut r [u32], st: &mut r [u32], hi: i64, lo: i64, pp: i64) -> i64 {
+    if f_is_zero(hi, lo) { return small(0) }
+    let m = f_man(hi, lo)
+    let sh = f_exp(hi, lo) + pp
+    var v: i64
+    v = int_from_i64(h, st, m)
+    if sh >= 0 {
+        v = int_shl(h, st, v, sh)
+    } else {
+        v = int_sar(h, st, v, 0 - sh)
+    }
+    if (hi >> 31) == 1 { v = int_neg(h, st, v) }
+    v
+}
+
+# 2 * atanh(1/3) = ln 2
+fn make_ln2[r](h: &mut r [u32], st: &mut r [u32]) -> i64 {
+    var power: i64
+    var sum: i64
+    var k: i64
+    power = div_small(h, st, fx_one(h, st), 3)
+    sum = small(0)
+    k = 0
+    while not is_zero_int(h, power) {
+        sum = int_add(h, st, sum, div_small(h, st, power, 2 * k + 1), 0)
+        power = div_small(h, st, power, 9)
+        k += 1
+    }
+    int_shl(h, st, sum, 1)
+}
+
+fn get_ln2[r](h: &mut r [u32], st: &mut r [u32]) -> i64 {
+    if g(st, 4) == 0 { p(st, 4, make_ln2(h, st)) }
+    g(st, 4)
+}
+
+# atan(1/n) at 1280 bits
+fn atan_inv[r](h: &mut r [u32], st: &mut r [u32], n: i64) -> i64 {
+    var power: i64
+    var sum: i64
+    var k: i64
+    power = div_small(h, st, int_shl(h, st, small(1), 1280), n)
+    sum = small(0)
+    k = 0
+    while not is_zero_int(h, power) {
+        let term = div_small(h, st, power, 2 * k + 1)
+        if (k & 1) == 0 {
+            sum = int_add(h, st, sum, term, 0)
+        } else {
+            sum = int_add(h, st, sum, term, 1)
+        }
+        power = div_small(h, st, power, n * n)
+        k += 1
+    }
+    sum
+}
+
+# pi at 1280 bits by Machin's formula
+fn get_pi[r](h: &mut r [u32], st: &mut r [u32]) -> i64 {
+    if g(st, 5) == 0 {
+        let a = int_mul(h, st, atan_inv(h, st, 5), small(16))
+        let b = int_mul(h, st, atan_inv(h, st, 239), small(4))
+        p(st, 5, int_add(h, st, a, b, 1))
+    }
+    g(st, 5)
+}
+
+# exp of the fixed point t (|t| < 1024)
+fn exp_fixed[r](h: &mut r [u32], st: &mut r [u32], t: i64) -> i64 {
+    let ln2 = get_ln2(h, st)
+    let half = int_sar(h, st, ln2, 1)
+    var adj: i64
+    adj = half
+    if i_sign(h, t) == 1 { adj = int_neg(h, st, half) }
+    let kq = int_divmod(h, st, int_add(h, st, t, adj, 0), ln2, 0)
+    let k = int_of(kq)
+    let rr = int_add(h, st, t, int_mul(h, st, kq, ln2), 1)
+    let r8 = int_sar(h, st, rr, 8)
+    let one = fx_one(h, st)
+    var term: i64
+    var sum: i64
+    var n: i64
+    term = one
+    sum = one
+    n = 1
+    while not is_zero_int(h, term) {
+        term = div_small(h, st, fx_mul(h, st, term, r8), n)
+        sum = int_add(h, st, sum, term, 0)
+        n += 1
+    }
+    for i in 0 as i64..8 {
+        sum = fx_mul(h, st, sum, sum)
+    }
+    big_to_float(h, st, sum, k - 256, 0)
+}
+
+# the float of the exp of the float words
+fn f_exp_fn[r](h: &mut r [u32], st: &mut r [u32], hi: i64, lo: i64) -> i64 {
+    if f_is_nan(hi, lo) { return f_nan(h, st) }
+    if f_is_inf(hi, lo) {
+        if (hi >> 31) == 1 { return mk_float(h, st, 0, 0) }
+        return mk_float(h, st, hi, lo)
+    }
+    if f_cmp(hi, lo, 1082535936, 0) == 1 { return f_inf(h, st, 0) }
+    if f_cmp(hi, lo, 3230093312, 0) == -1 { return mk_float(h, st, 0, 0) }
+    exp_fixed(h, st, fx_of_float(h, st, hi, lo, 256))
+}
+
+# log of f * 2^E for a finite positive float, as a fixed point
+fn log_fixed[r](h: &mut r [u32], st: &mut r [u32], hi: i64, lo: i64) -> i64 {
+    var m: i64
+    var ee: i64
+    m = f_man(hi, lo)
+    ee = f_exp(hi, lo) + 52
+    var sh: i64
+    sh = 256 - 52
+    if m >= 6369051672525773 {
+        ee += 1
+        sh = 256 - 53
+    }
+    let f = int_shl(h, st, int_from_i64(h, st, m), sh)
+    let one = fx_one(h, st)
+    var z: i64
+    z = fx_div(h, st, int_add(h, st, f, one, 1), int_add(h, st, f, one, 0))
+    # the series runs on the magnitude of z: a shift to the right of a negative number never reaches 0
+    let zneg = i_sign(h, z)
+    if zneg == 1 { z = int_neg(h, st, z) }
+    let z2 = fx_mul(h, st, z, z)
+    var power: i64
+    var sum: i64
+    var k: i64
+    power = z
+    sum = small(0)
+    k = 0
+    while not is_zero_int(h, power) {
+        sum = int_add(h, st, sum, div_small(h, st, power, 2 * k + 1), 0)
+        power = fx_mul(h, st, power, z2)
+        k += 1
+    }
+    var logf: i64
+    logf = int_shl(h, st, sum, 1)
+    if zneg == 1 { logf = int_neg(h, st, logf) }
+    int_add(h, st, int_mul(h, st, small(ee), get_ln2(h, st)), logf, 0)
+}
+
+fn f_log_fn[r](h: &mut r [u32], st: &mut r [u32], hi: i64, lo: i64) -> i64 {
+    if f_is_nan(hi, lo) { return f_nan(h, st) }
+    if f_is_zero(hi, lo) { return f_inf(h, st, 1) }
+    if (hi >> 31) == 1 { return f_nan(h, st) }
+    if f_is_inf(hi, lo) { return mk_float(h, st, hi, lo) }
+    big_to_float(h, st, log_fixed(h, st, hi, lo), -256, 0)
+}
+
+# whether the float words are an integer, and then whether it is odd: 0 not an integer, 1 even, 2 odd
+fn f_parity(hi: i64, lo: i64) -> i64 {
+    if f_is_zero(hi, lo) { return 1 }
+    if f_ex(hi) == 2047 { return 0 }
+    let m = f_man(hi, lo)
+    let e = f_exp(hi, lo)
+    if e >= 1 { return 1 }
+    if e == 0 { return 1 + (m & 1) }
+    if e <= -53 { return 0 }
+    if (m & (((1 as i64) << (0 - e)) - 1)) != 0 { return 0 }
+    1 + ((m >> (0 - e)) & 1)
+}
+
+# x^y for floats
+fn f_pow_fn[r](h: &mut r [u32], st: &mut r [u32], hx: i64, lx: i64, hy: i64, ly: i64) -> i64 {
+    let one = mk_float(h, st, 1072693248, 0)
+    if f_is_zero(hy, ly) { return one }
+    if f_cmp(hx, lx, 1072693248, 0) == 0 { return one }
+    if f_is_nan(hx, lx) or f_is_nan(hy, ly) { return f_nan(h, st) }
+    let par = f_parity(hy, ly)
+    let ysign = hy >> 31
+    let xsign = hx >> 31
+    var neg: i64
+    neg = 0
+    if xsign == 1 and par == 2 { neg = 1 }
+    if f_is_zero(hx, lx) {
+        if ysign == 1 { return f_inf(h, st, neg) }
+        return mk_float(h, st, neg << 31, 0)
+    }
+    if f_is_inf(hy, ly) {
+        # |x| against 1
+        let c = f_cmp(hx & 2147483647, lx, 1072693248, 0)
+        if c == 0 { return one }
+        var big: i64
+        big = 0
+        if c == 1 { big = 1 }
+        if big == 1 - ysign { return f_inf(h, st, 0) }
+        return mk_float(h, st, 0, 0)
+    }
+    if f_is_inf(hx, lx) {
+        if ysign == 1 { return mk_float(h, st, neg << 31, 0) }
+        return f_inf(h, st, neg)
+    }
+    if xsign == 1 and par == 0 { return f_nan(h, st) }
+    let hax = hx & 2147483647
+    let lg = log_fixed(h, st, hax, lx)
+    var t: i64
+    t = int_mul(h, st, lg, int_from_i64(h, st, f_man(hy, ly)))
+    let ey = f_exp(hy, ly)
+    if ey >= 0 {
+        t = int_shl(h, st, t, ey)
+    } else {
+        t = int_sar(h, st, t, 0 - ey)
+    }
+    if ysign == 1 { t = int_neg(h, st, t) }
+    var res: i64
+    if i_nbits(h, t) > 256 + 10 {
+        if i_sign(h, t) == 1 {
+            res = mk_float(h, st, 0, 0)
+        } else {
+            res = f_inf(h, st, 0)
+        }
+    } else {
+        res = exp_fixed(h, st, t)
+    }
+    if neg == 1 { return mk_float(h, st, fl_hi(h, res) | 2147483648, fl_lo(h, res)) }
+    res
+}
+
+fn sin_series[r](h: &mut r [u32], st: &mut r [u32], x: i64) -> i64 {
+    let x2 = fx_mul(h, st, x, x)
+    var term: i64
+    var sum: i64
+    var k: i64
+    term = x
+    sum = x
+    k = 1
+    while not is_zero_int(h, term) {
+        term = int_neg(h, st, div_small(h, st, fx_mul(h, st, term, x2), (2 * k) * (2 * k + 1)))
+        sum = int_add(h, st, sum, term, 0)
+        k += 1
+    }
+    sum
+}
+
+fn cos_series[r](h: &mut r [u32], st: &mut r [u32], x: i64) -> i64 {
+    let x2 = fx_mul(h, st, x, x)
+    var term: i64
+    var sum: i64
+    var k: i64
+    term = fx_one(h, st)
+    sum = term
+    k = 1
+    while not is_zero_int(h, term) {
+        term = int_neg(h, st, div_small(h, st, fx_mul(h, st, term, x2), (2 * k - 1) * (2 * k)))
+        sum = int_add(h, st, sum, term, 0)
+        k += 1
+    }
+    sum
+}
+
+# sin (want 0) or cos (want 1) of a float
+fn f_trig[r](h: &mut r [u32], st: &mut r [u32], hx: i64, lx: i64, want: i64) -> i64 {
+    if f_is_nan(hx, lx) or f_is_inf(hx, lx) { return f_nan(h, st) }
+    if f_is_zero(hx, lx) {
+        if want == 0 { return mk_float(h, st, hx, lx) }
+        return mk_float(h, st, 1072693248, 0)
+    }
+    let neg = hx >> 31
+    let ax = hx & 2147483647
+    if f_cmp(ax, lx, 1044381696, 0) == -1 {
+        # below 2^-27: sin x is x, cos x is 1
+        if want == 0 { return mk_float(h, st, hx, lx) }
+        return mk_float(h, st, 1072693248, 0)
+    }
+    let pi = get_pi(h, st)
+    let pi2 = int_sar(h, st, pi, 1)
+    let m = f_man(ax, lx)
+    let xx = int_shl(h, st, int_from_i64(h, st, m), 1280 + f_exp(ax, lx))
+    let q = int_divmod(h, st, xx, pi2, 0)
+    var rem: i64
+    rem = int_add(h, st, xx, int_mul(h, st, q, pi2), 1)
+    var quad: i64
+    quad = i_dig(h, q, 0) & 3
+    if cmp_int(h, int_shl(h, st, rem, 1), pi2) > 0 {
+        rem = int_add(h, st, rem, pi2, 1)
+        quad = (quad + 1) & 3
+    }
+    let r = int_sar(h, st, rem, 1280 - 256)
+    # the value is  s * (sin or cos of r)
+    var use_cos: i64
+    var flip: i64
+    use_cos = want
+    flip = 0
+    if want == 0 {
+        if quad == 1 { use_cos = 1 }
+        if quad == 2 { flip = 1 }
+        if quad == 3 {
+            use_cos = 1
+            flip = 1
+        }
+        flip = flip ^ neg
+    } else {
+        if quad == 1 {
+            use_cos = 0
+            flip = 1
+        }
+        if quad == 2 { flip = 1 }
+        if quad == 3 { use_cos = 0 }
+    }
+    var v: i64
+    if use_cos == 1 {
+        v = cos_series(h, st, r)
+    } else {
+        v = sin_series(h, st, r)
+    }
+    if flip == 1 { v = int_neg(h, st, v) }
+    big_to_float(h, st, v, -256, 0)
+}
+
+# the integer square root of n
+fn isqrt[r](h: &mut r [u32], st: &mut r [u32], n: i64) -> i64 {
+    if is_zero_int(h, n) { return small(0) }
+    var x: i64
+    x = int_shl(h, st, small(1), (i_nbits(h, n) + 1) / 2 + 1)
+    var go: i64
+    go = 1
+    while go == 1 {
+        let y = int_sar(h, st, int_add(h, st, x, int_divmod(h, st, n, x, 0), 0), 1)
+        if cmp_int(h, y, x) >= 0 {
+            go = 0
+        } else {
+            x = y
+        }
+    }
+    x
+}
+
+# atan of a fixed point z >= 0
+fn atan_fixed[r](h: &mut r [u32], st: &mut r [u32], z0: i64) -> i64 {
+    let one = fx_one(h, st)
+    var z: i64
+    var inv: i64
+    z = z0
+    inv = 0
+    if cmp_int(h, z, one) > 0 {
+        inv = 1
+        z = fx_div(h, st, one, z)
+    }
+    for i in 0 as i64..3 {
+        let root = isqrt(h, st, int_shl(h, st, int_add(h, st, one, fx_mul(h, st, z, z), 0), 256))
+        z = fx_div(h, st, z, int_add(h, st, one, root, 0))
+    }
+    let z2 = fx_mul(h, st, z, z)
+    var power: i64
+    var sum: i64
+    var k: i64
+    power = z
+    sum = small(0)
+    k = 0
+    while not is_zero_int(h, power) {
+        let term = div_small(h, st, power, 2 * k + 1)
+        if (k & 1) == 0 {
+            sum = int_add(h, st, sum, term, 0)
+        } else {
+            sum = int_add(h, st, sum, term, 1)
+        }
+        power = fx_mul(h, st, power, z2)
+        k += 1
+    }
+    var res: i64
+    res = int_shl(h, st, sum, 3)
+    if inv == 1 { res = int_add(h, st, int_sar(h, st, get_pi(h, st), 1280 - 256 + 1), res, 1) }
+    res
+}
+
+# atan2(y, x)
+fn f_atan2[r](h: &mut r [u32], st: &mut r [u32], hy: i64, ly: i64, hx: i64, lx: i64) -> i64 {
+    if f_is_nan(hy, ly) or f_is_nan(hx, lx) { return f_nan(h, st) }
+    let sy = hy >> 31
+    let sx = hx >> 31
+    let pi256 = int_sar(h, st, get_pi(h, st), 1280 - 256)
+    let ys = sy << 31
+    if f_is_zero(hy, ly) {
+        if sx == 1 {
+            let pf = big_to_float(h, st, pi256, -256, 0)
+            return mk_float(h, st, fl_hi(h, pf) | ys, fl_lo(h, pf))
+        }
+        return mk_float(h, st, ys, 0)
+    }
+    if f_is_zero(hx, lx) {
+        let hp = big_to_float(h, st, int_sar(h, st, pi256, 1), -256, 0)
+        return mk_float(h, st, fl_hi(h, hp) | ys, fl_lo(h, hp))
+    }
+    var ang: i64
+    ang = 0
+    var done: i64
+    done = 0
+    if f_is_inf(hy, ly) or f_is_inf(hx, lx) {
+        done = 1
+        if f_is_inf(hy, ly) {
+            if f_is_inf(hx, lx) {
+                if sx == 1 {
+                    ang = int_sar(h, st, int_mul(h, st, pi256, small(3)), 2)
+                } else {
+                    ang = int_sar(h, st, pi256, 2)
+                }
+            } else {
+                ang = int_sar(h, st, pi256, 1)
+            }
+        } else {
+            if sx == 1 {
+                ang = pi256
+            } else {
+                ang = small(0)
+            }
+        }
+    }
+    if done == 0 {
+        let my = f_man(hy, ly)
+        let mx = f_man(hx, lx)
+        let d = f_exp(hy, ly) - f_exp(hx, lx)
+        if d > 140 {
+            ang = int_sar(h, st, pi256, 1)
+            if sx == 1 { ang = int_sar(h, st, pi256, 1) }
+        } else if d < -140 {
+            if sx == 0 {
+                let q = f_div(h, st, hy & 2147483647, ly, hx, lx)
+                return mk_float(h, st, fl_hi(h, q) | ys, fl_lo(h, q))
+            }
+            ang = pi256
+        } else {
+            let z = int_divmod(h, st, int_shl(h, st, int_from_i64(h, st, my), 256 + d + 60), int_shl(h, st, int_from_i64(h, st, mx), 60), 0)
+            ang = atan_fixed(h, st, z)
+            if sx == 1 { ang = int_add(h, st, pi256, ang, 1) }
+        }
+    }
+    var res: i64
+    res = big_to_float(h, st, ang, -256, 0)
+    if sy == 1 { return mk_float(h, st, fl_hi(h, res) | ys, fl_lo(h, res)) }
+    res
+}
+
+# the float res made after the mark of the heap top is made again at the mark: the temporaries between are released
+fn release_to[r](h: &mut r [u32], st: &mut r [u32], mark: i64, res: i64) -> i64 {
+    if is_int(res) { return res }
+    if (res >> 1) < mark { return res }
+    let hi = fl_hi(h, res)
+    let lo = fl_lo(h, res)
+    p(st, 0, mark)
+    mk_float(h, st, hi, lo)
+}

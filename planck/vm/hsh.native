@@ -1,0 +1,101 @@
+# hsh: HASH, the number that equal values share
+#
+# Numbers have the hash of their value: an integer by its sign and digits, a float or a complex number that is equal to an integer by the
+# digits of that integer. Strings, symbols and m-exprs are by their contents, and arrays, functions and plain arrays by a number that is given to
+# the object by its first HASH (the word after the header; st[1] is the last number given). The hash is a non-negative integer of 30 bits.
+import mem
+import obj
+import big
+import flt
+import num
+
+fn mix(acc: i64, x: i64) -> i64 {
+    (acc * 31 + x + 7) & 1073741823
+}
+
+fn hash_int[r](h: &r [u32], v: i64) -> i64 {
+    var acc: i64
+    acc = i_sign(h, v)
+    let nd = i_nd(h, v)
+    for i in 0 as i64..nd {
+        acc = mix(acc, i_dig(h, v, i))
+    }
+    acc
+}
+
+# the hash of a float: of the integer when the value is one, otherwise of the bits
+fn hash_float[r](h: &r [u32], hi: i64, lo: i64) -> i64 {
+    if f_ex(hi) != 2047 {
+        if f_is_zero(hi, lo) { return hash_zero() }
+        var m: i64
+        var e: i64
+        m = f_man(hi, lo)
+        e = f_exp(hi, lo)
+        var whole: bool
+        whole = e >= 0
+        if e < 0 and e > -53 {
+            if (m & (((1 as i64) << (0 - e)) - 1)) == 0 {
+                m = m >> (0 - e)
+                e = 0
+                whole = true
+            }
+        }
+        if whole {
+            var acc: i64
+            acc = hi >> 31
+            let nd = (nbits(m) + e + 15) / 16
+            for i in 0 as i64..nd {
+                acc = mix(acc, f_int_digit(m, e, i))
+            }
+            return acc
+        }
+    }
+    mix(mix(1000003, hi), lo)
+}
+
+# the hash of the integer 0
+fn hash_zero() -> i64 {
+    0
+}
+
+fn hash_string[r](h: &r [u32], s: i64) -> i64 {
+    var acc: i64
+    acc = 5381
+    let n = str_len(h, s)
+    for i in 0 as i64..n {
+        acc = mix(acc, str_byte(h, s, i))
+    }
+    acc
+}
+
+fn hash_value[r](h: &mut r [u32], st: &mut r [u32], v: i64) -> i64 {
+    if is_int(v) { return hash_int(h, v) }
+    let k = kind_of(h, v)
+    if k == 0 { return hash_int(h, v) }
+    if k == 1 { return hash_float(h, fl_hi(h, v), fl_lo(h, v)) }
+    if k == 2 {
+        if f_cmp(cx_ih(h, v), cx_il(h, v), 0, 0) == 0 { return hash_float(h, cx_rh(h, v), cx_rl(h, v)) }
+        return mix(hash_float(h, cx_rh(h, v), cx_rl(h, v)), hash_float(h, cx_ih(h, v), cx_il(h, v)))
+    }
+    if k == 3 { return hash_string(h, v) }
+    if k == 4 { return mix(hash_string(h, g(h, (v >> 1) + 1)), 4) }
+    if k == 5 {
+        var acc: i64
+        acc = hash_value(h, st, mexpr_head(h, v))
+        let n = mexpr_arity(h, v)
+        for i in 0 as i64..n {
+            acc = mix(acc, hash_value(h, st, mexpr_arg(h, v, i)))
+        }
+        return acc
+    }
+    # identity: the word after the header holds the number
+    let at = (v >> 1) + 1
+    var id: i64
+    id = g(h, at)
+    if id == 0 {
+        id = g(st, 1) + 1
+        p(st, 1, id)
+        p(h, at, id)
+    }
+    id & 1073741823
+}

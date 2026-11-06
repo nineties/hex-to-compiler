@@ -1,0 +1,64 @@
+# Fusion, NEXT, environments, effects and continuations on planckvm: the program is written with the instructions and run by planck/vm; the image path is the first argument
+use("pvm/image")
+
+# println of R[x]
+show(x) := [GETGLOBAL{8, 0}, MOVE{9, x}, CALL{8, 8, 1}]
+cat(xs) := concat_map(x -> x, xs)
+
+# the clauses of a function: the first takes the argument 1, the second 2, the third any
+f1 := Code{"f1", 1, 2, [MATCHEQ{0, 0}, NEXT{}, LOADI{1, 10}, RET{1}], [I{1}]}
+f2 := Code{"f2", 1, 2, [MATCHEQ{0, 0}, NEXT{}, LOADI{1, 20}, RET{1}], [I{2}]}
+f3 := Code{"f3", 1, 2, [LOADI{1, 30}, RET{1}], []}
+
+# counter() := { n := 0; () -> { n = n + 1; n } }
+counter := Code{"counter", 0, 1, [NEWENV{1}, LOADI{0, 0}, ENVSET{0, 0, 0}, CLOSURE{0, 0}, RET{0}], [K{"inc"}]}
+inc := Code{"inc", 0, 1, [ENVGET{0, 0, 0}, ADDI{0, 0, 1}, ENVSET{0, 0, 0}, ENVGET{0, 0, 0}, RET{0}], []}
+
+# body1 performs Ask{} and adds 1 to the answer; body2 performs Other{}
+body1 := Code{"body1", 0, 2, [LOADI{0, 1}, LOADK{1, 0}, PERFORM{1, 1}, ADD{0, 0, 1}, RET{0}], [M{"Ask", []}]}
+body2 := Code{"body2", 0, 2, [LOADK{0, 0}, PERFORM{0, 0}, RET{0}], [M{"Other", []}]}
+# the handlers: (Ask{}, k) -> k(41), (Ask{}, k) -> k(10) + k(20), (Other{}, k) -> 99, (Ask{}, k) -> 7
+hresume := Code{"hresume", 2, 4, [MATCHHEAD{0, 0, 0}, NEXT{}, MOVE{2, 1}, LOADI{3, 41}, TCALL{2, 1}], [Y{"Ask"}]}
+htwice := Code{"htwice", 2, 8, [MATCHHEAD{0, 0, 0}, NEXT{}, MOVE{2, 1}, LOADI{3, 10}, CALL{4, 2, 1}, MOVE{5, 1}, LOADI{6, 20}, CALL{7, 5, 1}, ADD{4, 4, 7}, RET{4}], [Y{"Ask"}]}
+hother := Code{"hother", 2, 3, [MATCHHEAD{0, 0, 0}, NEXT{}, LOADI{2, 99}, RET{2}], [Y{"Other"}]}
+hdrop := Code{"hdrop", 2, 3, [MATCHHEAD{0, 0, 0}, NEXT{}, LOADI{2, 7}, RET{2}], [Y{"Ask"}]}
+# handle { body1 } with hother: Ask{} is not taken there, so the outer handler gets it
+nest := Code{"nest", 0, 2, [CLOSURE{0, 0}, CLOSURE{1, 1}, HANDLE{0, 0}, RET{0}], [K{"body1"}, K{"hother"}]}
+
+part1 := cat([
+    # Fusion and NEXT
+    [CLOSURE{0, 1}, CLOSURE{1, 2}, FUSION{2, 0, 1}, CLOSURE{3, 3}, FUSION{2, 2, 3}], show(2),
+    [MOVE{4, 2}, LOADI{5, 1}, CALL{6, 4, 1}], show(6),
+    [MOVE{4, 2}, LOADI{5, 2}, CALL{6, 4, 1}], show(6),
+    [MOVE{4, 2}, LOADI{5, 5}, CALL{6, 4, 1}], show(6),
+    [FUSION{4, 0, 1}, TYPEOF{5, 4}], show(5),
+    # the first operand none: the second is the result
+    [LOADNONE{4, 1}, FUSION{5, 4, 0}, EQ{6, 5, 0}], show(6),
+    # environments: two counters
+    [CLOSURE{0, 4}, CALL{1, 0, 0}, MOVE{2, 1}, CALL{3, 2, 0}], show(3),
+    [MOVE{2, 1}, CALL{3, 2, 0}], show(3),
+    [MOVE{4, 0}, CALL{5, 4, 0}, MOVE{6, 5}, CALL{7, 6, 0}], show(7),
+    [MOVE{2, 1}, CALL{3, 2, 0}], show(3)
+])
+
+part2 := cat([
+    # handle { 1 + perform Ask{} } with (Ask{}, k) -> k(41)
+    [CLOSURE{0, 6}, CLOSURE{1, 8}, HANDLE{2, 0}], show(2),
+    # the continuation is called twice
+    [CLOSURE{0, 6}, CLOSURE{1, 9}, HANDLE{2, 0}], show(2),
+    # the handler does not call the continuation
+    [CLOSURE{0, 6}, CLOSURE{1, 11}, HANDLE{2, 0}], show(2),
+    # an inner handler that does not take the effect: the outer handler gets it, and the continuation includes the inner handler
+    [CLOSURE{0, 12}, CLOSURE{1, 8}, HANDLE{2, 0}], show(2),
+    [CLOSURE{0, 12}, CLOSURE{1, 9}, HANDLE{2, 0}], show(2),
+    # a handler that is a Fusion: the first clause fails and NEXT tries the second
+    [CLOSURE{0, 6}, CLOSURE{1, 10}, CLOSURE{3, 8}, FUSION{1, 1, 3}, HANDLE{2, 0}], show(2),
+    [CLOSURE{0, 7}, CLOSURE{1, 10}, CLOSURE{3, 8}, FUSION{1, 1, 3}, HANDLE{2, 0}], show(2),
+    # the same handle twice, one after the other
+    [CLOSURE{0, 6}, CLOSURE{1, 8}, HANDLE{0, 0}, CLOSURE{2, 6}, CLOSURE{3, 8}, HANDLE{4, 2}, ADD{5, 0, 4}], show(5),
+    [LOADNONE{0, 1}, RET{0}]
+])
+
+main := Code{"main", 0, 16, cat([part1, part2]), [C{"println"}, K{"f1"}, K{"f2"}, K{"f3"}, K{"counter"}, K{"inc"}, K{"body1"}, K{"body2"}, K{"hresume"}, K{"htwice"}, K{"hother"}, K{"hdrop"}, K{"nest"}]}
+
+write_file(array_get(argv(), 1), bytes.to_u8(pvm_image.build([f1, f2, f3, counter, inc, body1, body2, hresume, htwice, hother, hdrop, nest, main], "main")))

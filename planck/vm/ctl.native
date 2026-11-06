@@ -1,0 +1,366 @@
+# ctl: the instructions that change the control of planckvm, the environments, the Fusions and the continuations
+#
+# A frame is 7 words of the frame stack fs: 0 fn, 1 env, 2 alts, 3 next, 4 base, 5 pc, 6 ret. The pc is the index of the instruction from the
+# first instruction of the code. ret is the register (the low 16 bits), the mode (bits 16 and 17: 0 put the value in the register, 1 and 2 the
+# call was made by a condition instruction with k = mode - 1, 3 drop the value) and the kind (the bits from 18: 0 normal, 1 boundary, 2 transfer).
+# The control state of the loop is the top frame fp only: after an instruction of this unit the loop reads the code, the pc and the base again.
+#
+# Objects: Fusion (kind 9: the number, then the alternatives), environment (kind 12: the parent, then the slots),
+# continuation (kind 11: the number, the register of PERFORM, the number of frames, the frames, the registers).
+# The result of enter and next_alt: 0 a frame was made at the index st[3]; 1 a builtin gave the value st[2] (st[3] is the frame it was called for);
+# 2 no alternative takes the arguments.
+import mem
+import obj
+import builtin
+
+fn code_of[r](h: &r [u32], lam: i64) -> i64 {
+    g(h, (lam >> 1) + 2) >> 1
+}
+
+fn code_arity[r](h: &r [u32], code: i64) -> i64 {
+    (g(h, code + 1) >> 8) & 255
+}
+
+fn code_nregs[r](h: &r [u32], code: i64) -> i64 {
+    (g(h, code + 1) >> 16) & 65535
+}
+
+fn ret_word(a: i64, mode: i64, kind: i64) -> i64 {
+    a + mode * 65536 + kind * 262144
+}
+
+fn is_func[r](h: &r [u32], f: i64) -> bool {
+    if is_int(f) { return false }
+    let k = kind_of(h, f)
+    k == 8 or k == 9 or k == 10 or k == 11
+}
+
+# the alternatives of a function: the elements of a Fusion, or the function itself
+fn alt_count[r](h: &r [u32], f: i64) -> i64 {
+    if kind_of(h, f) == 9 { return size_of(h, f) - 1 }
+    1
+}
+
+fn alt_at[r](h: &r [u32], f: i64, i: i64) -> i64 {
+    if kind_of(h, f) == 9 { return g(h, (f >> 1) + 2 + i) }
+    f
+}
+
+# whether the alternative (a Lambda, a builtin or a continuation) takes c arguments
+fn alt_takes[r](h: &r [u32], f: i64, c: i64) -> bool {
+    let k = kind_of(h, f)
+    if k == 8 { return code_arity(h, code_of(h, f)) == c }
+    if k == 10 { return (g(h, (f >> 1) + 3) >> 1) == c }
+    if k == 11 { return c == 1 }
+    false
+}
+
+# do_return drops the frame fp and gives the value v to the frame below as the ret of the dropped frame says; the result is the frame below
+fn do_return[r](h: &r [u32], st: &r [u32], rs: &mut r [u32], fs: &mut r [u32], fp: i64, v: i64) -> i64 {
+    let rt = g(fs, fp + 6)
+    let q = fp - 7
+    let mode = (rt >> 16) & 3
+    if mode == 0 {
+        p(rs, g(fs, q + 4) + (rt & 65535), v)
+    } else if mode != 3 {
+        # the word after the condition instruction is JMP: it is run when the truth equals k, else skipped
+        var cond: i64
+        cond = 0
+        if v != g(h, 1) { cond = 1 }
+        if cond != mode - 1 { p(fs, q + 5, g(fs, q + 5) + 1) }
+    }
+    q
+}
+
+# resume copies the frames and the registers of the continuation k to fs from fp and to rs from sl, with the argument at rs[nb]
+fn resume[r](h: &r [u32], st: &mut r [u32], rs: &mut r [u32], fs: &mut r [u32], fp: i64, k: i64, nb: i64, rt: i64, sl: i64) -> i64 {
+    let v = g(rs, nb)
+    let kb = k >> 1
+    let nf = g(h, kb + 3)
+    let nr = size_of(h, k) - 3 - 7 * nf
+    if sl + nr > len(rs) { die("stack overflow") }
+    if fp + 7 * nf > len(fs) { die("stack overflow") }
+    for i in 0 as i64..nr {
+        p(rs, sl + i, g(h, kb + 4 + 7 * nf + i))
+    }
+    for j in 0 as i64..nf {
+        for t in 0 as i64..7 {
+            p(fs, fp + 7 * j + t, g(h, kb + 4 + 7 * j + t))
+        }
+        p(fs, fp + 7 * j + 4, g(fs, fp + 7 * j + 4) + sl)
+    }
+    p(fs, fp + 6, (rt & 262143) + 262144)
+    let last = fp + 7 * (nf - 1)
+    p(rs, g(fs, last + 4) + g(h, kb + 2), v)
+    p(st, 3, last)
+    0
+}
+
+# enter calls f with c arguments that are at rs[nb]. The new frame is at fp and its ret is rt. sl is the place where a continuation is copied.
+# The alternatives are tried from start.
+fn enter[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], fs: &mut r [u32], fp: i64, f: i64, c: i64, nb: i64, rt: i64, sl: i64, start: i64) -> i64 {
+    if not is_func(h, f) { die("not a function") }
+    let fk = kind_of(h, f)
+    if fk == 10 {
+        if (g(h, (f >> 1) + 3) >> 1) != c { die("not a function") }
+    }
+    var keep: i64
+    keep = 0
+    if fk == 9 { keep = 1 }
+    if (rt >> 18) == 2 { keep = 1 }
+    let n = alt_count(h, f)
+    var i: i64
+    var sel: i64
+    i = start
+    sel = -1
+    while sel < 0 and i < n {
+        if alt_takes(h, alt_at(h, f, i), c) {
+            sel = i
+        } else {
+            i += 1
+        }
+    }
+    p(st, 3, fp)
+    if sel < 0 { return 2 }
+    let alt = alt_at(h, f, sel)
+    let kd = kind_of(h, alt)
+    if kd == 10 {
+        p(st, 2, call_builtin(h, st, rs, g(h, (alt >> 1) + 2) >> 1, nb))
+        return 1
+    }
+    if kd == 11 { return resume(h, st, rs, fs, fp, alt, nb, rt, sl) }
+    let code = code_of(h, alt)
+    if nb + code_nregs(h, code) > len(rs) { die("stack overflow") }
+    if fp + 7 > len(fs) { die("stack overflow") }
+    p(fs, fp, alt)
+    p(fs, fp + 1, g(h, (alt >> 1) + 3))
+    if keep == 1 {
+        p(fs, fp + 2, f)
+    } else {
+        p(fs, fp + 2, g(h, 3))
+    }
+    p(fs, fp + 3, sel + 1)
+    p(fs, fp + 4, nb)
+    p(fs, fp + 5, 0)
+    p(fs, fp + 6, rt)
+    0
+}
+
+# capture makes a continuation of the frames q to last, the registers s0 to rend-1, and the continuation prior (0 if none) after them
+fn capture[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], fs: &r [u32], q: i64, last: i64, s0: i64, rend: i64, reg: i64, prior: i64) -> i64 {
+    let nfa = (last - q) / 7 + 1
+    let nra = rend - s0
+    var nfp: i64
+    var nrp: i64
+    var pb: i64
+    nfp = 0
+    nrp = 0
+    pb = 0
+    if prior != 0 {
+        pb = prior >> 1
+        nfp = g(h, pb + 3)
+        nrp = size_of(h, prior) - 3 - 7 * nfp
+    }
+    let k = alloc_obj(h, st, 11, 3 + 7 * (nfa + nfp) + nra + nrp)
+    let kb = k >> 1
+    p(h, kb + 1, 0)
+    p(h, kb + 2, reg)
+    p(h, kb + 3, nfa + nfp)
+    for j in 0 as i64..nfa {
+        for t in 0 as i64..7 {
+            p(h, kb + 4 + 7 * j + t, g(fs, q + 7 * j + t))
+        }
+        p(h, kb + 4 + 7 * j + 4, g(fs, q + 7 * j + 4) - s0)
+    }
+    for j in 0 as i64..nfp {
+        for t in 0 as i64..7 {
+            p(h, kb + 4 + 7 * (nfa + j) + t, g(h, pb + 4 + 7 * j + t))
+        }
+        p(h, kb + 4 + 7 * (nfa + j) + 4, g(h, pb + 4 + 7 * j + 4) + (rend - s0))
+    }
+    let rb = kb + 4 + 7 * (nfa + nfp)
+    for i in 0 as i64..nra {
+        p(h, rb + i, g(rs, s0 + i))
+    }
+    for i in 0 as i64..nrp {
+        p(h, rb + nra + i, g(h, pb + 4 + 7 * nfp + i))
+    }
+    k
+}
+
+# the index of the nearest boundary frame at or below q, or -1
+fn find_boundary[r](fs: &r [u32], q0: i64) -> i64 {
+    var q: i64
+    var go: i64
+    q = q0
+    go = 1
+    while go == 1 {
+        if q < 0 {
+            go = 0
+        } else if (g(fs, q + 6) >> 18) == 1 {
+            go = 0
+        } else {
+            q -= 7
+        }
+    }
+    q
+}
+
+# prepare turns the boundary frame q into the transfer frame that calls its handler with the value v and the continuation k
+fn prepare[r](rs: &mut r [u32], fs: &mut r [u32], q: i64, v: i64, k: i64) {
+    let fb = g(fs, q + 4)
+    p(fs, q + 2, g(rs, fb - 1))
+    p(fs, q + 3, 0)
+    p(fs, q + 5, 0)
+    p(fs, q + 6, (g(fs, q + 6) & 262143) + 524288)
+    p(rs, fb, v)
+    p(rs, fb + 1, k)
+}
+
+# transfer: no alternative of the handler in the transfer frame t took the effect; the next boundary below gets it with a longer continuation
+fn transfer[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], fs: &mut r [u32], t: i64) -> i64 {
+    let tb = g(fs, t + 4)
+    let v = g(rs, tb)
+    let k0 = g(rs, tb + 1)
+    let q = find_boundary(fs, t - 7)
+    if q < 0 { die("unhandled effect") }
+    let gb = g(fs, q + 4)
+    let k = capture(h, st, rs, fs, q, t - 7, gb - 2, tb - 2, g(h, (k0 >> 1) + 2), k0)
+    prepare(rs, fs, q, v, k)
+    q
+}
+
+# next_alt tries the next alternatives of the function that was called for the frame fp; the transfer frame goes on to the outer boundary
+fn next_alt[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], fs: &mut r [u32], fp: i64) -> i64 {
+    var cur: i64
+    var status: i64
+    cur = fp
+    status = 2
+    while status == 2 {
+        let alts = g(fs, cur + 2)
+        let rt = g(fs, cur + 6)
+        if alts == g(h, 3) { die("matching failed") }
+        var c: i64
+        c = 2
+        if (rt >> 18) != 2 { c = code_arity(h, code_of(h, g(fs, cur))) }
+        let nb = g(fs, cur + 4)
+        status = enter(h, st, rs, fs, cur, alts, c, nb, rt, nb - 1, g(fs, cur + 3))
+        if status == 2 {
+            if (rt >> 18) != 2 { die("matching failed") }
+            cur = transfer(h, st, rs, fs, cur)
+        }
+    }
+    status
+}
+
+fn do_perform[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], fs: &mut r [u32], fp: i64, a: i64, b: i64) -> i64 {
+    let base = g(fs, fp + 4)
+    let v = g(rs, base + b)
+    let q = find_boundary(fs, fp)
+    if q < 0 { die("unhandled effect") }
+    let fb = g(fs, q + 4)
+    let nregs = code_nregs(h, code_of(h, g(fs, fp)))
+    let k = capture(h, st, rs, fs, q, fp, fb - 2, base + nregs, a, 0)
+    prepare(rs, fs, q, v, k)
+    next_alt(h, st, rs, fs, q)
+}
+
+# the instructions CALL TCALL RET NEXT HANDLE PERFORM; pc is the saved pc of the top frame fp. The result is the top frame after the instruction.
+fn exec_ctl[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], fs: &mut r [u32], fp: i64, op: i64, w: i64, pc: i64) -> i64 {
+    let base = g(fs, fp + 4)
+    let a = (w >> 8) & 255
+    let b = (w >> 16) & 255
+    let c = w >> 24
+    p(fs, fp + 5, pc)
+    var status: i64
+    if op == 20 {
+        status = enter(h, st, rs, fs, fp + 7, g(rs, base + b), c, base + b + 1, ret_word(a, 0, 0), base + b + 1, 0)
+        if status == 0 { return g(st, 3) }
+        if status == 1 {
+            p(rs, base + a, g(st, 2))
+            return fp
+        }
+        die("matching failed")
+    } else if op == 21 {
+        let f = g(rs, base + b)
+        for i in 0 as i64..c + 1 {
+            p(rs, base - 1 + i, g(rs, base + b + i))
+        }
+        status = enter(h, st, rs, fs, fp, f, c, base, g(fs, fp + 6) & 262143, base - 1, 0)
+        if status == 0 { return g(st, 3) }
+        if status == 1 { return do_return(h, st, rs, fs, fp, g(st, 2)) }
+        die("matching failed")
+    } else if op == 22 {
+        return do_return(h, st, rs, fs, fp, g(rs, base + a))
+    } else if op == 23 {
+        status = next_alt(h, st, rs, fs, fp)
+        if status == 1 { return do_return(h, st, rs, fs, g(st, 3), g(st, 2)) }
+        return g(st, 3)
+    } else if op == 34 {
+        let hd = g(rs, base + b + 1)
+        if not is_func(h, hd) { die("not a function") }
+        status = enter(h, st, rs, fs, fp + 7, g(rs, base + b), 0, base + b + 2, ret_word(a, 0, 1), base + b + 1, 0)
+        if status == 0 { return g(st, 3) }
+        if status == 1 {
+            p(rs, base + a, g(st, 2))
+            return fp
+        }
+        die("matching failed")
+    } else if op == 35 {
+        status = do_perform(h, st, rs, fs, fp, a, b)
+        if status == 1 { return do_return(h, st, rs, fs, g(st, 3), g(st, 2)) }
+        return g(st, 3)
+    }
+    die("unknown instruction")
+    fp
+}
+
+# NEWENV ENVGET ENVSET
+fn exec_env[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], fs: &mut r [u32], fp: i64, op: i64, w: i64, base: i64) {
+    let a = (w >> 8) & 255
+    let b = (w >> 16) & 255
+    let c = w >> 24
+    if op == 6 {
+        let n = w >> 16
+        let e = alloc_obj(h, st, 12, 1 + n)
+        p(h, (e >> 1) + 1, g(fs, fp + 1))
+        for i in 0 as i64..n {
+            p(h, (e >> 1) + 2 + i, g(h, 3))
+        }
+        p(fs, fp + 1, e)
+        return
+    }
+    var e: i64
+    e = g(fs, fp + 1)
+    for i in 0 as i64..b {
+        e = g(h, (e >> 1) + 1)
+    }
+    if op == 7 {
+        p(rs, base + a, g(h, (e >> 1) + 2 + c))
+    } else {
+        p(h, (e >> 1) + 2 + c, g(rs, base + a))
+    }
+}
+
+# FUSION: R[A] := R[B] | R[C]
+fn exec_fusion[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], w: i64, base: i64) {
+    let a = (w >> 8) & 255
+    let x = g(rs, base + ((w >> 16) & 255))
+    let y = g(rs, base + (w >> 24))
+    if x == g(h, 3) {
+        p(rs, base + a, y)
+        return
+    }
+    if not is_func(h, x) { die("FUSION: not a function") }
+    if not is_func(h, y) { die("FUSION: not a function") }
+    let nx = alt_count(h, x)
+    let ny = alt_count(h, y)
+    let f = alloc_obj(h, st, 9, 1 + nx + ny)
+    for i in 0 as i64..nx {
+        p(h, (f >> 1) + 2 + i, alt_at(h, x, i))
+    }
+    for i in 0 as i64..ny {
+        p(h, (f >> 1) + 2 + nx + i, alt_at(h, y, i))
+    }
+    p(rs, base + a, f)
+}

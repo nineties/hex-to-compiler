@@ -1,0 +1,73 @@
+# mem: the words of planckvm and the allocation of heap objects
+#
+# The heap, the registers and the frames are arrays of u32: a word is a value or a number.
+# A value is an integer 2n+1 (n has 31 bits) or a reference, twice the index of the heap.
+# Heap object: the header (size << 6 | kind << 2 | r << 1 | 1) and the words after it. size is the number of the words after the header.
+# The machine state st: st[0] is the index of the first free word of the heap.
+
+# g reads a word as the non-negative i64 and p writes the low 32 bits
+fn g[r](a: &r [u32], i: i64) -> i64 {
+    a[i] as i64
+}
+
+fn p[r](a: &mut r [u32], i: i64, v: i64) {
+    a[i] = v as u32
+}
+
+fn s16(v: i64) -> i64 {
+    if v >= 32768 { return v - 65536 }
+    v
+}
+
+fn s24(v: i64) -> i64 {
+    if v >= 8388608 { return v - 16777216 }
+    v
+}
+
+fn s32(v: i64) -> i64 {
+    if v >= 2147483648 { return v - 4294967296 }
+    v
+}
+
+fn die(m: &static [u8]) {
+    write(2, m)
+    write(2, "\n")
+    exit(1)
+}
+
+# the value of the integer n; it stops when n is out of 31 bits
+fn mk_int(n: i64) -> i64 {
+    if n < -1073741824 { die("integer overflow") }
+    if n > 1073741823 { die("integer overflow") }
+    n * 2 + 1
+}
+
+# the integer of the value v (a value that is known to be an integer)
+fn int_of(v: i64) -> i64 {
+    s32(v) >> 1
+}
+
+fn is_int(v: i64) -> bool {
+    (v & 1) == 1
+}
+
+# the kind of the object that the reference v points to
+fn kind_of[r](h: &r [u32], v: i64) -> i64 {
+    (g(h, v >> 1) >> 2) & 15
+}
+
+fn size_of[r](h: &r [u32], v: i64) -> i64 {
+    g(h, v >> 1) >> 6
+}
+
+# alloc_obj makes an object of the kind and the size (words after the header), and returns its reference; the words are 0
+fn alloc_obj[r](h: &mut r [u32], st: &mut r [u32], kind: i64, size: i64) -> i64 {
+    let at = g(st, 0)
+    if at + 1 + size > len(h) { die("out of memory") }
+    p(h, at, size * 64 + kind * 4 + 1)
+    for i in 0 as i64..size {
+        p(h, at + 1 + i, 0)
+    }
+    p(st, 0, at + 1 + size)
+    at * 2
+}
