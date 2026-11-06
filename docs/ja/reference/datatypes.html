@@ -43,7 +43,7 @@
 <table>
 <tr><th>型</th><th><code>head</code></th><th>リテラル</th><th>mutable か</th><th><code>==</code></th><th><code>is</code></th><th>table の key</th></tr>
 <tr><td>整数</td><td><code>Int</code></td><td><code>42</code> <code>0x1f</code> <code>0b101</code></td><td>immutable</td><td>値</td><td>値</td><td>可</td></tr>
-<tr><td>float</td><td><code>Float</code></td><td><code>1.5</code> <code>2.5e-3</code></td><td>immutable</td><td>値</td><td>object</td><td>可</td></tr>
+<tr><td>float</td><td><code>Float</code></td><td><code>1.5</code> <code>2.5e-3</code></td><td>immutable</td><td>値</td><td>object</td><td>NaN 以外は可</td></tr>
 <tr><td>文字列</td><td><code>String</code></td><td><code>"abc"</code></td><td>immutable</td><td>中身</td><td>intern</td><td>可</td></tr>
 <tr><td>symbol</td><td><code>Symbol</code></td><td><code>x</code></td><td>immutable</td><td>名前</td><td>intern</td><td>可</td></tr>
 <tr><td>M式</td><td>M式ごと</td><td><code>Head{a, b}</code> <code>(a, b)</code> <code>[a, b]</code> <code>[]</code></td><td>immutable</td><td>head と引数</td><td>intern</td><td>可</td></tr>
@@ -65,7 +65,8 @@
 <h3>float</h3>
 <ul>
 <li>IEEE 754 の binary64 です。</li>
-<li>NaN は自分自身とも equal ではありません。NaN の object は自分自身と identical です。</li>
+<li>NaN は自分自身を含め、どの値とも equal でも identical でもありません。<code>x</code> が NaN なら <code>x == x</code> も <code>x is x</code> も false です。</li>
+<li>NaN は table の key にできません。NaN を key にするとエラーです。</li>
 <li>同じ値でも別の object は identical ではありません。</li>
 <li>整数と equal な float の hash は、その整数と同じです。それ以外は中身で決まります。</li>
 </ul>
@@ -86,7 +87,8 @@
 <ul>
 <li>head の symbol と任意の個数の引数を持ちます。</li>
 <li>糖衣は <code>(a, b)</code>（<code>Tuple</code>）・<code>[a, b]</code> と <code>::</code>（<code>Cons</code>）・<code>[]</code>（<code>Nil</code>）です。</li>
-<li>引数に mutable な値は入れられません。mutable な値を中に持つ immutable なユーザーデータも入れられません。M式を作るときに実行時エラーになります。</li>
+<li>引数に mutable な値は入れられません。mutable な値を中に持つ immutable なユーザーデータも入れられません。NaN も入れられません。M式を作るときに実行時エラーになります。</li>
+<li>M式は NaN を含まないので、<code>==</code> と <code>is</code> は同じ判定で、O(1) です。</li>
 <li><code>a[i]</code> は読めます。</li>
 </ul>
 
@@ -128,14 +130,14 @@
 <h3>equality を使う所</h3>
 <ul>
 <li>同じ名前を2回書いたパターン（<code>f(a, a)</code>）は、2つの値が <code>==</code> で equal なときだけ合います。</li>
-<li>table（<code>table_get</code>・<code>table_set</code>・<code>t[key]</code>）は、key が identical か equal なら同じ key とみなします。同じ NaN の object を key にすれば引けます。array と plain array を key にするとエラーです。</li>
+<li>table（<code>table_get</code>・<code>table_set</code>・<code>t[key]</code>）は、key が identical か equal なら同じ key とみなします。array・plain array・NaN を key にするとエラーです。</li>
 <li><code>hash(x)</code> は 0 以上の整数です。<code>==</code> で equal な値は同じ値になります。<code>hash</code> の具体的な値は定めません。</li>
 </ul>
 
 <h2 id="identity">identity と <code>is</code></h2>
 <p><code>a is b</code> は、a と b が identical なら true、そうでなければ false です。否定は <code>a is not b</code> と書きます。優先順位は <code>==</code> と同じ比較演算子の段です。比較と同じく結合しないので、<code>a is b is c</code> はエラーです。パターンの中に <code>is</code> は書けません。</p>
 <ul>
-<li>identical な値は equal です。ただし NaN は除きます。</li>
+<li>identical な値は必ず equal です。<code>a is b</code> なら <code>a == b</code> です。NaN は自分自身とも identical ではありません。</li>
 <li>intern する型の値は、同じ型の値と equal なら identical です。float 以外の型はすべて intern します。</li>
 <li>型が違う値は identical ではありません。<code>1 == 1.0</code> は true ですが、<code>1 is 1.0</code> は false です。</li>
 <li>identical の判定は多倍長整数を除き O(1) です。</li>
