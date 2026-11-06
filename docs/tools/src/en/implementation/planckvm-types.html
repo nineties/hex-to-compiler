@@ -1,0 +1,59 @@
+<!--title planckvm data types-->
+<h1>planckvm data types</h1>
+<p class="lead">This page defines the kinds of values of planckvm, heads, equality and the hash. How a value is represented on the heap is in <a href="planckvm-repr.html">planckvm value representation</a>. The execution model is in <a href="planckvm.html">planckvm: execution model and values</a>, and the instructions are in <a href="planckvm-isa.html">planckvm instructions</a>.</p>
+
+<h2>Kinds of values</h2>
+<table>
+<tr><th>Value</th><th><code>head</code></th></tr>
+<tr><td>integer</td><td><code>Int</code></td></tr>
+<tr><td>float</td><td><code>Float</code></td></tr>
+<tr><td>complex number</td><td><code>Complex</code></td></tr>
+<tr><td>string</td><td><code>String</code></td></tr>
+<tr><td>symbol</td><td><code>Symbol</code></td></tr>
+<tr><td>m-expr</td><td>the head of the m-expr</td></tr>
+<tr><td>array</td><td><code>Array</code></td></tr>
+<tr><td>plain array</td><td><code>Plain</code></td></tr>
+<tr><td>Lambda, Fusion, builtin, continuation</td><td><code>Function</code></td></tr>
+</table>
+<p>An integer is one kind and has no upper limit on its size. How many bits of it go into a word does not appear in the specification of the values of the language. The number of bits appears only in the element types of plain arrays (<code>'i8</code> to <code>'u64</code>).</p>
+
+<h2>Heads</h2>
+<p>Every value has a head (<code>head</code>). The head of an m-expr is its own head symbol, and the head of any other value is the symbol of the type name in the table above. The symbols of type names cannot be the head of an m-expr.</p>
+<table>
+<tr><th>Value</th><th><code>head</code></th><th><code>arity</code></th><th><code>arg(v, i)</code></th></tr>
+<tr><td>m-expr</td><td>its own head</td><td>number of arguments</td><td>argument i</td></tr>
+<tr><td>array</td><td><code>Array</code></td><td>number of elements</td><td>element i</td></tr>
+<tr><td>integer, float, complex number, string, symbol, plain array, function</td><td>the type name in the table</td><td>0</td><td>an error when out of range</td></tr>
+</table>
+<ul>
+<li><code>true</code>, <code>false</code> and <code>none</code> are symbols, so their head is <code>Symbol</code>.</li>
+<li>The kind of a value is told by <code>head</code>, and there is no other builtin that returns the kind.</li>
+<li>The pattern <code>x @ Int</code> matches a value whose <code>head</code> is <code>Int</code>. It follows the same rule as the pattern <code>Head{p, ...}</code> of m-exprs, and an m-expr is never mistaken for it because a type name cannot be the head of an m-expr.</li>
+</ul>
+
+<h2>Integers in bytecode</h2>
+<p>The form of bytecode does not depend on the width of an integer that fits in a word. An integer is written in one of two ways.</p>
+<ul>
+<li>An integer that fits a field of an instruction is written in the field as a signed integer (two's complement). The width of the field is decided by the format of the instruction (<code>C</code> of the <code>ABC</code> format is 8 bits, <code>D</code> of the <code>AD</code> format is 16 bits, and <code>sJ</code> of the <code>J</code> format is 24 bits).</li>
+<li>An integer that does not fit is put in the table of constants as an integer constant, and the instruction holds the index in the table. An integer in the table of constants is the sign word (0 for 0 or more, 1 for negative), the word of the number of digits, and the 64-bit digits (from the lowest digit, the low word first).</li>
+</ul>
+<p>Both forms become an ordinary integer value when read. When a value can be written both in the table of constants and in a field of an instruction, it is written in the field.</p>
+
+<h2>Identity and equality</h2>
+<ul>
+<li>The same value is equal to itself, except that NaN is not equal to itself.</li>
+<li>Integers are equal when their values are the same.</li>
+<li>Floats, complex numbers, strings and m-exprs are equal if their contents are equal, even as different objects. M-exprs compare the head and the arguments recursively.</li>
+<li>A symbol is unique for each name, so it is compared by identity.</li>
+<li>Arrays, plain arrays and functions are equal only if they are the same object.</li>
+<li>Equality across the number types (integers, floats and complex numbers) is as in "Numbers" of <a href="planckvm.html">planckvm: execution model and values</a>.</li>
+</ul>
+
+<h2>Hash</h2>
+<p><code>HASH</code> returns an integer from 0 to 2<sup>30</sup>-1. Values that are equal by <code>EQ</code> give the same value.</p>
+<ul>
+<li>An integer is decided by its value alone. Let <code>acc</code> be 0 for the sign 0 or more and 1 for negative, and for each 16-bit piece <code>d</code> of the absolute value from the low end, repeat <code>acc = (acc * 31 + d + 7) mod 2<sup>30</sup></code>. The hash of 0 is 0. It does not depend on the width of a digit.</li>
+<li>A float that is equal to an integer, and a complex number whose imaginary part is 0 and whose real part is equal to an integer, have the same value as that integer.</li>
+<li>Other floats, complex numbers, strings, symbols and m-exprs are decided by their contents. Equal contents give the same value, and the exact values are not defined.</li>
+<li>Arrays, plain arrays and functions give a value that is decided for each object and does not change while the object lives.</li>
+</ul>

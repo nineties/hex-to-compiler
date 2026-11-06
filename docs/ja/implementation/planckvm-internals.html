@@ -32,6 +32,8 @@
 <li><a href="vasm.html">vasm の検査器</a></li>
 <li><a href="planckvm.html">planckvm: 実行モデルと値</a></li>
 <li><a href="planckvm-isa.html">planckvm の命令</a></li>
+<li><a href="planckvm-types.html">planckvm のデータ型</a></li>
+<li><a href="planckvm-repr.html">planckvm の値の表し方</a></li>
 <li><a class="here" href="planckvm-internals.html">planckvm の内部仕様</a></li>
 </ol></details></nav>
 <main>
@@ -103,49 +105,7 @@
 </ol>
 
 <h2>ヒープとガベージコレクション</h2>
-<h3>値</h3>
-<p>値は 32 ビットの1語です。</p>
-<table class="bits">
-<colgroup><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col></colgroup>
-<tr class="ruler"><td>3<br>1</td><td>3<br>0</td><td>2<br>9</td><td>2<br>8</td><td>2<br>7</td><td>2<br>6</td><td>2<br>5</td><td>2<br>4</td><td>2<br>3</td><td>2<br>2</td><td>2<br>1</td><td>2<br>0</td><td>1<br>9</td><td>1<br>8</td><td>1<br>7</td><td>1<br>6</td><td>1<br>5</td><td>1<br>4</td><td>1<br>3</td><td>1<br>2</td><td>1<br>1</td><td>1<br>0</td><td><br>9</td><td><br>8</td><td><br>7</td><td><br>6</td><td><br>5</td><td><br>4</td><td><br>3</td><td><br>2</td><td><br>1</td><td><br>0</td></tr>
-<tr class="lab"><td colspan="32">整数</td></tr>
-<tr class="fld"><td colspan="31">符号付き整数 (31)</td><td colspan="1">1</td></tr>
-<tr class="lab"><td colspan="32">参照</td></tr>
-<tr class="fld"><td colspan="31">ヒープの語の添字 (31)</td><td colspan="1">0</td></tr>
-</table>
-<p>小さい整数は 31 ビットの即値で、それ以外の値はヒープ上のオブジェクトへの参照です。ヒープは 32 ビットの語の配列で、世代ごとの領域をその上に取ります。</p>
-
-<h3>オブジェクト</h3>
-<p>オブジェクトの先頭の語はヘッダです。</p>
-<table class="bits">
-<colgroup><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col></colgroup>
-<tr class="ruler"><td>3<br>1</td><td>3<br>0</td><td>2<br>9</td><td>2<br>8</td><td>2<br>7</td><td>2<br>6</td><td>2<br>5</td><td>2<br>4</td><td>2<br>3</td><td>2<br>2</td><td>2<br>1</td><td>2<br>0</td><td>1<br>9</td><td>1<br>8</td><td>1<br>7</td><td>1<br>6</td><td>1<br>5</td><td>1<br>4</td><td>1<br>3</td><td>1<br>2</td><td>1<br>1</td><td>1<br>0</td><td><br>9</td><td><br>8</td><td><br>7</td><td><br>6</td><td><br>5</td><td><br>4</td><td><br>3</td><td><br>2</td><td><br>1</td><td><br>0</td></tr>
-<tr class="lab"><td colspan="32">通常</td></tr>
-<tr class="fld"><td colspan="26">size (26)</td><td colspan="4">kind</td><td colspan="1">r</td><td colspan="1">1</td></tr>
-<tr class="lab"><td colspan="32">転送先</td></tr>
-<tr class="fld"><td colspan="31">移動先の参照 (31)</td><td colspan="1">0</td></tr>
-</table>
-<p><code>size</code> はヘッダの後の語数、<code>r</code> は記憶集合に入っている印です。ビット 0 が 0 のヘッダは GC がコピーした後の転送先です。</p>
-<table>
-<tr><th>kind</th><th>オブジェクト</th><th>ヘッダの後の語</th></tr>
-<tr><td>0x0</td><td>大きな整数</td><td>符号（0 か 1）、桁数、桁。桁は 1 語に 16 ビットを下位から</td></tr>
-<tr><td>0x1</td><td>浮動小数点数</td><td>binary64 の下位、上位</td></tr>
-<tr><td>0x2</td><td>複素数</td><td>実部の下位、上位、虚部の下位、上位</td></tr>
-<tr><td>0x3</td><td>文字列</td><td>バイト数、バイトを下位から詰めた語</td></tr>
-<tr><td>0x4</td><td>シンボル</td><td>名前の文字列、番号</td></tr>
-<tr><td>0x5</td><td>M式</td><td>頭、引数</td></tr>
-<tr><td>0x6</td><td>配列</td><td>番号、要素</td></tr>
-<tr><td>0x7</td><td>plain 配列</td><td>番号、型の番号、要素数、要素を詰めた語</td></tr>
-<tr><td>0x8</td><td>Lambda</td><td>番号、コード、環境</td></tr>
-<tr><td>0x9</td><td>Fusion</td><td>番号、選択肢（平らに並べる）。Lambda, 組み込み, 継続だけが入る</td></tr>
-<tr><td>0xA</td><td>組み込み</td><td>番号、組み込みの番号、arity、名前のシンボル</td></tr>
-<tr><td>0xB</td><td>継続</td><td>番号、<code>reg</code>、フレーム数、フレーム、レジスタ</td></tr>
-<tr><td>0xC</td><td>環境</td><td>親の環境、スロット</td></tr>
-<tr><td>0xD</td><td>セル</td><td>値、名前のシンボル、<code>guard</code> のビットの番号（無ければ -1、タグ付き）</td></tr>
-<tr><td>0xE</td><td>コード</td><td>語0〜語3、命令列、定数表（<a href="planckvm-isa.html#format">フォーマット</a>のとおり）</td></tr>
-</table>
-<p>GC は kind を見て値の語だけをたどります。大きな整数、浮動小数点数、複素数、文字列、plain 配列の中身はたどりません。コードは命令列を読み飛ばして定数表をたどります。継続のフレームは <code>fn</code> <code>env</code> <code>alts</code> だけをたどり、レジスタはすべてたどります。</p>
-<p>FUSION は <code>R[B]</code> と <code>R[C]</code> の選択肢を連結して新しい Fusion を作ります。</p>
+<p>値の語、オブジェクトのヘッダ、種類ごとの中身は<a href="planckvm-repr.html">planckvm の値の表し方</a>に定めます。ヒープは 32 ビットの語の配列で、世代ごとの領域をその上に取ります。</p>
 
 <h3>世代</h3>
 <ul>
@@ -203,7 +163,7 @@
 <li><code>PLAINGET</code> と <code>PLAINSET</code> は要素をボックス化しない数として読み書きします。</li>
 </ul>
 
-<nav class="pager"><a class="prev" href="planckvm-isa.html"><small>前のページ</small>planckvm の命令</a></nav>
+<nav class="pager"><a class="prev" href="planckvm-repr.html"><small>前のページ</small>planckvm の値の表し方</a></nav>
 </main>
 </div>
 <footer><div class="inner"><a href="https://github.com/nineties/hex-to-compiler">github.com/nineties/hex-to-compiler</a></div></footer>

@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>planckvm のデータ型 | hex-to-compiler project</title>
+<link rel="alternate" hreflang="en" href="../../en/implementation/planckvm-types.html">
+<link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+<header class="site-header"><div class="inner">
+<a class="logo" href="../index.html"><span class="brand"><b>hex-to-compiler <i>project</i></b><small>自分自身をブートストラップする処理系</small></span></a>
+<nav class="site-nav">
+<a href="../index.html">概要</a>
+<a href="../tutorial/index.html">チュートリアル</a>
+<a href="../reference/index.html">リファレンス</a>
+<a class="here" href="../implementation/index.html">処理系の実装</a>
+<a href="https://github.com/nineties/hex-to-compiler">GitHub</a>
+<a class="lang-switch" lang="en" hreflang="en" href="../../en/implementation/planckvm-types.html">English</a>
+</nav>
+</div></header>
+<div class="layout">
+<nav class="toc" aria-label="処理系の実装の目次"><details open><summary>処理系の実装の目次</summary>
+<h2>処理系の実装</h2>
+<ol>
+<li><a href="index.html">構成</a></li>
+<li><a href="bootstrap.html">機械語から planck0 まで</a></li>
+<li><a href="planck0.html">planck0</a></li>
+<li><a href="init.html">init.pk と M式</a></li>
+<li><a href="peg.html">packrat パーサ</a></li>
+<li><a href="syntax.html">構文の定義</a></li>
+<li><a href="vasm.html">vasm の検査器</a></li>
+<li><a href="planckvm.html">planckvm: 実行モデルと値</a></li>
+<li><a href="planckvm-isa.html">planckvm の命令</a></li>
+<li><a class="here" href="planckvm-types.html">planckvm のデータ型</a></li>
+<li><a href="planckvm-repr.html">planckvm の値の表し方</a></li>
+<li><a href="planckvm-internals.html">planckvm の内部仕様</a></li>
+</ol></details></nav>
+<main>
+<h1>planckvm のデータ型</h1>
+<p class="lead">この頁は、planckvm の値の種類、頭、等しさ、ハッシュを定めます。値のヒープ上の表し方は<a href="planckvm-repr.html">planckvm の値の表し方</a>にあります。実行モデルは<a href="planckvm.html">planckvm: 実行モデルと値</a>、命令は<a href="planckvm-isa.html">planckvm の命令</a>にあります。</p>
+
+<h2>値の種類</h2>
+<table>
+<tr><th>値</th><th><code>head</code></th></tr>
+<tr><td>整数</td><td><code>Int</code></td></tr>
+<tr><td>浮動小数点数</td><td><code>Float</code></td></tr>
+<tr><td>複素数</td><td><code>Complex</code></td></tr>
+<tr><td>文字列</td><td><code>String</code></td></tr>
+<tr><td>シンボル</td><td><code>Symbol</code></td></tr>
+<tr><td>M式</td><td>M式ごとの頭</td></tr>
+<tr><td>配列</td><td><code>Array</code></td></tr>
+<tr><td>plain 配列</td><td><code>Plain</code></td></tr>
+<tr><td>Lambda・Fusion・組み込み・継続</td><td><code>Function</code></td></tr>
+</table>
+<p>整数は 1 種類で、大きさに上限がありません。何ビットまでを語の中に入れるかは、言語の値の仕様には現れません。ビット数が現れるのは plain 配列の要素の型（<code>'i8</code> から <code>'u64</code> まで）だけです。</p>
+
+<h2>頭</h2>
+<p>すべての値が頭（<code>head</code>）を持ちます。M式の頭は自分の頭のシンボルで、それ以外の値の頭は上の表の型名のシンボルです。型名のシンボルは M式の頭にできません。</p>
+<table>
+<tr><th>値</th><th><code>head</code></th><th><code>arity</code></th><th><code>arg(v, i)</code></th></tr>
+<tr><td>M式</td><td>自分の頭</td><td>引数の個数</td><td>i 番目の引数</td></tr>
+<tr><td>配列</td><td><code>Array</code></td><td>要素数</td><td>i 番目の要素</td></tr>
+<tr><td>整数・浮動小数点数・複素数・文字列・シンボル・plain 配列・関数</td><td>表の型名</td><td>0</td><td>範囲外でエラー</td></tr>
+</table>
+<ul>
+<li><code>true</code>・<code>false</code>・<code>none</code> はシンボルなので、頭は <code>Symbol</code> です。</li>
+<li>値の種類の判別は <code>head</code> で行い、種類を返す別の組み込みは持ちません。</li>
+<li>パターンの <code>x @ Int</code> は <code>head</code> が <code>Int</code> の値に合います。M式の頭を判別するパターン <code>Head{p, ...}</code> と同じ規則で、型名の頭は M式の頭にできないので、M式と取り違えません。</li>
+</ul>
+
+<h2>バイトコードの中の整数</h2>
+<p>バイトコードの形は、整数が語の中に入る幅に依りません。整数は次のどちらかで書きます。</p>
+<ul>
+<li>命令の欄に収まる整数は、欄に符号つき（2 の補数）で書きます。欄の幅は命令の形式で決まります（<code>ABC</code> 形式の <code>C</code> は 8 ビット、<code>AD</code> 形式の <code>D</code> は 16 ビット、<code>J</code> 形式の <code>sJ</code> は 24 ビット）。</li>
+<li>収まらない整数は、定数表に整数の定数として置き、命令は定数表の添字を持ちます。定数表の整数は、符号の語（0 は 0 以上、1 は負）、桁数の語、64 ビットの桁（下位の桁から、下位の語が先）の順に並べます。</li>
+</ul>
+<p>どちらの形も、読み込むと通常の整数の値になります。同じ値を定数表と命令の欄の両方で書けるときは、命令の欄に書きます。</p>
+
+<h2>同一性と等しさ</h2>
+<ul>
+<li>同じ値どうしは等しいです。ただし NaN は自分自身と等しくありません。</li>
+<li>整数は値が同じときに等しいです。</li>
+<li>浮動小数点数・複素数・文字列・M式は、別のオブジェクトでも中身が等しければ等しいです。M式は頭と引数を再帰的に比べます。</li>
+<li>シンボルは名前ごとに一意なので、同一性で比べます。</li>
+<li>配列・plain 配列・関数は同一のオブジェクトだけが等しくなります。</li>
+<li>型をまたぐ数の等しさ（整数と浮動小数点数と複素数）は<a href="planckvm.html">planckvm: 実行モデルと値</a>の「数」のとおりです。</li>
+</ul>
+
+<h2>ハッシュ</h2>
+<p><code>HASH</code> は 0 以上 2<sup>30</sup>-1 以下の整数を返します。<code>EQ</code> で等しい値は同じ値になります。</p>
+<ul>
+<li>整数は値だけで決まります。値の符号を 0（0 以上）か 1（負）の <code>acc</code> とし、絶対値を下位から 16 ビットずつ取った各 <code>d</code> について <code>acc = (acc * 31 + d + 7) mod 2<sup>30</sup></code> を繰り返した結果です。0 のハッシュは 0 です。桁の幅には依りません。</li>
+<li>整数に等しい浮動小数点数と、虚部が 0 で実部が整数に等しい複素数は、その整数と同じ値です。</li>
+<li>それ以外の浮動小数点数・複素数・文字列・シンボル・M式は中身で決まります。中身が等しければ値が同じで、具体的な値は定めません。</li>
+<li>配列・plain 配列・関数は、オブジェクトごとに決まり、そのオブジェクトの間は変わらない値です。</li>
+</ul>
+
+<nav class="pager"><a class="prev" href="planckvm-isa.html"><small>前のページ</small>planckvm の命令</a><a class="next" href="planckvm-repr.html"><small>次のページ</small>planckvm の値の表し方</a></nav>
+</main>
+</div>
+<footer><div class="inner"><a href="https://github.com/nineties/hex-to-compiler">github.com/nineties/hex-to-compiler</a></div></footer>
+<script src="../../assets/page.js"></script>
+</body>
+</html>
