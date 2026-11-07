@@ -538,6 +538,87 @@ check(total, 36)
 for (Tuple{a, b} in [Tuple{1, 2}, Tuple{3, 4}]) total = total + a * b
 check(total, 50)
 check((for (x in [1]) x), none)
+# for knows no type: it walks the iterator that _iter(xs) makes. The types of the core are the arms of _iter.
+collect(xs) := {
+    r := []
+    for (x in xs) r = x :: r
+    reverse(r)
+}
+check(collect(1..4), [1, 2, 3, 4])
+check(collect(4..1), [])
+check(collect([5, 6]), [5, 6])
+check(collect([]), [])
+check(collect([none, false, 0]), [none, false, 0])
+check(collect([() -> 1])[0](), 1)
+av := array(3)
+av[0] = 7
+av[2] = 9
+check(collect(av), [7, none, 9])
+check(collect(array(0)), [])
+pv := u8_array(3)
+pv[1] = 200
+check(collect(pv), [0, 200, 0])
+check(collect(u16_array(0)), [])
+tv := table.new()
+tv["a"] = 1
+tv["b"] = 2
+tv["c"] = 3
+check(list.sum(map(kv -> kv[1], collect(tv))), 6)
+check(length(collect(tv)), 3)
+check(member("b", map(kv -> kv[0], collect(tv))), true)
+check(length(collect(table.new())), 0)
+bv := vector.new()
+vector.push(bv, 1)
+vector.push(bv, 2)
+check(collect(bv), [1, 2])
+check(collect(vector.new()), [])
+# an element pushed in the loop is visited
+grow := vector.new()
+vector.push(grow, 1)
+for (x in grow) if (x < 4) vector.push(grow, x + 1)
+check(vector.to_list(grow), [1, 2, 3, 4])
+# a type of the program is added by _iter in front, and it works with break, continue and return
+record Countdown(n)
+_iter = (Countdown{n}) -> {
+    i := n
+    (end) -> if (i > 0) {
+        i -= 1
+        i + 1
+    } else end
+} | _iter
+check(collect(Countdown{3}), [3, 2, 1])
+check(collect(Countdown{0}), [])
+cd_sum := 0
+for (x in Countdown{5}) {
+    if (x == 4) continue
+    if (x == 2) break
+    cd_sum += x
+}
+check(cd_sum, 8)
+cd_first(xs, k) := {
+    for (x in xs) if (x < k) return x
+    none
+}
+check(cd_first(Countdown{9}, 3), 2)
+# a source that never ends, which only break stops
+record Nat()
+_iter = (Nat{}) -> {
+    i := 0
+    (end) -> {
+        i += 1
+        i - 1
+    }
+} | _iter
+nat_sum := 0
+for (x in Nat{}) {
+    if (x > 10) break
+    nat_sum += x
+}
+check(nat_sum, 55)
+# the loops over the same value do not share their places, and a loop in a loop is fine
+pairs := []
+for (x in Countdown{2}) for (y in Countdown{2}) pairs = Tuple{x, y} :: pairs
+check(length(pairs), 4)
 find_first(p, xs) := {
     for (x in xs) {
         if (p(x)) return x
