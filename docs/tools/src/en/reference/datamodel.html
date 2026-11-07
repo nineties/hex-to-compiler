@@ -1,102 +1,94 @@
 <!--title Data model-->
 <h1>Data model</h1>
-<p class="lead">Every value has a type, and a value is an M-expression or an atom. The evaluator works on M-expressions. An M-expression whose head is not a special form is a constructor: its arguments are evaluated and an M-expression with the same head is built. <code>==</code> tests whether values are equal, and <code>is</code> whether they are the same thing (identical). Identical values are always equal, and for an interned type equal values are identical. Mixed number types are raised to the highest type, and mistakes are runtime errors. What follows are the differences between the types and the exceptions to these rules.</p>
-
-<h2 id="kinds">M-expressions and atoms</h2>
-<p>An atom is a value that is not an M-expression: an integer, a float, a complex number, a string, a symbol, a function, an array, a plain array, a type value or user data.</p>
-<ul>
-<li>The <code>head</code> of an M-expression is a symbol. A head is not registered, so two libraries can use the same head. <code>head(x)</code> is for M-expressions only, and is an error for an atom.</li>
-<li>A type is itself a value (a type value), which <code>type(x)</code> returns. <code>type(1)</code> is <code>Int</code>, and <code>type(Int)</code> is <code>Type</code>.</li>
-<li><code>Int</code>, <code>String</code>, <code>Expr</code> and the other type names are variables that hold type values. <code>x @ T</code> compares the variable <code>T</code> with <code>type(x)</code>, so <code>x @ Expr</code> matches every M-expression.</li>
-</ul>
-<p>The M-expression <code>Set{1}</code> and a type named <code>Set</code> are different things, so a name never collides with a head.</p>
+<p class="lead">A value is an M-expression or an atom.</p>
 
 <h2 id="mexpr">M-expressions</h2>
+<p>An M-expression is a value written <code>Head{a, b, ...}</code>. It has a head (a symbol) and a sequence of arguments.</p>
+<!--ex dm_mexpr-->
 <ul>
-<li>The type is <code>Expr</code>, and it is immutable. The literal is <code>Head{a, b}</code>. The sugar is <code>(a, b)</code> (<code>Tuple</code>), <code>[a, b]</code> and <code>::</code> (<code>Cons</code>), and <code>[]</code> (<code>Nil</code>).</li>
-<li>Interned. <code>f{1}</code> and <code>f{1.0}</code> are not equal.</li>
-<li>A mutable value, immutable user data that holds a mutable value, and a NaN cannot be arguments. Making an M-expression with one is a runtime error.</li>
+<li>The type is <code>Expr</code>, and it is immutable.</li>
+<li>Sugar: <code>(a, b)</code> is <code>Tuple</code>, <code>[a, b]</code> and <code>::</code> are <code>Cons</code>, and <code>[]</code> is <code>Nil</code>.</li>
+<li>The number of arguments has no limit. A mutable value and a NaN cannot be arguments. Making an M-expression with one is a runtime error.</li>
+<li><code>head(x)</code> works on M-expressions only.</li>
 </ul>
+<!--ex e_dm_head_atom-->
 
-<h2 id="atoms">Types of atoms</h2>
-<p>There are nine builtin types of atoms. User data makes new types. In the table, a type value is written with the name of its type.</p>
+<h2 id="atoms">Atoms</h2>
+<p>A value that is not an M-expression is an atom. User data makes new types.</p>
 <table>
-<tr><th>Type</th><th><code>type</code></th><th>Literal</th><th>Mutable?</th><th><code>==</code></th><th><code>is</code></th><th>Table key</th></tr>
-<tr><td>integer</td><td><code>Int</code></td><td><code>42</code> <code>0x1f</code> <code>0b101</code></td><td>immutable</td><td>value</td><td>value</td><td>yes</td></tr>
-<tr><td>float</td><td><code>Float</code></td><td><code>1.5</code> <code>2.5e-3</code></td><td>immutable</td><td>value</td><td>object</td><td>yes, except NaN</td></tr>
-<tr><td>complex number</td><td><code>Complex</code></td><td><code>2i</code></td><td>immutable</td><td>value</td><td>—</td><td>yes</td></tr>
-<tr><td>string</td><td><code>String</code></td><td><code>"abc"</code></td><td>immutable</td><td>identity</td><td>intern</td><td>yes</td></tr>
-<tr><td>symbol</td><td><code>Symbol</code></td><td><code>x</code></td><td>immutable</td><td>identity</td><td>intern</td><td>yes</td></tr>
-<tr><td>function</td><td><code>Function</code></td><td><code>(p) -&gt; e</code> <code>f | g</code></td><td>immutable</td><td>identity</td><td>object</td><td>yes</td></tr>
-<tr><td>array</td><td><code>Array</code></td><td>—</td><td>mutable</td><td>true if identical, otherwise element by element</td><td>object</td><td>no</td></tr>
-<tr><td>plain array</td><td><code>Plain</code></td><td>—</td><td>mutable</td><td>true if identical, otherwise element by element</td><td>object</td><td>no</td></tr>
-<tr><td>type value</td><td><code>Type</code></td><td>—</td><td>immutable</td><td>identity</td><td>—</td><td>yes</td></tr>
-<tr><td>user data</td><td>the type value of its type</td><td>—</td><td>specified when made</td><td>identity. The given function if <code>==</code> is given</td><td>immutable: intern. mutable: object. object if <code>==</code> is given</td><td>yes</td></tr>
+<tr><th>Type</th><th><code>type</code></th><th>Literal</th><th>Mutable?</th><th>Notes</th></tr>
+<tr><td>integer</td><td><code>Int</code></td><td><code>42</code> <code>0x1f</code> <code>0b101</code></td><td>immutable</td><td>Arbitrary precision</td></tr>
+<tr><td>float</td><td><code>Float</code></td><td><code>1.5</code> <code>2.5e-3</code></td><td>immutable</td><td>IEEE 754 binary64</td></tr>
+<tr><td>complex number</td><td><code>Complex</code></td><td><code>2i</code></td><td>immutable</td><td>Also made by <code>complex(re, im)</code></td></tr>
+<tr><td>string</td><td><code>String</code></td><td><code>"abc"</code></td><td>immutable</td><td>Bytes, 0 bytes included, up to 65535. <code>s[i]</code> is a string of length 1</td></tr>
+<tr><td>symbol</td><td><code>Symbol</code></td><td><code>x</code></td><td>immutable</td><td>The name starts with a letter, <code>_</code> or <code>%</code></td></tr>
+<tr><td>function</td><td><code>Function</code></td><td><code>(p) -&gt; e</code> <code>f | g</code></td><td>immutable</td><td>Lambda, Fusion, builtin function, continuation</td></tr>
+<tr><td>array</td><td><code>Array</code></td><td>—</td><td>mutable</td><td>Fixed length. The elements of <code>array(n)</code> are <code>none</code> at first</td></tr>
+<tr><td>plain array</td><td><code>Plain</code></td><td>—</td><td>mutable</td><td>The element type is one of <code>'bool</code>, <code>'i8</code> to <code>'u64</code>, <code>'f16</code> to <code>'f64</code>, <code>'c64</code>, <code>'c128</code></td></tr>
+<tr><td>type value</td><td><code>Type</code></td><td>—</td><td>immutable</td><td></td></tr>
+<tr><td>user data</td><td>the type value of its type</td><td>—</td><td>specified when made</td><td></td></tr>
 </table>
-
-<h2 id="notes">Notes on each type</h2>
-<ul>
-<li>An integer has arbitrary precision. The range has no limit, and there is no wraparound or truncation.</li>
-<li>A complex number is made with an imaginary literal (<code>2i</code>) or <code>complex(re, im)</code>. It is equal to an integer or a float with the same value.</li>
-<li>A float is an IEEE 754 binary64. A NaN is neither equal nor identical to anything, itself included (<code>x == x</code> and <code>x is x</code> are both false), and using it as a table key is an error.</li>
-<li>A string is a sequence of bytes, 0 bytes included, up to 65535 bytes. <code>a[i]</code> returns a string of length 1.</li>
-<li>A symbol name starts with a letter, <code>_</code> or <code>%</code>. For <code>true</code>, <code>false</code> and <code>none</code>, see <a href="syntax.html#lexical">Lexical rules</a>.</li>
-<li>A function is a Lambda, a Fusion, a builtin function or a continuation. It is equal only when identical.</li>
-<li>An array has a fixed length. <code>array(n)</code> makes one, with all elements <code>none</code> at first. All elements of a plain array have one type: <code>'bool</code>, <code>'i8</code> to <code>'u64</code>, <code>'f16</code> to <code>'f64</code>, <code>'c64</code> or <code>'c128</code>. Both can be changed by <code>a[i] = e</code>. It is an error when out of range (for a plain array, also when the value cannot be converted).</li>
-<li>A different array or plain array with the same contents is equal but not identical. <code>==</code> first returns true if the two are identical, so if <code>a</code> holds a NaN, <code>a == a</code> is true. A different array <code>b</code> that holds the same NaN object gives <code>a == b</code> false.</li>
-<li>A type value is shown by the name of the type. Different types with the same name are told apart by <code>is</code>.</li>
-</ul>
-
-<h3>User data</h3>
-<ul>
-<li>Made by a builtin function. You must specify whether it is immutable or mutable. There is no default.</li>
-<li>Each type is a unique value made each time, and its name is only used for display. A type with the same name made elsewhere is a different type.</li>
-<li>You may give a function for <code>==</code> and a function for hash, both together. A type with them is not interned, and <code>is</code> compares objects. The author of the type must keep two rules: if <code>a is b</code> then <code>a == b</code>, and equal values have the same hash.</li>
-<li>For a type without them, <code>==</code> is identity, and the hash is decided by the contents if immutable and by the object if mutable.</li>
-</ul>
+<p>A type is a value (a type value), which <code>type(x)</code> returns. <code>type(1)</code> is <code>Int</code>, and <code>type(Int)</code> is <code>Type</code>. <code>x @ T</code> tests whether <code>type(x)</code> is <code>T</code>, and <code>x @ Expr</code> matches every M-expression.</p>
+<!--ex dm_array-->
+<!--ex e_dm_array_range-->
+<p>An array or a plain array is changed by <code>a[i] = e</code>. Out of range is an error, and so is a value that does not fit a plain array.</p>
 
 <h2 id="equality">Equality</h2>
-<p>Tested by <code>a == b</code> (<code>_eq</code>); <code>a != b</code> (<code>_ne</code>) is its opposite. Integers, floats and complex numbers are equal if the values are the same, even when the types differ, and the hash is the same too (<code>1 == 1.0</code>, <code>1 == complex(1, 0)</code>).</p>
+<p><code>a == b</code> tests whether a and b are equal as values.</p>
 <ul>
-<li>A pattern that writes the same name twice (<code>f(a, a)</code>) matches only when the two values are equal.</li>
-<li>A table (<code>table_get</code>, <code>table_set</code> and <code>t[key]</code>) treats two keys as the same if they are identical or equal. An array, a plain array or a NaN as the key is an error.</li>
-<li><code>hash(x)</code> is an integer of 0 or more, and equal values give the same value. The exact values are not defined.</li>
+<li>Integers, floats and complex numbers are equal if the values are the same, even when the types differ (<code>1 == 1.0</code>). A NaN is not equal to any value.</li>
+<li>M-expressions are equal if the heads and the arguments are equal.</li>
+<li>Arrays and plain arrays are equal if identical, and otherwise are compared element by element.</li>
+<li>A pattern that writes the same name twice, such as <code>f(a, a)</code>, matches only when the two values are equal.</li>
+<li><code>hash(x)</code> is an integer of 0 or more, and equal values give the same value.</li>
 </ul>
 
 <h2 id="identity">Identity and <code>is</code></h2>
-<p><code>a is b</code> is true if a and b are identical. Its negation is <code>a is not b</code>, and its precedence is that of <code>==</code>, at the level of the comparison operators. It does not group, so <code>a is b is c</code> is an error, and <code>is</code> cannot be written in a pattern.</p>
+<p><code>a is b</code> is true if a and b are the same thing (identical). Identical values are always equal, and values of different types are not identical (<code>1 == 1.0</code> is true, <code>1 is 1.0</code> is false). <code>is not</code> is the negation. Its precedence is that of <code>==</code>, it does not group, and it cannot be written in a pattern.</p>
+<p>Interning makes equal values into one object. For an interned type, equal values are identical, and <code>is</code> is O(1) (except for arbitrary precision integers).</p>
+<table>
+<tr><th>Type</th><th><code>==</code></th><th><code>is</code></th><th>Table key</th></tr>
+<tr><td>integer</td><td>value</td><td>value</td><td>yes</td></tr>
+<tr><td>float</td><td>value</td><td>object</td><td>yes, except NaN</td></tr>
+<tr><td>complex number</td><td>value</td><td>—</td><td>yes</td></tr>
+<tr><td>string</td><td>identity</td><td>intern</td><td>yes</td></tr>
+<tr><td>symbol</td><td>identity</td><td>intern</td><td>yes</td></tr>
+<tr><td>function</td><td>identity</td><td>object</td><td>yes</td></tr>
+<tr><td>array</td><td>true if identical, otherwise element by element</td><td>object</td><td>no</td></tr>
+<tr><td>plain array</td><td>true if identical, otherwise element by element</td><td>object</td><td>no</td></tr>
+<tr><td>type value</td><td>identity</td><td>—</td><td>yes</td></tr>
+<tr><td>M-expression</td><td>head and arguments</td><td>intern</td><td>yes</td></tr>
+<tr><td>user data</td><td>identity. The given function if <code>==</code> is given</td><td>immutable: intern. mutable: object. object if <code>==</code> is given</td><td>yes</td></tr>
+</table>
+<p>A table (<code>table_get</code>, <code>table_set</code> and <code>t[key]</code>) treats two keys as the same if they are identical or equal.</p>
+
+<h2 id="userdata">User data</h2>
 <ul>
-<li>Interning makes equal values into one object. Integers, strings, symbols, M-expressions and immutable user data without <code>==</code> given are interned, so <code>==</code> and <code>is</code> are the same test, and O(1) (except for arbitrary precision integers).</li>
-<li>Floats, functions, arrays, plain arrays, mutable user data and user data with <code>==</code> given are objects. Equal values are not always identical.</li>
-<li>Values of different types are not identical. <code>1 == 1.0</code> is true, but <code>1 is 1.0</code> is false.</li>
+<li>Made by a builtin function. You must specify whether it is immutable or mutable.</li>
+<li>Immutable user data cannot hold a mutable value. Making one that does is a runtime error.</li>
+<li>Each type made is a different value. The name is only used for display, and types with the same name are told apart by <code>is</code>.</li>
+<li>You may give a function for <code>==</code> and a function for hash, both together. The author must keep two rules: if <code>a is b</code> then <code>a == b</code>, and equal values have the same hash.</li>
+<li>Without them, the hash is decided by the contents if immutable and by the object if mutable.</li>
+</ul>
+
+<h2 id="numbers">Numbers</h2>
+<p>An operation on mixed number types raises them to the highest type.</p>
+<!--ex dm_int-->
+<ul>
+<li><code>_div</code> truncates toward 0, and <code>_quo</code> (the operator <code>//</code>) rounds toward minus infinity. <code>_mod(a, b)</code> is <code>a - b * (a // b)</code> and has the sign of the divisor.</li>
+<li>A zero divisor is a runtime error. <code>_div</code> with a float or a complex number gives an infinity or NaN (per component for a complex number).</li>
+<li><code>_lt</code> <code>_le</code> <code>_gt</code> <code>_ge</code> compare an integer and a float by their mathematical values. They give <code>false</code> when a NaN is involved and are a runtime error on a complex number.</li>
+<li>An integer raised to a float becomes the nearest float, and one beyond the range of floats is a runtime error.</li>
 </ul>
 
 <h2>Literals</h2>
-<p><code>true</code>, <code>false</code> and <code>none</code> are literals whose value is the symbol of the same name. They are not variables, so <code>Def{true, e}</code>, <code>Set{true, e}</code> and <code>Declare{true}</code> stop the program before running. A top-level string is a comment.</p>
-
-<h2 id="numbers">Numbers</h2>
-<ul>
-<li>Integer division: <code>_div</code> truncates toward 0. <code>_quo</code> (the operator <code>//</code>) rounds toward minus infinity, so <code>-7 // 2</code> is <code>-4</code>. <code>_mod(a, b)</code> is <code>a - b * (a // b)</code> and has the sign of the divisor.</li>
-<li>A zero divisor is a runtime error, except for <code>_div</code> with a float or a complex number, which gives an infinity or NaN (per component for a complex number).</li>
-<li><code>_lt</code> <code>_le</code> <code>_gt</code> <code>_ge</code> compare an integer and a float by their mathematical values, without raising the type. They give <code>false</code> when NaN is involved and are a runtime error on a complex number.</li>
-<li><code>_eq</code> treats numbers of different types as equal when their values are the same (<code>1 == 1.0</code>). Complex numbers are equal when both components are equal. NaN is not equal to itself.</li>
-<li>An integer is raised to the nearest float, and one beyond the range of floats is a runtime error.</li>
-</ul>
-
-<h2>Special forms</h2>
-<ul>
-<li><code>Def{x, e}</code>: <code>e</code> sees the previous variables, up to but not including <code>x</code>. <code>Set{x, e}</code> assigns.</li>
-<li><code>Declare{x}</code>: the same as <code>Def{x, none}</code>, except that nothing happens when <code>x</code> is already a variable of the place where <code>Def{x, e}</code> defines <code>x</code>.</li>
-<li><code>If{c, a, b}</code>: <code>b</code> only when <code>c</code> is <code>false</code>.</li>
-<li><code>Fusion{f, g}</code>: tries <code>g</code> when no pattern of <code>f</code> matches. <code>Fusion{none, g}</code> is <code>g</code>.</li>
-</ul>
-<!--ex t2_mexpr-->
+<p><code>true</code>, <code>false</code> and <code>none</code> are literals whose value is the symbol of the same name. They are not variables. A top-level string is a comment.</p>
 
 <h2 id="record">record</h2>
-<p><code>record T(f, g, ...)</code> names the arguments of the values <code>T{a, b, ...}</code>. Values are built as before. <code>t.f</code> is the argument of <code>t</code> at the position of <code>f</code> in the declaration for the head of <code>t</code>, and the <code>.</code> follows its left operand with no space.</p>
+<p><code>record T(f, g, ...)</code> names the arguments of <code>T{a, b, ...}</code>. <code>t.f</code> is the argument at the position of <code>f</code>, and the <code>.</code> follows its left operand with no space. <code>t with { f = e }</code> is a new value with that field replaced.</p>
+<!--ex t1_with-->
 <ul>
 <li>Values with different heads can have fields of the same name. Declaring the same <code>T</code> again replaces the names.</li>
 <li>Using <code>.f</code> on a value whose head is not declared, or that has no field <code>f</code>, stops the program with a message.</li>
-<li><code>t with { f = e, g = e2 }</code> is a new value with those fields replaced (<code>t</code> does not change). The fields are replaced from the left, so <code>e</code> can refer to the fields of the original <code>t</code>. <code>with { ... }</code> can follow another one.</li>
+<li>The fields of <code>with</code> are replaced from the left, and a right-hand side can refer to the fields of the original <code>t</code>. <code>with { ... }</code> can follow another one.</li>
 </ul>
-<!--ex t1_with-->
