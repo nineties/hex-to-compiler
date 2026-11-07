@@ -50,7 +50,7 @@
 <tr><td>function</td><td><code>Function</code></td><td><code>(p) -&gt; e</code> <code>f | g</code></td><td>immutable</td><td>identity</td><td>object</td><td>可</td></tr>
 <tr><td>array</td><td><code>Array</code></td><td>—</td><td>mutable</td><td>要素ごと</td><td>object</td><td>不可</td></tr>
 <tr><td>plain array</td><td><code>Plain</code></td><td>—</td><td>mutable</td><td>要素ごと</td><td>object</td><td>不可</td></tr>
-<tr><td>ユーザーデータ</td><td>型名の symbol</td><td>—</td><td>作るときに指定</td><td>identity</td><td>immutable は intern、mutable は object</td><td>可</td></tr>
+<tr><td>ユーザーデータ</td><td>型名の symbol</td><td>—</td><td>作るときに指定</td><td>identity。<code>==</code> を渡したときはその関数</td><td>immutable は intern、mutable は object。<code>==</code> を渡したときは object</td><td>可</td></tr>
 </table>
 <p>値の型は <code>head</code> で調べます。パターンの <code>x @ Int</code> は <code>head</code> が <code>Int</code> の値に合います。</p>
 
@@ -118,7 +118,9 @@
 <ul>
 <li>組み込み関数で作ります。作るときに immutable か mutable かを必ず指定します。既定はありません。</li>
 <li>型名が組み込みの型名や別のユーザーデータの型名と同じときは、型を作るときにエラーです。組み込みの8つの型名の symbol とユーザーデータの型名の symbol は、M式の head にできません。</li>
-<li>immutable は hash が中身で決まります。mutable はオブジェクトごとに決まります。</li>
+<li>作るときに <code>==</code> の関数と hash の関数を渡せます。渡すなら両方です。<code>==</code> を渡した型は intern せず、<code>is</code> は object の比較です。<code>==</code> と hash は渡した関数です。</li>
+<li>渡した関数について、<code>a is b</code> なら <code>a == b</code> であること、equal なら hash が同じであることは、型を作る人が守ります。</li>
+<li>渡さない型は、immutable は hash が中身で決まり、mutable はオブジェクトごとに決まります。<code>==</code> は identity です。</li>
 </ul>
 
 <h2 id="equality">equality</h2>
@@ -129,17 +131,17 @@
 
 <h3>equality を使う所</h3>
 <ul>
-<li>同じ名前を2回書いたパターン（<code>f(a, a)</code>）は、2つの値が <code>==</code> で equal なときだけ合います。</li>
-<li>table（<code>table_get</code>・<code>table_set</code>・<code>t[key]</code>）は、key が identical か equal なら同じ key とみなします。array・plain array・NaN を key にするとエラーです。</li>
-<li><code>hash(x)</code> は 0 以上の整数です。<code>==</code> で equal な値は同じ値になります。<code>hash</code> の具体的な値は定めません。</li>
+<li>同じ名前を2回書いたパターン（<code>f(a, a)</code>）は、2つの値が <code>==</code> で equal なときだけ合います。ユーザーデータは渡された <code>==</code> を使います。</li>
+<li>table（<code>table_get</code>・<code>table_set</code>・<code>t[key]</code>）は、key が identical か equal なら同じ key とみなします。ユーザーデータは渡された <code>==</code> と hash を使います。array・plain array・NaN を key にするとエラーです。</li>
+<li><code>hash(x)</code> は 0 以上の整数です。<code>==</code> で equal な値は同じ値になります。<code>==</code> を渡したユーザーデータは、渡された hash の値です。<code>hash</code> の具体的な値は定めません。</li>
 </ul>
 
 <h2 id="identity">identity と <code>is</code></h2>
 <p><code>a is b</code> は、a と b が identical なら true、そうでなければ false です。否定は <code>a is not b</code> と書きます。優先順位は <code>==</code> と同じ比較演算子の段です。比較と同じく結合しないので、<code>a is b is c</code> はエラーです。パターンの中に <code>is</code> は書けません。</p>
 <ul>
 <li>identical な値は必ず equal です。<code>a is b</code> なら <code>a == b</code> です。NaN は自分自身とも identical ではありません。</li>
-<li>整数・文字列・symbol・M式・immutable なユーザーデータは intern します。float・function・array・plain array・mutable なユーザーデータは object です。</li>
-<li>intern は、同じ値を1つの object にまとめて作ることです。同じ値を2回作っても同じ object が返ります。intern する型は equal なら identical です。だから <code>==</code> は <code>is</code> と同じ判定で、O(1) です。</li>
+<li>整数・文字列・symbol・M式・<code>==</code> を渡していない immutable なユーザーデータは intern します。float・function・array・plain array・mutable なユーザーデータ・<code>==</code> を渡したユーザーデータは object です。</li>
+<li>intern は、同じ値を1つの object にまとめて作ることです。同じ値を2回作っても同じ object が返ります。intern する型は equal なら identical です。<code>==</code> を渡したユーザーデータは intern しないので、equal でも identical とは限りません。だから <code>==</code> は <code>is</code> と同じ判定で、O(1) です。</li>
 <li>型が違う値は identical ではありません。<code>1 == 1.0</code> は true ですが、<code>1 is 1.0</code> は false です。</li>
 <li>identical の判定は多倍長整数を除き O(1) です。</li>
 </ul>
