@@ -38,130 +38,58 @@
 </ol></details></nav>
 <main>
 <h1>planckvm の内部仕様</h1>
-<p class="lead">planckvm の実装の中の設計を説明します。VM の利用者が前提にしてよい動作は、外部仕様の<a href="planckvm.html">planckvm: 実行モデルと値</a>と<a href="planckvm-isa.html">planckvm の命令</a>に書きます。</p>
+<p class="lead">実装の中の設計です。呼び出しの状態はレジスタスタックとフレームスタックだけに置き、継続はその複製、GC は評価器自身が持ちます。目的は、planck で書いた評価器を部分評価して vasm の実装を得ることです。外部仕様は<a href="planckvm.html">実行モデルと値</a>と<a href="planckvm-isa.html">命令</a>にあります。</p>
 
 <h2>方針</h2>
 <ul>
-<li>評価器はバイトコードインタプリタです。式を命令に変換して命令ループで実行します。</li>
-<li>評価器は独自のガベージコレクタを備えます。方式は世代別コピー GC で、値のヒープと根は評価器が持ちます。</li>
-<li>評価器はホストのエフェクト、継続、M式の読み取りを使いません。これらは評価器の一部として planck で書きます。</li>
-<li>命令ループは自分を再帰呼び出ししません。planck の呼び出しの状態はレジスタスタックとフレームスタックだけにあります。</li>
+<li>評価器は、式を命令に変換して命令ループで実行するバイトコードインタプリタです。命令ループは自分を再帰呼び出しせず、ホストのエフェクトと継続も使いません。</li>
+<li>命令列は作成後に変わらず、パターン照合は呼ばれる側のコードの中にあります。コードが静的なら、命令の読み出しと照合を展開できます。</li>
+<li>動的な間接呼び出しは <code>CALL</code> の呼び出し先だけです。大域変数は書き換えられるので静的に扱えません。</li>
 </ul>
 
 <h2>スタック</h2>
-<p>評価器はレジスタスタックとフレームスタックの2つの連続した領域を持ちます。どちらも GC の根で、満杯になると <code>stack overflow</code> で止まります。レジスタスタックは起動時に全要素を none で埋めます。</p>
+<p>レジスタスタックとフレームスタックは連続した領域で、どちらも GC の根です。満杯になると <code>stack overflow</code> で止まります。</p>
 
 <h3>フレーム</h3>
-<p>フレームは 7 語です。</p>
-<table>
-<tr><th>語</th><th>欄</th><th>意味</th></tr>
-<tr><td>0</td><td><code>fn</code></td><td>実行中の Lambda。コードと定数表はここからたどる</td></tr>
-<tr><td>1</td><td><code>env</code></td><td>現在の環境。無ければ none</td></tr>
-<tr><td>2</td><td><code>alts</code></td><td>呼ばれた Fusion。Fusion でなければ none</td></tr>
-<tr><td>3</td><td><code>next</code></td><td><code>alts</code> の次に試す選択肢の番号（タグなしの整数）</td></tr>
-<tr><td>4</td><td><code>base</code></td><td>窓の先頭のレジスタスタックの添字（タグなしの整数）</td></tr>
-<tr><td>5</td><td><code>pc</code></td><td>このフレームが別のフレームを呼んでいる間の、次の命令の添字（タグなしの整数）</td></tr>
-<tr><td>6</td><td><code>ret</code></td><td>下の図</td></tr>
-</table>
+<p>フレームは 7 語で、<code>fn</code>（実行中の Lambda）・<code>env</code>（現在の環境）・<code>alts</code>（呼ばれた Fusion、無ければ none）・<code>next</code>（次に試す選択肢の番号）・<code>base</code>（窓の先頭のレジスタスタックの添字）・<code>pc</code>（別のフレームを呼んでいる間の次の命令の添字）・<code>ret</code> の順です。<code>next</code>・<code>base</code>・<code>pc</code> はタグなしの整数です。</p>
 <table class="bits">
 <colgroup><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col></colgroup>
 <tr class="ruler"><td>3<br>1</td><td>3<br>0</td><td>2<br>9</td><td>2<br>8</td><td>2<br>7</td><td>2<br>6</td><td>2<br>5</td><td>2<br>4</td><td>2<br>3</td><td>2<br>2</td><td>2<br>1</td><td>2<br>0</td><td>1<br>9</td><td>1<br>8</td><td>1<br>7</td><td>1<br>6</td><td>1<br>5</td><td>1<br>4</td><td>1<br>3</td><td>1<br>2</td><td>1<br>1</td><td>1<br>0</td><td><br>9</td><td><br>8</td><td><br>7</td><td><br>6</td><td><br>5</td><td><br>4</td><td><br>3</td><td><br>2</td><td><br>1</td><td><br>0</td></tr>
 <tr class="lab"><td colspan="32">ret</td></tr>
 <tr class="fld"><td colspan="12">0 (12)</td><td colspan="2" class="v">kind</td><td colspan="2" class="v">mode</td><td colspan="16">reg (16)</td></tr>
 </table>
-<table>
-<tr><th>欄</th><th>値</th><th>意味</th></tr>
-<tr><td rowspan="3"><code>kind</code></td><td>0</td><td>通常のフレーム</td></tr>
-<tr><td>1</td><td>境界。ハンドラは <code>R[-1]</code>（<code>base-1</code> の位置）、本体の Lambda は <code>R[-2]</code></td></tr>
-<tr><td>2</td><td>転送。<code>PERFORM</code> がハンドラを呼んだフレーム。<code>R[0]</code> が送られた値、<code>R[1]</code> が継続</td></tr>
-<tr><td rowspan="4"><code>mode</code></td><td>0</td><td>返り値を呼び出し元の <code>R[reg]</code> に入れる</td></tr>
-<tr><td>1</td><td>呼び出したのは <code>k = 0</code> の条件の命令</td></tr>
-<tr><td>2</td><td>呼び出したのは <code>k = 1</code> の条件の命令</td></tr>
-<tr><td>3</td><td>返り値を捨てる</td></tr>
-</table>
-<h3>呼び出しと復帰</h3>
 <ul>
-<li><code>CALL A B C</code> が Lambda を選んだら、現在のフレームの <code>pc</code> を保存し、新しいフレームを <code>base = 現在の base + B + 1</code>、<code>env = fn の環境</code>、<code>ret = A</code> で積みます。窓が <code>base + nregs</code> まで収まることを確かめます。引数は動かしません。</li>
-<li><code>HANDLE A B</code> は同じように <code>base = 現在の base + B + 2</code>、<code>ret</code> の <code>kind = 1</code>、<code>reg = A</code> のフレームを積み、<code>R[B]</code> の Lambda を引数なしで実行します。</li>
-<li><code>RET A</code> は値を読み、フレームを捨て、捨てたフレームの <code>ret</code> のとおりに呼び出し元へ渡します。</li>
-<li><code>TCALL B C</code> は <code>R[B]</code> から <code>R[B+C]</code> を <code>R[-1]</code> から <code>R[C-1]</code> へ移し、現在のフレームを置き換えます。<code>ret</code> の <code>mode</code> と <code>reg</code> は保ち、<code>kind</code> は 0 にします。組み込みを呼んだときは結果を <code>RET</code> と同じように渡します。</li>
-<li><code>alts</code> の中身は下の Fusion の形です。<code>NEXT</code> は <code>next</code> から順に、引数の個数が合う選択肢を選びます。Lambda ならフレームの <code>fn</code> と <code>env</code> を置き換え、<code>pc</code> を 0 にします。窓は変えません。組み込みなら結果を <code>RET</code> と同じように渡し、継続なら <code>TCALL</code> と同じように再開します。</li>
-<li>選択肢が尽きたとき、<code>kind</code> が 2 なら転送に進み、それ以外なら <code>matching failed</code> で止まります。</li>
-<li>組み込みのセルが上書きされているときの呼び出しは、<code>R[nregs]</code> に関数、その上に引数を置いて <code>CALL</code> と同じように行います。<code>ret</code> は命令の種類で決まり、条件の命令なら <code>mode</code> は <code>k + 1</code>、<code>ASET</code> <code>PLAINSET</code> なら 3、それ以外なら 0 で <code>reg = A</code> です。窓の検査は <code>nregs</code> に呼び出しの分を足した大きさで行います。</li>
+<li><code>kind</code>: 0 は通常のフレーム、1 は境界（ハンドラが <code>R[-1]</code>、本体の Lambda が <code>R[-2]</code>）、2 は転送（<code>PERFORM</code> がハンドラを呼んだフレームで、<code>R[0]</code> が送られた値、<code>R[1]</code> が継続）。</li>
+<li><code>mode</code>: 0 は返り値を呼び出し元の <code>R[reg]</code> に入れる、1 と 2 は呼び出したのが <code>k = 0</code>、<code>k = 1</code> の条件の命令、3 は捨てる。</li>
 </ul>
 
-<h3>上書きの判定</h3>
-<p>評価器は語 <code>guard</code> を1つ持ち、命令の組み込みの欄の名前ごとに1ビットを割り当てます。組み込みの欄を持つ命令は、まず <code>guard</code> が 0 かを見て、0 でなければ自分のビットを見ます。この名前のセルには印があり、<code>SETGLOBAL</code> は印のあるセルに書くときにビットを更新します（値が元の組み込みなら 0、それ以外なら 1）。</p>
+<h3>呼び出しと復帰</h3>
+<ul>
+<li><code>CALL A B C</code> が Lambda を選ぶと、<code>pc</code> を保存して、<code>base</code> が現在の base + B + 1、<code>ret</code> の <code>reg</code> が A のフレームを積みます。引数は動かしません。<code>HANDLE A B</code> は <code>base + B + 2</code>、<code>kind = 1</code> のフレームを積みます。</li>
+<li><code>RET</code> はフレームを捨て、その <code>ret</code> のとおりに値を渡します。<code>TCALL</code> は引数を <code>R[-1]</code> から移して現在のフレームを置き換え、<code>ret</code> は <code>kind</code> だけ 0 にして引き継ぎます。</li>
+<li><code>NEXT</code> は <code>next</code> から順に、引数の個数が合う選択肢を選びます。Lambda なら <code>fn</code> と <code>env</code> を置き換えて <code>pc</code> を 0 にします。尽きたとき、<code>kind</code> が 2 なら転送に進み、それ以外は <code>matching failed</code> で止まります。</li>
+<li>組み込みの上書きは、語 <code>guard</code> の各ビット（命令の組み込みの欄の名前に1つずつ対応）で判定します。<code>SETGLOBAL</code> が名前のセルに書くときにビットを更新し、命令はまず <code>guard</code> が 0 かを見ます。上書きされていれば <code>R[nregs]</code> に関数、その上に引数を置いて <code>CALL</code> と同じに呼びます。</li>
+</ul>
 
 <h3>継続</h3>
-<p>継続はヒープ上のオブジェクトで、フレームスタックの切片とレジスタスタックの切片のコピーです。継続の実現にホストのエフェクトは使いません。</p>
+<p>継続はヒープ上のオブジェクトで、フレームスタックとレジスタスタックの切片のコピーです。</p>
 <ol>
-<li><code>PERFORM A B</code>: 現在のフレームから下へたどって <code>kind</code> が 1 のフレーム F を探します。無ければ <code>unhandled effect</code> で止まります。</li>
-<li>現在のフレームの <code>pc</code> を保存し、F から現在のフレームまでのフレームと、<code>F.base - 2</code> から現在のフレームの <code>R[nregs-1]</code> までのレジスタをコピーして継続を作ります。コピーの <code>base</code> はレジスタの切片の先頭からの差にし、<code>A</code> を継続の欄 <code>reg</code> に入れます。命令の表の S はこの2つの切片の確保を指します。</li>
-<li>F より上を捨て、F と同じ位置に <code>kind = 2</code>、<code>ret</code> の <code>mode</code> と <code>reg</code> は F のまま、<code>base = F.base</code> のフレームを作ります。<code>R[0]</code> に送られた値、<code>R[1]</code> に継続を入れて、ハンドラを引数 2 個で選びます。</li>
-<li>転送: このフレームの下から次の <code>kind</code> が 1 のフレーム G を探します。無ければ <code>unhandled effect</code> で止まります。G からこのフレームの1つ下までの切片の後ろに元の継続の切片をつないだ新しい継続を作り、G について手順 3 を行います。元の継続のレジスタの切片は <code>F.base - 2</code> の位置に続くので隙間はできません。元の切片のフレームの <code>base</code> には <code>F.base - G.base</code> を足します。</li>
-<li>再開: <code>CALL A B 1</code> の関数が継続なら、引数を先に読み、切片を <code>現在の base + B + 1</code> の位置にコピーし、各フレームの <code>base</code> にその位置を足します。切片の最初のフレーム（境界）の <code>ret</code> は <code>CALL</code> が積むフレームと同じく、<code>mode</code> と <code>reg</code> を <code>A</code> から決めます。切片の最後のフレームを現在のフレームにし、その <code>R[reg]</code> に引数を入れ、保存した <code>pc</code> から続けます。</li>
-<li><code>TCALL</code> の関数が継続なら、引数を先に読み、切片を現在のフレームの <code>base - 1</code> の位置にコピーし、最初のフレームの <code>ret</code> の <code>mode</code> と <code>reg</code> は現在のフレームのものにします。</li>
+<li><code>PERFORM A B</code> は、現在のフレームから下へ <code>kind = 1</code> のフレーム F を探します。無ければ <code>unhandled effect</code> で止まります。</li>
+<li>F から現在のフレームまでのフレームと、<code>F.base - 2</code> から現在の <code>R[nregs-1]</code> までのレジスタをコピーして継続を作ります。コピーの <code>base</code> は切片の先頭からの差です。</li>
+<li>F より上を捨て、F の位置に <code>kind = 2</code> のフレームを作り、送られた値と継続を <code>R[0]</code> と <code>R[1]</code> に入れてハンドラを選びます。一致が無ければ、下の次の境界 G までの切片に元の切片をつないだ新しい継続を作り、G で同じことを繰り返します。</li>
+<li>再開は、切片を呼び出した窓の上にコピーして各フレームの <code>base</code> にその位置を足し、最後のフレームを現在のフレームにして、保存した <code>pc</code> から続けます。最初のフレーム（境界）の <code>ret</code> は <code>CALL</code> が積むフレームと同じに決めます。</li>
 </ol>
 
 <h2>ヒープとガベージコレクション</h2>
-<p>値の word、オブジェクトのヘッダ、種類ごとの中身は<a href="planckvm-repr.html">planckvm の内部表現</a>にあります。ヒープは 32 ビットの word の array で、世代ごとの領域をその上に取ります。</p>
-
-<h3>世代</h3>
+<p>値の word とオブジェクトの中身は<a href="planckvm-repr.html">内部表現</a>にあります。GC は若い世代と古い世代の2世代のコピー GC で、評価器の一部として planck で書きます。確保は若い世代から行い、収まらないオブジェクトだけを古い世代に直接確保します。</p>
 <ul>
-<li>GC は若い世代と古い世代の2世代のコピー GC で、評価器の一部として planck で書き、vasm のランタイムには含めません。</li>
-<li>確保は若い世代から行います。若い世代に収まらないオブジェクトは古い世代に直接確保します。</li>
-<li>若い世代が満杯になると、根と記憶集合からたどれる若いオブジェクトをすべて古い世代へコピーし、若い世代を空にします。</li>
-<li>古い世代が満杯になると、古い世代を2つの半空間の間でコピーします。</li>
+<li>若い世代が満杯になると、根と記憶集合からたどれる若いオブジェクトを古い世代へコピーします。古い世代が満杯になれば、2つの半空間の間でコピーします。</li>
+<li>命令の表で S の付いた命令は、確保で GC が走ることがあります。GC は命令の副作用より前に走り、命令の入力は GC が更新するレジスタから読み直します。ループの途中のセーフポイントはありません。</li>
+<li>実行中の値はすべて、レジスタスタック・フレームスタック・セル・評価器の状態（シンボル表や組み込みの一時スロット）・記憶集合のどれかからたどれます。評価器のローカル変数にだけ存在する値はありません。</li>
 </ul>
-
-<h3>確保とセーフポイント</h3>
-<ul>
-<li>命令の表で S の付いた命令はメモリを確保する可能性があり、その確保で GC が走ることがあります。</li>
-<li>GC は命令の副作用より前に走ります。命令の入力は GC の間もレジスタに残り、GC によって更新されます。命令は GC の後で入力を読み直します。</li>
-<li>実行中の値はすべて、レジスタスタック、フレームスタック、環境、セル、評価器の状態のいずれかからたどれます。評価器のローカル変数にだけ存在する値はありません。組み込みが確保をまたいで保持する値は評価器の状態の一時スロットに置きます。</li>
-<li>確保しない命令（<code>JMP</code> <code>MOVE</code> <code>ENVGET</code> など）では GC は走りません。ループの途中にセーフポイントは置きません。</li>
-</ul>
-
-<h3>根</h3>
-<table>
-<tr><th>根</th><th>内容</th></tr>
-<tr><td>レジスタスタック</td><td>底から現在のフレームの <code>R[nregs-1]</code> までの全要素。上書きの呼び出しで組み込みを実行している間は、その引数の位置まで</td></tr>
-<tr><td>フレームスタック</td><td>全フレームの <code>fn</code> <code>env</code> <code>alts</code></td></tr>
-<tr><td>セル</td><td>大域変数</td></tr>
-<tr><td>評価器の状態</td><td>シンボル表、コンパイル中の状態、組み込みの一時スロット</td></tr>
-<tr><td>記憶集合</td><td>古いオブジェクトのリスト（若い世代の GC だけ）</td></tr>
-</table>
-<p>レジスタの生死の表は持ちません。レジスタスタックの要素は常に有効な値か none です。この状態を次の2つで保ちます。</p>
-<ul>
-<li>起動時に全要素を none で埋めます。</li>
-<li>GC は根の範囲より上で前回の GC の後に使われた範囲を none で埋めます。範囲の上端は窓を作るときに更新する語 <code>high</code> で持ちます。</li>
-</ul>
-<p>呼び出し元の <code>R[B]</code> より上は呼ばれた側の窓に重なり、<code>R[B]</code> より下は生きている値か過去の値です。過去の値は上書きされるまで生き残りますが、誤った参照にはなりません。pc は添字なので、コードが移動しても影響を受けません。</p>
-
-<h3>ライトバリア</h3>
-<p>方式は記憶集合（古い世代のオブジェクトのリスト）です。古い世代のオブジェクトに若い世代のオブジェクトへの参照を書き込むとき、ヘッダの <code>r</code> が 0 ならその古いオブジェクトを記録して <code>r</code> を 1 にします。対象の命令は <code>ENVSET</code> <code>SETGLOBAL</code> <code>ASET</code> です。plain 配列は参照を持たないので記録しません。若い世代に確保したオブジェクトの初期化は記録しません。古い世代に直接確保したオブジェクトは、初期化で若い参照を書いたら記録します。レジスタスタックとフレームスタックへの書き込みは、毎回根としてたどるので記録しません。</p>
-
-<h3>identity</h3>
-<p>配列、plain 配列、関数は identity（<code>EQ</code> と <code>HASH</code>）を持ちます。identity はアドレスでは表さず、最初の <code>HASH</code> のときにオブジェクトの番号の語へ番号を割り当てます（0 は未割り当て）。シンボルの番号は名前から、M式と文字列の番号は中身から、数の番号は値から決まります。</p>
-
-<h3>数と plain 配列の表現</h3>
-<ul>
-<li>整数どうしの結果が小さい整数に収まるなら、確保せずに済ませてかまいません。確保が起きるのは桁が増えたときと、浮動小数点数や複素数の結果を作るときです。大きな整数の結果が 31 ビットに収まるときは必ず即値にします。</li>
-<li>浮動小数点数と複素数はヒープ上の不変のボックスです。vasm では複素数を浮動小数点数2つの組で表します。</li>
-<li>plain 配列の要素はタグを持ちません。複素数の要素も plain 配列の中では2つの数であり、ボックスではありません。</li>
-</ul>
-
-<h2>部分評価との関係</h2>
-<p>planckvm の目的は planck で書いた評価器を部分評価して planck の vasm 実装を得ることです。次の性質はこの目的のために設計しました。</p>
-<ul>
-<li>命令列は作成後に変わらず、レジスタ番号とジャンプの差は即値です。コードが静的なら、命令の読み出しと次の命令の選択を展開でき、レジスタの添字も静的に決まります。</li>
-<li>パターン照合は呼ばれる側のコードの中にあります。関数ごとに照合を特化でき、データの木をたどる照合器は要りません。</li>
-<li>継続はフレームの複製で実現し、ホストのエフェクトを使いません。評価器が <code>Perform</code> を使わないので、<code>planck/lib/partial_eval.pk</code> にある継続の制限に当たりません。</li>
-<li>動的な間接呼び出しは <code>CALL</code> の呼び出し先だけです。呼ばれる可能性のあるコードの集合が閉じていれば、コードごとの関数に分割できます。</li>
-<li>組み込みの上書きの判定は語 <code>guard</code> を読むだけなので、<code>guard</code> が静的なら畳み込めます。大域変数は書き換え可能なセルなので、書き換えられる大域変数は静的に扱えません。</li>
-<li><code>PLAINGET</code> と <code>PLAINSET</code> は要素をボックス化しない数として読み書きします。</li>
-</ul>
+<p>レジスタの生死の表は持たず、レジスタスタックの要素は常に有効な値か none です。起動時に全要素を none で埋め、GC が根より上の使われた範囲を none で埋めて、この状態を保ちます。範囲の上端は、窓を作るときに更新する語 <code>high</code> に記録します。</p>
+<p>古い世代のオブジェクトに若いオブジェクトへの参照を書くとき（<code>ENVSET</code> <code>SETGLOBAL</code> <code>ASET</code>）、ヘッダの <code>r</code> が 0 ならそのオブジェクトを記憶集合に記録して <code>r</code> を 1 にします。</p>
+<p>配列、plain array、関数の identity（<code>EQ</code> と <code>HASH</code>）は、アドレスでなく、最初の <code>HASH</code> のときに割り当てる番号で表します。</p>
 
 <nav class="pager"><a class="prev" href="planckvm-repr.html"><small>前のページ</small>planckvm の値の表し方</a></nav>
 </main>

@@ -1,50 +1,49 @@
 <!--title Grammar declarations-->
 <h1>Grammar declarations</h1>
-<p class="lead"><code>::=</code> defines or replaces a rule of the grammar. The syntax of planck is made of the same rules, so a declaration extends the syntax of the following expressions.</p>
+<p class="lead"><code>::=</code> defines or replaces a PEG rule. The syntax of planck is made of the same rules, so a declaration extends the syntax of the following expressions. Alternatives are tried in order, and the result of a rule is memoized for each position (packrat).</p>
 
 <h2>::=</h2>
-<p><code>name ::= alternative | ...</code> defines or replaces the rule <code>name</code> of the grammar. The rules of the <a href="syntax.html">syntax</a> (<code>expr</code>, <code>primary</code>, <code>block</code>, <code>add_expr</code> ..., <code>ident</code>, <code>integer</code>, <code>string</code>) are rules of the same grammar. <code>...</code> as an alternative stands for the previous definition of the rule.</p>
+<p><code>name ::= alternative | ...</code> defines the rule <code>name</code>, and replaces it if it already exists. The alternative <code>...</code> stands for the previous definition of the rule. An alternative is a sequence of items followed by an optional action <code>{ ... }</code>. The items and the action are on the same line as <code>::=</code> or <code>|</code>.</p>
 <!--ex r_unless-->
-<p>An alternative is a sequence of items followed by an optional action <code>{ ... }</code>. The items and the action are on the same line as <code>::=</code> or <code>|</code>.</p>
 
 <h2>Items</h2>
 <table>
 <tr><th>Item</th><th>Matches</th></tr>
-<tr><td><code>"text"</code></td><td>the text, after blanks and comments</td></tr>
-<tr><td><code>'word</code></td><td>the word, not followed by <code>[A-Za-z0-9_]</code></td></tr>
+<tr><td><code>"text"</code>, <code>'word</code></td><td>the text; the word, not followed by <code>[A-Za-z0-9_]</code></td></tr>
 <tr><td><code>nospace("text")</code></td><td>the text, with no blanks or comments before it</td></tr>
-<tr><td><code>.</code></td><td>any one character, after skipping blanks and comments. The value is the character as a string</td></tr>
-<tr><td><code>[set]</code>, <code>[^set]</code></td><td>one character that is in the set, or is not (<a href="#charset">character classes</a>), after skipping blanks and comments. The value is the character as a string</td></tr>
+<tr><td><code>.</code>, <code>[set]</code>, <code>[^set]</code></td><td>any one character; one character that is in the set; one that is not (<a href="#charset">character classes</a>). The value is the character as a string</td></tr>
 <tr><td><code>name</code></td><td>the rule</td></tr>
 <tr><td><code>same</code></td><td>nothing, when the next token is on the same line as the position</td></tr>
 <tr><td><code>delimited(e, sep)</code>, <code>delimited1(e, sep)</code></td><td><code>e</code> separated by <code>sep</code>: zero or more, one or more. The value is <code>Tuple{v, ...}</code></td></tr>
-<tr><td><code>(a | b ...)</code></td><td>a choice</td></tr>
-<tr><td><code>e*</code>, <code>e+</code>, <code>e?</code></td><td>zero or more, one or more, optional</td></tr>
+<tr><td><code>(a | b ...)</code>, <code>e*</code>, <code>e+</code>, <code>e?</code></td><td>a choice; zero or more; one or more; optional</td></tr>
 <tr><td><code>&amp;e</code>, <code>!e</code></td><td>lookahead: <code>e</code> matches / does not match, without consuming</td></tr>
 <tr><td><code>label:e</code></td><td><code>e</code>, and its value is the variable <code>label</code> in the action</td></tr>
 </table>
+<p>Texts, words, <code>.</code> and <code>[set]</code> skip blanks and comments first. The value of an alternative is the value of its action, the value of the item when there is one item, or <code>Tuple{v, ...}</code> of the items. <code>e*</code> and <code>e+</code> give <code>Tuple{v, ...}</code>, and <code>e?</code> gives <code>Tuple{}</code> or <code>Tuple{v}</code>.</p>
+<p>A rule may be directly left recursive (<code>sum ::= a:sum "+" b:term { ... } | term</code>), which groups to the left.</p>
+<!--ex t7_calc-->
 
 <h2 id="charset">Character classes</h2>
-<p>The set of <code>[set]</code> is a sequence of characters and ranges. A letter, a digit or <code>_</code> followed by <code>-</code> and a character, as in <code>a-z</code>, is the characters in that range. Any other <code>-</code> is itself. <code>\n</code>, <code>\t</code>, <code>\a</code>, <code>\b</code>, <code>\f</code>, <code>\r</code>, <code>\v</code> and <code>\0</code> are those control characters, and any other <code>\x</code> is the character <code>x</code> (<code>\]</code>, <code>\-</code>, <code>\\</code>, <code>\ </code>). Blanks at both ends of the set are not in it. An empty set, a reversed range (<code>[9-0]</code>) and a range without its end (<code>[a-]</code>) are syntax errors.</p>
-<p><code>[^set]</code> is a character that is not in the set. At the end of the input none of <code>.</code>, <code>[set]</code> and <code>[^set]</code> matches.</p>
-<p>The characters are read one at a time, and blanks and comments are skipped before each. The value of <code>cs:[0-9]+</code> is a <code>Tuple{v, ...}</code> of one-character strings.</p>
+<ul>
+<li>A letter, a digit or <code>_</code> followed by <code>-</code> and a character is a range, as in <code>a-z</code>. Any other <code>-</code> is itself.</li>
+<li><code>\n</code>, <code>\t</code>, <code>\a</code>, <code>\b</code>, <code>\f</code>, <code>\r</code>, <code>\v</code> and <code>\0</code> are control characters. Any other <code>\x</code> is the character <code>x</code>.</li>
+<li>Blanks at both ends of the set are not in it. An empty set, a reversed range (<code>[9-0]</code>) and a range without its end (<code>[a-]</code>) are syntax errors.</li>
+<li>At the end of the input none of <code>.</code>, <code>[set]</code> and <code>[^set]</code> matches.</li>
+</ul>
 <!--ex r_charset-->
-
-<h2>Values and order</h2>
-<p>Alternatives are tried in order (PEG). The value of an alternative is the value of its action, the value of the item when there is one item, or <code>Tuple{v, ...}</code> of the items. <code>e*</code> and <code>e+</code> give <code>Tuple{v, ...}</code>, <code>e?</code> gives <code>Tuple{}</code> or <code>Tuple{v}</code>.</p>
-<p>Results of rules are memoized for each position (packrat parsing). A rule may be directly left recursive (<code>sum ::= a:sum "+" b:term { ... } | term</code>), which groups to the left.</p>
-<!--ex t7_calc-->
 
 <h2>peg_parse</h2>
 <p><code>peg_parse(rule, s)</code> parses a prefix of <code>s</code> by the rule and returns <code>Tuple{value, rest}</code>, <code>Tuple{Eof{}, ""}</code> when only blanks are left, or <code>Tuple{SyntaxError{...}, ""}</code>.</p>
 
-<h2 id="text">Text of a rule</h2>
-<p><code>name{| text |}</code> is an expression whose text is read by the rule <code>name</code> when the expression is parsed. There is no space between <code>name</code> and <code>{|</code>.</p>
-<p>The text is read only by the rule (its strings, words and rules, with their blanks and comments), not by the tokens of the expressions around it. The rule decides where the text ends, and <code>|}</code> must follow, after blanks. So <code>|}</code> and <code>}</code> that the rule reads, for example in its strings or brackets, are a part of the text. A failure of the rule or a missing <code>|}</code> is a syntax error of the expression, at the farthest position the rule reached in the text.</p>
-<p>The value of the expression is the value of the rule, as a constant.</p>
+<h2 id="text">Text read by a rule</h2>
+<p><code>name{| text |}</code> is an expression whose <code>text</code> is read by the rule <code>name</code> when the expression is parsed. Its value is the value of the rule, as a constant. There is no space between <code>name</code> and <code>{|</code>. Define the rule in an expression that is evaluated before the expression with <code>text</code> is parsed.</p>
+<ul>
+<li>Only the rule reads <code>text</code>, not the tokens of the surrounding expressions.</li>
+<li>The rule decides where <code>text</code> ends, and <code>|}</code> must follow, after blanks. A <code>|}</code> or <code>}</code> that the rule reads is a part of <code>text</code>.</li>
+<li>A failure of the rule or a missing <code>|}</code> is a syntax error, at the farthest position the rule reached in <code>text</code>.</li>
+</ul>
 <!--ex r_calc-->
-<p>The rule must be defined by an expression that is evaluated before the expression with the text is parsed.</p>
 
-<h2>Reading the grammar</h2>
-<p><code>peg_sources</code> is a table from a rule name to the parsing expression given to <code>_define_rule</code>, with the actions not evaluated (<code>...</code> replaced by the previous definition). <code>peg_version</code> increases at every <code>_define_rule</code>.</p>
+<h2>peg_sources and peg_version</h2>
+<p><code>peg_sources</code> is a table from a rule name to the parsing expression given to <code>_define_rule</code>. The actions are not evaluated (<code>...</code> is replaced by the previous definition). <code>peg_version</code> increases at every <code>_define_rule</code>.</p>
 <!--ex i_sources-->

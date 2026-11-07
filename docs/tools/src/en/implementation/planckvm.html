@@ -1,152 +1,68 @@
 <!--title planckvm: execution model and values-->
 <h1>planckvm: execution model and values</h1>
-<p class="lead">planckvm is the bytecode that runs all of planck. An evaluator written in planck translates an expression into planckvm instructions and runs them in an instruction loop. This page and <a href="planckvm-isa.html">planckvm instructions</a> are the external specification: what the user of the VM and a code generator from planck may rely on. This page covers the machine, the values and the numbers. The design inside an implementation is in <a href="planckvm-internals.html">planckvm internals</a>.</p>
+<p class="lead">planckvm is the bytecode of a register machine that runs all of planck. Every variable is resolved at compile time to a cell, an environment or a register, and no name is looked up at run time. A call overlaps a window on the registers of the caller and does not copy the arguments. This page and <a href="planckvm-isa.html">planckvm instructions</a> are the external specification, and the design of an implementation is in <a href="planckvm-internals.html">planckvm internals</a>.</p>
 
 <h2>Execution model</h2>
-<p>The machine is a register machine. Every instruction reads and writes the registers of the current frame.</p>
-<table>
-<tr><th>Name</th><th>Contents</th></tr>
-<tr><td>code</td><td>The instructions and the constant table of one lambda or of one top-level expression. Immutable. Its form is in <a href="planckvm-isa.html#format">Bytecode format</a></td></tr>
-<tr><td>register</td><td><code>R[0]</code> to <code>R[nregs-1]</code> of each frame, where <code>nregs</code> is a field of the code. Each holds one value</td></tr>
-<tr><td>frame</td><td>The state of one call</td></tr>
-<tr><td>environment</td><td>A place on the heap for the variables that &ldquo;Where variables live&rdquo; assigns to it. It is made for a call and has a parent environment</td></tr>
-<tr><td>cell</td><td>One global variable: an object that holds a value and a name</td></tr>
-</table>
+<p>Instructions read and write the registers <code>R[0]</code> to <code>R[nregs-1]</code> of the current frame. A code (instructions and a constant table) is immutable, and one lambda or one top-level expression is one code (<a href="planckvm-isa.html#format">Bytecode format</a>). An environment is a place on the heap for variables, and a cell is one global variable.</p>
 
 <h3>Register windows</h3>
+<p>The registers of the frames lie on one register stack, and the range of a frame is its window. The window of a lambda called by <code>CALL A B C</code> starts at <code>R[B+1]</code> of the caller, so the arguments <code>R[B+1]</code> to <code>R[B+C]</code> are <code>R[0]</code> to <code>R[C-1]</code> of the callee.</p>
 <ul>
-<li>The registers of all frames lie on one register stack. The range of the registers of a frame is its window.</li>
-<li>The window of a lambda called by <code>CALL A B C</code> starts at <code>R[B+1]</code> of the caller. The caller puts the arguments in <code>R[B+1]</code> to <code>R[B+C]</code>, so they become <code>R[0]</code> to <code>R[C-1]</code> of the callee without being copied.</li>
-<li>During the call, <code>R[B]</code> of the caller keeps the called function. The values of the registers above <code>R[B]</code> are lost by the call. A value used after the call is kept below <code>R[B]</code>.</li>
-<li>The first value of a register other than the arguments is unspecified. A register is written before it is read.</li>
-<li>When a window does not fit the register stack, the program stops with <code>stack overflow</code>.</li>
+<li>During the call, <code>R[B]</code> keeps the called function. The values above <code>R[B]</code> are lost, so a value used after the call is kept below <code>R[B]</code>.</li>
 </ul>
 
 <h3>Where variables live</h3>
-<p>A variable is decided by where it is written, and it is resolved at compile time to one of the three places below. Name resolution ends at compile time, and at run time there is no state of an undefined variable.</p>
+<p>A variable is resolved by where it is written.</p>
 <table>
 <tr><th>Place</th><th>Variables</th><th>Access</th></tr>
 <tr><td>Cell</td><td>Global variables</td><td><code>GETGLOBAL</code> <code>SETGLOBAL</code></td></tr>
-<tr><td>Environment</td><td>The variables of a function that are (1) referred to from a lambda or the body of a <code>Handle</code> inside it, or (2) assigned, when the same code has any of <code>CALL</code>, <code>TCALL</code>, <code>HANDLE</code> and <code>PERFORM</code></td><td><code>ENVGET</code> <code>ENVSET</code></td></tr>
-<tr><td>Register</td><td>The other variables of a function</td><td>Written directly as operands of instructions</td></tr>
+<tr><td>Environment</td><td>The variables of a function that are (1) referred to from a lambda or the body of a <code>Handle</code> inside it, or (2) targets of a <code>Set</code>, when the same code has any of <code>CALL</code>, <code>TCALL</code>, <code>HANDLE</code> and <code>PERFORM</code></td><td><code>ENVGET</code> <code>ENVSET</code></td></tr>
+<tr><td>Register</td><td>The other variables of a function</td><td>Operands</td></tr>
 </table>
 <ul>
-<li>A variable is assigned when it is the target of a <code>Set</code>.</li>
-<li>A call has at most one environment, and only a code with variables in an environment makes it with <code>NEWENV</code>. Every slot starts as <code>none</code>. The current environment of a code that does not run <code>NEWENV</code> is the environment that its lambda keeps.</li>
-<li>A variable in an environment is resolved at compile time to a depth <code>d</code> (the number of parent links to follow from the current environment) and a slot <code>i</code>.</li>
-<li>A lambda keeps the current environment of the place where it was made. The environment is shared, so an assignment after the lambda was made is seen by the lambda.</li>
-<li>When a path can reach a variable in a register without going through its definition, <code>LOADNONE</code> at the entry of the code sets it to <code>none</code>.</li>
-<li>A global variable is a cell, whose first value is <code>none</code>. <code>Def</code> makes a new cell, and the expressions compiled after it refer to the new cell. The expressions compiled before keep referring to the old one. <code>Set</code> writes the same cell.</li>
-<li><code>true</code>, <code>false</code> and <code>none</code> are literals, not variables. They are in no register, environment or cell, and are compiled as constants. Writing one as the target of <code>Def</code>, <code>Set</code> or <code>Declare</code> is a compile error.</li>
+<li>A variable in an environment resolves to (depth d, slot i). A call has at most one environment, made with <code>NEWENV</code> only by a code that has such variables. A lambda keeps the environment of the place where it was made and shares it, so an assignment after its creation is seen by the lambda.</li>
+<li>A global variable starts as <code>none</code>. <code>Def</code> makes a new cell and <code>Set</code> writes the same cell. An expression compiled before a <code>Def</code> keeps pointing to the old cell.</li>
+<li><code>true</code>, <code>false</code> and <code>none</code> are literals. Writing one as the target of <code>Def</code>, <code>Set</code> or <code>Declare</code> is a compile error.</li>
 </ul>
 
 <h3>Calls</h3>
-<p><code>CALL A B C</code> calls <code>f = R[B]</code> with the C arguments <code>R[B+1]</code> to <code>R[B+C]</code>. What it does depends on the kind of <code>f</code>.</p>
-<table>
-<tr><th><code>f</code></th><th>Condition</th><th>Action</th></tr>
-<tr><td>Lambda</td><td>The arity of its code is C</td><td>Make a new frame and run the code from its first instruction</td></tr>
-<tr><td>Fusion <code>a | b</code></td><td>Try <code>a</code> first, then <code>b</code> when <code>a</code> runs out</td><td>What the chosen function does</td></tr>
-<tr><td>Builtin</td><td>The number of arguments fits</td><td>No frame is made and the result is received at once. Only <code>eval</code> makes a code of arity 0 and runs it in a frame as a lambda</td></tr>
-<tr><td>Continuation</td><td>C is 1</td><td>Resume</td></tr>
-<tr><td>Anything else</td><td></td><td>Stop with <code>not a function</code></td></tr>
-</table>
-<p>The instructions at the entry of a code match the patterns. When they do not match, <code>NEXT</code> tries the next alternative with the same arguments. The instructions at the entry do not write the registers of the arguments. When the alternatives run out, the program stops with <code>matching failed</code>.</p>
-<p>The value of <code>RET</code> in the callee is received according to the instruction that made the call.</p>
-<table>
-<tr><th>Calling instruction</th><th>How the value is received</th></tr>
-<tr><td>A test instruction (<code>TEST</code> to <code>TGEI</code>)</td><td>The condition is true when the value is not <code>false</code>, and the rule of the test instructions applies</td></tr>
-<tr><td><code>ASET</code> <code>PLAINSET</code></td><td>Discarded</td></tr>
-<tr><td>Any other</td><td>Put in <code>R[A]</code></td></tr>
-</table>
-<p>An instruction with a name in the Builtin column of the instruction table does the action of the table only while the cell of that name holds the builtin. When another value has been assigned to the cell, the instruction places a call above its window, calls that value with the same arguments and receives the result by the table above. An immediate is passed as an integer argument.</p>
+<p><code>CALL A B C</code> calls <code>f = R[B]</code> with C arguments. A lambda runs in a new frame when its arity is C. A Fusion <code>a | b</code> tries <code>a</code> first and then <code>b</code> when <code>a</code> runs out. A builtin whose number of arguments fits makes no frame and the result is received at once. A continuation resumes when C is 1. Anything else stops with <code>not a function</code>.</p>
+<ul>
+<li>The instructions at the entry of a code match the patterns. When they do not match, <code>NEXT</code> tries the next alternative with the same arguments, and the program stops with <code>matching failed</code> when none is left. The entry instructions do not write the registers of the arguments.</li>
+<li>The value of <code>RET</code> in the callee is, for a test instruction (<code>TEST</code> to <code>TGEI</code>), true when it is not <code>false</code>. For <code>ASET</code> and <code>PLAINSET</code> it is discarded, and otherwise it goes to <code>R[A]</code>.</li>
+<li>An instruction with a name in the Builtin column of the instruction table does the action of the table only while the cell of that name holds the builtin. When another value has been assigned to the cell, the instruction calls that value with the same arguments and receives the result as above.</li>
+</ul>
 
 <h3>Continuations and handlers</h3>
-<ul>
-<li><code>HANDLE</code> runs its body in a boundary frame. When the body ends normally, its value is the value of the <code>Handle</code>.</li>
-<li><code>PERFORM A B</code> follows the callers to the innermost boundary, copies the frames and the registers up to it and makes a continuation <code>k</code>. It then drops what is above the boundary and calls the handler of the boundary with <code>(R[B], k)</code>. The result is the value of the <code>Handle</code>.</li>
-<li>When no alternative of the handler matches, the effect goes to the next boundary outside. Then <code>k</code> is made again as a copy up to that outer boundary, and the inner boundary is in the copy.</li>
-<li>With no boundary the program stops with <code>unhandled effect: v</code>.</li>
-<li>Calling <code>k</code> copies the saved frames and registers again above the window of the caller. The handler of the boundary stays installed (deep handlers). The argument of <code>k</code> is put in <code>R[A]</code> of the <code>PERFORM</code> and the run goes on. When the body ends, its value returns to the caller of <code>k</code>.</li>
-<li><code>k</code> can be called any number of times.</li>
-<li>Resuming copies neither environments nor cells, so the variables in them are shared between the resumed copies. The variables in registers are copied by value. A variable in a register is not written after the capture, so a variable defined at the capture has the same value in every copy. An <code>x := e</code> that runs after the resumption defines a separate variable in each copy when <code>x</code> is in a register.</li>
-</ul>
+<p><code>HANDLE</code> runs its body in a boundary frame, and the value of the body is the value of the <code>Handle</code>. <code>PERFORM A B</code> copies the frames and registers up to the innermost boundary into a continuation <code>k</code>, drops what is above the boundary and calls the handler of the boundary with <code>(R[B], k)</code>. The result is the value of the <code>Handle</code>. When no alternative matches, the effect goes to the next boundary outside, and with none the program stops with <code>unhandled effect: v</code>.</p>
+<p><code>k</code> is an ordinary function and can be called any number of times. Calling it copies the saved frames and registers again above the window of the caller and goes on with the handler of the boundary still installed (deep). The argument of <code>k</code> goes to <code>R[A]</code> of the <code>PERFORM</code>.</p>
+<p>Resuming copies neither environments nor cells, so the copies share the variables in them. A variable in a register is copied by value, so an <code>x := e</code> that runs after the resumption defines a separate variable in each copy.</p>
 
-<h3>Stopping</h3>
-<p>A runtime error writes its message to the standard error and ends with status 1. There is no way to catch it. The <code>Error</code> effect of <code>error.at</code> is not an error of this kind; it is an ordinary <code>PERFORM</code>.</p>
-
-<h3>Top level</h3>
-<ul>
-<li>One top-level expression is one code of arity 0. The local variables of a block in it follow the rule for the variables of a function and are in the registers or the environment of this code.</li>
-<li>The loop that reads and runs the expressions is the entry of the evaluator, not an instruction. For each expression it reads the cells of the global variables <code>parse</code> and <code>eval</code> and calls them with the entry code below.</li>
-<li>The entry code is the two words <code>CALL R0 R0 n</code> and <code>HALT R0</code>. The evaluator puts the function in <code>R[0]</code> and the arguments from <code>R[1]</code>, and runs it at the bottom of the register stack.</li>
-<li><code>eval(e)</code> runs the compiled code of <code>e</code> as if it had been called.</li>
-</ul>
+<h3>Runtime errors and the top level</h3>
+<p>A runtime error writes its message to the standard error and ends with status 1. It cannot be caught. One top-level expression is one code of arity 0, and the loop that reads the cells of <code>parse</code> and <code>eval</code> for each expression and calls them is in the entry of the evaluator. The entry code is the two words <code>CALL R0 R0 n</code> and <code>HALT R0</code>.</p>
 
 <h2>Values</h2>
-<table>
-<tr><th>Kind</th><th>Contents</th><th><code>type</code></th></tr>
-<tr><td>Integer</td><td>Arbitrary precision</td><td><code>Int</code></td></tr>
-<tr><td>Float</td><td>IEEE 754 binary64. Immutable</td><td><code>Float</code></td></tr>
-<tr><td>Complex</td><td>Two binary64 numbers, the real and the imaginary part. Immutable</td><td><code>Complex</code></td></tr>
-<tr><td>String</td><td>An immutable sequence of bytes, which may contain 0</td><td><code>String</code></td></tr>
-<tr><td>Symbol</td><td>Unique for its name</td><td><code>Symbol</code></td></tr>
-<tr><td>M-expression</td><td>A head symbol and any number of arguments. Immutable</td><td><code>Expr</code></td></tr>
-<tr><td>Array</td><td>A mutable sequence of values</td><td><code>Array</code></td></tr>
-<tr><td>Plain array</td><td>A mutable sequence of elements of one of the 14 types below</td><td><code>Plain</code></td></tr>
-<tr><td>Function</td><td>Lambda, fusion, builtin or continuation</td><td><code>Function</code></td></tr>
-<tr><td>Internal</td><td>Environment, cell and code. They are never passed to a program as values</td><td></td></tr>
-</table>
+<p>The <code>type</code> of a value is one of <code>Int</code>, <code>Float</code>, <code>Complex</code>, <code>String</code>, <code>Symbol</code>, <code>Expr</code>, <code>Array</code>, <code>Plain</code> and <code>Function</code>. An integer has arbitrary precision. A float and a complex number are immutable binary64 (a complex number has a real and an imaginary part). A string is an immutable sequence of bytes that may contain 0, a symbol is unique for its name, and an M-expression is immutable. An array is a mutable sequence of values, and a plain array a mutable sequence of elements of one type. A function is a lambda, a Fusion, a builtin or a continuation.</p>
 <ul>
-<li><code>Tuple{...}</code>, <code>Cons{x, xs}</code> and <code>Nil{}</code> are M-expressions with a fixed head. <code>true</code>, <code>false</code> and <code>none</code> are literals of the symbols of the same names.</li>
-<li>The only value treated as false is the symbol <code>false</code>.</li>
-<li>A string is handled by its whole length, including the 0 bytes. The comparison of <code>EQ</code>, the output of <code>put</code> and <code>print</code>, and <code>STRLEN</code>, <code>_strcat</code> and <code>substr</code> do not stop at a 0 byte.</li>
-<li>Equality (<code>EQ</code>): numbers are compared by value (see below). Strings are equal by contents, M-expressions by head and arguments recursively, and symbols by identity. Arrays, plain arrays and functions are equal only to themselves.</li>
-<li><code>HASH</code> gives equal values the same number. A float equal to an integer, and a complex number whose imaginary part is 0 and whose real part is equal to an integer, have the hash of that integer. Arrays, functions and plain arrays are given a number that stays the same for the object.</li>
+<li>Only the symbol <code>false</code> is false. Every other value is true.</li>
+<li><code>EQ</code> compares numbers by value, strings by contents, M-expressions by head and arguments recursively, and symbols by identity. Arrays, plain arrays and functions are equal only to themselves. Values equal by <code>EQ</code> have the same <code>HASH</code> (<a href="planckvm-types.html">planckvm data types</a>).</li>
 </ul>
 
 <h2>Numbers</h2>
+<p>Integers have arbitrary precision, and nothing wraps around or is truncated. A float is binary64 rounded to nearest even. A complex number is made by <code>complex(re, im)</code>. <code>ADD</code>, <code>SUB</code>, <code>MUL</code> and <code>DIV</code> are one instruction each that looks at the types, and mixed types are raised to the higher one in the order integer, float, complex. These are the exceptions.</p>
 <ul>
-<li>Integers have arbitrary precision. There is one integer type in the language: no integer is out of range, and nothing wraps around or is truncated.</li>
-<li>A float is IEEE 754 binary64 with rounding to nearest even. A complex number is a pair of floats.</li>
-<li><code>ADD</code>, <code>SUB</code>, <code>MUL</code> and <code>DIV</code> look at the types of their arguments, as one instruction each, and take integers, floats and complex numbers. When the types are mixed, the operands are raised to the higher type in the order integer, float, complex, and the result has that type.</li>
-<li>An integer raised to a float is rounded to the nearest value. An integer above 2^53 loses precision: <code>2^53 + 1 + 0.0</code> is the float <code>2^53</code>. Raising an integer that is beyond the range of floats (about 1.8 x 10^308) is an error.</li>
-<li><code>DIV</code> of two integers is the quotient truncated toward 0, and a zero divisor is an error. A division that involves a float or a complex number does not stop on a zero divisor: a float gives an infinity or NaN, and a complex number gives the same rule applied to its components.</li>
-<li><code>LT</code> and <code>GE</code> compare an integer and a float by their mathematical values without raising the type. They give <code>false</code> when NaN is involved. A complex number has no order, so <code>LT</code> or <code>GE</code> on a complex number is an error.</li>
-<li><code>EQ</code> says that values of different types are equal when their values are the same (<code>1 == 1.0</code>, <code>1 == complex(1, 0)</code>). NaN is not equal to itself. Complex numbers are equal when both components are equal.</li>
-<li>Floating-point exceptions do not stop the program.</li>
-<li>A complex number is made by <code>complex(re, im)</code>. There is no literal.</li>
+<li>An integer raised to a float is rounded to the nearest value. An integer beyond the range of floats is an error.</li>
+<li><code>DIV</code> of two integers is the quotient truncated toward 0, and a zero divisor is an error. A division that involves a float or a complex number does not stop on a zero divisor. It gives an infinity or NaN (per component for a complex number).</li>
+<li><code>LT</code> and <code>GE</code> compare an integer and a float by their mathematical values without raising the type. They give <code>false</code> with NaN, and a complex number is an error.</li>
+<li><code>EQ</code> takes values of different types as equal when their values are the same (<code>1 == 1.0</code>), and NaN is not equal to itself.</li>
 </ul>
 
-<h3>Plain array types</h3>
-<table>
-<tr><th>Type</th><th>Element</th><th>Range</th></tr>
-<tr><td><code>'bool</code></td><td><code>true</code> or <code>false</code></td><td></td></tr>
-<tr><td><code>'i8</code> <code>'i16</code> <code>'i32</code> <code>'i64</code></td><td>Signed integer</td><td>-2^(n-1) to 2^(n-1)-1</td></tr>
-<tr><td><code>'u8</code> <code>'u16</code> <code>'u32</code> <code>'u64</code></td><td>Unsigned integer</td><td>0 to 2^n-1</td></tr>
-<tr><td><code>'f16</code> <code>'f32</code> <code>'f64</code></td><td>Float</td><td>IEEE 754 binary16, binary32 and binary64</td></tr>
-<tr><td><code>'c64</code> <code>'c128</code></td><td>Complex</td><td>The real and the imaginary part are binary32 and binary64</td></tr>
-</table>
-<p>Reading an element gives a language value: an integer for an integer type, <code>true</code> or <code>false</code> for <code>'bool</code>, a float widened to binary64 without changing the value for <code>'f16</code> and <code>'f32</code>, and a complex number with widened components for <code>'c64</code>.</p>
-
-<h3>Writing to a plain array</h3>
-<p><code>PLAINSET</code> converts the value as in this table.</p>
-<table>
-<tr><th>Value written</th><th>Array type</th><th><code>PLAINSET</code></th></tr>
-<tr><td>An integer in range</td><td>Integer</td><td>Stored as it is</td></tr>
-<tr><td>An integer out of range (<code>256</code> or <code>-1</code> to <code>'u8</code>, <code>128</code> to <code>'i8</code>, <code>2^31</code> to <code>'i32</code>, <code>2^63</code> to <code>'i64</code>, <code>2^64</code> to <code>'u64</code>)</td><td>Integer</td><td>Error. It is not wrapped around</td></tr>
-<tr><td>A float with a fraction (<code>1.5</code> <code>-1.5</code> <code>255.9</code> <code>-128.9</code>)</td><td>Integer</td><td>Truncated toward 0 (<code>1</code> <code>-1</code> <code>255</code> <code>-128</code>), then the range is checked</td></tr>
-<tr><td>A float that is out of range after truncation (<code>128.0</code> to <code>'i8</code>, <code>1e30</code> to <code>'i32</code>, <code>2.0^63</code> to <code>'i64</code>)</td><td>Integer</td><td>Error</td></tr>
-<tr><td><code>-0.5</code></td><td><code>'u8</code></td><td><code>0</code></td></tr>
-<tr><td>NaN or an infinity</td><td>Integer</td><td>Error</td></tr>
-<tr><td>A complex number (even <code>complex(1, 0)</code>)</td><td>Integer, <code>'f16</code> <code>'f32</code> <code>'f64</code></td><td>Error</td></tr>
-<tr><td>A nonzero number, NaN, or a complex number with a nonzero component</td><td><code>'bool</code></td><td><code>true</code></td></tr>
-<tr><td><code>0</code> <code>0.0</code> <code>-0.0</code> <code>complex(0, 0)</code></td><td><code>'bool</code></td><td><code>false</code></td></tr>
-<tr><td><code>true</code> <code>false</code></td><td>Integer, float and complex types</td><td><code>1</code> <code>0</code> (<code>1.0</code> <code>0.0</code>)</td></tr>
-<tr><td>An integer or a float</td><td>Complex</td><td>It is the real part and the imaginary part is 0</td></tr>
-<tr><td>An integer (<code>2^53 + 1</code>) or a float</td><td><code>'f64</code></td><td>Rounded to the nearest value (<code>2^53 + 1</code> becomes <code>9007199254740992.0</code>)</td></tr>
-<tr><td>A float</td><td><code>'f32</code> <code>'f16</code> <code>'c64</code></td><td>Rounded to the nearest value. A value too small (<code>1e-46</code>) becomes <code>0.0</code></td></tr>
-<tr><td>A value above the maximum of <code>'f32</code> (about 3.4028235 x 10^38, such as <code>1e39</code>)</td><td><code>'f32</code> <code>'c64</code></td><td>An infinity of the same sign. It does not stop</td></tr>
-<tr><td>A value above the maximum of <code>'f16</code> (65504, such as <code>65520.0</code> or <code>1e5</code>)</td><td><code>'f16</code></td><td>An infinity of the same sign. <code>65519.0</code> becomes <code>65504</code></td></tr>
-<tr><td>An integer beyond the range of doubles (<code>2^1100</code>)</td><td>Float and complex types</td><td>Error</td></tr>
-<tr><td>A string, <code>none</code>, a symbol other than <code>true</code> and <code>false</code>, an M-expression, an array or a function</td><td>Every type</td><td>Error: the value is not of a numeric type of the language, and nothing is converted</td></tr>
-</table>
+<h3>Plain arrays</h3>
+<p>The element types are <code>'bool</code>; the signed integers <code>'i8</code>, <code>'i16</code>, <code>'i32</code> and <code>'i64</code>; the unsigned integers <code>'u8</code> to <code>'u64</code>; the floats <code>'f16</code>, <code>'f32</code> and <code>'f64</code> (binary16, binary32 and binary64); and the complex numbers <code>'c64</code> and <code>'c128</code> (real and imaginary parts of binary32 and binary64). A read element is a value of the language, and <code>'f16</code> and <code>'f32</code> widen to binary64 without changing the value.</p>
+<p><code>PLAINSET</code> can write only a number that fits the type. A value that does not fit stops the program.</p>
+<ul>
+<li>To an integer type, an integer in range is stored as it is. One out of range is an error and never wraps around. A float is truncated toward 0 and then checked against the range (<code>255.9</code> becomes <code>255</code>). NaN, an infinity and a complex number are errors.</li>
+<li>To a float type, the value is rounded to the nearest. Above the largest value of <code>'f32</code> or <code>'f16</code> it becomes an infinity of the same sign. To a complex type, it is stored as the real part.</li>
+<li>To <code>'bool</code>, a non-zero number is <code>true</code>, and <code>0</code>, <code>0.0</code> and <code>-0.0</code> are <code>false</code>. <code>true</code> and <code>false</code> written to a numeric type are <code>1</code> and <code>0</code>.</li>
+<li>A value that is not a number (a string, <code>none</code>, an M-expression, an array or a function), and an integer beyond binary64 written to a float or complex type, are errors.</li>
+</ul>

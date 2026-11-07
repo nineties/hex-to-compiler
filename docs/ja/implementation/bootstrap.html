@@ -38,10 +38,10 @@
 </ol></details></nav>
 <main>
 <h1>機械語から planck0 まで</h1>
-<p class="lead">16進ダンプで書いた Forth から、sasm で書いた planck0 までのブートストラップのステージです。</p>
+<p class="lead">16進ダンプの Forth から sasm で書いた planck0 まで、各段は前の段の上で、次の段をより高級な言語で書き直します。</p>
 
 <h2>pforth</h2>
-<p><a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/pforth.xxd">pforth.xxd</a> は16進ダンプで、右側の注釈は <code>xxd -r -c 8</code> が無視します。戻したバイト列がそのまま32ビット x86 Linux の ELF 実行ファイルです。</p>
+<p><a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/pforth.xxd">pforth.xxd</a> は16進ダンプです。右側の注釈は <code>xxd -r -c 8</code> が無視し、戻したバイト列がそのまま32ビット x86 Linux の ELF 実行ファイルです。</p>
 <div class="example">
 <p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/pforth.xxd#L1-L11">bootstrap/pforth.xxd: 00000000</a></p>
 <pre>00000000: 7f45 4c46 0101 0100   # planckforth -
@@ -56,23 +56,7 @@
 00000048: 0000 0040 0700 0000   p_memsz(1GB),p_flags=PF_X|PF_W|PF_R
 00000050: 0010 0000 0084 0408   p_align, &lt;here&gt;</pre>
 </div>
-<p>辞書の初期状態は1文字の名前の組み込み語だけです。<code>k</code> は1文字読む、<code>t</code> は1文字書く、<code>f</code> は文字から語を引く、<code>x</code> は語を実行する、などです。</p>
-<div class="example">
-<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/pforth.xxd#L20-L31">bootstrap/pforth.xxd: 00000090</a></p>
-<pre>00000090: 6882 0408 0000 0000
-00000094: 8880 0408 0143 0000   C: cell
-0000009c: 7082 0408 0000 0000
-000000a0: 9480 0408 0168 0000   h: &amp;here
-000000a8: 7582 0408 0000 0000
-000000ac: a080 0408 016c 0000   l: &amp;latest
-000000b4: 7d82 0408 0000 0000
-000000b8: ac80 0408 016b 0000   k: key
-000000c0: 8582 0408 0000 0000
-000000c4: b880 0408 0174 0000   t: type
-000000cc: 9d82 0408 0000 0000
-000000d0: c480 0408 016a 0000   j: branch</pre>
-</div>
-<p>最初の解釈器は <code>k</code>・<code>f</code>・<code>x</code> を繰り返すだけです。この段階の Hello World は次のとおりです。</p>
+<p>辞書は1文字の名前の組み込み語だけで、最初の解釈器は、1文字読む <code>k</code>、語を引く <code>f</code>、実行する <code>x</code> を繰り返します。</p>
 <div class="example">
 <p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/plisp.fs#L71-L78">bootstrap/plisp.fs: The 1st phase interpreter repeats execution</a></p>
 <pre>\ The 1st phase interpreter repeats execution of k, f and x.
@@ -86,40 +70,10 @@
 </div>
 
 <h2>plisp</h2>
-<p><a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/plisp.fs">plisp.fs</a> は pforth への入力です。先頭は1文字の語だけで書いた列で、空白と改行を何もしない語として、<code>\</code> を行コメントの語として登録します（<a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/plisp.fs#L1-L15"><code>bootstrap/plisp.fs: h@l@h@!h@C+h!k1k0-h@$k:k0</code></a>）。以降は自己拡張で Forth を組み立てます。</p>
-<ul>
-<li>2番目の解釈器です。名前で語を引き、コンパイル状態を持ちます（<a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/plisp.fs#L335-L358"><code>bootstrap/plisp.fs: The 2nd Phase Interpreter</code></a>）。</li>
-<li>条件分岐・ループ・再帰・構造体などの通常の Forth の語です（<a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/plisp.fs#L498-L1384"><code>bootstrap/plisp.fs: Compilers</code></a>）。</li>
-<li>3番目の解釈器です。辞書にない語を数として読み、数でもなければエラーを出して止まります（<a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/plisp.fs#L1386-L1446"><code>bootstrap/plisp.fs: 3rd Phase Interpreter</code></a>）。</li>
-</ul>
-<p>その Forth で Lisp インタプリタを書きます（<a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/plisp.fs#L1684"><code>bootstrap/plisp.fs: Implementation of PlanckLISP</code></a> 以降）。リスト、ノード、リーダとプリンタ、評価器の順で、最後に <code>bootstrap/plisp/init.lisp</code> を読みます（<a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/plisp.fs#L2435"><code>bootstrap/plisp.fs: s&quot; bootstrap/plisp/init.lisp&quot; eval-file</code></a>）。次のステージがアセンブラとコンパイラなので、構文木を直接扱えて内部 DSL を作りやすい Lisp を選んでいます。</p>
+<p><a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/plisp.fs">plisp.fs</a> は pforth への入力です。1文字の語だけで書いた先頭から自己拡張して、名前で語を引く解釈器、条件分岐・ループ・構造体を順に作ります。その Forth で Lisp インタプリタを書き、最後に <code>bootstrap/plisp/init.lisp</code> を読みます。</p>
 
 <h2>asm と sasm</h2>
-<p>どちらも plisp の上で動き、次のステージを作るために使います。性能と安全性より実装の単純さを優先しています。</p>
-<p><a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/asm/core.lisp">asm/core.lisp</a> は x86 32ビットのアセンブラです。S式の命令列から ELF を直接書き出し、ヘッダ・コード・データを読み書き実行可能な1つの <code>PT_LOAD</code> に置きます。</p>
-<div class="example">
-<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/asm/examples/hello.s#L1-L19">bootstrap/asm/examples/hello.s</a></p>
-<pre>; hello.s in x86
-
-(entry start)
-
-(label msg)
-    (ascii &quot;Hello World!\n&quot;)
-
-(const len (- here msg))
-
-(label start)
-    (mov %eax 4)   ; SYS_WRITE
-    (mov %ebx 1)   ; stdout
-    (mov %ecx msg) ; addr
-    (mov %edx len) ; length
-    (int 0x80)
-
-    (mov %eax 1)    ; SYS_EXIT
-    (xor %ebx %ebx) ; status = 0
-    (int 0x80)</pre>
-</div>
-<p><a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/sasm/core.lisp">sasm/core.lisp</a> は構造化アセンブリ言語 sasm のコンパイラです。sasm は型のない C 風の言語で、変数・関数・<code>if</code>・<code>while</code> を持ち、plisp の内部 DSL として実装されています。レジスタ割り付けはしません。スタックへの push と pop を繰り返すコードを生成し、asm で機械語にします。</p>
+<p>どちらも plisp の上で動き、性能と安全性より実装の単純さを優先します。<a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/asm/core.lisp">asm/core.lisp</a> は x86 32ビットのアセンブラで、S式の命令列から ELF を直接書き出します。<a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/sasm/core.lisp">sasm/core.lisp</a> は、型のない C 風の言語 sasm のコンパイラです。レジスタ割り付けはせず、スタックへの push と pop を繰り返すコードを asm で機械語にします。</p>
 <div class="example">
 <p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/sasm/examples/fib.sv#L1-L14">bootstrap/sasm/examples/fib.sv</a></p>
 <pre>; fib.sv
@@ -138,12 +92,8 @@
     )</pre>
 </div>
 
-<h2>plisp2</h2>
-<p>Forth の上の plisp は以降のステージには遅すぎるため、同じ Lisp を sasm で書き直したのが <a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/plisp2.sv">plisp2.sv</a> です。メモリ確保（<a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/plisp2.sv#L6-L42"><code>bootstrap/plisp2.sv: Memory Allocation</code></a>）、ノード（<a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/plisp2.sv#L54-L300"><code>bootstrap/plisp2.sv: Nodes</code></a>）、リーダとプリンタ（<a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/plisp2.sv#L302-L584"><code>bootstrap/plisp2.sv: Parser and Printer</code></a>）、評価器（<a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/plisp2.sv#L586-L826"><code>bootstrap/plisp2.sv: Eval</code></a>）、組み込み関数（<a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/plisp2.sv#L828-L1023"><code>bootstrap/plisp2.sv: Primitive Functions</code></a>）の順に並んでいます。</p>
-<p>plisp2 は plisp の上の sasm でコンパイルし、できた plisp2 の上で同じ sasm が <code>bootstrap/planck0.sv</code> をコンパイルします。</p>
-
-<h2>planck0</h2>
-<p><a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/planck0.sv">planck0.sv</a>も sasm で書かれています。中身は<a href="planck0.html">planck0</a>の頁にあります。</p>
+<h2>plisp2 と planck0</h2>
+<p><a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/plisp2.sv">plisp2.sv</a> は同じ Lisp を sasm で書き直したものです。ビルドは2段で、plisp の上の sasm で plisp2 をコンパイルし、できた plisp2 の上で同じ sasm が <a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/planck0.sv">planck0.sv</a> をコンパイルします。中身は<a href="planck0.html">planck0</a>にあります。</p>
 
 <nav class="pager"><a class="prev" href="index.html"><small>前のページ</small>構成</a><a class="next" href="planck0.html"><small>次のページ</small>planck0</a></nav>
 </main>

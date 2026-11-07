@@ -38,197 +38,53 @@
 </ol></details></nav>
 <main>
 <h1>planckvm internal representation</h1>
-<p class="lead">Words, headers, the contents of each kind, and how the GC treats them on the heap.</p>
+<p class="lead">The low bit of a word tells an immediate from a reference, and the <code>kind</code> in the header tells the kind of an object. A field marked raw is a number as it is, and every other field is a word of a value. The GC follows only the value fields.</p>
 
-<h2>Words</h2>
-<p>The words of the heap, the registers and the frames are all 32 bits, and the bits are numbered from 0 at the least significant bit. The lowest bit of a word tells what the word is.</p>
+<h2>Words and headers</h2>
+<p>Every word in the heap, the registers and the frames is 32 bits, and bits are numbered from 0 at the least significant bit.</p>
 <table class="bits">
 <colgroup><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col></colgroup>
 <tr class="ruler"><td>3<br>1</td><td>3<br>0</td><td>2<br>9</td><td>2<br>8</td><td>2<br>7</td><td>2<br>6</td><td>2<br>5</td><td>2<br>4</td><td>2<br>3</td><td>2<br>2</td><td>2<br>1</td><td>2<br>0</td><td>1<br>9</td><td>1<br>8</td><td>1<br>7</td><td>1<br>6</td><td>1<br>5</td><td>1<br>4</td><td>1<br>3</td><td>1<br>2</td><td>1<br>1</td><td>1<br>0</td><td><br>9</td><td><br>8</td><td><br>7</td><td><br>6</td><td><br>5</td><td><br>4</td><td><br>3</td><td><br>2</td><td><br>1</td><td><br>0</td></tr>
 <tr class="lab"><td colspan="32">integer</td></tr>
 <tr class="fld"><td colspan="31">value n (31)</td><td colspan="1">1</td></tr>
 <tr class="lab"><td colspan="32">reference</td></tr>
-<tr class="fld"><td colspan="31">index in the heap (31)</td><td colspan="1">0</td></tr>
-</table>
-<table>
-<tr><th>Word</th><th>Lowest bit</th><th>Value of the word</th></tr>
-<tr><td>immediate integer</td><td>1</td><td><code>2n+1</code>. n is 31 bits in two's complement, from -2<sup>30</sup> to 2<sup>30</sup>-1</td></tr>
-<tr><td>reference to an object</td><td>0</td><td>twice the index, in words from the start of the heap, of the header of the object</td></tr>
-</table>
-<ul>
-<li>The integer of the language is one kind. An integer that fits an immediate is always an immediate, and only an integer that does not fit is a big integer object.</li>
-<li>Only integers are immediates. Floats, complex numbers, strings and symbols are all objects.</li>
-<li>A word does not hold the kind of an object. The kind is read from the header of the object.</li>
-</ul>
-
-<h2>Headers</h2>
-<p>The first word of an object is the header. An object is the header and the words after it.</p>
-<table class="bits">
-<colgroup><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col></colgroup>
-<tr class="ruler"><td>3<br>1</td><td>3<br>0</td><td>2<br>9</td><td>2<br>8</td><td>2<br>7</td><td>2<br>6</td><td>2<br>5</td><td>2<br>4</td><td>2<br>3</td><td>2<br>2</td><td>2<br>1</td><td>2<br>0</td><td>1<br>9</td><td>1<br>8</td><td>1<br>7</td><td>1<br>6</td><td>1<br>5</td><td>1<br>4</td><td>1<br>3</td><td>1<br>2</td><td>1<br>1</td><td>1<br>0</td><td><br>9</td><td><br>8</td><td><br>7</td><td><br>6</td><td><br>5</td><td><br>4</td><td><br>3</td><td><br>2</td><td><br>1</td><td><br>0</td></tr>
+<tr class="fld"><td colspan="31">heap index (31)</td><td colspan="1">0</td></tr>
 <tr class="lab"><td colspan="32">header</td></tr>
 <tr class="fld"><td colspan="26">size (26)</td><td colspan="4">kind (4)</td><td colspan="1" class="v">m (1)</td><td colspan="1">1</td></tr>
 </table>
-<table>
-<tr><th>Field</th><th>Meaning</th></tr>
-<tr><td><code>size</code></td><td>The number of words after the header. The object is <code>size + 1</code> words with the header</td></tr>
-<tr><td><code>kind</code></td><td>The kind of the object, as in the table below</td></tr>
-<tr><td><code>m</code></td><td>A mark that the GC uses. 0 in an image</td></tr>
-<tr><td>lowest bit</td><td>1 in a header</td></tr>
-</table>
-<p>A header is not a value, and it is not put in a register or in a field of an object. A word with the lowest bit 0 at the place of a header is the reference to the place that the GC moved the object to. An image has none.</p>
-<p><code>kind</code> uses 0 to 14 and does not use 15.</p>
-<table>
-<tr><th>kind</th><th>Object</th><th>Head</th></tr>
-<tr><td>0</td><td>big integer</td><td><code>Int</code></td></tr>
-<tr><td>1</td><td>float</td><td><code>Float</code></td></tr>
-<tr><td>2</td><td>complex number</td><td><code>Complex</code></td></tr>
-<tr><td>3</td><td>string</td><td><code>String</code></td></tr>
-<tr><td>4</td><td>symbol</td><td><code>Symbol</code></td></tr>
-<tr><td>5</td><td>m-expr</td><td>the head of the m-expr</td></tr>
-<tr><td>6</td><td>array</td><td><code>Array</code></td></tr>
-<tr><td>7</td><td>plain array</td><td><code>Plain</code></td></tr>
-<tr><td>8</td><td>Lambda</td><td><code>Function</code></td></tr>
-<tr><td>9</td><td>Fusion</td><td><code>Function</code></td></tr>
-<tr><td>10</td><td>builtin</td><td><code>Function</code></td></tr>
-<tr><td>11</td><td>continuation</td><td><code>Function</code></td></tr>
-<tr><td>12</td><td>environment</td><td>none</td></tr>
-<tr><td>13</td><td>cell</td><td>none</td></tr>
-<tr><td>14</td><td>code</td><td>none</td></tr>
-</table>
-<p>The <code>head</code> of an immediate integer is <code>Int</code>. Environments, cells and codes never reach a program as values.</p>
+<ul>
+<li>An immediate integer is <code>2n+1</code>, where n is 31 bits in two's complement. An integer that fits is always an immediate, and only one that does not fit is a big-integer object. Floats, complex numbers, strings and symbols are all objects.</li>
+<li>A reference is twice the index of the header of the object, in words from the start of the heap.</li>
+<li>The first word of an object is its header, not a value. <code>size</code> is the number of words after the header, and <code>m</code> is a mark of the GC, 0 in an image. A word with low bit 0 at the position of a header is a reference to where the GC moved the object.</li>
+</ul>
 
 <h2>Contents of objects</h2>
-<p>In the tables below, a word is the position counted with the word after the header as 0. A field marked "value" holds a word of a value (an immediate or a reference). A field marked "raw" holds the number itself and not a value. When a 64-bit quantity is split into 2 words, the low word comes first.</p>
-
-<h3>Big integers</h3>
+<p>"Word" is the position counted from 0 at the word after the header. A 64-bit quantity puts the lower word first. Environments, cells and codes are never passed to a program as values.</p>
 <table>
-<tr><th>Word</th><th>Contents</th></tr>
-<tr><td>0</td><td>sign (raw. 0 for 0 or more, 1 for negative)</td></tr>
-<tr><td>1</td><td>number of digits n (raw. 1 or more)</td></tr>
-<tr><td>2-3</td><td>digit 0 (64 bits. the low word first)</td></tr>
-<tr><td>4-5</td><td>digit 1</td></tr>
-<tr><td>...</td><td>digit n-1</td></tr>
+<tr><th>kind</th><th>Object (head)</th><th>Contents</th></tr>
+<tr><td>0</td><td>big integer (<code>Int</code>)</td><td>sign (raw; 0 for 0 or more, 1 for negative), number of digits n (raw), then n digits in base 2<sup>64</sup> from the lowest. The top digit is not 0</td></tr>
+<tr><td>1, 2</td><td>float, complex (<code>Float</code>, <code>Complex</code>)</td><td>the bits of binary64 (raw). A complex number is the real part and then the imaginary part</td></tr>
+<tr><td>3</td><td>string (<code>String</code>)</td><td>number of bytes n (raw), then the bytes. Byte i lies in word <code>1 + i/4</code>, at position <code>i mod 4</code> from the low end. The unused bytes of the last word are 0</td></tr>
+<tr><td>4</td><td>symbol (<code>Symbol</code>)</td><td>the name (a reference to a string). There is one symbol per name</td></tr>
+<tr><td>5</td><td>M-expression (the head of each)</td><td>the head (a reference to a symbol), then the arguments. Immutable</td></tr>
+<tr><td>6</td><td>array (<code>Array</code>)</td><td>identity number (raw), then the elements. The number of elements never changes</td></tr>
+<tr><td>7</td><td>plain array (<code>Plain</code>)</td><td>identity number (raw), number of the element type (raw), number of elements n (raw), then the packed words of elements</td></tr>
+<tr><td>8</td><td>lambda (<code>Function</code>)</td><td>identity number (raw), the code, the environment of the place where it was made (<code>none</code> if none)</td></tr>
+<tr><td>9</td><td>Fusion (<code>Function</code>)</td><td>identity number (raw), the alternatives (lambdas, builtins, continuations, in the order to try). A Fusion never holds a Fusion; <code>FUSION</code> joins both sides</td></tr>
+<tr><td>10</td><td>builtin (<code>Function</code>)</td><td>identity number (raw), number of the builtin (raw), arity (raw), the name (a symbol)</td></tr>
+<tr><td>11</td><td>continuation (<code>Function</code>)</td><td>identity number (raw), the <code>reg</code> of <code>PERFORM</code> (raw), number of frames f (raw), the slice of frames (f of them, with the fields in <a href="planckvm-internals.html">internals</a>), the slice of registers. The GC follows <code>fn</code>, <code>env</code> and <code>alts</code> of the frames and all the registers</td></tr>
+<tr><td>12</td><td>environment</td><td>the parent environment (<code>none</code> if none), then the slots</td></tr>
+<tr><td>13</td><td>cell</td><td>the value of the global variable, the name (a symbol), the number of the bit that checks for an overwritten builtin (an immediate integer; -1 if none)</td></tr>
+<tr><td>14</td><td>code</td><td>everything from word 0 of the <a href="planckvm-isa.html#format">format</a> to the constant table. The GC follows only the constant table and skips the instructions</td></tr>
 </table>
+<p>The <code>head</code> of an immediate integer is also <code>Int</code>. The kind 15 is not used. The identity number of an array, a plain array, a lambda, a Fusion, a builtin and a continuation is 0 until the first <code>HASH</code> assigns a number of 1 or more, and it never changes after that.</p>
+
+<h3>Elements of a plain array</h3>
+<p>The type numbers are 0 for <code>'bool</code>, 1 to 4 for <code>'i8</code> to <code>'i64</code>, 5 to 8 for <code>'u8</code> to <code>'u64</code>, 9 to 11 for <code>'f16</code>, <code>'f32</code> and <code>'f64</code>, and 12 and 13 for <code>'c64</code> and <code>'c128</code>. The size of an element is 1 byte for <code>'bool</code> and the number of bits in the name for the others.</p>
 <ul>
-<li>A value is the sign and the absolute value. The digits of the absolute value are in base 2<sup>64</sup>, from the lowest digit.</li>
-<li><code>size</code> is <code>2 + 2n</code>. The number of digits is limited to what fits the <code>size</code> field.</li>
-<li>The top digit is not 0. An integer that fits the range of an immediate is not a big integer. 0 is an immediate.</li>
+<li>Elements are untagged bits packed without gaps in little endian. Element i starts at byte position <code>i * (bytes per element)</code>, and byte position <code>b</code> is the <code>b mod 4</code>-th byte from the low end of word <code>3 + b/4</code>.</li>
+<li>Integer types are in two's complement, <code>'bool</code> is 1 for <code>true</code>, float types are IEEE 754 bits, and a complex type is the real part and then the imaginary part. The unused bytes of the last word are 0, and a new array has all bits 0.</li>
 </ul>
-
-<h3>Floats and complex numbers</h3>
-<table>
-<tr><th>kind</th><th>Word</th><th>Contents</th></tr>
-<tr><td>float (1)</td><td>0-1</td><td>the bits of a binary64 (the low word first. raw)</td></tr>
-<tr><td rowspan="2">complex number (2)</td><td>0-1</td><td>the binary64 of the real part (the low word first. raw)</td></tr>
-<tr><td>2-3</td><td>the binary64 of the imaginary part (the low word first. raw)</td></tr>
-</table>
-
-<h3>Strings</h3>
-<table>
-<tr><th>Word</th><th>Contents</th></tr>
-<tr><td>0</td><td>number of bytes n (raw)</td></tr>
-<tr><td>1-</td><td>the bytes. Byte i is in the byte number <code>i mod 4</code> from the low end of word <code>1 + i/4</code>. The number of words is n divided by 4, rounded up. The unused bytes of the last word are 0</td></tr>
-</table>
-<p>The bytes may include the 0 byte. <code>size</code> is <code>1 + ceil(n/4)</code>.</p>
-
-<h3>Symbols</h3>
-<table>
-<tr><th>Word</th><th>Contents</th></tr>
-<tr><td>0</td><td>name (value. reference to a string)</td></tr>
-</table>
-<p>Symbols with the same name are one object, so a symbol is unique for each name. The string of the name does not change.</p>
-
-<h3>M-exprs</h3>
-<table>
-<tr><th>Word</th><th>Contents</th></tr>
-<tr><td>0</td><td>head (value. reference to a symbol)</td></tr>
-<tr><td>1-</td><td>arguments (values)</td></tr>
-</table>
-<p>The number of arguments is <code>size - 1</code>. An m-expr is immutable.</p>
-
-<h3>Arrays</h3>
-<table>
-<tr><th>Word</th><th>Contents</th></tr>
-<tr><td>0</td><td>identity number (raw. see "Identity numbers" below)</td></tr>
-<tr><td>1-</td><td>elements (values)</td></tr>
-</table>
-<p>The number of elements is <code>size - 1</code> and does not change after the array is made.</p>
-
-<h3>Plain arrays</h3>
-<table>
-<tr><th>Word</th><th>Contents</th></tr>
-<tr><td>0</td><td>identity number (raw)</td></tr>
-<tr><td>1</td><td>number of the element type (raw)</td></tr>
-<tr><td>2</td><td>number of elements n (raw)</td></tr>
-<tr><td>3-</td><td>the packed words of the elements</td></tr>
-</table>
-<table>
-<tr><th>Type number</th><th>Type</th><th>Bytes of an element</th></tr>
-<tr><td>0</td><td><code>'bool</code></td><td>1</td></tr>
-<tr><td>1-4</td><td><code>'i8</code> <code>'i16</code> <code>'i32</code> <code>'i64</code></td><td>1 2 4 8</td></tr>
-<tr><td>5-8</td><td><code>'u8</code> <code>'u16</code> <code>'u32</code> <code>'u64</code></td><td>1 2 4 8</td></tr>
-<tr><td>9-11</td><td><code>'f16</code> <code>'f32</code> <code>'f64</code></td><td>2 4 8</td></tr>
-<tr><td>12-13</td><td><code>'c64</code> <code>'c128</code></td><td>8 16</td></tr>
-</table>
-<ul>
-<li>An element is a bit string with no tag, and the elements are packed in little endian with no gap. Element i starts at the byte position <code>i * (bytes of an element)</code>, and the byte position <code>b</code> is the byte number <code>b mod 4</code> from the low end of word <code>3 + b/4</code>.</li>
-<li>Integer types are in two's complement. For <code>'bool</code>, <code>true</code> is 1 and <code>false</code> is 0. Float types are the bit strings of IEEE 754, and complex types are the real part and then the imaginary part.</li>
-<li><code>size</code> is <code>2 + ceil(n * bytes of an element / 4)</code>. The unused bytes of the last word are 0.</li>
-<li>The elements just after the array is made are all 0 bits, which stand for <code>false</code>, <code>0</code>, <code>0.0</code> and <code>complex(0, 0)</code>.</li>
-</ul>
-
-<h3>Lambdas, Fusions, builtins and continuations</h3>
-<table>
-<tr><th>kind</th><th>Word</th><th>Contents</th></tr>
-<tr><td rowspan="3">Lambda (8)</td><td>0</td><td>identity number (raw)</td></tr>
-<tr><td>1</td><td>code (value. reference to a code)</td></tr>
-<tr><td>2</td><td>environment of the place where it was made (value. <code>none</code> if there is none)</td></tr>
-<tr><td rowspan="2">Fusion (9)</td><td>0</td><td>identity number (raw)</td></tr>
-<tr><td>1-</td><td>alternatives (values. each a Lambda, a builtin or a continuation, in the order they are tried)</td></tr>
-<tr><td rowspan="4">builtin (10)</td><td>0</td><td>identity number (raw)</td></tr>
-<tr><td>1</td><td>number of the builtin (raw)</td></tr>
-<tr><td>2</td><td>arity (raw)</td></tr>
-<tr><td>3</td><td>name (value. reference to a symbol)</td></tr>
-<tr><td rowspan="5">continuation (11)</td><td>0</td><td>identity number (raw)</td></tr>
-<tr><td>1</td><td><code>reg</code> of the <code>PERFORM</code> (raw)</td></tr>
-<tr><td>2</td><td>number of frames f (raw)</td></tr>
-<tr><td>3-</td><td>the slice of frames (f frames. a frame is 7 words, with the fields in the <a href="planckvm-internals.html">internals</a>)</td></tr>
-<tr><td>after</td><td>the slice of registers (values. the number of words follows from <code>size</code>)</td></tr>
-</table>
-<p>A Fusion has no Fusion as an alternative. <code>FUSION</code> joins the alternatives of both sides into a new Fusion.</p>
-
-<h3>Environments, cells and codes</h3>
-<table>
-<tr><th>kind</th><th>Word</th><th>Contents</th></tr>
-<tr><td rowspan="2">environment (12)</td><td>0</td><td>parent environment (value. <code>none</code> if there is none)</td></tr>
-<tr><td>1-</td><td>slots (values)</td></tr>
-<tr><td rowspan="3">cell (13)</td><td>0</td><td>value of the global variable</td></tr>
-<tr><td>1</td><td>name (value. reference to a symbol)</td></tr>
-<tr><td>2</td><td>number of the bit that checks the overwriting of a builtin (immediate integer. -1 if there is none)</td></tr>
-<tr><td>code (14)</td><td>0-</td><td>all of the <a href="planckvm-isa.html#format">bytecode format</a> from word 0 to the table of constants (raw and values are mixed. the words of the table of constants are values)</td></tr>
-</table>
-
-<h3>同一性の番号</h3>
-<p>配列・plain 配列・Lambda・Fusion・組み込み・継続は、語 0 に同一性の番号を持ちます。作った直後は 0 で、番号を割り当てるまで 0 のままです。最初の <code>HASH</code> が 1 以上の番号を割り当て、以降は変わりません。同じ機械で割り当てる番号は互いに異なります。</p>
-
-<h2>How the GC treats objects</h2>
-<p>The GC reads <code>kind</code> in the header and follows only the fields of values. It does not follow raw fields.</p>
-<table>
-<tr><th>kind</th><th>Fields that are followed</th></tr>
-<tr><td>big integer, float, complex number, string, plain array</td><td>none (the contents are numbers and bytes)</td></tr>
-<tr><td>symbol</td><td>name</td></tr>
-<tr><td>m-expr</td><td>head, arguments</td></tr>
-<tr><td>array</td><td>elements</td></tr>
-<tr><td>Lambda</td><td>code, environment</td></tr>
-<tr><td>Fusion</td><td>alternatives</td></tr>
-<tr><td>builtin</td><td>name</td></tr>
-<tr><td>continuation</td><td><code>fn</code>, <code>env</code> and <code>alts</code> of the frames, and all of the slice of registers</td></tr>
-<tr><td>environment</td><td>parent, slots</td></tr>
-<tr><td>cell</td><td>value, name</td></tr>
-<tr><td>code</td><td>table of constants (the instructions are skipped)</td></tr>
-</table>
-<p>The GC moves objects, so the word of a reference changes while the identity of the object stays.</p>
 
 <nav class="pager"><a class="prev" href="planckvm-types.html"><small>Previous</small>planckvm data types</a><a class="next" href="planckvm-internals.html"><small>Next</small>planckvm internals</a></nav>
 </main>

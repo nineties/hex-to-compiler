@@ -1,79 +1,56 @@
 <!--title 値・パターン・M式-->
 <h1>値・パターン・M式</h1>
-<p class="lead">評価の対象は M式です。値の種類、特殊形式、パターン、エフェクト、トップレベルを定めます。</p>
+<p class="lead">評価の対象は M式です。特殊形式の頭を持たない M式は構築子で、引数を評価した同じ頭の M式になります。パターンは構築子と同じ形で書き、合えば変数を束縛します。数は型が混ざると高いほうに揃え、誤りは実行時エラーです。以下は原則から外れる所です。値の種類は<a href="datatypes.html">データ型</a>にあります。</p>
 
 <h2>M式</h2>
-<p>M式はシンボル（<code>x</code>）・整数（<code>42</code>・<code>-1</code>）・浮動小数点数（<code>1.5</code>）・文字列（<code>"abc"</code>）・<code>Head{a, b, ...}</code> のいずれかです。シンボルは英字・<code>_</code>・<code>%</code> のどれかで始まり、英字・数字・<code>_</code> が続きます。文字列は65535バイトまでです。<code>Head{...}</code> の引数の個数に上限はありません。トップレベルに置いた文字列は効果を持たないので、コメントとして使えます。</p>
-<p><code>true</code>・<code>false</code>・<code>none</code> はリテラルです。それぞれ同じ名前のシンボルを値とするので、<code>true</code> と <code>Quote{true}</code> は同じ値です。変数ではないので、<code>Def{true, e}</code>・<code>Set{true, e}</code>・<code>Declare{true}</code> を書くと、式を実行する前にメッセージを出してプログラムが止まります。</p>
+<p><code>true</code>・<code>false</code>・<code>none</code> は、同じ名前のシンボルを値とするリテラルです。変数ではないので、<code>Def{true, e}</code>・<code>Set{true, e}</code>・<code>Declare{true}</code> は実行前にプログラムを止めます。トップレベルの文字列は効果を持たず、コメントになります。</p>
 
-<h2>値</h2>
-<table>
-<tr><th><code>type</code></th><th>値</th></tr>
-<tr><td><code>Int</code></td><td>多倍長の整数</td></tr>
-<tr><td><code>Float</code></td><td>浮動小数点数。IEEE 754 の binary64</td></tr>
-<tr><td><code>Complex</code></td><td>複素数。浮動小数点数の組</td></tr>
-<tr><td><code>String</code></td><td>文字列</td></tr>
-<tr><td><code>Symbol</code></td><td>シンボル。<code>true</code>・<code>false</code>・<code>none</code> はシンボルのリテラル</td></tr>
-<tr><td><code>Expr</code></td><td><code>Head{a, ...}</code></td></tr>
-<tr><td><code>Function</code></td><td>Lambda・Fusion・組み込み関数・継続</td></tr>
-<tr><td><code>Array</code></td><td><code>array(n)</code> で作る固定長の可変配列</td></tr>
-<tr><td><code>Plain</code></td><td><code>plain_array(kind, n)</code> で作る、要素の型が1つの可変配列</td></tr>
-</table>
-<p>値の型・immutability・equality は<a href="datatypes.html">データ型</a>にあります。</p>
-
-<h3 id="numbers">数</h3>
+<h2 id="numbers">数</h2>
 <ul>
-<li>整数の範囲に制限はなく、ラップアラウンドも切り詰めも起きません。</li>
-<li>浮動小数点数の丸めは最近接偶数で、浮動小数点例外が起きてもプログラムは止まりません。複素数は <code>complex(re, im)</code> か虚数リテラル（<code>2i</code>）で作ります。</li>
-<li><code>_add</code> <code>_sub</code> <code>_mul</code> <code>_div</code> は整数・浮動小数点数・複素数を受け取り、それ以外の値を渡すとプログラムは止まります。型が混ざると、整数・浮動小数点数・複素数の順で高いほうの型に被演算子を揃え、結果もその型になります。</li>
-<li>整数を浮動小数点数に揃えるときは最も近い値に丸めます。浮動小数点数の範囲を超える整数を揃えると実行時エラーです。</li>
-<li>整数どうしの <code>_div</code> は0方向へ切り捨てた商で、除数が0なら実行時エラーです。浮動小数点数か複素数を含む割り算は、除数が0でも止まりません。浮動小数点数は無限大か NaN になり、複素数は各成分に同じ規則を当てた値になります。</li>
-<li>整数どうしの <code>_quo</code>（演算子 <code>//</code>）は負の無限大方向へ丸めた商で、<code>-7 // 2</code> は <code>-4</code> です。除数が0なら実行時エラーです。</li>
-<li>整数どうしの <code>_mod(a, b)</code> は <code>a - b * (a // b)</code>（符号は除数と同じ） で、除数が0なら実行時エラーです。</li>
-<li><code>_lt</code> <code>_le</code> <code>_gt</code> <code>_ge</code> は整数と浮動小数点数を型を揃えずに数学的な値で比べます。NaN を含むと <code>false</code> です。数でない値か複素数を渡すとプログラムは止まります。</li>
-<li><code>_eq</code> は型が違っても値が同じ数を等しいとします（<code>1 == 1.0</code>）。NaN は自分自身とも等しくありません。複素数は両方の成分が等しいときに等しくなります。<code>_ne</code> は <code>_eq</code> の逆です。</li>
+<li>整数どうしの割り算は3つあります。<code>_div</code> は0方向へ切り捨て、<code>_quo</code>（<code>//</code>）は負の無限大方向へ丸めます（<code>-7 // 2</code> は <code>-4</code>）。<code>_mod(a, b)</code> は <code>a - b * (a // b)</code> で、符号は除数と同じです。</li>
+<li>除数が0なら実行時エラーです。ただし浮動小数点数か複素数を含む <code>_div</code> は止まらず、無限大か NaN（複素数は成分ごと）になります。</li>
+<li><code>_lt</code> <code>_le</code> <code>_gt</code> <code>_ge</code> は整数と浮動小数点数を、型を揃えず数学的な値で比べます。NaN を含むと <code>false</code> で、複素数は実行時エラーです。</li>
+<li><code>_eq</code> は型が違っても値が同じ数を等しいとします（<code>1 == 1.0</code>）。複素数は両成分が等しいときに等しく、NaN は自分自身とも等しくありません。</li>
+<li>整数は最も近い浮動小数点数に丸めて揃え、範囲外は実行時エラーです。</li>
 </ul>
 
 <h2>特殊形式</h2>
-<table>
-<tr><th>形</th><th>意味</th></tr>
-<tr><td><code>Def{x, e}</code> / <code>Set{x, e}</code></td><td>変数の定義（右辺から前の変数が見える） / 代入</td></tr>
-<tr><td><code>Declare{x}</code></td><td><code>Def{x, none}</code> と同じ。ただし、<code>Def{x, e}</code> が <code>x</code> を定義する場所の変数（トップレベルでは読み込み中のファイルで定義した大域変数）に <code>x</code> がすでにあれば何もしない。値は <code>none</code></td></tr>
-<tr><td><code>Apply{f, Tuple{a, ...}}</code></td><td><code>f</code> の呼び出し</td></tr>
-<tr><td><code>Do{e, ...}</code></td><td>順に評価し、最後の値を返す</td></tr>
-<tr><td><code>If{c, a, b}</code></td><td><code>c</code> が <code>false</code> なら <code>b</code>、それ以外なら <code>a</code></td></tr>
-<tr><td><code>While{c, e}</code></td><td>繰り返し</td></tr>
-<tr><td><code>Lambda{Tuple{pattern, ...}, body}</code></td><td>関数</td></tr>
-<tr><td><code>Fusion{f, g}</code></td><td><code>f</code> を試し、<code>f</code> のどのパターンも合わなければ <code>g</code> を試す。<code>Fusion{none, g}</code> は <code>g</code></td></tr>
-<tr><td><code>Quote{e}</code>・<code>QuasiQuote{e}</code>・<code>UnQuote{e}</code></td><td>クオート・準クオート・アンクオート</td></tr>
-<tr><td><code>Handle{body, handler}</code>・<code>Perform{v}</code></td><td>代数的エフェクト</td></tr>
-<tr><td><code>Tuple{a, ...}</code></td><td>組</td></tr>
-</table>
-<p>これ以外の頭の M式（<code>Cons{x, y}</code> など）はコンストラクタで、引数を評価して同じ頭の M式を作ります。</p>
+<ul>
+<li><code>Def{x, e}</code>：右辺から <code>x</code> より前の変数が見えます。<code>Set{x, e}</code> は代入です。</li>
+<li><code>Declare{x}</code>：<code>Def{x, none}</code> と同じです。ただし <code>Def{x, e}</code> が <code>x</code> を定義する場所に <code>x</code> がすでにあれば何もしません。</li>
+<li><code>If{c, a, b}</code>：<code>c</code> が <code>false</code> のときだけ <code>b</code> です。</li>
+<li><code>Fusion{f, g}</code>：<code>f</code> のどのパターンも合わなければ <code>g</code> を試します。<code>Fusion{none, g}</code> は <code>g</code> です。</li>
+</ul>
 <!--ex t2_mexpr-->
 
 <h2 id="patterns">パターン</h2>
-<p>引数のパターンは次のいずれかです。</p>
 <ul>
-<li>変数 <code>x</code>。<code>_</code> は何にでも合い、何も束縛しません</li>
-<li>整数・文字列・<code>true</code>・<code>false</code>・<code>none</code>。等しい値に合い、何も束縛しません</li>
-<li><code>Quote{v}</code>。等しい値に合います（例 <code>Quote{x}</code> はシンボル <code>x</code> に合います）</li>
-<li><code>Head{p, ...}</code>。頭と引数の数が同じ M式に合います</li>
-<li><code>Head{p, ..., _Rest{x}}</code>。頭が同じで、<code>_Rest</code> の前の引数の数以上の引数を持つ M式に合い、残りの引数の <code>Tuple</code> を <code>x</code> に束縛します（構文は <code>Head{p, ..., x...}</code>）</li>
-<li><code>_TypeOf{p, type}</code>。<code>type</code> が値の <code>type</code> で、<code>p</code> が合うときに合います</li>
+<li><code>_</code>：何にでも合い、何も束縛しません。</li>
+<li><code>Head{p, ..., _Rest{x}}</code>：引数が <code>_Rest</code> の前の数以上ある M式に合い、残りの <code>Tuple</code> を <code>x</code> に束縛します。</li>
+<li><code>_TypeOf{p, type}</code>：値の <code>type</code> が <code>type</code> で <code>p</code> が合う値に合います。</li>
 </ul>
-<p>構文では <code>'none</code> が <code>Quote{none}</code>、<code>x @ Int</code> が <code>_TypeOf{x, Int}</code>（<code>Int</code> は変数）、<code>x :: xs</code> と <code>[a, b]</code> が <code>Cons</code> のパターンになります。</p>
 <!--ex t3_type-->
 
+<h2 id="partial">部分関数と融合</h2>
+<p>関数はパターンで引数を取るので、合わない引数があり得る部分関数です。<code>Fusion{f, g}</code>（構文は <code>f | g</code>）は、まず <code>f</code> を試し、どのパターンも合わなければ（ガードが偽のときも）<code>g</code> を試します。つないだ順に試すので、<code>f(0) := ...</code> のように同じ場所に続けて書いた定義も、書いた順に試す1つの関数です。</p>
+<pre>f := (0) -&gt; "zero" | (1) -&gt; "one"
+f(1)   // "one"
+f(7)   // どの腕にも合わず、プログラムが止まる</pre>
+<p>どれにも合わなかったときの挙動は、どこでも同じです。</p>
+<ul>
+<li>関数呼び出し・<code>match</code>・融合した関数は、値を返さずエラーのメッセージ（<code>matching failed</code>）を出してプログラムが止まります。次を探すのは、融合のつなぎ先だけです。</li>
+<li><code>Perform</code> は例外です。<code>Handle</code> のハンドラのどのパターンにも合わなければ、さらに外側のハンドラを探し、なければ <code>unhandled effect</code> で止まります。</li>
+</ul>
+
 <h2>代数的エフェクト</h2>
-<p><code>Handle{body, handler}</code> は <code>body</code> を評価します。<code>Perform{v}</code> は合うパターンを持つ一番近い <code>handler(v, k)</code> を呼びます。<code>k</code> は <code>Perform</code> の継続です。ハンドラは深いハンドラで、継続の中でも有効です。どのパターンにも合わなければ、さらに外側のハンドラを探します。</p>
-<p><code>k</code> は通常の関数で、何度でも、<code>Handle</code> が値を返したあとでも呼べます。継続を捕捉した時点で定義済みの変数は、再開した複数の計算で共有されます。再開のあとに <code>x := e</code> で定義した変数は、内側に書いた関数が参照しない限り、計算ごとに別の変数です。</p>
+<p><code>Perform{v}</code> は、合うパターンを持つ一番近い <code>handler(v, k)</code> を呼びます。ハンドラは継続の中でも有効です。<code>k</code> は通常の関数で、<code>Handle</code> が値を返したあとでも何度でも呼べます。</p>
+<p>継続を捕捉した時点で定義済みの変数は、再開した計算のあいだで共有されます。再開のあとに定義した変数は別です。</p>
 <!--ex t5_resume-->
 
 <h2>トップレベル</h2>
-<p>トップレベルの式を読むたびに大域変数 <code>parse</code> と <code>eval</code> を引き直すので、プログラムが差し替えると次の式から新しい定義で処理されます。プログラムの中の <code>Apply{eval, ...}</code> も差し替えた <code>eval</code> を呼びます。</p>
+<p>式を読むたびに大域変数 <code>parse</code> と <code>eval</code> を引き直すので、差し替えると次の式から新しい定義で処理されます。<code>Apply{eval, ...}</code> も差し替えた <code>eval</code> を呼びます。</p>
 <ul>
-<li><code>parse</code>：<code>文字列 -> Tuple{M式, 文字列の残り}</code>。空白は自分で読み飛ばし、空白しか残っていなければ <code>Tuple{Eof{}, ""}</code> を返します。差し替える <code>parse</code> は <code>Eof{}</code> をそのまま通します。</li>
+<li><code>parse</code>：<code>文字列 -> Tuple{M式, 文字列の残り}</code>。空白しか残っていなければ <code>Tuple{Eof{}, ""}</code> を返し、差し替える <code>parse</code> は <code>Eof{}</code> をそのまま通します。</li>
 <li><code>eval</code>：<code>M式 -> 値</code>。</li>
 </ul>
 <!--ex t6_eval-->

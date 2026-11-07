@@ -1,79 +1,56 @@
 <!--title Values, patterns, M-expressions-->
 <h1>Values, patterns, M-expressions</h1>
-<p class="lead">The evaluator works on M-expressions. This page defines the kinds of values, the special forms, patterns, effects and the top level.</p>
+<p class="lead">The evaluator works on M-expressions. An M-expression whose head is not a special form is a constructor: its arguments are evaluated and an M-expression with the same head is built. A pattern is written like a constructor and binds variables when it matches. Mixed number types are raised to the highest type, and mistakes are runtime errors. The kinds of values are in <a href="datatypes.html">Data types</a>.</p>
 
 <h2>M-expressions</h2>
-<p>An M-expression is a symbol (<code>x</code>), an integer (<code>42</code>, <code>-1</code>), a float (<code>1.5</code>), a string (<code>"abc"</code>) or <code>Head{a, b, ...}</code>. A symbol is a letter, <code>_</code> or <code>%</code> followed by letters, digits and <code>_</code>. A string is up to 65535 bytes and <code>Head{...}</code> has no limit on the number of arguments. A string at the top level has no effect, so it can be used as a comment.</p>
-<p><code>true</code>, <code>false</code> and <code>none</code> are literals. Each is the symbol of the same name, and its value is that symbol, so <code>true</code> and <code>Quote{true}</code> have the same value. They are not variables: <code>Def{true, e}</code>, <code>Set{true, e}</code> and <code>Declare{true}</code> stop the program with a message before the expression runs.</p>
+<p><code>true</code>, <code>false</code> and <code>none</code> are literals whose value is the symbol of the same name. They are not variables, so <code>Def{true, e}</code>, <code>Set{true, e}</code> and <code>Declare{true}</code> stop the program before running. A top-level string is a comment.</p>
 
-<h2>Values</h2>
-<table>
-<tr><th><code>type</code></th><th>Value</th></tr>
-<tr><td><code>Int</code></td><td>Integer of arbitrary precision</td></tr>
-<tr><td><code>Float</code></td><td>Float, IEEE 754 binary64</td></tr>
-<tr><td><code>Complex</code></td><td>Complex number, a pair of floats</td></tr>
-<tr><td><code>String</code></td><td>String</td></tr>
-<tr><td><code>Symbol</code></td><td>Symbol (<code>true</code>, <code>false</code> and <code>none</code> are literals of symbols)</td></tr>
-<tr><td><code>Expr</code></td><td><code>Head{a, ...}</code></td></tr>
-<tr><td><code>Function</code></td><td>Lambda, fusion, builtin function or continuation</td></tr>
-<tr><td><code>Array</code></td><td>Mutable array of fixed length made by <code>array(n)</code></td></tr>
-<tr><td><code>Plain</code></td><td>Mutable array of elements of one type, made by <code>plain_array(kind, n)</code></td></tr>
-</table>
-<p>The types of values, immutability and equality are in <a href="datatypes.html">Data types</a>.</p>
-
-<h3 id="numbers">Numbers</h3>
+<h2 id="numbers">Numbers</h2>
 <ul>
-<li>No integer is out of range, and nothing wraps around or is truncated.</li>
-<li>Floats round to nearest even, and floating-point exceptions do not stop the program. A complex number is made by <code>complex(re, im)</code> or an imaginary literal (<code>2i</code>).</li>
-<li><code>_add</code> <code>_sub</code> <code>_mul</code> <code>_div</code> take integers, floats and complex numbers, and stop the program on any other value. When the types are mixed, the operands are raised to the higher type in the order integer, float, complex, and the result has that type.</li>
-<li>An integer raised to a float is rounded to the nearest value. Raising an integer beyond the range of floats is a runtime error.</li>
-<li><code>_div</code> of two integers is the quotient truncated toward 0, and a zero divisor is a runtime error. A division that involves a float or a complex number does not stop on a zero divisor: a float gives an infinity or NaN, and a complex number gives the same rule applied to its components.</li>
-<li><code>_quo</code> of two integers (the operator <code>//</code>) is the quotient rounded toward minus infinity, so <code>-7 // 2</code> is <code>-4</code>. A zero divisor is a runtime error.</li>
-<li><code>_mod(a, b)</code> of two integers is <code>a - b * (a // b)</code>, which has the sign of the divisor, and a zero divisor is a runtime error.</li>
-<li><code>_lt</code> <code>_le</code> <code>_gt</code> <code>_ge</code> compare an integer and a float by their mathematical values without raising the type, and give <code>false</code> when NaN is involved. They stop the program on a value that is not a number and on a complex number.</li>
-<li><code>_eq</code> says that numbers of different types are equal when their values are the same (<code>1 == 1.0</code>). NaN is not equal to itself. Complex numbers are equal when both components are equal. <code>_ne</code> is the opposite of <code>_eq</code>.</li>
+<li>Integer division: <code>_div</code> truncates toward 0. <code>_quo</code> (the operator <code>//</code>) rounds toward minus infinity, so <code>-7 // 2</code> is <code>-4</code>. <code>_mod(a, b)</code> is <code>a - b * (a // b)</code> and has the sign of the divisor.</li>
+<li>A zero divisor is a runtime error, except for <code>_div</code> with a float or a complex number, which gives an infinity or NaN (per component for a complex number).</li>
+<li><code>_lt</code> <code>_le</code> <code>_gt</code> <code>_ge</code> compare an integer and a float by their mathematical values, without raising the type. They give <code>false</code> when NaN is involved and are a runtime error on a complex number.</li>
+<li><code>_eq</code> treats numbers of different types as equal when their values are the same (<code>1 == 1.0</code>). Complex numbers are equal when both components are equal. NaN is not equal to itself.</li>
+<li>An integer is raised to the nearest float, and one beyond the range of floats is a runtime error.</li>
 </ul>
 
 <h2>Special forms</h2>
-<table>
-<tr><th>Form</th><th>Meaning</th></tr>
-<tr><td><code>Def{x, e}</code> / <code>Set{x, e}</code></td><td>Define a variable (<code>e</code> sees the previous <code>x</code>) / assign a variable</td></tr>
-<tr><td><code>Declare{x}</code></td><td><code>Def{x, none}</code>, or nothing when <code>x</code> is already a variable of the place where <code>Def{x, e}</code> defines <code>x</code> (at the top level, a global variable defined by the file being loaded). The value is <code>none</code></td></tr>
-<tr><td><code>Apply{f, Tuple{a, ...}}</code></td><td>Call <code>f</code></td></tr>
-<tr><td><code>Do{e, ...}</code></td><td>Evaluate in order, return the last</td></tr>
-<tr><td><code>If{c, a, b}</code></td><td><code>b</code> when <code>c</code> is <code>false</code>, otherwise <code>a</code></td></tr>
-<tr><td><code>While{c, e}</code></td><td>Loop</td></tr>
-<tr><td><code>Lambda{Tuple{pattern, ...}, body}</code></td><td>Function</td></tr>
-<tr><td><code>Fusion{f, g}</code></td><td>Try <code>f</code>, then <code>g</code> if no pattern of <code>f</code> matches. <code>Fusion{none, g}</code> is <code>g</code></td></tr>
-<tr><td><code>Quote{e}</code>, <code>QuasiQuote{e}</code>, <code>UnQuote{e}</code></td><td>Quotation</td></tr>
-<tr><td><code>Handle{body, handler}</code>, <code>Perform{v}</code></td><td>Algebraic effects</td></tr>
-<tr><td><code>Tuple{a, ...}</code></td><td>Tuple</td></tr>
-</table>
-<p>An M-expression with any other head, such as <code>Cons{x, y}</code>, is a constructor: its arguments are evaluated and an M-expression with the same head is built.</p>
+<ul>
+<li><code>Def{x, e}</code>: <code>e</code> sees the previous variables, up to but not including <code>x</code>. <code>Set{x, e}</code> assigns.</li>
+<li><code>Declare{x}</code>: the same as <code>Def{x, none}</code>, except that nothing happens when <code>x</code> is already a variable of the place where <code>Def{x, e}</code> defines <code>x</code>.</li>
+<li><code>If{c, a, b}</code>: <code>b</code> only when <code>c</code> is <code>false</code>.</li>
+<li><code>Fusion{f, g}</code>: tries <code>g</code> when no pattern of <code>f</code> matches. <code>Fusion{none, g}</code> is <code>g</code>.</li>
+</ul>
 <!--ex t2_mexpr-->
 
 <h2 id="patterns">Patterns</h2>
-<p>A parameter pattern is one of:</p>
 <ul>
-<li>a variable <code>x</code>, or <code>_</code> (matches anything and binds nothing)</li>
-<li>an integer, a string, <code>true</code>, <code>false</code> or <code>none</code> (matches an equal value and binds nothing)</li>
-<li><code>Quote{v}</code> (matches an equal value, e.g. <code>Quote{x}</code> matches the symbol <code>x</code>)</li>
-<li><code>Head{p, ...}</code> (matches an M-expression with the same head and arity)</li>
-<li><code>Head{p, ..., _Rest{x}}</code> (matches an M-expression with the same head and at least as many arguments as the ones before <code>_Rest</code>, and binds <code>x</code> to a <code>Tuple</code> of the remaining arguments; written <code>Head{p, ..., x...}</code>)</li>
-<li><code>_TypeOf{p, type}</code> (<code>p</code> matches and <code>type</code> is <code>type</code> of the value)</li>
+<li><code>_</code>: matches anything and binds nothing.</li>
+<li><code>Head{p, ..., _Rest{x}}</code>: matches an M-expression with at least as many arguments as the patterns before <code>_Rest</code>, and binds <code>x</code> to a <code>Tuple</code> of the rest.</li>
+<li><code>_TypeOf{p, type}</code>: matches a value whose <code>type</code> is <code>type</code> and which <code>p</code> matches.</li>
 </ul>
-<p>In the syntax, <code>'none</code> is <code>Quote{none}</code>, <code>x @ Int</code> is <code>_TypeOf{x, Int}</code>, where <code>Int</code> is a variable, and <code>x :: xs</code> and <code>[a, b]</code> are patterns of <code>Cons</code>.</p>
 <!--ex t3_type-->
 
+<h2 id="partial">Partial functions and fusion</h2>
+<p>A function takes its arguments by patterns, so it is a partial function: some arguments may not match. <code>Fusion{f, g}</code> (written <code>f | g</code>) tries <code>f</code> first, and tries <code>g</code> if none of its patterns match (also when a guard is false). Functions are tried in the order they are joined, so definitions written one after another in the same place, such as <code>f(0) := ...</code>, form one function tried in the order written.</p>
+<pre>f := (0) -&gt; "zero" | (1) -&gt; "one"
+f(1)   // "one"
+f(7)   // matches no arm, and the program stops</pre>
+<p>What happens when nothing matches is the same everywhere.</p>
+<ul>
+<li>A function call, a <code>match</code> and a fused function return no value: they print an error message (<code>matching failed</code>) and the program stops. Only the next function of a fusion is tried.</li>
+<li><code>Perform</code> is the exception. If no pattern of a handler of <code>Handle</code> matches, the next outer handler is searched, and with none the program stops with <code>unhandled effect</code>.</li>
+</ul>
+
 <h2>Algebraic effects</h2>
-<p><code>Handle{body, handler}</code> evaluates <code>body</code>. <code>Perform{v}</code> calls the nearest <code>handler(v, k)</code> that has a matching pattern, where <code>k</code> is the continuation of the <code>Perform</code>. Handlers are deep: they stay installed in the continuation. When no pattern matches, the effect goes to the outer handler.</p>
-<p><code>k</code> is an ordinary function and can be called any number of times, even after <code>Handle</code> has returned. Variables that are defined when the continuation is captured are shared between the resumed copies. A variable defined by <code>x := e</code> after the resumption is defined separately in each copy, unless a function written inside refers to it.</p>
+<p><code>Perform{v}</code> calls the nearest <code>handler(v, k)</code> that has a matching pattern. Handlers stay installed in the continuation. <code>k</code> is an ordinary function and can be called any number of times, even after <code>Handle</code> has returned.</p>
+<p>Variables defined when the continuation is captured are shared between the resumed copies. Variables defined after the resumption are separate.</p>
 <!--ex t5_resume-->
 
 <h2>Top level</h2>
-<p>The loop looks up the global variables <code>parse</code> and <code>eval</code> for every expression, so a program can replace them and the next expression is handled by the new definitions. <code>Apply{eval, ...}</code> in a program also calls the replaced <code>eval</code>.</p>
+<p>The loop looks up the global variables <code>parse</code> and <code>eval</code> for every expression, so replacing them takes effect from the next expression. <code>Apply{eval, ...}</code> also calls the replaced <code>eval</code>.</p>
 <ul>
-<li><code>parse</code>: <code>String -&gt; Tuple{M-expression, rest String}</code>. It skips blanks itself and returns <code>Tuple{Eof{}, ""}</code> when only blanks are left. A replacement <code>parse</code> passes <code>Eof{}</code> through.</li>
+<li><code>parse</code>: <code>String -&gt; Tuple{M-expression, rest String}</code>. It returns <code>Tuple{Eof{}, ""}</code> when only blanks are left, and a replacement <code>parse</code> passes <code>Eof{}</code> through.</li>
 <li><code>eval</code>: <code>M-expression -&gt; value</code>.</li>
 </ul>
 <!--ex t6_eval-->

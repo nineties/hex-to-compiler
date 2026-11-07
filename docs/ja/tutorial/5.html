@@ -37,7 +37,7 @@
 </ol></details></nav>
 <main>
 <h1>5. 代数的エフェクト</h1>
-<p class="lead"><code>handle e with h</code> と <code>perform v</code> は深いハンドラの代数的エフェクトです。継続を何度でも呼べるので、例外・生成器・非決定計算を同じ仕組みで書けます。</p>
+<p class="lead"><code>perform v</code> は、一番近い <code>handle</code> のハンドラを <code>h(v, k)</code> で呼びます。<code>k</code> は <code>perform</code> の継続で、何度でも呼べるので、例外・生成器・非決定計算が同じ仕組みで書けます。</p>
 
 <h2>例外</h2>
 <div class="example">
@@ -55,24 +55,9 @@ Error{&quot;division by zero&quot;}
 before
 Error{&quot;division by zero&quot;}</pre>
 </div>
-<p><code>perform v</code> は、<code>v</code> に合うパターンを持つ一番近いハンドラを <code>h(v, k)</code> で呼びます。<code>k</code> は <code>perform</code> の継続です。ハンドラの値が <code>handle</code> 式の値になり、<code>k</code> を呼ばなければ残りの計算は捨てられます（3つ目の例で <code>after</code> が出ない）。内側のハンドラに合うパターンがなければ外側のハンドラを試します。</p>
+<p>ハンドラの値が <code>handle</code> 式の値です。<code>k</code> を呼ばなければ残りの計算は捨てられます。</p>
 
-<h2>再開</h2>
-<div class="example">
-<p class="file">t5_resume.pk</p>
-<pre class="pk"><span class="tok-name">ask</span><span class="tok-op">(</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-kw">perform</span> <span class="tok-name">Ask</span><span class="tok-op">{</span><span class="tok-op">}</span>
-
-<span class="tok-name">with_answer</span><span class="tok-op">(</span><span class="tok-name">v</span><span class="tok-op">,</span> <span class="tok-name">f</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-kw">handle</span> <span class="tok-name">f</span><span class="tok-op">(</span><span class="tok-op">)</span> <span class="tok-kw">with</span> <span class="tok-op">(</span><span class="tok-name">Ask</span><span class="tok-op">{</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">k</span><span class="tok-op">)</span> <span class="tok-op">-&gt;</span> <span class="tok-name">k</span><span class="tok-op">(</span><span class="tok-name">v</span><span class="tok-op">)</span>
-
-<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">with_answer</span><span class="tok-op">(</span><span class="tok-num">21</span><span class="tok-op">,</span> <span class="tok-op">(</span><span class="tok-op">)</span> <span class="tok-op">-&gt;</span> <span class="tok-name">ask</span><span class="tok-op">(</span><span class="tok-op">)</span> <span class="tok-op">*</span> <span class="tok-num">2</span><span class="tok-op">)</span><span class="tok-op">)</span>
-<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">with_answer</span><span class="tok-op">(</span><span class="tok-num">5</span><span class="tok-op">,</span> <span class="tok-op">(</span><span class="tok-op">)</span> <span class="tok-op">-&gt;</span> <span class="tok-name">ask</span><span class="tok-op">(</span><span class="tok-op">)</span> <span class="tok-op">+</span> <span class="tok-name">ask</span><span class="tok-op">(</span><span class="tok-op">)</span><span class="tok-op">)</span><span class="tok-op">)</span></pre>
-<p class="label">出力</p>
-<pre class="out">42
-10</pre>
-</div>
-<p><code>k(x)</code> は <code>perform</code> が <code>x</code> を返したものとして計算を再開します。ハンドラは深く、再開した先の <code>perform</code> も同じハンドラが受けます。</p>
-
-<h2>生成器</h2>
+<h2>再開と生成器</h2>
 <div class="example">
 <p class="file">t5_generator.pk</p>
 <pre class="pk"><span class="tok-kw">fun</span> <span class="tok-name">walk</span>
@@ -92,7 +77,7 @@ yield 2
 yield 3
 [1, 2, 3]</pre>
 </div>
-<p>同じ <code>walk</code> に対してハンドラが値の使い方を決めます。2つ目は <code>v :: k(none)</code> で結果をリストに集めています。</p>
+<p><code>k(x)</code> は <code>perform</code> が <code>x</code> を返したものとして計算を再開します。同じ <code>walk</code> でも、ハンドラが値の使い方を決めます。</p>
 
 <h2>多重再開</h2>
 <div class="example">
@@ -107,7 +92,8 @@ yield 3
 <p class="label">出力</p>
 <pre class="out">[Tuple{1, &quot;a&quot;}, Tuple{1, &quot;b&quot;}, Tuple{2, &quot;a&quot;}, Tuple{2, &quot;b&quot;}]</pre>
 </div>
-<p><code>k</code> は通常の関数で、<code>handle</code> が値を返したあとでも何度でも呼べます。ここでは候補ごとに <code>k</code> を呼んで結果を連結しています。N クイーンを同じ方法で解いたサンプルが <a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/examples/queens.pk">planck/examples/queens.pk</a> です。</p>
+<p>候補ごとに <code>k</code> を呼んで結果を連結しています。N クイーンは <a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/examples/queens.pk">planck/examples/queens.pk</a> にあります。</p>
+
 <nav class="pager"><a class="prev" href="4.html"><small>前のページ</small>4. ライブラリ</a><a class="next" href="6.html"><small>次のページ</small>6. クオートと評価器</a></nav>
 </main>
 </div>

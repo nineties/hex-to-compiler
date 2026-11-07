@@ -38,21 +38,23 @@
 </ol></details></nav>
 <main>
 <h1>構文の定義</h1>
-<p class="lead"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/syntax.pk">planck/syntax.pk</a> は、planck の構文を packrat パーサの規則として定義し、ファイルの途中で <code>parse</code> を差し替えます。構文は処理系に組み込まれておらず、planck のプログラムの一部です。</p>
-<p>ファイルは2つの部分に分かれます。<code>parse</code> を差し替えるまでは、字句・動作が呼ぶ関数・文法の文法を M式で書きます。差し替えたあとの部分は、それまでに定義した規則で読まれ、planck の構文を <code>::=</code> で宣言します。</p>
+<p class="lead"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/syntax.pk">planck/syntax.pk</a> は、planck の構文を packrat パーサの規則として定義します。構文は処理系に組み込まれず、planck のプログラムです。すべての構文は M式の木に読み替えられ、ファイルの途中で <code>parse</code> を差し替えると有効になります。</p>
+<ul>
+<li>差し替えるまでは、字句・動作が呼ぶ関数・文法の文法を M式で書きます。</li>
+<li>差し替えたあとは、planck の構文を <code>::=</code> で宣言します。</li>
+</ul>
 
 <h2>字句</h2>
-<p>識別子・整数・文字列などの字句は、構文解析式でなく関数で書きます。字句の関数は読めたら次の位置を返します。</p>
+<p>識別子・整数・文字列などの字句は、読めたら次の位置を返す関数で書き、<code>_define_rule</code> にそのまま渡します。</p>
 <div class="example">
 <p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/syntax.pk#L57-L58">planck/syntax.pk: Def{peg_tok_ident</a></p>
 <pre class="pk"><span class="tok-name">Def</span><span class="tok-op">{</span><span class="tok-name">peg_tok_ident</span><span class="tok-op">,</span> <span class="tok-name">Lambda</span><span class="tok-op">{</span><span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">p</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">peg_scan_ident</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">p</span><span class="tok-op">,</span> <span class="tok-name">true</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span>
 <span class="tok-name">Def</span><span class="tok-op">{</span><span class="tok-name">peg_tok_rule_name</span><span class="tok-op">,</span> <span class="tok-name">Lambda</span><span class="tok-op">{</span><span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">p</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">peg_scan_ident</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">p</span><span class="tok-op">,</span> <span class="tok-name">false</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span></pre>
 </div>
-<p>予約語の表 <code>peg_reserved</code> の単語と <code>f"</code> の <code>f</code> は識別子になりません（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/syntax.pk#L12-L32"><code>planck/syntax.pk: Def{peg_reserved</code></a>）。関数は <code>_define_rule</code> にそのまま渡せば規則になります（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/syntax.pk#L212-L218"><code>planck/syntax.pk: Apply{_define_rule, Tuple{Quote{ident}</code></a>）。</p>
-<p>規則の動作は規則を定義するときにコンパイルされます。名前はコンパイル時に決まるので、動作が呼ぶ関数 <code>peg_*</code> の定義（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/syntax.pk#L233-L1082"><code>planck/syntax.pk: Functions of the syntax sugar</code></a>）は、文法の規則（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/syntax.pk#L1495-L2336"><code>planck/syntax.pk: The grammar of the grammar, declared with</code></a>）より前に置きます。</p>
+<p>動作は規則を定義するときにコンパイルされるので、動作が呼ぶ関数 <code>peg_*</code> は文法の規則より前に置きます。</p>
 
 <h2 id="decl">文法の宣言</h2>
-<p><code>::=</code> は規則 <code>syntax_decl</code> が読み、<code>_define_rule</code> を呼ぶ木にします。<code>syntax_decl</code> が使う規則 <code>g_choice</code>・<code>g_alt</code>・<code>g_item</code>・<code>g_suffix</code>・<code>g_primary</code> が文法の文法です。これらの規則は宣言が作る形のとおりに、まず M式で書きます（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/syntax.pk#L1380-L1453"><code>planck/syntax.pk: Grammar of the grammar</code></a>）。</p>
+<p><code>::=</code> は規則 <code>syntax_decl</code> が読み、<code>_define_rule</code> を呼ぶ木にします。<code>syntax_decl</code> が使う <code>g_choice</code>・<code>g_alt</code>・<code>g_item</code>・<code>g_suffix</code>・<code>g_primary</code> が文法の文法で、宣言が作る形のとおりに、まず M式で書きます。</p>
 <div class="example">
 <p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/syntax.pk#L1413-L1425">planck/syntax.pk: Apply{_define_rule, Tuple{Quote{syntax_decl}</a></p>
 <pre class="pk"><span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">_define_rule</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">Quote</span><span class="tok-op">{</span><span class="tok-name">syntax_decl</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">Quote</span><span class="tok-op">{</span>
@@ -69,7 +71,7 @@
     <span class="tok-name">Act</span><span class="tok-op">{</span><span class="tok-name">Seq</span><span class="tok-op">{</span><span class="tok-name">Many1</span><span class="tok-op">{</span><span class="tok-name">g_item</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">Option</span><span class="tok-op">{</span><span class="tok-name">Seq</span><span class="tok-op">{</span><span class="tok-name">same</span><span class="tok-op">,</span> <span class="tok-name">block</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">,</span>
         <span class="tok-name">Lambda</span><span class="tok-op">{</span><span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">items</span><span class="tok-op">,</span> <span class="tok-name">act</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">Do</span><span class="tok-op">{</span><span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">peg_alt</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">items</span><span class="tok-op">,</span> <span class="tok-name">act</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span></pre>
 </div>
-<p>選択肢の項目と動作は <code>g_alt</code> が <code>peg_alt</code> で <code>Act{Seq{...}, Lambda{Tuple{Tuple{ラベル, ...}}, 動作}}</code> に組み替えます（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/syntax.pk#L1401-L1409"><code>planck/syntax.pk: the items and the action of an alternative</code></a>）。ラベルは動作の無名関数の引数パターンになります。</p>
+<p>選択肢のラベルは、動作の無名関数の引数パターンになります。<code>syntax_decl</code> は <code>expr</code> の最初の選択肢なので、<code>::=</code> は式を書ける所ならどこにでも書け、次のトップレベルの式から新しい規則で読まれます。</p>
 <div class="example">
 <p class="file">i_decl.pk</p>
 <pre class="pk"><span class="tok-name">use</span><span class="tok-op">(</span><span class="tok-str">"pretty"</span><span class="tok-op">)</span>
@@ -88,60 +90,39 @@
   }
 }</pre>
 </div>
-<p><code>syntax_decl</code> は <code>expr</code> の最初の選択肢なので、<code>::=</code> は式を書ける所ならどこにでも書けます。次のトップレベルの式から新しい規則で読みます。</p>
 
 <h2>parse の差し替え</h2>
-<p>動作を書く式の構文は、planck の規則を書くのに足りる最小のものです。読めるのは M式・呼び出し・<code>`e</code>・<code>'e</code>・<code>!e</code>・ブロックです（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/syntax.pk#L1455-L1488"><code>planck/syntax.pk: The expressions of an action</code></a>）。そのあとの2行で <code>parse</code> を切り替えます。</p>
+<p>動作を書く式の構文は最小のものです（M式・呼び出し・準クオート・ブロック）。そのあとで <code>parse</code> を切り替え、文法の文法自体も <code>::=</code> で宣言し直します。</p>
 <div class="example">
 <p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/syntax.pk#L1492-L1493">planck/syntax.pk: Def{parse_mexpr, parse}</a></p>
 <pre class="pk"><span class="tok-name">Def</span><span class="tok-op">{</span><span class="tok-name">parse_mexpr</span><span class="tok-op">,</span> <span class="tok-name">parse</span><span class="tok-op">}</span>
 <span class="tok-name">Set</span><span class="tok-op">{</span><span class="tok-name">parse</span><span class="tok-op">,</span> <span class="tok-name">Lambda</span><span class="tok-op">{</span><span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">s</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">peg_parse</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">Quote</span><span class="tok-op">{</span><span class="tok-name">toplevel</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">s</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span></pre>
 </div>
-<p>M式のリーダを <code>parse_mexpr</code> として残し、<code>parse</code> を規則 <code>toplevel</code> で1式読む関数にします。差し替えは <code>Def</code> でなく <code>Set</code> です。<code>init.pk</code> の <code>load</code> の中の <code>parse</code> は、指す変数がすでに決まっています。<code>Def</code> では新しい変数が増えるだけで、<code>load</code> が読むライブラリは古い <code>parse</code> で読まれます。planck0 は式ごとに <code>parse</code> を引き直すので（<a href="planck0.html">planck0</a>）、切り替えたあとの式は上の規則で読まれます。</p>
-<p><code>toplevel</code> は <code>expr</code> を1つ読み、<code>;</code>・改行・次の式の始まりのどれかを確かめます（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/syntax.pk#L1788"><code>planck/syntax.pk: toplevel ::= e:expr</code></a>）。</p>
-<p><code>primary</code> に <code>ident{expr, ...}</code> の選択肢があるので、M式もそのまま式として読めます。</p>
-<p>続いて文法の文法自体を <code>::=</code> で宣言し直します（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/syntax.pk#L1495-L1524"><code>planck/syntax.pk: The grammar of the grammar, declared with</code></a>）。宣言し直した規則は同じ名前の規則を置き換え、2つの書き方が作る規則は同じです。ここから先の planck の規則は <code>::=</code> で書きます。</p>
+<p>M式のリーダを <code>parse_mexpr</code> として残し、<code>parse</code> を規則 <code>toplevel</code> で1式読む関数にします。差し替えは <code>Def</code> でなく <code>Set</code> です。<code>load</code> が使う <code>parse</code> はすでに決まった変数なので、<code>Def</code> では新しい変数が増えるだけで、ライブラリは古い <code>parse</code> で読まれます。</p>
 
 <h2>式</h2>
-<p>規則は結合の強い順に宣言し、どの規則も宣言済みの規則だけを参照するようにします。<code>unary</code>・<code>postfix</code>・<code>mul_expr</code>・<code>add_expr</code> から <code>or_expr</code> まで、続いてパターン、<code>arrow</code>・<code>union</code>・<code>primary</code>・<code>expr</code> の順です（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/syntax.pk#L1526-L2336"><code>planck/syntax.pk: The rules of planck</code></a>）。宣言した規則は、それまでの規則を読むのに使っていた同じ名前の小さな規則を置き換えます。加減算の規則は次のとおりです。</p>
+<p>規則は結合の強い順に宣言し、宣言済みの規則だけを参照します。</p>
 <div class="example">
 <p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/syntax.pk#L1569-L1571">planck/syntax.pk: add_expr ::= a:add_expr &quot;+</a></p>
 <pre class="pk">add_expr <span class="tok-op">::=</span> <span class="tok-name">a</span><span class="tok-op">:</span>add_expr <span class="tok-str">"+"</span> <span class="tok-name">b</span><span class="tok-op">:</span>mul_expr <span class="tok-op">{</span> <span class="tok-op">`</span><span class="tok-name">_add</span><span class="tok-op">(</span><span class="tok-op">!</span><span class="tok-name">a</span><span class="tok-op">,</span> <span class="tok-op">!</span><span class="tok-name">b</span><span class="tok-op">)</span> <span class="tok-op">}</span>
            <span class="tok-op">|</span> <span class="tok-name">a</span><span class="tok-op">:</span>add_expr <span class="tok-name">minus</span> <span class="tok-name">b</span><span class="tok-op">:</span>mul_expr <span class="tok-op">{</span> <span class="tok-op">`</span><span class="tok-name">_sub</span><span class="tok-op">(</span><span class="tok-op">!</span><span class="tok-name">a</span><span class="tok-op">,</span> <span class="tok-op">!</span><span class="tok-name">b</span><span class="tok-op">)</span> <span class="tok-op">}</span>
            <span class="tok-op">|</span> <span class="tok-name">mul_expr</span></pre>
 </div>
-<p><code>add_expr</code> は直接左再帰なので左結合です。動作は準クオートで、<code>!a</code> と <code>!b</code> がラベルの値になり、<code>Apply{_add, Tuple{a, b}}</code> を作ります。<code>minus</code> の中の <code>same</code> は次の字句が同じ行にあるときだけ成功するので、行頭の <code>-1</code> は新しい式になります（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/syntax.pk#L1532"><code>planck/syntax.pk: minus ::= same</code></a>）。</p>
-<p>動作が返すのは評価器が受け取る M式そのものです。<code>1 + 2</code> は <code>Apply{_add, Tuple{1, 2}}</code> になり、M式で直接書いた場合と同じ木です。</p>
-<div class="example">
-<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/syntax.pk#L1716-L1731">planck/syntax.pk: primary ::= if_expr</a></p>
-<pre class="pk">primary <span class="tok-op">::=</span> <span class="tok-name">if_expr</span>
-          <span class="tok-op">|</span> <span class="tok-kw">'while</span> <span class="tok-str">"("</span> <span class="tok-name">c</span><span class="tok-op">:</span>expr <span class="tok-str">")"</span> <span class="tok-name">b</span><span class="tok-op">:</span>expr <span class="tok-op">{</span> <span class="tok-name">peg_while</span><span class="tok-op">(</span><span class="tok-name">c</span><span class="tok-op">,</span> <span class="tok-name">b</span><span class="tok-op">)</span> <span class="tok-op">}</span>
-          <span class="tok-op">|</span> <span class="tok-kw">'handle</span> <span class="tok-name">b</span><span class="tok-op">:</span>expr <span class="tok-kw">'with</span> <span class="tok-name">h</span><span class="tok-op">:</span>union <span class="tok-op">{</span> <span class="tok-op">`</span><span class="tok-name">Handle</span><span class="tok-op">{</span><span class="tok-op">!</span><span class="tok-name">b</span><span class="tok-op">,</span> <span class="tok-op">!</span><span class="tok-name">h</span><span class="tok-op">}</span> <span class="tok-op">}</span>
-          <span class="tok-op">|</span> <span class="tok-kw">'perform</span> <span class="tok-name">v</span><span class="tok-op">:</span>unary <span class="tok-op">{</span> <span class="tok-op">`</span><span class="tok-name">Perform</span><span class="tok-op">{</span><span class="tok-op">!</span><span class="tok-name">v</span><span class="tok-op">}</span> <span class="tok-op">}</span>
-          <span class="tok-op">|</span> <span class="tok-name">block</span>
-          <span class="tok-op">|</span> <span class="tok-name">embed</span>
-          <span class="tok-op">|</span> <span class="tok-name">h</span><span class="tok-op">:</span>ident <span class="tok-kw">nospace</span><span class="tok-op">(</span><span class="tok-str">"{"</span><span class="tok-op">)</span> <span class="tok-name">args</span><span class="tok-op">:</span><span class="tok-kw">delimited</span><span class="tok-op">(</span><span class="tok-name">expr</span><span class="tok-op">,</span> <span class="tok-str">","</span><span class="tok-op">)</span> <span class="tok-str">"}"</span> <span class="tok-op">{</span> <span class="tok-name">mexpr</span><span class="tok-op">(</span><span class="tok-name">h</span><span class="tok-op">,</span> <span class="tok-name">args</span><span class="tok-op">)</span> <span class="tok-op">}</span>
-          <span class="tok-op">|</span> <span class="tok-name">istr_open</span> <span class="tok-name">parts</span><span class="tok-op">:</span><span class="tok-op">(</span><span class="tok-name">istr_text</span> <span class="tok-name">istr_hole</span> <span class="tok-name">expr</span> <span class="tok-str">"}"</span><span class="tok-op">)</span><span class="tok-op">*</span> <span class="tok-name">last</span><span class="tok-op">:</span>istr_text <span class="tok-name">istr_close</span> <span class="tok-op">{</span> <span class="tok-name">peg_interp</span><span class="tok-op">(</span><span class="tok-name">parts</span><span class="tok-op">,</span> <span class="tok-name">last</span><span class="tok-op">)</span> <span class="tok-op">}</span>
-          <span class="tok-op">|</span> <span class="tok-name">ident</span>
-          <span class="tok-op">|</span> <span class="tok-name">t</span><span class="tok-op">:</span>float <span class="tok-op">{</span> <span class="tok-op">`</span><span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">_float</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-op">!</span><span class="tok-name">t</span><span class="tok-op">}</span><span class="tok-op">}</span> <span class="tok-op">}</span>
-          <span class="tok-op">|</span> <span class="tok-name">integer</span>
-          <span class="tok-op">|</span> <span class="tok-name">string</span>
-          <span class="tok-op">|</span> <span class="tok-str">"("</span> <span class="tok-str">")"</span> <span class="tok-op">{</span> <span class="tok-op">'</span><span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-op">}</span> <span class="tok-op">}</span>
-          <span class="tok-op">|</span> <span class="tok-str">"("</span> <span class="tok-name">es</span><span class="tok-op">:</span><span class="tok-kw">delimited1</span><span class="tok-op">(</span><span class="tok-name">expr</span><span class="tok-op">,</span> <span class="tok-str">","</span><span class="tok-op">)</span> <span class="tok-str">")"</span> <span class="tok-op">{</span> <span class="tok-name">peg_group</span><span class="tok-op">(</span><span class="tok-name">es</span><span class="tok-op">)</span> <span class="tok-op">}</span>
-          <span class="tok-op">|</span> <span class="tok-str">"["</span> <span class="tok-name">es</span><span class="tok-op">:</span><span class="tok-kw">delimited</span><span class="tok-op">(</span><span class="tok-name">expr</span><span class="tok-op">,</span> <span class="tok-str">","</span><span class="tok-op">)</span> <span class="tok-str">"]"</span> <span class="tok-op">{</span> <span class="tok-name">peg_to_list</span><span class="tok-op">(</span><span class="tok-name">es</span><span class="tok-op">)</span> <span class="tok-op">}</span>
-          <span class="tok-op">|</span> <span class="tok-name">sugar_primary</span></pre>
-</div>
-<p><code>primary</code> の最後の選択肢 <code>sugar_primary</code> は <code>match</code>・<code>return</code>・<code>break</code>・<code>continue</code>・<code>for</code> を読みます（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/syntax.pk#L1708-L1712"><code>planck/syntax.pk: sugar_primary ::= &#x27;match</code></a>）。</p>
-<p><code>fun f</code> と <code>f(p, ...) = e</code> も規則 <code>expr</code> の選択肢で、それぞれ <code>Def{f, none}</code> と <code>Set{f, Fusion{f, Lambda{...}}}</code> を作ります（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/syntax.pk#L1764-L1785"><code>planck/syntax.pk: expr ::= syntax_decl</code></a>）。<code>f(p, ...) := e</code> は <code>Do{Declare{f}, Set{f, Fusion{f, Lambda{...}}}}</code> に読み替えるので、<code>f</code> がすでにその場所の変数なら <code>f</code> に定義を足します。本体の <code>Lambda</code> は <code>peg_lambda</code> が作ります。ブロックは <code>Do</code> に包むだけで、中の定義を先頭へ移すことはしません。</p>
+<p><code>add_expr</code> は直接左再帰なので左結合です。動作は準クオートで、<code>1 + 2</code> は <code>Apply{_add, Tuple{1, 2}}</code> になります。行頭の <code>-1</code> が新しい式になるのは、<code>minus</code> の <code>same</code> が同じ行の字句にだけ成功するからです。</p>
+<p>関数の定義も規則 <code>expr</code> の選択肢です。</p>
+<ul>
+<li><code>fun f</code>: <code>Def{f, none}</code></li>
+<li><code>f(p, ...) = e</code>: <code>Set{f, Fusion{f, Lambda{...}}}</code></li>
+<li><code>f(p, ...) := e</code>: <code>Do{Declare{f}, Set{f, Fusion{f, Lambda{...}}}}</code>。<code>f</code> がすでにその場所の変数なら <code>f</code> に定義を足します。</li>
+</ul>
 
 <h2 id="index">添字と置き換え</h2>
-<p><code>a[i]</code> は規則 <code>postfix</code> の選択肢です。<code>[</code> は <code>a</code> に空白なしで続け、<code>]</code> のあとが代入の <code>=</code> のときはこの選択肢では読みません（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/syntax.pk#L1559"><code>planck/syntax.pk: | a:postfix nospace(&quot;[&quot;) i:index</code></a>）。<code>a[i] = e</code> は規則 <code>expr</code> の選択肢が <code>_index_set</code> の呼び出しにします（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/syntax.pk#L1780"><code>planck/syntax.pk: | a:postfix nospace(&quot;[&quot;) i:expr &quot;]</code></a>）。</p>
-<p><code>[ ]</code> の中は規則 <code>index</code> で、式1つです（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/syntax.pk#L1547"><code>planck/syntax.pk: index ::= e:expr</code></a>）。<code>t[p -&gt; e | q if c -&gt; g]</code> のようにガードのある腕を含む関数には、<code>_peg_rewrite</code> が <code>peg_fuse</code> で <code>peg_skip</code> を返す腕を最後に足します。どの腕も当てはまらないとき、この関数は <code>peg_skip</code> を返します（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/syntax.pk#L520-L529"><code>planck/syntax.pk: _peg_rewrite,</code></a>）。</p>
-<p><code>_index_get</code> と <code>_index_set</code> は、種類ごとの <code>Lambda</code> を <code>Fusion</code> でつないだ関数です（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/syntax.pk#L1190-L1259"><code>planck/syntax.pk: a[i] is _index_get(a, i</code></a>・<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/syntax.pk#L1261-L1339"><code>planck/syntax.pk: a[i] = v is _index_set(a, i, v</code></a>）。表は <code>Table{t}</code>、リストは <code>Cons{x, xs}</code> と <code>Nil{}</code> の頭で選ぶので、パターンだけで種類が決まります。関数 <code>f</code> を添字にすると <code>subst(t, f)</code> を呼びます（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/syntax.pk#L1110-L1160"><code>planck/syntax.pk: subst(t, f) replaces</code></a>）。<code>subst</code> は <code>f</code> の最後に「<code>peg_skip</code> を返す」腕を足します。それ以外の値が返った部分は置き換えて内側を試さず、<code>peg_skip</code> が返った部分では引数ごとに再帰します。</p>
-<p>利用者が <code>_index_get = (K{...}, i) -&gt; ... | _index_get</code> と代入すると、新しい種類が元の関数の前に入ります。<code>planck/lib/vector.pk</code> の末尾はこの書き方です。</p>
+<p><code>a[i]</code> は <code>_index_get</code>、<code>a[i] = e</code> は <code>_index_set</code> の呼び出しになります（<code>[</code> は <code>a</code> に空白なしで続けます）。</p>
+<p><code>_index_get</code> と <code>_index_set</code> は、種類ごとの <code>Lambda</code>（表は <code>Table{t}</code>、リストは <code>Cons</code> と <code>Nil</code>）を <code>Fusion</code> でつないだ関数です。利用者が <code>_index_get = (K{...}, i) -&gt; ... | _index_get</code> と代入すると、新しい種類が元の関数の前に入ります。</p>
+<p>関数 <code>f</code> を添字にすると <code>subst(t, f)</code> を呼びます。<code>f</code> の最後に「<code>peg_skip</code> を返す」腕を足して、木の各部分に当てます。<code>peg_skip</code> 以外が返った部分は置き換えて内側を試さず、返った部分は引数ごとに再帰します。</p>
 
-<h2>return と break の読み替え</h2>
-<p><code>return</code>・<code>break</code>・<code>continue</code> はエフェクトに読み替えます。<code>return</code> を読むたびに数を数え、関数の木を作るときに数が増えていれば本体を <code>Handle</code> で包みます（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/syntax.pk#L376-L392"><code>planck/syntax.pk: peg_lambda,</code></a>）。</p>
+<h2>return と break</h2>
+<p><code>return</code>・<code>break</code>・<code>continue</code> はエフェクトに読み替えます。関数の木を作るとき、<code>return</code> を読んでいれば本体を <code>Handle</code> で包みます。</p>
 <div class="example">
 <p class="file">i_return.pk</p>
 <pre class="pk"><span class="tok-name">use</span><span class="tok-op">(</span><span class="tok-str">"pretty"</span><span class="tok-op">)</span>
@@ -180,10 +161,9 @@
   }
 }</pre>
 </div>
-<p><code>for</code> の本体の <code>return x</code> は <code>Perform{Return{x}}</code> になり、関数の本体全体が <code>Handle{..., (Return{v}, k) -&gt; v}</code> で包まれます。<code>for</code> は <code>peg_for</code> の呼び出しです。</p>
 
 <h2>規則で読む文字列</h2>
-<p><code>name{| text |}</code> は関数で書いた規則 <code>embed</code> が読みます（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/syntax.pk#L1346-L1366"><code>planck/syntax.pk: Def{peg_tok_embed</code></a>）。<code>name</code> と <code>{|</code> のあと、規則 <code>name</code> をその位置から呼び、続く <code>|}</code> を読みます。規則の値は <code>Quote{v}</code> として木に入ります。</p>
+<p><code>name{| text |}</code> は、関数で書いた規則 <code>embed</code> が読みます。規則 <code>name</code> をその位置から呼び、続く <code>|}</code> を読んで、値を <code>Quote{v}</code> として木に入れます（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/syntax.pk#L1346-L1366"><code>planck/syntax.pk: Def{peg_tok_embed</code></a>）。</p>
 
 <nav class="pager"><a class="prev" href="peg.html"><small>前のページ</small>packrat パーサ</a><a class="next" href="vasm.html"><small>次のページ</small>vasm の検査器</a></nav>
 </main>
