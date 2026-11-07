@@ -182,6 +182,10 @@
 ; cont    |      0 |    0 | 0111 | top frame | boundary frame |
 ; fusion  |      0 |    0 | 1000 | fun1 | fun2 |
 ; code    |      0 |    0 | 1010 | (see Bytecode VM)
+; type    | fields |    0 | 1011 | name | Tuple of the field names |
+; data    | fields |    0 | 1100 | type | field1 | .... |
+;
+; A type is made by _record_new, and a data is an instance of a type that the function made by it builds.
 ;
 ;
 ; Both symbols and mexpr undergo interning,
@@ -269,6 +273,8 @@
 (def FusionT  0x8)
 (def IntT     0x9)
 (def CodeT    0xa)
+(def TypeT    0xb)
+(def DataT    0xc)
 
 (fun fprint_tag (chan tag)
     (if (== tag SymbolT) (fputs chan "Symbol")
@@ -281,7 +287,9 @@
     (if (== tag ContT) (fputs chan "Cont")
     (if (== tag FusionT) (fputs chan "Fusion")
     (if (== tag IntT) (fputs chan "Int")
-        ))))))))))
+    (if (== tag TypeT) (fputs chan "Type")
+    (if (== tag DataT) (fputs chan "Data")
+        ))))))))))))
     )
 
 (fun gettag (node)
@@ -528,6 +536,8 @@
 (long noneS)
 (long _S)
 (long _TypeOfS)
+(long TypeSlotS)
+(long typeS)
 (long _RestS)
 (long intS)
 (long stringS)
@@ -596,6 +606,8 @@
     (= noneS    (sym "none"))
     (= _S       (sym "_"))
     (= _TypeOfS (sym "_TypeOf"))
+    (= TypeSlotS (sym "_TypeSlot"))
+    (= typeS    (sym "type"))
     (= _RestS   (sym "_Rest"))
     (= intS     (sym "int"))
     (= stringS  (sym "string"))
@@ -671,6 +683,8 @@
     (if (is_function v) (return functionS))
     (if (== t ArrayT) (return arrayS))
     (if (== t PlainT) (return plainS))
+    (if (== t DataT) (return (get v 1)))
+    (if (== t TypeT) (return typeS))
     (not_reachable "typeof")
     )
 
@@ -778,13 +792,15 @@
     (if (== t ContT) (fputs chan "<cont>")
     (if (== t ArrayT) (fputs chan "<array>")
     (if (== t PlainT) (fprint_plain chan e)
+    (if (== t DataT) (fprint_mexpr chan e)
+    (if (== t TypeT) (fprint chan (get e 1))
     (if (== t FusionT) (do
         (fprint chan (get e 1))
         (fputs chan "|")
         (fprint chan (get e 2))
         )
         (fputs chan "<?>")
-        ))))))))))
+        ))))))))))))
     )
 (fun eprint (e) (fprint STDERR e))
 
@@ -1190,6 +1206,7 @@
 
 (def PRIM_NATIVE 0)
 (def PRIM_EVAL   1)
+(def PRIM_NEW    2)
 
 ; === Compiler
 ;
@@ -1533,6 +1550,60 @@
     (return 0)
     )
 
+;  whether t of the pattern _TypeOf{p, t} is a type value of a program, not one of the symbols of typeof
+(fun is_program_type (t)
+    (if (!= (gettag t) SymbolT) (return 1))
+    (if (|| (== t intS) (|| (== t stringS) (|| (== t symbolS) (|| (== t mexprS) (|| (== t functionS) (|| (== t arrayS) (|| (== t plainS) (== t typeS))))))))
+        (return 0))
+    (return 1)
+    )
+
+; whether the pattern p has _TypeOf{q, t} of a type value of a program
+(fun has_program_type (p)
+    (var i 0)
+    (var n 0)
+    (if (!= (gettag p) MexprT) (return 0))
+    (if (== (get p 1) QuoteS) (return 0))
+    (= n (get_header_arg p))
+    (if (&& (== (get p 1) _TypeOfS) (== n 2)) (do
+        (if (is_program_type (get p 3)) (return 1))
+        ))
+    (while (< i n) (do
+        (if (has_program_type (get p (+ i 2))) (return 1))
+        (+= i 1)
+        ))
+    (return 0)
+    )
+
+; The type t of _TypeOf{q, t} in a pattern of a function is evaluated where the function is made. This emits the code that
+; evaluates t and stores it in a new slot of the environment, and gives p with t replaced by _TypeSlot{slot}.
+(fun hoist_types (p)
+    (var i 0)
+    (var n 0)
+    (var slot 0)
+    (var vals 0)
+    (var q 0)
+    (if (! (has_program_type p)) (return p))
+    (= n (get_header_arg p))
+    (= vals (allocate (* 4 (+ n 1))))
+    (while (< i n) (do
+        (set vals i (hoist_types (get p (+ i 2))))
+        (+= i 1)
+        ))
+    (if (&& (== (get p 1) _TypeOfS) (&& (== n 2) (is_program_type (get p 3)))) (do
+        (compile (get p 3) 0)
+        (= slot (get cctx CX_NSLOTS))
+        (set cctx CX_NSLOTS (+ slot 1))
+        (emit OP_STORE)
+        (emit 0)
+        (emit slot)
+        (emit OP_POP)
+        (stack_effect -1)
+        (set vals 1 (mexpr1 TypeSlotS (fixnum slot)))
+        ))
+    (return (mexprn (get p 1) n vals))
+    )
+
 (fun compile_mexpr (e tail)
     (var head (get e 1))
     (var arity (get_header_arg e))
@@ -1657,8 +1728,9 @@
         ))
     (if (== head LambdaS) (do
         (if (|| (!= arity 2) (! (has_head TupleS (get e 2)))) (malformed e))
+        (= args (hoist_types (get e 2)))
         (emit OP_CLOSURE)
-        (emit (compile_lambda (get e 2) (get e 3)))
+        (emit (compile_lambda args (get e 3)))
         (stack_effect 1)
         (return 0)
         ))
@@ -1866,6 +1938,7 @@
     (var i 0)
     (var n 0)
     (var h 0)
+    (var tp 0)
     (if (== p _S) (return 1)) ; wildcard
     (if (== t SymbolT) (do ; variable pattern
         (set env (+ 1 (get idx)) v)
@@ -1877,7 +1950,11 @@
         (= h (get p 1))
         (if (== h QuoteS) (return (values_equal (get p 2) v)))
         (if (== h _TypeOfS) (do
-            (if (!= (typeof v) (get p 3)) (return 0))
+            (= tp (get p 3))
+            ; a type made by a program is in a slot of the environment where the function was made
+            (if (&& (== (gettag tp) MexprT) (== (get tp 1) TypeSlotS))
+                (= tp (get (get env 0) (+ (fixnum_to_int (get tp 2)) 1))))
+            (if (!= (typeof v) tp) (return 0))
             (return (match_pat (get p 2) v env idx))
             ))
         (if (!= (gettag v) MexprT) (return 0))
@@ -1994,6 +2071,19 @@
     (vm_push x)
     )
 
+; a data of the type made by _record_new with the fields from args
+(fun new_data (type args nargs)
+    (var d (allocate (* 4 (+ nargs 2))))
+    (var i 0)
+    (set d 0 (make_header DataT 0 nargs))
+    (set d 1 type)
+    (while (< i nargs) (do
+        (set d (+ i 2) (get args i))
+        (+= i 1)
+        ))
+    (return d)
+    )
+
 ; call callee (selected by select()) with args. the result goes to caller.
 (fun invoke (callee args nargs caller)
     (var t (gettag callee))
@@ -2008,6 +2098,11 @@
         (if (== (get callee 3) PRIM_EVAL) (do
             (= code (compile_toplevel (get args 0)))
             (enter code (new_env code 0) caller 0)
+            (return 0)
+            ))
+        (if (== (get callee 3) PRIM_NEW) (do
+            (= v (new_data (get callee 2) args nargs))
+            (deliver caller v)
             (return 0)
             ))
         (= fn (get callee 1))
@@ -2422,14 +2517,20 @@
     (return (get m 1))
     )
 
-(fun p_arity (m)
+; an M-expr or a data, which have the arguments
+(fun expect_args (m)
+    (if (== (gettag m) DataT) (return 0))
     (expect MexprT m)
+    )
+
+(fun p_arity (m)
+    (expect_args m)
     (return (fixnum (get_header_arg m)))
     )
 
 (fun p_arg (m i)
     (var n 0)
-    (expect MexprT m)
+    (expect_args m)
     (check_int "arg" i)
     (= n (fixnum_to_int i))
     (if (|| (< n 0) (>= n (get_header_arg m))) (runtime_error "arg: index out of range: " i))
@@ -2443,6 +2544,29 @@
     )
 
 (fun p_typeof (v) (return (typeof v)))
+
+; _record_new(name, Tuple{field, ...}) is Tuple{type, make}. make is the function that takes the fields and gives a data of the type.
+(fun p_record_new (name fields)
+    (var type (allocate 12))
+    (var make (allocate 16))
+    (var n 0)
+    (var i 0)
+    (expect SymbolT name)
+    (expect_mexpr TupleS fields)
+    (= n (get_header_arg fields))
+    (while (< i n) (do
+        (expect SymbolT (get fields (+ i 2)))
+        (+= i 1)
+        ))
+    (set type 0 (make_header TypeT 0 n))
+    (set type 1 name)
+    (set type 2 fields)
+    (set make 0 (make_header PrimT 0 n))
+    (set make 1 0)
+    (set make 2 type)
+    (set make 3 PRIM_NEW)
+    (return (tup2 type make))
+    )
 
 ; --- strings, symbols, tables and files (used by planck/peg.pk)
 
@@ -2926,6 +3050,7 @@
     (defprim "arg"     2 p_arg     PRIM_NATIVE)
     (defprim "mexpr"   2 p_mexpr   PRIM_NATIVE)
     (defprim "typeof"  1 p_typeof  PRIM_NATIVE)
+    (defprim "_record_new" 2 p_record_new PRIM_NATIVE)
     (defprim "parse"   1 p_parse   PRIM_NATIVE)
     (defprim "strlen"  1 p_strlen  PRIM_NATIVE)
     (defprim "ord"     2 p_ord     PRIM_NATIVE)
