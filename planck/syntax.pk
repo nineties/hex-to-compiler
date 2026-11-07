@@ -890,7 +890,13 @@ Def{
         }
     }}
 
-" a module value is Module{Table{...}}: the table holds the names and the values of the fields of this value "
+" a module value is a Module, whose field is the table that holds the names and the values of the fields of this value "
+Def{_module_type, Apply{_record, Tuple{Quote{Module}, Quote{Tuple{table}}}}}
+
+Def{Module, Apply{arg, Tuple{_module_type, 0}}}
+
+Def{_make_module, Apply{arg, Tuple{_module_type, 1}}}
+
 Def{
     _module,
     Lambda{
@@ -905,7 +911,7 @@ Def{
                     Set{vals, Apply{arg, Tuple{vals, 1}}}
                 }
             },
-            Module{t}
+            Apply{_make_module, Tuple{t}}
         }
     }}
 
@@ -913,8 +919,9 @@ Def{
     _record_get,
     Fusion{
         Lambda{
-            Tuple{Module{Table{a}}, name},
+            Tuple{_TypeOf{m, Module}, name},
             Do{
+                Def{a, Apply{arg, Tuple{Apply{arg, Tuple{m, 0}}, 0}}},
                 Def{e, Apply{table_find, Tuple{a, name, Apply{hash, Tuple{name}}}}},
                 If{
                     Apply{_eq, Tuple{e, none}},
@@ -922,7 +929,7 @@ Def{
                         Apply{put, Tuple{"no field "}},
                         Apply{put, Tuple{Apply{symname, Tuple{name}}}},
                         Apply{put, Tuple{" in "}},
-                        Apply{println, Tuple{Module{}}},
+                        Apply{println, Tuple{Quote{Module{}}}},
                         Apply{exit, Tuple{1}}
                     },
                     none
@@ -1159,7 +1166,7 @@ Def{
                 }
             },
             Fusion{
-                Lambda{Tuple{Table{t}, k}, Apply{table_get, Tuple{Table{t}, k, none}}},
+                Lambda{Tuple{_TypeOf{t, Table}, k}, Apply{table_get, Tuple{t, k, none}}},
                 Fusion{
                     Lambda{Tuple{x, _TypeOf{f, Function}}, Apply{subst, Tuple{x, f}}},
                     Fusion{
@@ -1236,7 +1243,7 @@ Def{
     Fusion{
         Lambda{Tuple{_TypeOf{a, Array}, _TypeOf{i, Int}, v}, Apply{array_set, Tuple{a, i, v}}},
         Fusion{
-            Lambda{Tuple{Table{t}, k, v}, Apply{table_set, Tuple{Table{t}, k, v}}},
+            Lambda{Tuple{_TypeOf{t, Table}, k, v}, Apply{table_set, Tuple{t, k, v}}},
             Fusion{
                 Lambda{
                     Tuple{_TypeOf{s, String}, i, v},
@@ -2358,8 +2365,8 @@ _iter(a @ Plain) := {
 }
 
 " a table: Tuple{key, value} of each entry, in the order of table.items. The table must not change while it is walked. "
-_iter(Table{t}) := {
-    b := array_get(t, 0)
+_iter(tb @ Table) := {
+    b := array_get(arg(tb, 0), 0)
     n := array_len(b)
     i := 0
     e := none
