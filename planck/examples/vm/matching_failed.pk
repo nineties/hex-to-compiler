@@ -1,0 +1,60 @@
+# MatchingFailed on planckvm: a call that no alternative takes performs MatchingFailed{f, args, loc}; the program is written with the instructions and run by planck/vm
+use("pvm/image")
+
+cat(xs) := concat_map(x -> x, xs)
+
+# println of R[x]
+show(x) := [GETGLOBAL{8, 0}, MOVE{9, x}, CALL{8, 8, 1}]
+
+# f1 takes only 1, f2 takes only two arguments
+f1 := Code{"f1", 1, 2, [MATCHEQ{0, 0}, NEXT{}, LOADI{1, 10}, RET{1}], [I{1}]}
+f2 := Code{"f2", 2, 3, [MATCHEQ{0, 0}, NEXT{}, LOADI{2, 20}, RET{2}], [I{2}]}
+
+# (MatchingFailed{f, args, loc}, k) -> the fields in `fields` are printed (a field of the kind (i, true) is printed by its type) and k(v)
+field_show(Pair{i, true}) := [FIELD{4, 0, i}, TYPEOF{4, 4}, GETGLOBAL{8, 1}, MOVE{9, 4}, CALL{8, 8, 1}]
+field_show(Pair{i, false}) := [FIELD{4, 0, i}, GETGLOBAL{8, 1}, MOVE{9, 4}, CALL{8, 8, 1}]
+handler(name, fields, v) := Code{name, 2, 12, cat([
+    [MATCHHEAD{0, 0, 3}, NEXT{}],
+    cat(map(field_show, fields)),
+    [MOVE{6, 1}, LOADI{7, v}, TCALL{6, 1}]
+]), [Y{"MatchingFailed"}, C{"println"}]}
+
+# handlers that only match Other{}: MatchingFailed passes through them
+hother := Code{"hother", 2, 3, [MATCHHEAD{0, 0, 0}, NEXT{}, LOADI{2, 99}, RET{2}], [Y{"Other"}]}
+
+# bodies: f1(5), f1(5, 6), (f1 | f2)(7), a function that makes the tail call f1(5, 6), and f1(5) inside a handler that does not take it
+b_call := Code{"b_call", 0, 3, [CLOSURE{1, 0}, LOADI{2, 5}, CALL{0, 1, 1}, RET{0}], [K{"f1"}]}
+b_arity := Code{"b_arity", 0, 4, [CLOSURE{1, 0}, LOADI{2, 5}, LOADI{3, 6}, CALL{0, 1, 2}, RET{0}], [K{"f1"}]}
+b_fusion := Code{"b_fusion", 0, 6, [CLOSURE{1, 0}, CLOSURE{2, 1}, FUSION{1, 1, 2}, LOADI{2, 7}, CALL{0, 1, 1}, RET{0}], [K{"f1"}, K{"f2"}]}
+g_tail := Code{"g_tail", 0, 4, [CLOSURE{1, 0}, LOADI{2, 5}, LOADI{3, 6}, TCALL{1, 2}], [K{"f1"}]}
+b_tail := Code{"b_tail", 0, 2, [CLOSURE{1, 0}, CALL{0, 1, 0}, RET{0}], [K{"g_tail"}]}
+b_nest := Code{"b_nest", 0, 2, [CLOSURE{0, 0}, CLOSURE{1, 1}, HANDLE{2, 0}, RET{2}], [K{"b_call"}, K{"hother"}]}
+
+# handle { body } with handler: the value of the Handle is printed
+run(body, hd) := cat([[CLOSURE{0, body}, CLOSURE{1, hd}, HANDLE{2, 0}], show(2)])
+
+h42 := handler("h42", [], 42)
+h7 := handler("h7", [Pair{1, false}, Pair{2, false}, Pair{0, true}], 7)
+h8 := handler("h8", [Pair{0, true}], 8)
+h9 := handler("h9", [Pair{1, false}], 9)
+h11 := handler("h11", [], 11)
+
+names := ["f1", "f2", "b_call", "b_arity", "b_fusion", "g_tail", "b_tail", "b_nest", "hother", "h42", "h7", "h8", "h9", "h11"]
+k(n) := list.index_of(n, names) + 1
+
+main := Code{"main", 0, 3, cat([
+    # a call that no alternative takes, and the handler resumes the call with 42
+    run(k("b_call"), k("h42")),
+    # the fields of the effect: the arguments and the position (none), and the type of the function
+    run(k("b_call"), k("h7")),
+    # a Fusion: the function is the whole Fusion; and a call with the wrong number of arguments
+    run(k("b_fusion"), k("h8")),
+    run(k("b_arity"), k("h9")),
+    # a tail call
+    run(k("b_tail"), k("h11")),
+    # the handler that does not take MatchingFailed lets it pass to the outer handler
+    run(k("b_nest"), k("h42")),
+    [LOADNONE{0, 1}, RET{0}]
+]), C{"println"} :: map(n -> K{n}, names)}
+
+write_file(array_get(argv(), 1), bytes.to_u8(pvm_image.build([f1, f2, hother, b_call, b_arity, b_fusion, g_tail, b_tail, b_nest, h42, h7, h8, h9, h11, main], "main")))
