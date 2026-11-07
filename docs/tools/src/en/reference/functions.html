@@ -1,94 +1,74 @@
 <!--title Partial functions and fusion-->
 <h1>Partial functions and fusion</h1>
-<p class="lead">A function takes its arguments by patterns. A pattern describes the shape of an argument in the same notation as an expression, and binds variables when it matches. <code>f | g</code> (fusion) writes cases.</p>
+<p class="lead">A function takes its arguments by patterns. A pattern describes the shape of an argument as an M-expression, and binds variables when it matches. <code>Fusion{f, g}</code> (fusion) writes cases.</p>
 
 <h2 id="partial">Partial functions and fusion</h2>
-<p>A function takes its arguments by patterns, so it is a partial function: some arguments may not match. <code>f | g</code> (<code>Fusion{f, g}</code>) tries <code>f</code>, and tries <code>g</code> if none of its patterns match.</p>
+<p>A function takes its arguments by patterns, so it is a partial function: some arguments may not match. <code>Fusion{f, g}</code> tries <code>f</code>, and tries <code>g</code> if none of its patterns match.</p>
 <!--ex fn_fusion-->
-<ul>
-<li>A false guard <code>if c</code> counts as no match.</li>
-<li>Definitions <code>f(0) := ...</code> written one after another in the same place form one function, tried in the order written.</li>
-<li>A call that matches no arm raises <a href="#matching-failed">MatchingFailed</a>. With no handler, the program stops.</li>
-</ul>
+<p>A call that matches no arm raises <a href="#matching-failed">MatchingFailed</a>. With no handler, the program stops.</p>
 <!--ex e_fn_nomatch-->
 
 <h2 id="patterns">Patterns</h2>
 <ul>
-<li><code>_</code>: matches anything and binds nothing.</li>
-<li><code>Head{p, ..., _Rest{x}}</code>: matches an M-expression with at least as many arguments as the patterns before <code>_Rest</code>, and binds <code>x</code> to a <code>Tuple</code> of the rest.</li>
-<li><code>_TypeOf{p, type}</code>: matches a value <code>x</code> with <code>type(x)</code> equal to <code>type</code> and which <code>p</code> matches.</li>
+<li>Variable: matches anything and binds it. <code>_</code> matches anything and binds nothing.</li>
+<li>Integer, string: matches an equal value. <code>Quote{s}</code> matches the symbol <code>s</code>.</li>
+<li><code>Head{p, ...}</code>: matches an M-expression whose head is <code>Head</code> and whose arguments match <code>p, ...</code> in order.</li>
+<li><code>_TypeOf{p, type}</code>: matches a value <code>x</code> with <code>type(x)</code> equal to <code>type</code> and which <code>p</code> matches. With <code>Expr</code> as <code>type</code>, it matches every M-expression.</li>
 </ul>
 <!--ex t3_type-->
-
-<h3>Notation in parameters</h3>
-<p>A parameter <code>p</code> and the pattern of <code>for</code> are written as expressions up to the level of <code>or</code>, turned into an M-expression, and matched. They are written like expressions, with identifiers as variables. The exceptions are:</p>
-<ul>
-<li>The names of operators and called functions are symbols. <code>x + 1</code> matches the tree <code>Apply{Quote{_add}, Tuple{x, 1}}</code> and <code>f(p, ...)</code> matches <code>Apply{Quote{f}, Tuple{p, ...}}</code>. To make the called function a variable, write <code>(f)(p, ...)</code>.</li>
-<li><code>'e</code> is <code>Quote{e}</code>, <code>p @ type</code> checks a type, and <code>x...</code> is the rest of the last parameter.</li>
-<li>Writing the same name twice, as in <code>f(a, a)</code>, matches only when the two values are equal by <code>==</code>.</li>
-<li><code>p or q</code> matches either. Variables are allowed only when every branch binds the same variables (<code>f((x, 0) or (0, x)) := x</code>). To match the M-expression <code>If{a, true, b}</code> of an expression <code>or</code>, write <code>If{a, 'true, b}</code>.</li>
-<li>Allowed forms: operators (<code>or and not == != &lt;= &gt;= &lt; &gt; :: + - * / %</code>, unary <code>-</code> and <code>'</code>), <code>f(p, ...)</code>, <code>Head{p, ...}</code>, identifiers, <code>true</code> <code>false</code> <code>none</code>, integers, strings, tuples and lists.</li>
-</ul>
+<p>To match a tree such as <code>Apply{_add, Tuple{x, 1}}</code>, write the function position as <code>Quote{_add}</code>. A variable there matches a call of any function.</p>
 <!--ex r_pattern-->
-<!--ex r_pattern_or-->
 
 <h2 id="rest">Rest arguments</h2>
-<p><code>x...</code> binds the remaining arguments to a <code>Tuple</code> (<code>Tuple{}</code> if none).</p>
+<p><code>_Rest{x}</code> binds the remaining arguments to a <code>Tuple</code> (<code>Tuple{}</code> if none).</p>
 <!--ex r_rest-->
 <ul>
-<li>It can be written only as the last parameter of a function <code>f(p, x...) := e</code> or <code>(p, x...) -> e</code> and of a pattern <code>Head{p, x...}</code>.</li>
+<li>It can be written only as the last parameter of a <code>Lambda</code> and as the last argument of a pattern <code>Head{p, ...}</code>.</li>
 <li>A call with fewer arguments than the preceding parameters does not match.</li>
-<li>Writing it anywhere else, as an argument of a call, or in a guarded function stops the program with a message before the code runs.</li>
+<li>Writing it anywhere else or as an argument of a call stops the program with a message before the code runs.</li>
 </ul>
 
-<h2 id="add-case">Adding a case with a definition</h2>
-<p><code>f(p, ...) := e</code> is the same as <code>f(p, ...) = e</code> (add after the function of <code>f</code>) when the variables at the place where it is written have <code>f</code>, and defines a new <code>f</code> otherwise.</p>
+<h2 id="add-case">Adding a case</h2>
+<p><code>Declare{f}</code> followed by <code>Set{f, Fusion{f, Lambda{Tuple{p, ...}, body}}}</code> adds a case after the function of <code>f</code> when the variables at the place where it is written have <code>f</code>, and defines a new <code>f</code> otherwise.</p>
 <!--ex r_scope_same-->
 <table>
 <tr><th>Written at</th><th>Variables at the place</th></tr>
 <tr><td>top level</td><td>global variables of the same file</td></tr>
 <tr><td>in a function</td><td>its parameters and the variables defined earlier in it</td></tr>
-<tr><td>branch of a top-level <code>if</code>, body of a <code>while</code></td><td>variables defined earlier in it</td></tr>
+<tr><td>branch of a top-level <code>If</code>, body of a <code>While</code></td><td>variables defined earlier in it</td></tr>
 </table>
-<p>Variables of an outer function, variables of another file (a library loaded by <code>use</code>) and builtin functions are not variables at the place. <code>f(p, ...) := e</code> with such a name defines a new <code>f</code> that hides the outer one and does not change it. To add a case to an <code>f</code> of another file, write <code>f(p, ...) = e</code>.</p>
+<p>Variables of an outer function, variables of another file (a library loaded by <code>use</code>) and builtin functions are not variables at the place. <code>Declare{f}</code> with such a name defines a new <code>f</code> that hides the outer one and does not change it. To add a case to an <code>f</code> of another file, <code>Set</code> it without <code>Declare</code>.</p>
 <!--ex t8_place-->
 <!--ex t8_library-->
-<ul>
-<li>A definition can have a guard. <code>f(p, ...) if c := e</code> returns <code>e</code> only when the arguments match and <code>c</code> is true. Otherwise the next definition written right after it is tried (a different expression in between breaks the chain).</li>
-<li>A definition with <code>export</code> and <code>f(p, ...) = e</code> cannot have a guard.</li>
-</ul>
 
 <h2 id="mutual-recursion">Mutual recursion</h2>
-<p>Declare the name first with <code>fun f</code> (its value is <code>none</code>) and fill it in later with <code>f(p, ...) = e</code>, which is <code>f = f | (p, ...) -&gt; e</code>. Since <code>none | g</code> is <code>g</code>, the first <code>f(p, ...) = e</code> assigns the function itself.</p>
+<p>Declare the name first with <code>Def{f, none}</code> and fill it in later with <code>Set{f, Fusion{f, Lambda{...}}}</code>. Since <code>Fusion{none, g}</code> is <code>g</code>, the first <code>Set</code> assigns the function itself.</p>
 <!--ex r_scope_fun-->
 <p>Calling <code>f</code> before it is filled calls <code>none</code> and stops the program.</p>
 <!--ex e_call_before_fill-->
-<p>When the value of <code>f</code> is a guarded function, a function added by <code>f(p, ...) = e</code> is not called even if the guard is false, just as a following <code>| g</code> is not called for a guarded function passed through a variable.</p>
-<!--ex e_fn_guard_chain-->
 
 <h2 id="matching-failed">MatchingFailed</h2>
-<p>A function call, a <code>match</code> or the last function of a fusion that has no matching arm performs <code>MatchingFailed{f, args, loc}</code> instead of stopping. <code>match e { f }</code> is the same call as <code>f(e)</code>.</p>
+<p>A function call or the last function of a fusion that has no matching arm performs <code>MatchingFailed{f, args, loc}</code> instead of stopping.</p>
 <table>
 <tr><th>Field</th><th>Contents</th></tr>
 <tr><td><code>f</code></td><td>the function that was called (the whole fusion for a fusion)</td></tr>
 <tr><td><code>args</code></td><td>a <code>Tuple{...}</code> of the arguments that did not match</td></tr>
-<tr><td><code>loc</code></td><td>the position of the failed call or <code>match</code>: <code>Loc{file, line, column}</code></td></tr>
+<tr><td><code>loc</code></td><td>the position of the failed call: <code>Loc{file, line, column}</code></td></tr>
 </table>
-<pre>f := (0) -&gt; "zero" | (1) -&gt; "one"
-a := handle f(7) with (MatchingFailed{_, Tuple{n}, _}, k) -&gt; n
-println(a)</pre>
+<pre>Def{f, Fusion{Lambda{Tuple{0}, "zero"}, Lambda{Tuple{1}, "one"}}}
+Def{a, Handle{Apply{f, Tuple{7}}, Lambda{Tuple{MatchingFailed{_, Tuple{n}, _}, k}, n}}}
+Apply{println, Tuple{a}}</pre>
 <pre class="out">7</pre>
 <ul>
-<li>The value of the handler is the value of the <code>Handle</code>, not of the expression that called <code>f(7)</code>.</li>
+<li>The value of the handler is the value of the <code>Handle</code>, not of <code>Apply{f, Tuple{7}}</code>.</li>
 <li>With no handler, the program prints <code>matching failed</code> and stops. It is not <code>unhandled effect</code>.</li>
-<li>A handler that accepts only <code>Return{v}</code> or <code>Break{}</code> is passed through. A handler <code>(e, k) -&gt; ...</code> whose pattern matches anything also receives <code>MatchingFailed</code>.</li>
+<li>A handler that accepts only <code>Return{v}</code> or <code>Break{}</code> is passed through. A handler <code>Lambda{Tuple{e, k}, body}</code> whose pattern matches anything also receives <code>MatchingFailed</code>.</li>
 </ul>
 
 <h3>A failure deep inside an arm</h3>
-<p>Whether to move on to the next arm is decided only by the entry patterns and guards. A <code>MatchingFailed</code> raised deep in the body of an arm whose entry matched propagates outward.</p>
-<pre>g(0) := "zero"
-h := (x) -&gt; g(x) | (x) -&gt; "second arm"
-
-r := handle h(5) with (MatchingFailed{f, _, _}, k) -&gt; "failed in g"
-println(r)</pre>
+<p>Whether to move on to the next arm is decided only by the entry patterns. A <code>MatchingFailed</code> raised deep in the body of an arm whose entry matched propagates outward.</p>
+<pre>Def{g, Lambda{Tuple{0}, "zero"}}
+Def{h, Fusion{Lambda{Tuple{x}, Apply{g, Tuple{x}}}, Lambda{Tuple{x}, "second arm"}}}
+Def{r, Handle{Apply{h, Tuple{5}}, Lambda{Tuple{MatchingFailed{f, _, _}, k}, "failed in g"}}}
+Apply{println, Tuple{r}}</pre>
 <pre class="out">"failed in g"</pre>
