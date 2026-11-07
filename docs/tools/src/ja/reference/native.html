@@ -1,13 +1,19 @@
 <!--title native-->
 <h1>native</h1>
-<p class="lead"><code>use("native/compile")</code> が定義するシステム言語です。意味は <a href="vasm.html">vasm</a> と同じで、書き方が高級です。式を入れ子にでき、<code>let</code>・<code>for</code>・複合代入・短絡の <code>and</code> と <code>or</code> を使え、大きな整数リテラルも書けます。<code>native{| ... |}</code> に書いた関数と構造体を、<code>native_compile.compile</code> が vasm のモジュールに展開します。所有と借用の検査は展開した vasm に対して行います。</p>
+<p class="lead"><code>use("native/compile")</code> が定義するシステム言語です。意味は <a href="vasm.html">vasm</a> と同じで、書き方が高級です。<code>native{| ... |}</code> に書いた関数と構造体を、<code>native_compile.compile</code> が vasm のモジュールに展開します。所有と借用の検査は展開した vasm に対して行います。</p>
 
 <h2>プログラム</h2>
 <p>プログラムは構造体と関数の並びで、その前に <code>import</code> を置けます。<code>import lib</code> は単位 <code>lib</code> を指し、ほかの単位の構造体と関数は、こう書いた単位のものだけ使えます（<a href="vasmc.html">vasmc</a>）。<code>import</code> はファイルの先頭に1行に1つ書きます。型・構造体・関数の宣言は vasm と同じ書き方です。関数の本体は文の並びで、文は改行か <code>;</code> で区切ります。</p>
-<p><code>native{| ... |}</code> の値は <code>PModule{[...]}</code> で、リストの先頭に import ごとの <code>PImport{at, name}</code> が並びます。<code>native_compile.compile(m)</code> は vasm の <code>Module{[...]}</code> を返し、<code>vasm_check</code> と <code>vasm_build</code> がそのまま受け取ります。<code>native_compile.compile_all(m)</code> は <code>Tuple{モジュール, 誤りのリスト}</code> を返します。誤りは <code>VasmErr{kind, loc, msg}</code> で、関数ごとに最初の1件です。<code>native_compile.errors(file, 誤り)</code> は位置をファイルの <code>Loc</code> にします。別の単位の関数を呼び、構造体を使うこともできます（<a href="vasmc.html">vasmc</a>）。</p>
+<p><code>native{| ... |}</code> の値は <code>PModule{[...]}</code> で、リストの先頭に import ごとの <code>PImport{at, name}</code> が並びます。<code>native_compile</code> の関数は、これを次のように扱います。</p>
+<table>
+<tr><th>関数</th><th>返す値</th></tr>
+<tr><td><code>native_compile.compile(m)</code></td><td>vasm の <code>Module{[...]}</code>。<code>vasm_check</code> と <code>vasm_build</code> がそのまま受け取る</td></tr>
+<tr><td><code>native_compile.compile_all(m)</code></td><td><code>Tuple{モジュール, 誤りのリスト}</code>。誤りは <code>VasmErr{kind, loc, msg}</code> で、関数ごとに最初の1件</td></tr>
+<tr><td><code>native_compile.errors(file, 誤り)</code></td><td>位置をファイルの <code>Loc</code> にした誤り</td></tr>
+</table>
 
 <h2>式</h2>
-<p>式は入れ子にできます。優先順位は上から下へ強くなります。</p>
+<p>式は入れ子にでき、優先順位は上から下へ強くなります。</p>
 <table>
 <tr><th>形</th><th>意味</th></tr>
 <tr><td><code>a or b</code></td><td><code>a</code> が真なら <code>b</code> を計算しない</td></tr>
@@ -45,17 +51,16 @@
 <h2>型の決まり方</h2>
 <ul>
 <li>式の型は、変数と関数の宣言と組み込みの型から決まります。型を書く場所は <code>let</code>・<code>var</code>・パラメータ・関数の結果・<code>as</code> だけです。</li>
-<li>整数のリテラルは、それだけでは型がありません。代入先・引数・相手の項・関数の結果の型が、リテラルの型になります。<code>let x = 5</code> のように型を決める手がかりのないリテラルは誤りです。<code>let x: i64 = 5</code> か <code>5 as i64</code> と書きます。</li>
+<li>整数のリテラルは、それだけでは型がありません。代入先・引数・相手の項・関数の結果の型が、リテラルの型になります。<code>let x = 5</code> のように型を決める手がかりのないリテラルは誤りです。<code>let x: i64 = 5</code> か <code>5 as i64</code> が正しい書き方です。</li>
 <li><code>for i in a..b</code> の変数の型は、<code>a</code> と <code>b</code> のうちリテラルでない方の型です。両方リテラルなら誤りで、<code>0 as i64..10</code> のように一方に型を付けます。</li>
-<li>借用を結果に持つ関数の呼び出しは、結果の領域が引数から1つに決まるときだけ、型を推論します。決まらないときは <code>let x: T = f(...)</code> と書きます。</li>
-<li>配列の添字は <code>i64</code> です。ほかの整数の型の添字には <code>as i64</code> が付きます。</li>
+<li>借用を結果に持つ関数の呼び出しは、結果の領域が引数から1つに決まるときだけ、型を推論します。決まらないときは <code>let x: T = f(...)</code> のように型を書きます。</li>
+<li>配列の添字は <code>i64</code> です。ほかの整数型の添字には <code>as i64</code> が必要です。</li>
 <li>同じ名前を宣言し直せます。前の変数は見えなくなります。</li>
 </ul>
 
 <h2>大きなリテラル</h2>
 <p>vasm のリテラルは -32768 から 32767 までです。native はそれを超える整数のリテラルを書けます。リテラルは型の範囲に入らなければ誤りです。</p>
 <!--ex native_logic-->
-<p>展開は、15 ビットずつの部分を上の位から <code>&lt;&lt;</code> と <code>|</code> でつないで値を作ります。負の値は最後に 0 から引きます。</p>
 
 <h2>誤り</h2>
 <p>展開の誤りの <code>kind</code> は <code>'type</code>（型が決まらない・リテラルが型の範囲にない・式の文が呼び出しでない）と <code>'undefined</code>（宣言のない変数・関数・構造体）です。所有・借用・初期化の誤りは展開では調べず、展開した vasm を <code>vasm_check.check</code> が調べます。誤りの位置は native のソースの位置です。</p>

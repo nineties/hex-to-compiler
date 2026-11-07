@@ -36,7 +36,7 @@
 </ol></details></nav>
 <main>
 <h1>vasm</h1>
-<p class="lead"><code>use("vasm/check")</code> defines a low-level language. The functions and structs written in <code>vasm{| ... |}</code> are checked by the rules of ownership and borrowing. A use after free, a double free, a violation of borrowing and a read of an uninitialized register are errors. The check uses type rules alone and has no way to switch it off.</p>
+<p class="lead"><code>use("vasm/check")</code> defines a low-level language. The functions and structs written in <code>vasm{| ... |}</code> are checked by the rules of ownership and borrowing. An <code>own</code> value has exactly one owner and is moved or freed at most once. A borrow is valid only inside its region.</p>
 
 <h2>Programs</h2>
 <p>A program is a list of structs and functions. Both are visible from everywhere in the module. Statements are separated by newlines or <code>;</code>.</p>
@@ -57,7 +57,7 @@ fn f[r, ...](x: T, ...) -&gt; T { ... }</pre>
 <tr><td><code>&amp;static T</code></td><td>a shared borrow that lasts to the end of the program; the type of a string literal is <code>&amp;static [u8]</code></td></tr>
 <tr><td><code>val</code></td><td>a value of planck: an integer, a string, a symbol, a constructed value, an array or a function</td></tr>
 </table>
-<p>A field of a struct, the contents of an <code>own</code> and the element of an array can be <code>own</code>. They cannot be borrows. A value of a type that owns something always has exactly one owner.</p>
+<p>A field of a struct, the contents of an <code>own</code> and the element of an array can be <code>own</code>. They cannot be borrows.</p>
 
 <h2>Instructions</h2>
 <table>
@@ -83,12 +83,12 @@ fn f[r, ...](x: T, ...) -&gt; T { ... }</pre>
 <tr><td><code>free(p: own T)</code></td><td>releases it; a released value cannot be used, and releasing it again is an error</td></tr>
 <tr><td><code>alloc(n: i64, v: T) -&gt; own [T]</code></td><td>an array of <code>n</code> copies of <code>v</code>; <code>v</code> cannot own anything</td></tr>
 <tr><td><code>len(a: &amp;r [T]) -&gt; i64</code></td><td>the length of an array</td></tr>
-<tr><td><code>write(fd: i64, a: &amp;r [u8]) -&gt; i64</code></td><td>asks the system to write the bytes of an array to the file <code>fd</code> (1 is the output, 2 the error output); the array is only borrowed. The result is the number of bytes written, or negative for an error</td></tr>
+<tr><td><code>write(fd: i64, a: &amp;r [u8]) -&gt; i64</code></td><td>asks the system to write the bytes of an array to the file <code>fd</code> (1 is the output, 2 the error output). The result is the number of bytes written, or negative for an error</td></tr>
 <tr><td><code>exit(status: i64)</code></td><td>asks the system to end the program with the status (its low 8 bits are seen outside)</td></tr>
 <tr><td><code>argc() -&gt; i64</code></td><td>the number of arguments of the program (the name of the program is one of them)</td></tr>
-<tr><td><code>argv(i: i64) -&gt; &amp;static [u8]</code></td><td>the bytes of the <code>i</code>-th argument, without a terminator. <code>argv(0)</code> is the name of the program. The array is not released while the program runs, so the borrow is <code>static</code>; an <code>i</code> that is not less than the number of arguments ends the program as failed</td></tr>
+<tr><td><code>argv(i: i64) -&gt; &amp;static [u8]</code></td><td>the bytes of the <code>i</code>-th argument, without a terminator. <code>argv(0)</code> is the name of the program. An <code>i</code> that is not less than the number of arguments ends the program as failed</td></tr>
 <tr><td><code>open(path: &amp;r [u8]) -&gt; i64</code></td><td>asks the system to open for reading the file whose name is the bytes of the array <code>path</code>. The result is an integer that stands for the file, or negative for an error</td></tr>
-<tr><td><code>read(fd: i64, a: &amp;mut r [u8]) -&gt; i64</code></td><td>asks the system to read bytes from the file <code>fd</code> into the array <code>a</code>, as many as it holds at most, from its first element. The result is the number of bytes read, 0 at the end of the file, or negative for an error; the array is only borrowed</td></tr>
+<tr><td><code>read(fd: i64, a: &amp;mut r [u8]) -&gt; i64</code></td><td>asks the system to read bytes from the file <code>fd</code> into the array <code>a</code>, as many as it holds at most, from its first element. The result is the number of bytes read, 0 at the end of the file, or negative for an error</td></tr>
 <tr><td><code>create(path: &amp;r [u8]) -&gt; i64</code></td><td>asks the system to open for writing the file whose name is the bytes of the array <code>path</code>, emptied or made new. The result is an integer for the file, or negative for an error</td></tr>
 <tr><td><code>close(fd: i64)</code></td><td>asks the system to close the file <code>fd</code></td></tr>
 <tr><td><code>swap(x, v: T) -&gt; T</code></td><td>puts <code>v</code> in <code>x</code> and returns the previous value; <code>x</code> is a place of the form <code>*p</code>, <code>p[i]</code> or <code>p.f</code></td></tr>
@@ -99,7 +99,7 @@ fn f[r, ...](x: T, ...) -&gt; T { ... }</pre>
 <li>Only an initialized register can be read. After an <code>if</code>, only what both branches initialized is initialized; after a <code>while</code>, the state is the one before the loop.</li>
 <li>Both operands of an integer operation have the same type. Integers of different widths or signedness cannot be mixed; use <code>as</code> to match them. Widening extends the sign or zero-extends according to the source, and narrowing keeps the low bits.</li>
 <li>An integer literal is checked to be in the range of the type of its target, argument or other operand. A single literal ranges from -32768 to 32767. A larger value is built, as in <code>m = 0x7F45</code>, <code>m = m &lt;&lt; 16</code>, <code>m = m | 0x4C46</code>.</li>
-<li>A string literal <code>"..."</code> is an array of <code>u8</code> in read-only data. It has the escapes of planck strings, the bytes are those of the source, and there is no terminator: <code>len</code> gives the number of bytes. Its type is <code>&amp;static [u8]</code>, so it can be written where an operand is taken, as in <code>write(1, "hello\n")</code>, <code>return "name"</code> and <code>s = "abc"</code>. The same literal is stored once. As with any shared borrow, the elements cannot be written.</li>
+<li>A string literal <code>"..."</code> is an array of <code>u8</code> in read-only data. It has the escapes of planck strings, the bytes are those of the source, and there is no terminator: <code>len</code> gives the number of bytes. Its type is <code>&amp;static [u8]</code>, so it can be written where an operand is taken, as in <code>write(1, "hello\n")</code>, <code>return "name"</code> and <code>s = "abc"</code>. The elements cannot be written.</li>
 <li>An index is an <code>i64</code>. Whether it is in range is left to a run-time check; the checker looks at types and ownership only. An array cannot be read or written as a whole through <code>*p</code>.</li>
 <li>A struct value is copied like an integer unless it owns something, and is moved if it does. <code>s.f</code> is the field of the value if <code>s</code> is a struct register, and the field of the target if <code>s</code> is a pointer to a struct.</li>
 </ul>
@@ -107,7 +107,7 @@ fn f[r, ...](x: T, ...) -&gt; T { ... }</pre>
 <h2>Ownership</h2>
 <ul>
 <li>An <code>own</code> value is moved or freed at most once.</li>
-<li>Where its owner goes away, what an <code>own</code> still holds is released automatically: at the end of a block or a function and at <code>return</code>; when it is overwritten (the previous value of <code>p = box(2)</code>, <code>*p = v</code>, <code>p[i] = v</code> and <code>s.f = v</code>); when the result of a call is discarded as a statement; and what is left in a value that is passed to <code>free</code>. The parts of a box, the fields of a struct and the elements of an array that have not been taken out are released.</li>
+<li>When its owner goes away, what an <code>own</code> still holds is released automatically. This happens at the end of a block or a function and at <code>return</code>; at an overwrite (the previous value of <code>p = box(2)</code>, <code>*p = v</code>, <code>p[i] = v</code> and <code>s.f = v</code>); when the result of a call is discarded as a statement; and for what is left in a value that is passed to <code>free</code> (the parts of a box, the fields of a struct and the elements of an array that have not been taken out).</li>
 <li>Using a released value, releasing it again and using a moved value are errors.</li>
 <li>A value that is moved or freed in only one branch has no determined owner afterwards, which is an error. A loop must give back, before the next iteration, a value it moves.</li>
 <li>A function takes the ownership of a moved argument. The caller cannot use the value afterwards.</li>
@@ -115,14 +115,14 @@ fn f[r, ...](x: T, ...) -&gt; T { ... }</pre>
 
 <h2>Taking out what an own value holds</h2>
 <ul>
-<li>When the contents hold <code>own</code>, <code>x = *p</code> moves them out. <code>p</code> must be an <code>own</code> and not borrowed. Afterwards <code>p</code> is an empty box: it cannot be read, moved or borrowed until <code>*p = v</code> puts contents in again or <code>free(p)</code> frees it. Nothing can be taken out of a borrow.</li>
+<li><code>x = *p</code> moves the contents out when they hold <code>own</code>. <code>p</code> must be an <code>own</code> and not borrowed; nothing can be taken out of a borrow. Afterwards <code>p</code> is an empty box, which cannot be read, moved or borrowed until <code>*p = v</code> puts contents in again or <code>free(p)</code> frees it.</li>
 <li>From a struct register <code>s</code>, <code>x = s.f</code> moves out a field that owns. Reading the field taken out or taking it out again is an error; <code>s.f = v</code> puts one back. Afterwards <code>s</code> cannot be used as a whole, and the remaining fields are released where <code>s</code> goes away.</li>
 <li>An element of an array and a field of the struct that a pointer points to are exchanged with <code>swap(p[i], v)</code> and <code>swap(p.f, v)</code>. <code>*p</code> is exchanged with <code>swap(*p, v)</code>. The place must be writable from an <code>own</code> (not borrowed) or a <code>&amp;mut</code>.</li>
 <li>A value that owns something cannot be copied out of an array element, the target of a pointer or a borrow.</li>
 </ul>
 
 <h2>val</h2>
-<p>A value of <code>val</code> holds its own kind. The checker sees <code>val</code> or another type, and a value of another kind ends the program as failed when it runs, as an index out of range does.</p>
+<p>A value of <code>val</code> keeps its kind at run time. The checker only tells <code>val</code> from the other types, and a value of the wrong kind ends the program as failed when it runs.</p>
 <table>
 <tr><th>Form</th><th>Meaning</th></tr>
 <tr><td><code>'name</code></td><td>a symbol, written where an operand is taken. <code>'true</code> <code>'false</code> <code>'none</code> are symbols, as in planck</td></tr>
@@ -145,19 +145,31 @@ fn f[r, ...](x: T, ...) -&gt; T { ... }</pre>
 <ul>
 <li>A <code>val</code> in a register is copied like an integer. It is not moved or borrowed.</li>
 <li>The holders of a value are counted, and the value is released when none is left. A holder is gone where an <code>own</code> is released automatically. An array that holds itself is not released.</li>
-<li>A <code>val</code> in a field of a struct, in a box or in an element of an array of <code>own</code> is what an <code>own</code> is there: it is taken out with <code>swap</code> or by a move.</li>
+<li>A <code>val</code> in a field of a struct, in a box or in an element of an array of <code>own</code> is treated as an <code>own</code>: it is taken out with <code>swap</code> or by a move.</li>
 </ul>
 
 <h2>Borrows and regions</h2>
+<p>While a value is borrowed it cannot be touched through its owner.</p>
 <ul>
-<li><code>x = &amp;r p</code> requires <code>p</code> to be declared before <code>r</code> and to live in <code>r</code>. While it is borrowed, <code>p</code> can be neither moved, freed nor assigned. While it is borrowed by <code>&amp;mut</code>, <code>*p</code>, <code>p[i]</code> and <code>p.f</code> cannot be read either. The loan ends at the end of <code>r</code>.</li>
-<li>A shared borrow is copied, and any number can exist. A <code>&amp;mut</code> is moved when it is used between registers.</li>
-<li>A <code>&amp;mut</code> passed to a borrowed parameter of a function is borrowed again for the call only and is not moved. It cannot be passed again to another argument of the same call. If the result type contains the region that was borrowed, the result carries the borrow out, so it is moved instead.</li>
-<li>A <code>&amp;mut</code> can be passed to a <code>&amp;</code> parameter (it is borrowed again as shared for the call).</li>
-<li>A borrow of an outer region <code>q</code> can be passed where a borrow of a region <code>r</code> opened inside <code>q</code> is expected, whether by assignment, <code>return</code> or an argument. The region parameters of a function have no inside-outside relation among them, and are outside the regions opened in the function.</li>
-<li>A region parameter of a function is the innermost region of the borrows that are passed (all the others must be outside it).</li>
-<li>The region <code>static</code> outlives every other region. A borrow of <code>static</code> can be put where a borrow of any region is expected, and passed for a region parameter, which then is <code>static</code> if nothing else is passed for it. A borrow of another region cannot be put where <code>&amp;static</code> is expected. <code>static</code> cannot be the name of a region or of a variable, and only a string literal makes a borrow of it.</li>
+<li><code>x = &amp;r p</code> requires <code>p</code> to be declared before <code>r</code> and to live to the end of <code>r</code>. The loan ends at the end of <code>r</code>.</li>
+<li>While <code>p</code> is borrowed, it can be neither moved, freed nor assigned. While it is borrowed by <code>&amp;mut</code>, <code>*p</code>, <code>p[i]</code> and <code>p.f</code> cannot be read either.</li>
 <li>The type <code>&amp;r T</code> can be written only inside <code>r</code>. Putting it in a register outside <code>r</code> or returning it out of <code>r</code> is an error.</li>
+</ul>
+
+<ul>
+<li>A shared borrow is copied, and any number can exist. A <code>&amp;mut</code> is moved when it is used between registers.</li>
+<li>A <code>&amp;mut</code> passed to a borrowed parameter of a function is borrowed again for the call only and is not moved. It cannot be passed again to another argument of the same call.</li>
+<li>A <code>&amp;mut</code> can be passed to a <code>&amp;</code> parameter (it is borrowed again as shared for the call).</li>
+<li>A borrow of an outer region <code>q</code> can be passed where a borrow of a region <code>r</code> opened inside <code>q</code> is expected, whether by assignment, <code>return</code> or an argument.</li>
+<li>The region parameters of a function have no inside-outside relation among them, and are outside the regions opened in the function.</li>
+<li>A region parameter of a function is the innermost region of the borrows that are passed. All the others must be outside it.</li>
+</ul>
+
+<ul>
+<li>If the result type of a function contains the region that was borrowed, the result carries the borrow out. The <code>&amp;mut</code> is then moved, not reborrowed.</li>
+<li>The region <code>static</code> outlives every other region. A borrow of <code>static</code> can be put where a borrow of any region is expected, and passed for a region parameter. It is <code>static</code> if nothing else is passed for it.</li>
+<li>A borrow of another region cannot be put where <code>&amp;static</code> is expected.</li>
+<li><code>static</code> cannot be the name of a region or of a variable, and only a string literal makes a borrow of it.</li>
 </ul>
 
 <h2>Kinds of errors</h2>

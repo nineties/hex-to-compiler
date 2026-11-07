@@ -38,7 +38,7 @@
 </ol></details></nav>
 <main>
 <h1>packrat パーサ</h1>
-<p class="lead"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk">planck/peg.pk</a>（M式で書かれています）は PEG を解釈実行するパーサです。文法は M式のデータです。パーサは規則の結果を位置ごとにメモ化します。</p>
+<p class="lead"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk">planck/peg.pk</a>（M式で書かれています）は PEG を解釈実行するパーサです。文法は M式のデータで、結果は（位置, 規則）ごとにメモ化します。</p>
 
 <h2>データとしての文法</h2>
 <p>構文解析式（規則の右辺）の形はファイルの先頭にあります。</p>
@@ -79,7 +79,7 @@
 <p><code>::=</code> を使わずに定義した規則も <code>sevens{| ... |}</code> で使えます。<code>::=</code> 自体も <code>_define_rule</code> の呼び出しに読み替えられます（<a href="syntax.html#decl">構文の定義</a>）。</p>
 
 <h2>解釈実行</h2>
-<p><code>peg_px(e, p)</code> は構文解析式 <code>e</code> を位置 <code>p</code> から試し、成功すれば次の位置を返して値を <code>peg_pv</code> に置きます。失敗は <code>-1</code> です。<code>peg_px</code>・<code>peg_call_rule</code>・<code>peg_run_rule</code> は互いに呼び合うので、<code>Def{名前, none}</code> で名前を宣言し、あとで <code>Set</code> で定義します（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L166-L167"><code>planck/peg.pk: peg_px(e, p) returns</code></a>）。</p>
+<p><code>peg_px(e, p)</code> は構文解析式 <code>e</code> を位置 <code>p</code> から試し、成功すれば次の位置を返して値を <code>peg_pv</code> に置きます。失敗は <code>-1</code> です。<code>peg_px</code>・<code>peg_call_rule</code>・<code>peg_run_rule</code> は互いに呼び合います。そのため <code>Def{名前, none}</code> で名前を先に宣言し、あとで <code>Set</code> で定義します（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L166-L167"><code>planck/peg.pk: peg_px(e, p) returns</code></a>）。</p>
 <div class="example">
 <p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L271-L276">planck/peg.pk: Set{peg_px,</a></p>
 <pre class="pk"><span class="tok-name">Set</span><span class="tok-op">{</span><span class="tok-name">peg_px</span><span class="tok-op">,</span> <span class="tok-name">Lambda</span><span class="tok-op">{</span><span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">e</span><span class="tok-op">,</span> <span class="tok-name">p</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">Do</span><span class="tok-op">{</span>
@@ -89,7 +89,7 @@
     <span class="tok-name">If</span><span class="tok-op">{</span><span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">_eq</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">t</span><span class="tok-op">,</span> <span class="tok-name">Quote</span><span class="tok-op">{</span><span class="tok-name">function</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">e</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">p</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">,</span>
         <span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">table_get</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">peg_handlers</span><span class="tok-op">,</span> <span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">head</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">e</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">none</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">e</span><span class="tok-op">,</span> <span class="tok-name">p</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span></pre>
 </div>
-<p>文字列は空白を読み飛ばしてから照合し、シンボルは規則として呼び、関数はそのまま呼びます。<code>Seq</code>・<code>Choice</code> などの M式は、頭ごとの処理を表 <code>peg_handlers</code> から引きます（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L227-L269"><code>planck/peg.pk: Def{peg_handlers</code></a>）。識別子や整数などの字句は、<a href="syntax.html">構文の定義</a>の側で関数として実装しています。</p>
+<p>文字列は空白を読み飛ばしてから照合し、シンボルは規則として呼び、関数はそのまま呼びます。<code>Seq</code>・<code>Choice</code> などの M式は、頭ごとの処理を表 <code>peg_handlers</code> から引きます（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L227-L269"><code>planck/peg.pk: Def{peg_handlers</code></a>）。</p>
 <p>失敗のたびに最も先まで進んだ位置を <code>peg_far</code> に記録し（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L60-L62"><code>planck/peg.pk: Def{peg_fail</code></a>）、構文エラーはその位置で報告します。</p>
 
 <h2>メモ化と直接左再帰</h2>
@@ -148,7 +148,7 @@
 <p>評価前の形は <code>peg_sources</code> に残します。<code>unparse</code> のように文法を読む道具はこの表を使います。</p>
 
 <h2>入口の関数</h2>
-<p><code>peg_parse(rule, s)</code> はメモを作り直してから規則を呼び、<code>Tuple{値, 残り}</code> を返します（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L375-L391"><code>planck/peg.pk: peg_parse(rule, s) parses a prefix</code></a>）。失敗すると <code>peg_far</code> の位置から行末までを添えた <code>SyntaxError{...}</code> を返します。</p>
+<p><code>peg_parse(rule, s)</code> はメモを作り直してから規則を呼びます。成功すると <code>Tuple{値, 残り}</code> を返します（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L375-L391"><code>planck/peg.pk: peg_parse(rule, s) parses a prefix</code></a>）。失敗すると、<code>peg_far</code> の位置から行末までを添えた <code>SyntaxError{...}</code> を返します。</p>
 
 <nav class="pager"><a class="prev" href="init.html"><small>前のページ</small>init.pk と M式</a><a class="next" href="syntax.html"><small>次のページ</small>構文の定義</a></nav>
 </main>

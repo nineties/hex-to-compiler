@@ -1,6 +1,6 @@
 <!--title Values, patterns, M-expressions-->
 <h1>Values, patterns, M-expressions</h1>
-<p class="lead">The evaluator works on M-expressions. This page defines the kinds of values, the special forms, patterns, effects and the top level.</p>
+<p class="lead">The evaluator works on M-expressions. This page defines the kinds of values, the special forms, patterns, effects and the top level. An M-expression whose head is not a special form is a constructor: its arguments are evaluated and an M-expression with the same head is built. When number types are mixed they are raised to the highest of integer, float, complex; an out-of-range value or a division of integers by 0 is a runtime error.</p>
 
 <h2>M-expressions</h2>
 <p>An M-expression is a symbol (<code>x</code>), an integer (<code>42</code>, <code>-1</code>), a float (<code>1.5</code>), a string (<code>"abc"</code>) or <code>Head{a, b, ...}</code>. A symbol is a letter, <code>_</code> or <code>%</code> followed by letters, digits and <code>_</code>. A string is up to 65535 bytes and <code>Head{...}</code> has no limit on the number of arguments. A string at the top level has no effect, so it can be used as a comment.</p>
@@ -13,7 +13,7 @@
 <tr><td><code>Float</code></td><td>Float, IEEE 754 binary64</td></tr>
 <tr><td><code>Complex</code></td><td>Complex number, a pair of floats</td></tr>
 <tr><td><code>String</code></td><td>String</td></tr>
-<tr><td><code>Symbol</code></td><td>Symbol (<code>true</code>, <code>false</code> and <code>none</code> are literals of symbols)</td></tr>
+<tr><td><code>Symbol</code></td><td>Symbol</td></tr>
 <tr><td><code>Expr</code></td><td><code>Head{a, ...}</code></td></tr>
 <tr><td><code>Function</code></td><td>Lambda, fusion, builtin function or continuation</td></tr>
 <tr><td><code>Array</code></td><td>Mutable array of fixed length made by <code>array(n)</code></td></tr>
@@ -23,16 +23,23 @@
 
 <h3 id="numbers">Numbers</h3>
 <ul>
-<li>No integer is out of range, and nothing wraps around or is truncated.</li>
-<li>Floats round to nearest even, and floating-point exceptions do not stop the program. A complex number is made by <code>complex(re, im)</code> or an imaginary literal (<code>2i</code>).</li>
-<li><code>_add</code> <code>_sub</code> <code>_mul</code> <code>_div</code> take integers, floats and complex numbers, and stop the program on any other value. When the types are mixed, the operands are raised to the higher type in the order integer, float, complex, and the result has that type.</li>
-<li>An integer raised to a float is rounded to the nearest value. Raising an integer beyond the range of floats is a runtime error.</li>
-<li><code>_div</code> of two integers is the quotient truncated toward 0, and a zero divisor is a runtime error. A division that involves a float or a complex number does not stop on a zero divisor: a float gives an infinity or NaN, and a complex number gives the same rule applied to its components.</li>
-<li><code>_quo</code> of two integers (the operator <code>//</code>) is the quotient rounded toward minus infinity, so <code>-7 // 2</code> is <code>-4</code>. A zero divisor is a runtime error.</li>
-<li><code>_mod(a, b)</code> of two integers is <code>a - b * (a // b)</code>, which has the sign of the divisor, and a zero divisor is a runtime error.</li>
-<li><code>_lt</code> <code>_le</code> <code>_gt</code> <code>_ge</code> compare an integer and a float by their mathematical values without raising the type, and give <code>false</code> when NaN is involved. They stop the program on a value that is not a number and on a complex number.</li>
-<li><code>_eq</code> says that numbers of different types are equal when their values are the same (<code>1 == 1.0</code>). NaN is not equal to itself. Complex numbers are equal when both components are equal. <code>_ne</code> is the opposite of <code>_eq</code>.</li>
+<li><code>_add</code> <code>_sub</code> <code>_mul</code> <code>_div</code> take integers, floats and complex numbers only, and stop the program on any other value.</li>
+<li>No integer is out of range, and nothing wraps around or is truncated. Floats round to nearest even, and floating-point exceptions do not stop the program. A complex number is made by <code>complex(re, im)</code> or an imaginary literal (<code>2i</code>).</li>
 </ul>
+<p>Division of two integers:</p>
+<table>
+<tr><th>Function</th><th>Result</th></tr>
+<tr><td><code>_div</code></td><td>The quotient truncated toward 0</td></tr>
+<tr><td><code>_quo</code> (the operator <code>//</code>)</td><td>The quotient rounded toward minus infinity, so <code>-7 // 2</code> is <code>-4</code></td></tr>
+<tr><td><code>_mod(a, b)</code></td><td><code>a - b * (a // b)</code>, which has the sign of the divisor</td></tr>
+</table>
+<p>A zero divisor is a runtime error, except for <code>_div</code> with a float or a complex number. A float gives an infinity or NaN, and a complex number gives the same rule applied to its components.</p>
+<table>
+<tr><th>Function</th><th>Rule</th></tr>
+<tr><td><code>_lt</code> <code>_le</code> <code>_gt</code> <code>_ge</code></td><td>Compare an integer and a float by their mathematical values, without raising the type. They give <code>false</code> when NaN is involved, and stop the program on a value that is not a number and on a complex number</td></tr>
+<tr><td><code>_eq</code> <code>_ne</code></td><td>Numbers of different types are equal when their values are the same (<code>1 == 1.0</code>). NaN is not equal to itself. Complex numbers are equal when both components are equal. <code>_ne</code> is the opposite</td></tr>
+</table>
+<p>An integer raised to a float is rounded to the nearest value, and an integer beyond the range of floats is a runtime error.</p>
 
 <h2>Special forms</h2>
 <table>
@@ -49,18 +56,17 @@
 <tr><td><code>Handle{body, handler}</code>, <code>Perform{v}</code></td><td>Algebraic effects</td></tr>
 <tr><td><code>Tuple{a, ...}</code></td><td>Tuple</td></tr>
 </table>
-<p>An M-expression with any other head, such as <code>Cons{x, y}</code>, is a constructor: its arguments are evaluated and an M-expression with the same head is built.</p>
 <!--ex t2_mexpr-->
 
 <h2 id="patterns">Patterns</h2>
 <p>A parameter pattern is one of:</p>
 <ul>
-<li>a variable <code>x</code>, or <code>_</code> (matches anything and binds nothing)</li>
-<li>an integer, a string, <code>true</code>, <code>false</code> or <code>none</code> (matches an equal value and binds nothing)</li>
-<li><code>Quote{v}</code> (matches an equal value, e.g. <code>Quote{x}</code> matches the symbol <code>x</code>)</li>
-<li><code>Head{p, ...}</code> (matches an M-expression with the same head and arity)</li>
-<li><code>Head{p, ..., _Rest{x}}</code> (matches an M-expression with the same head and at least as many arguments as the ones before <code>_Rest</code>, and binds <code>x</code> to a <code>Tuple</code> of the remaining arguments; written <code>Head{p, ..., x...}</code>)</li>
-<li><code>_TypeOf{p, type}</code> (<code>p</code> matches and <code>type</code> is <code>type</code> of the value)</li>
+<li>a variable <code>x</code>. <code>_</code> matches anything and binds nothing</li>
+<li>an integer, a string, <code>true</code>, <code>false</code> or <code>none</code>. It matches an equal value and binds nothing</li>
+<li><code>Quote{v}</code>. It matches an equal value</li>
+<li><code>Head{p, ...}</code>. It matches an M-expression with the same head and arity</li>
+<li><code>Head{p, ..., _Rest{x}}</code>. It matches an M-expression with the same head and at least as many arguments as the patterns before <code>_Rest</code>, and binds <code>x</code> to a <code>Tuple</code> of the remaining arguments. written <code>Head{p, ..., x...}</code></li>
+<li><code>_TypeOf{p, type}</code>. It matches when <code>type</code> is the <code>type</code> of the value and <code>p</code> matches</li>
 </ul>
 <p>In the syntax, <code>'none</code> is <code>Quote{none}</code>, <code>x @ Int</code> is <code>_TypeOf{x, Int}</code>, where <code>Int</code> is a variable, and <code>x :: xs</code> and <code>[a, b]</code> are patterns of <code>Cons</code>.</p>
 <!--ex t3_type-->

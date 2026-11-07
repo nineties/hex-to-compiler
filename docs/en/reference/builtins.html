@@ -36,7 +36,7 @@
 </ol></details></nav>
 <main>
 <h1>Builtin functions</h1>
-<p class="lead">These functions are available without <code>use</code>. Some are builtins of the implementation, and the others are defined by <code>init.pk</code>, <code>use.pk</code>, <code>peg.pk</code> and <code>syntax.pk</code>.</p>
+<p class="lead">These functions are available without <code>use</code>. Most names that start with <code>_</code> are functions that operators and syntax call. An error such as an index out of range or an unreadable value is a runtime error.</p>
 
 <table>
 <tr><th>Group</th><th>Functions</th></tr>
@@ -98,7 +98,7 @@ Point{1, &quot;a&quot;}</pre>
 <li><code>mexpr(h, Tuple{a, ...})</code> builds the M-expression <code>h{a, ...}</code> with the head <code>h</code>.</li>
 <li><code>symname(sym)</code>: the name of the symbol as a string (the inverse of <code>intern</code>). <code>intern(s)</code>: the symbol named <code>s</code>.</li>
 <li><code>strlen(s)</code>: the number of bytes, 0 bytes included. <code>ord(s, i)</code>: the byte at <code>i</code>, or <code>-1</code> when <code>i</code> is out of range. <code>s[i]</code>: the byte at <code>i</code> as a string of length 1.</li>
-<li><code>substr(s, i, j)</code>: the bytes from <code>i</code> to <code>j - 1</code>, and a runtime error out of range. <code>_strcat(a, b)</code>: <code>a</code> followed by <code>b</code>.</li>
+<li><code>substr(s, i, j)</code>: the bytes from <code>i</code> to <code>j - 1</code>. <code>_strcat(a, b)</code>: <code>a</code> followed by <code>b</code>.</li>
 </ul>
 <div class="example">
 <p class="file">r_builtins.pk</p>
@@ -152,21 +152,22 @@ true</pre>
 <tr><td><code>'c64</code> <code>'c128</code></td><td>Complex numbers (parts in binary32 and binary64)</td></tr>
 </table>
 <ul>
-<li><code>a[i]</code> and <code>a[i] = x</code> (<code>plain_get(a, i)</code>, <code>plain_set(a, i, x)</code>) read and write an element. An index outside <code>0</code> to <code>n - 1</code> is a runtime error.</li>
+<li><code>a[i]</code> and <code>a[i] = x</code> (<code>plain_get(a, i)</code>, <code>plain_set(a, i, x)</code>) read and write an element.</li>
 <li>Reading gives a value of the language, with <code>'f16</code>, <code>'f32</code> and <code>'c64</code> widened to binary64 without changing the value.</li>
 <li><code>plain_len(a)</code>: <code>n</code>. <code>plain_kind(a)</code>: the symbol of the type. <code>plain_copy(dst, di, src, si, n)</code> copies <code>n</code> elements of <code>src</code> from <code>si</code> to <code>dst</code> from <code>di</code>. The types must be the same, and the ranges may overlap in one array.</li>
 </ul>
 <p>Writing to a plain array converts the value:</p>
-<ul>
-<li>An integer out of the range of an integer type is a runtime error and never wraps around.</li>
-<li>A float written to an integer type is truncated toward 0, then the range is checked. NaN and infinities are runtime errors.</li>
-<li>A complex number written to an integer type or to <code>'f16</code>, <code>'f32</code> or <code>'f64</code> is a runtime error.</li>
-<li>A number written to <code>'bool</code> is <code>false</code> when it is 0 (<code>0</code>, <code>0.0</code>, <code>-0.0</code>, <code>complex(0, 0)</code>), and otherwise <code>true</code>, also for NaN.</li>
-<li><code>true</code> and <code>false</code> written to <code>'bool</code> stay as they are, and written to a number type are 1 and 0.</li>
-<li>An integer or a float written to a complex type is the real part, and the imaginary part is 0.</li>
-<li>A number written to a float or complex type is rounded to the nearest value. A value that rounds beyond the maximum of the type is an infinity of the same sign. An integer beyond the range of binary64 is a runtime error.</li>
-<li>Any other value is a runtime error for every type.</li>
-</ul>
+<table>
+<tr><th>Value written</th><th>To the type</th><th>Result</th></tr>
+<tr><td>Integer</td><td>Integer type</td><td>A runtime error when out of range; nothing wraps around</td></tr>
+<tr><td>Float</td><td>Integer type</td><td>Truncated toward 0, then the range is checked. NaN and infinities are runtime errors</td></tr>
+<tr><td>Complex number</td><td>Integer type, <code>'f16</code>, <code>'f32</code> or <code>'f64</code></td><td>A runtime error</td></tr>
+<tr><td>Number</td><td><code>'bool</code></td><td><code>false</code> when it is 0 (<code>0</code>, <code>0.0</code>, <code>-0.0</code>, <code>complex(0, 0)</code>), otherwise <code>true</code>, also for NaN</td></tr>
+<tr><td><code>true</code>, <code>false</code></td><td><code>'bool</code> / number type</td><td>Stay as they are / 1 and 0</td></tr>
+<tr><td>Integer, float</td><td>Complex type</td><td>The real part; the imaginary part is 0</td></tr>
+<tr><td>Number</td><td>Float or complex type</td><td>Rounded to the nearest value. A value that rounds beyond the maximum of the type is an infinity of the same sign. An integer beyond the range of binary64 is a runtime error</td></tr>
+<tr><td>Any other value</td><td>Any type</td><td>A runtime error</td></tr>
+</table>
 
 <h2>Bit operations</h2>
 <ul>
@@ -209,18 +210,26 @@ u8
 </div>
 
 <h2>Files and language</h2>
+<h3>Files and the command line</h3>
 <ul>
-<li><code>read_file(path)</code>: the contents of the file, including bytes 0. <code>try_read_file(path)</code>: the same, or <code>none</code> when the file cannot be read. <code>read_bytes(path)</code>: the same contents as a <code>u8</code> array. <code>write_file(path, x)</code> writes all bytes of the string or <code>u8</code> array <code>x</code> to the file, which is created or emptied; bytes 0 are written as they are. <code>chmod(path, mode)</code> sets the permissions (<code>493</code> is 755 in octal).</li>
-<li><code>argv()</code>: the array of the command-line strings, as <code>argv</code> of C <code>main</code>. The first is the program file and the rest are its arguments. For the program <code>a.pk</code> with the arguments <code>x y</code> they are <code>"a.pk"</code>, <code>"x"</code> and <code>"y"</code>.</li>
-<li><code>load(path)</code>: parse and evaluate the file. Its top-level expressions are evaluated with <code>path</code> as the file being loaded, and the program file given as the first argument and <code>planck/init.pk</code> are the files being loaded while they run (see <a href="syntax.html#scope">Scope of variables</a>).</li>
+<li><code>read_file(path)</code>: the contents of the file, bytes 0 included. <code>try_read_file(path)</code>: the same, or <code>none</code> when it cannot be read. <code>read_bytes(path)</code>: the same contents as a <code>u8</code> array.</li>
+<li><code>write_file(path, x)</code>: write all bytes of the string or <code>u8</code> array <code>x</code> to the file, which is created or emptied. <code>chmod(path, mode)</code>: set the permissions (<code>493</code> is 755 in octal).</li>
+<li><code>argv()</code>: the array of the command-line strings. The first is the program file and the rest are its arguments.</li>
+</ul>
+<h3>Loading and running</h3>
+<ul>
+<li><code>load(path)</code>: parse and evaluate the file. Its top-level expressions are evaluated with <code>path</code> as the file being loaded. The program file given as the first argument and <code>planck/init.pk</code> are the files being loaded while they run (see <a href="syntax.html#scope">Scope of variables</a>).</li>
 <li><code>_set_file(path)</code>: make <code>path</code> the file being loaded and return the previous one (<code>none</code> if there is none).</li>
-<li><code>use(name)</code>: <code>load("planck/lib/&lt;name&gt;.pk")</code> once, or the same with the <a href="library.html#preprocess">preprocessed library</a>. <code>used_libs</code> is the table of the libraries already loaded.</li>
+<li><code>use(name)</code>: run <code>load("planck/lib/&lt;name&gt;.pk")</code> once, or the same with the <a href="library.html#preprocess">preprocessed library</a>. <code>used_libs</code> is the table of the libraries already loaded.</li>
 <li><code>parse</code> and <code>eval</code> are the functions used by the <a href="values.html">top level</a>. <code>exit(n)</code> ends the program with the status <code>n</code>.</li>
+</ul>
+<h3>Functions the syntax implementation calls</h3>
+<ul>
 <li><code>_define_rule(name, e)</code>: define the rule by a parsing expression (see <a href="../implementation/peg.html">The packrat parser</a>). <code>peg_parse</code> is in <a href="grammar.html">Grammar declarations</a>.</li>
 <li><code>parse_mexpr(s)</code>: the parser of M-expressions, with the same arguments and result as <code>parse</code>.</li>
 <li><code>_to_text(x)</code>: <code>x</code> for a string, the decimal text for an integer, and <code>show(x)</code> (<code>planck/lib/pretty.pk</code>) otherwise, so a value other than a string or an integer in <code>{e}</code> needs <code>use("pretty")</code>. A string with embedded values is joined by <code>_strcat</code> from the left, and an empty piece is left out.</li>
 <li><code>_record_declare(name, fields)</code>: set the field names of the head <code>name</code> (<code>fields</code> is <code>Tuple{f, ...}</code>). <code>_record_get(t, name)</code>: the field. <code>_record_with(t, name, v)</code>: a new value in which the field is <code>v</code>. <code>_destructure(t, i, n)</code>: element <code>i</code> of the tuple <code>t</code> of <code>n</code> elements, and stops the program otherwise.</li>
-<li><code>_index_get(a, i)</code> and <code>_index_set(a, i, e)</code> are the functions that <code>a[i]</code> and <code>a[i] = e</code> call, and <code>subst(t, f)</code> is the function that <code>t[f]</code> calls (see <a href="syntax.html#index">Indexing and rewriting</a>).</li>
+<li><code>_index_get(a, i)</code> and <code>_index_set(a, i, e)</code> are the functions that <code>a[i]</code> and <code>a[i] = e</code> call. <code>subst(t, f)</code> is the function that <code>t[f]</code> calls (see <a href="syntax.html#index">Indexing and rewriting</a>).</li>
 <li><code>peg_for(xs, f)</code>: call <code>f</code> with each element of the list, vector or range <code>xs</code>, and return <code>none</code>. For a range <code>Range{a, b}</code> the elements are the integers from <code>a</code> to <code>b</code>, including <code>b</code>.</li>
 </ul>
 <div class="example">

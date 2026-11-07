@@ -38,10 +38,11 @@
 </ol></details></nav>
 <main>
 <h1>From machine code to planck0</h1>
-<p class="lead">This page follows the path from a one-page hex dump of Forth to planck0, which is written in sasm.</p>
+<p class="lead">These are the bootstrap stages from a Forth written as a hex dump to planck0 written in sasm.</p>
+<p>Each stage builds the next stage using only the earlier stages. The order is pforth, plisp, asm and sasm, plisp2, planck0.</p>
 
 <h2>pforth</h2>
-<p><a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/pforth.xxd">pforth.xxd</a> is a hex dump. <code>xxd -r -c 8</code> ignores the annotations on the right. The restored bytes are an executable ELF file. The current implementation produces a 32-bit x86 Linux ELF.</p>
+<p><a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/pforth.xxd">pforth.xxd</a> is a hex dump. <code>xxd -r -c 8</code> ignores the annotations on the right. The restored bytes are an executable 32-bit x86 Linux ELF file.</p>
 <div class="example">
 <p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/pforth.xxd#L1-L11">bootstrap/pforth.xxd: 00000000</a></p>
 <pre>00000000: 7f45 4c46 0101 0100   # planckforth -
@@ -92,10 +93,10 @@
 <li>The usual Forth words: conditionals, loops, recursion, structures (<a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/plisp.fs#L498-L1384"><code>bootstrap/plisp.fs: Compilers</code></a>).</li>
 <li>The third interpreter. It reads a word that is not in the dictionary as a number, and stops with an error if it is not a number (<a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/plisp.fs#L1386-L1446"><code>bootstrap/plisp.fs: 3rd Phase Interpreter</code></a>).</li>
 </ul>
-<p>A Lisp interpreter is written in that Forth (<a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/plisp.fs#L1684"><code>bootstrap/plisp.fs: Implementation of PlanckLISP</code></a> onward). It is written in the order of lists, nodes, the reader and printer, and the evaluator. At the end it reads <code>bootstrap/plisp/init.lisp</code> (<a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/plisp.fs#L2435"><code>bootstrap/plisp.fs: s&quot; bootstrap/plisp/init.lisp&quot; eval-file</code></a>). The next stage is an assembler and a compiler, so the choice is a Lisp: it handles syntax trees directly and makes internal DSLs easy.</p>
+<p>A Lisp interpreter is written in that Forth (<a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/plisp.fs#L1684"><code>bootstrap/plisp.fs: Implementation of PlanckLISP</code></a> onward). It is written in the order of lists, nodes, the reader and printer, and the evaluator. At the end it reads <code>bootstrap/plisp/init.lisp</code> (<a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/plisp.fs#L2435"><code>bootstrap/plisp.fs: s&quot; bootstrap/plisp/init.lisp&quot; eval-file</code></a>).</p>
 
 <h2>asm and sasm</h2>
-<p>Both run on plisp. They are tools for crossing to the next stage. They favor a simple implementation over performance and safety.</p>
+<p>Both run on plisp. They favor a simple implementation over performance and safety.</p>
 <p><a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/asm/core.lisp">asm/core.lisp</a> is an assembler for 32-bit x86. It writes an ELF file directly from a list of S-expression instructions, and puts the header, code and data in one readable, writable and executable <code>PT_LOAD</code>.</p>
 <div class="example">
 <p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/asm/examples/hello.s#L1-L19">bootstrap/asm/examples/hello.s</a></p>
@@ -139,8 +140,15 @@
 </div>
 
 <h2>plisp2</h2>
-<p>plisp on Forth is too slow for the later stages. <a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/plisp2.sv">plisp2.sv</a> is the same Lisp rewritten in sasm. It has, in order, memory allocation (<a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/plisp2.sv#L6-L42"><code>bootstrap/plisp2.sv: Memory Allocation</code></a>), nodes (<a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/plisp2.sv#L54-L300"><code>bootstrap/plisp2.sv: Nodes</code></a>), the reader and printer (<a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/plisp2.sv#L302-L584"><code>bootstrap/plisp2.sv: Parser and Printer</code></a>), the evaluator (<a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/plisp2.sv#L586-L826"><code>bootstrap/plisp2.sv: Eval</code></a>) and builtin functions (<a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/plisp2.sv#L828-L1023"><code>bootstrap/plisp2.sv: Primitive Functions</code></a>).</p>
-<p>plisp2 is compiled by sasm on plisp. The same sasm then compiles <code>bootstrap/planck0.sv</code> on the resulting plisp2.</p>
+<p><a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/plisp2.sv">plisp2.sv</a> is the same Lisp rewritten in sasm. It has these parts, in order.</p>
+<ul>
+<li>Memory allocation (<a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/plisp2.sv#L6-L42"><code>bootstrap/plisp2.sv: Memory Allocation</code></a>)</li>
+<li>Nodes (<a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/plisp2.sv#L54-L300"><code>bootstrap/plisp2.sv: Nodes</code></a>)</li>
+<li>The reader and printer (<a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/plisp2.sv#L302-L584"><code>bootstrap/plisp2.sv: Parser and Printer</code></a>)</li>
+<li>The evaluator (<a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/plisp2.sv#L586-L826"><code>bootstrap/plisp2.sv: Eval</code></a>)</li>
+<li>Builtin functions (<a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/plisp2.sv#L828-L1023"><code>bootstrap/plisp2.sv: Primitive Functions</code></a>)</li>
+</ul>
+<p>The build has two steps. First, sasm on plisp compiles plisp2. Then the same sasm, running on the resulting plisp2, compiles <code>bootstrap/planck0.sv</code>.</p>
 
 <h2>planck0</h2>
 <p><a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/planck0.sv">planck0.sv</a> is also written in sasm. The page <a href="planck0.html">planck0</a> describes it.</p>

@@ -1,6 +1,6 @@
 <!--title planckvm instructions-->
 <h1>planckvm instructions</h1>
-<p class="lead">The part of the external specification of planckvm about the bytecode format, the instructions, the builtin functions and the instructions for each feature of planck. See <a href="planckvm.html">planckvm: execution model and values</a> for the machine and the values, and <a href="planckvm-internals.html">planckvm internals</a> for the design inside an implementation.</p>
+<p class="lead">An instruction is one word, and only high-frequency operations are instructions. Everything else is a builtin function. The code generator keeps the code correct, and the evaluator does not check it. This page is the part of the external specification of planckvm about the bytecode format, the instructions, the builtin functions and the instructions for each feature of planck. See <a href="planckvm.html">planckvm: execution model and values</a> for the machine and the values, and <a href="planckvm-internals.html">planckvm internals</a> for the design inside an implementation.</p>
 
 <h2 id="format">Bytecode format</h2>
 <p>The basic unit is a 32-bit word. The unit of bytecode is a code: one lambda or one top-level expression is one code. The code of a nested function is in the constant table of the code around it. Bit 0 is the least significant bit.</p>
@@ -56,7 +56,7 @@ AD | high 16 of D/16 | high 8 of A/8 | EXT (8)/8
 </ul>
 
 <h3>Constant table</h3>
-<p>The constant table is a sequence of values of each code, and <code>i</code> of the operand <code>K[i]</code> is its index. An element is one value word.</p>
+<p>The constant table is a sequence of values of each code. An element is one value word, and <code>i</code> of <code>K[i]</code> is its index.</p>
 <table>
 <tr><th>Element</th><th>Instructions</th></tr>
 <tr><td>Literals of integers, floats and strings, <code>true</code>, <code>false</code> and <code>none</code>, the contents of <code>Quote</code>, and M-expressions made of constants only</td><td><code>LOADK</code></td></tr>
@@ -68,7 +68,7 @@ AD | high 16 of D/16 | high 8 of A/8 | EXT (8)/8
 </table>
 
 <h3>Conditions for a correct code</h3>
-<p>A code generator keeps the following. The evaluator does not check them.</p>
+<p>A code generator must keep the following.</p>
 <ul>
 <li>A jump goes to the start of an instruction inside the instructions.</li>
 <li>The last instruction is one of <code>RET</code>, <code>TCALL</code>, <code>JMP</code>, <code>HALT</code> and <code>NEXT</code>.</li>
@@ -80,7 +80,12 @@ AD | high 16 of D/16 | high 8 of A/8 | EXT (8)/8
 </ul>
 
 <h2>Instructions</h2>
-<p>The Format column gives the format of an instruction, and the fields of operands not written are 0. The marks are: <strong>S</strong>, a safe point where the collector may run because of an allocation; <strong>W</strong>, a write barrier; <strong>T</strong>, the instruction stops when its conditions are not met.</p>
+<p>The Format column gives the format of an instruction. A field that the Operands column does not list is 0. The last three columns are marks.</p>
+<ul>
+<li><strong>S</strong>: a safe point. The collector may run because of an allocation.</li>
+<li><strong>W</strong>: a write barrier.</li>
+<li><strong>T</strong>: the instruction stops when its conditions are not met.</li>
+</ul>
 <table>
 <tr><th>Mnemonic</th><th>Opcode</th><th>Format</th><th>Operands</th><th>Action</th><th>Builtin</th><th>S</th><th>W</th><th>T</th></tr>
 <tr><td><code>MOVE</code></td><td>0x00</td><td>ABC</td><td>A B</td><td><code>R[A] := R[B]</code></td><td></td><td></td><td></td><td></td></tr>
@@ -148,11 +153,11 @@ AD | high 16 of D/16 | high 8 of A/8 | EXT (8)/8
 </table>
 <p>A <strong>test instruction</strong> (<code>TEST</code> to <code>TGEI</code>) makes no value. When the condition is the same as <code>k</code> (true for <code>k = 1</code>, false for <code>k = 0</code>) it runs the <code>JMP</code> of the next word, and otherwise it skips the next word. With NaN, both <code>TLT</code> and <code>TGE</code> are false.</p>
 <p><code>ADD</code>, <code>SUB</code>, <code>MUL</code>, <code>DIV</code>, <code>MOD</code>, <code>ADDI</code>, <code>LT</code>, <code>GE</code>, <code>TLT</code>, <code>TGE</code>, <code>TLTI</code> and <code>TGEI</code> stop when an argument is not a number. For mixed types and the type of the result, see Numbers in the execution model. Of the instructions from <code>HEAD</code> to <code>PLAINSET</code>, those with the T mark stop for an argument of a wrong type or out of range (except for <code>ORD</code> out of range).</p>
-<p>An instruction with a name in the Builtin column has S and T like <code>CALL</code> while its cell is overwritten.</p>
+<p>An instruction with a name in the Builtin column has S and T while its cell is overwritten.</p>
 
 <h2 id="builtins">Builtins and instructions</h2>
-<p>Only what is called at a high frequency is an instruction: the constants, variables, control, calls, matching, effects and operators that every run goes through, and the builtins that are called the most. Everything else is a builtin function, and no instruction is added for it. An operation that differs by type is one instruction that looks at the type of its value.</p>
-<p>When <code>f</code> of an expression <code>Apply{f, Tuple{...}}</code> is a name of the Builtin column, resolves to its cell and has the right number of arguments, the compiler uses that instruction. The instruction itself handles an overwritten cell at run time, so the compiler does not distinguish it.</p>
+<p>The instructions are the constants, variables, control, calls, matching, effects and operators, and the builtins that are called the most. An operation that differs by type is one instruction that looks at the type of its value.</p>
+<p>When <code>f</code> of an expression <code>Apply{f, Tuple{...}}</code> is a name of the Builtin column, resolves to its cell and has the right number of arguments, the compiler uses that instruction. The compiler does not distinguish an overwritten cell.</p>
 
 <h3>Builtins that are not instructions</h3>
 <p>These are builtins of the machine (the Builtin of the table in Calls of the execution model). <code>GETGLOBAL</code> puts the function in <code>R[B]</code>, the arguments go above it, and <code>CALL</code> calls it.</p>
@@ -164,7 +169,7 @@ AD | high 16 of D/16 | high 8 of A/8 | EXT (8)/8
 <tr><td><code>intern(s)</code></td><td>The symbol named <code>s</code></td></tr>
 <tr><td><code>symname(sym)</code></td><td>The name of the symbol</td></tr>
 <tr><td><code>array(n)</code></td><td>An array of <code>n</code> elements filled with <code>none</code>. An error if <code>n</code> is negative</td></tr>
-<tr><td><code>plain_array(kind, n)</code></td><td>A plain array of <code>n</code> elements of the type <code>kind</code>, filled with 0 of that type (<code>false</code>, <code>0</code>, <code>0.0</code> or <code>complex(0, 0)</code>). An error if <code>kind</code> is none of the 14 types or <code>n</code> is negative</td></tr>
+<tr><td><code>plain_array(kind, n)</code></td><td>A plain array of <code>n</code> elements of the type <code>kind</code>, filled with the zero of that type (<code>false</code>, <code>0</code>, <code>0.0</code> or <code>complex(0, 0)</code>). An error if <code>kind</code> is none of the 14 types or <code>n</code> is negative</td></tr>
 <tr><td><code>plain_len(a)</code></td><td>The length</td></tr>
 <tr><td><code>plain_kind(a)</code></td><td>The symbol of the type</td></tr>
 <tr><td><code>bit_and(a, b)</code></td><td>Bitwise and</td></tr>
@@ -207,7 +212,7 @@ AD | high 16 of D/16 | high 8 of A/8 | EXT (8)/8
 <ul>
 <li>When the pattern of the parameter at position <code>i</code> is a variable in a register, that variable is <code>R[i]</code>.</li>
 <li>The other variables in registers are assigned from <code>R[arity]</code> in order. They are fixed for a code, and are not reused after a block ends.</li>
-<li>Temporary values use the numbers after the variables, like a stack. They are freed when the evaluation of the expression ends.</li>
+<li>Temporary values use the numbers after the variables, like a stack.</li>
 <li><code>nregs</code> is the sum of the arity, the number of the other variables in registers and the largest depth of temporary values.</li>
 </ul>
 <p>For an <strong>operand</strong> <code>&lt;e:r&gt;</code>, <code>r</code> is decided as follows. When <code>e</code> is a variable in a register that the evaluation of the later operands does not write, <code>r</code> is the register of that variable and no instruction is needed. Otherwise <code>r</code> is <code>t</code> and the value of <code>e</code> is put there.</p>
@@ -215,7 +220,7 @@ AD | high 16 of D/16 | high 8 of A/8 | EXT (8)/8
 <tr><th>Expression</th><th>Instructions</th></tr>
 <tr><td>Integer</td><td><code>LOADI d v</code> from -32768 to 32767, otherwise <code>LOADK d k</code></td></tr>
 <tr><td>Float (<code>1.5</code>), string, <code>true</code>, <code>false</code>, <code>none</code>, <code>'e</code></td><td><code>LOADK d k</code></td></tr>
-<tr><td>M-expression of constants only</td><td><code>LOADK d k</code>. M-expressions and strings are immutable and are shared</td></tr>
+<tr><td>M-expression of constants only</td><td><code>LOADK d k</code>. M-expressions and strings are shared</td></tr>
 <tr><td>Quasi-quotation with <code>!e</code></td><td><code>LOADK</code> for a subtree with no splice. For a part with a splice, the children go from <code>R[t]</code> in order and then <code>TUPLE</code>, <code>CONS</code> or <code>BUILD</code>. The <code>e</code> of <code>!e</code> is evaluated as an expression</td></tr>
 <tr><td>Variable <code>x</code></td><td><code>MOVE d r</code> in a register (nothing when they are the same), <code>ENVGET d dep i</code> in an environment, <code>GETGLOBAL d k</code> for a global</td></tr>
 <tr><td><code>x := e</code> / <code>x = e</code></td><td>In a register, <code>&lt;e:r&gt;</code> into the register of <code>x</code>. In an environment, <code>&lt;e:t&gt;</code> <code>ENVSET t dep i</code>. For a global, <code>&lt;e:t&gt;</code> <code>SETGLOBAL t k</code>. The value of the expression is the value of <code>e</code></td></tr>

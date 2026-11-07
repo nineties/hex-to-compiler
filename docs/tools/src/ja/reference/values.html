@@ -1,6 +1,6 @@
 <!--title 値・パターン・M式-->
 <h1>値・パターン・M式</h1>
-<p class="lead">評価の対象は M式です。値の種類、特殊形式、パターン、エフェクト、トップレベルを定めます。</p>
+<p class="lead">評価の対象は M式です。値の種類、特殊形式、パターン、エフェクト、トップレベルを定めます。特殊形式の頭以外の M式は構築子で、引数を評価した同じ頭の M式になります。数は型が混ざると整数・浮動小数点数・複素数の順で高いほうに揃え、範囲外や0での除算などは実行時エラーです。</p>
 
 <h2>M式</h2>
 <p>M式はシンボル（<code>x</code>）・整数（<code>42</code>・<code>-1</code>）・浮動小数点数（<code>1.5</code>）・文字列（<code>"abc"</code>）・<code>Head{a, b, ...}</code> のいずれかです。シンボルは英字・<code>_</code>・<code>%</code> のどれかで始まり、英字・数字・<code>_</code> が続きます。文字列は65535バイトまでです。<code>Head{...}</code> の引数の個数に上限はありません。トップレベルに置いた文字列は効果を持たないので、コメントとして使えます。</p>
@@ -13,7 +13,7 @@
 <tr><td><code>Float</code></td><td>浮動小数点数。IEEE 754 の binary64</td></tr>
 <tr><td><code>Complex</code></td><td>複素数。浮動小数点数の組</td></tr>
 <tr><td><code>String</code></td><td>文字列</td></tr>
-<tr><td><code>Symbol</code></td><td>シンボル。<code>true</code>・<code>false</code>・<code>none</code> はシンボルのリテラル</td></tr>
+<tr><td><code>Symbol</code></td><td>シンボル</td></tr>
 <tr><td><code>Expr</code></td><td><code>Head{a, ...}</code></td></tr>
 <tr><td><code>Function</code></td><td>Lambda・Fusion・組み込み関数・継続</td></tr>
 <tr><td><code>Array</code></td><td><code>array(n)</code> で作る固定長の可変配列</td></tr>
@@ -23,16 +23,23 @@
 
 <h3 id="numbers">数</h3>
 <ul>
-<li>整数の範囲に制限はなく、ラップアラウンドも切り詰めも起きません。</li>
-<li>浮動小数点数の丸めは最近接偶数で、浮動小数点例外が起きてもプログラムは止まりません。複素数は <code>complex(re, im)</code> か虚数リテラル（<code>2i</code>）で作ります。</li>
-<li><code>_add</code> <code>_sub</code> <code>_mul</code> <code>_div</code> は整数・浮動小数点数・複素数を受け取り、それ以外の値を渡すとプログラムは止まります。型が混ざると、整数・浮動小数点数・複素数の順で高いほうの型に被演算子を揃え、結果もその型になります。</li>
-<li>整数を浮動小数点数に揃えるときは最も近い値に丸めます。浮動小数点数の範囲を超える整数を揃えると実行時エラーです。</li>
-<li>整数どうしの <code>_div</code> は0方向へ切り捨てた商で、除数が0なら実行時エラーです。浮動小数点数か複素数を含む割り算は、除数が0でも止まりません。浮動小数点数は無限大か NaN になり、複素数は各成分に同じ規則を当てた値になります。</li>
-<li>整数どうしの <code>_quo</code>（演算子 <code>//</code>）は負の無限大方向へ丸めた商で、<code>-7 // 2</code> は <code>-4</code> です。除数が0なら実行時エラーです。</li>
-<li>整数どうしの <code>_mod(a, b)</code> は <code>a - b * (a // b)</code>（符号は除数と同じ） で、除数が0なら実行時エラーです。</li>
-<li><code>_lt</code> <code>_le</code> <code>_gt</code> <code>_ge</code> は整数と浮動小数点数を型を揃えずに数学的な値で比べます。NaN を含むと <code>false</code> です。数でない値か複素数を渡すとプログラムは止まります。</li>
-<li><code>_eq</code> は型が違っても値が同じ数を等しいとします（<code>1 == 1.0</code>）。NaN は自分自身とも等しくありません。複素数は両方の成分が等しいときに等しくなります。<code>_ne</code> は <code>_eq</code> の逆です。</li>
+<li><code>_add</code> <code>_sub</code> <code>_mul</code> <code>_div</code> が受け取るのは整数・浮動小数点数・複素数だけで、それ以外の値を渡すとプログラムは止まります。</li>
+<li>整数は範囲に制限がなく、ラップアラウンドも切り詰めも起きません。浮動小数点数の丸めは最近接偶数で、浮動小数点例外が起きても止まりません。複素数は <code>complex(re, im)</code> か虚数リテラル（<code>2i</code>）で作ります。</li>
 </ul>
+<p>整数どうしの割り算:</p>
+<table>
+<tr><th>関数</th><th>結果</th></tr>
+<tr><td><code>_div</code></td><td>0方向へ切り捨てた商</td></tr>
+<tr><td><code>_quo</code>（演算子 <code>//</code>）</td><td>負の無限大方向へ丸めた商。<code>-7 // 2</code> は <code>-4</code></td></tr>
+<tr><td><code>_mod(a, b)</code></td><td><code>a - b * (a // b)</code>。符号は除数と同じ</td></tr>
+</table>
+<p>除数が0なら実行時エラーです。ただし浮動小数点数か複素数を含む <code>_div</code> は止まらず、浮動小数点数は無限大か NaN、複素数は各成分に同じ規則を当てた値です。</p>
+<table>
+<tr><th>関数</th><th>規則</th></tr>
+<tr><td><code>_lt</code> <code>_le</code> <code>_gt</code> <code>_ge</code></td><td>整数と浮動小数点数を、型を揃えずに数学的な値で比べる。NaN を含むと <code>false</code>。数でない値か複素数を渡すとプログラムは止まる</td></tr>
+<tr><td><code>_eq</code> <code>_ne</code></td><td>型が違っても値が同じ数は等しい（<code>1 == 1.0</code>）。NaN は自分自身とも等しくない。複素数は両方の成分が等しいときに等しい。<code>_ne</code> は逆</td></tr>
+</table>
+<p>整数を浮動小数点数に揃えるときは最も近い値に丸め、浮動小数点数の範囲を超える整数は実行時エラーです。</p>
 
 <h2>特殊形式</h2>
 <table>
@@ -49,7 +56,6 @@
 <tr><td><code>Handle{body, handler}</code>・<code>Perform{v}</code></td><td>代数的エフェクト</td></tr>
 <tr><td><code>Tuple{a, ...}</code></td><td>組</td></tr>
 </table>
-<p>これ以外の頭の M式（<code>Cons{x, y}</code> など）はコンストラクタで、引数を評価して同じ頭の M式を作ります。</p>
 <!--ex t2_mexpr-->
 
 <h2 id="patterns">パターン</h2>
@@ -57,9 +63,9 @@
 <ul>
 <li>変数 <code>x</code>。<code>_</code> は何にでも合い、何も束縛しません</li>
 <li>整数・文字列・<code>true</code>・<code>false</code>・<code>none</code>。等しい値に合い、何も束縛しません</li>
-<li><code>Quote{v}</code>。等しい値に合います（例 <code>Quote{x}</code> はシンボル <code>x</code> に合います）</li>
+<li><code>Quote{v}</code>。等しい値に合います</li>
 <li><code>Head{p, ...}</code>。頭と引数の数が同じ M式に合います</li>
-<li><code>Head{p, ..., _Rest{x}}</code>。頭が同じで、<code>_Rest</code> の前の引数の数以上の引数を持つ M式に合い、残りの引数の <code>Tuple</code> を <code>x</code> に束縛します（構文は <code>Head{p, ..., x...}</code>）</li>
+<li><code>Head{p, ..., _Rest{x}}</code>。頭が同じで、引数が <code>_Rest</code> の前のパターンの数以上ある M式に合います。残りの引数の <code>Tuple</code> を <code>x</code> に束縛します（構文は <code>Head{p, ..., x...}</code>）</li>
 <li><code>_TypeOf{p, type}</code>。<code>type</code> が値の <code>type</code> で、<code>p</code> が合うときに合います</li>
 </ul>
 <p>構文では <code>'none</code> が <code>Quote{none}</code>、<code>x @ Int</code> が <code>_TypeOf{x, Int}</code>（<code>Int</code> は変数）、<code>x :: xs</code> と <code>[a, b]</code> が <code>Cons</code> のパターンになります。</p>

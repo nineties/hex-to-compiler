@@ -38,7 +38,7 @@
 </ol></details></nav>
 <main>
 <h1>planckvm の命令</h1>
-<p class="lead">この頁は planckvm の外部仕様のうち、バイトコードのフォーマット、命令、組み込み関数、planck の各機能に対応する命令を定めます。機械と値は<a href="planckvm.html">planckvm: 実行モデルと値</a>に、実装の中の設計は<a href="planckvm-internals.html">planckvm の内部仕様</a>にあります。</p>
+<p class="lead">1命令は1語で、高頻度の操作だけを命令にします。他は組み込み関数です。コードの正しさは生成する側が守り、評価器は検査しません。この頁は planckvm の外部仕様のうち、バイトコードのフォーマット、命令、組み込み関数、planck の各機能に対応する命令を定めます。機械と値は<a href="planckvm.html">planckvm: 実行モデルと値</a>に、実装の中の設計は<a href="planckvm-internals.html">planckvm の内部仕様</a>にあります。</p>
 
 <h2 id="format">バイトコードのフォーマット</h2>
 <p>基本単位は 32 ビットの語で、ビットの番号は最下位を 0 とします。バイトコードの単位はコードです。1つの Lambda または1つのトップレベルの式が1つのコードになり、入れ子の関数のコードは外側のコードの定数表に入ります。</p>
@@ -109,7 +109,7 @@
 </ul>
 
 <h3>定数表</h3>
-<p>定数表はコードごとの値の並びです。1要素は値1語で、オペランド <code>K[i]</code> の i は添字です。</p>
+<p>定数表はコードごとの値の並びで、1要素は値1語です。<code>K[i]</code> は添字 i の要素を指します。</p>
 <table>
 <tr><th>要素</th><th>使う命令</th></tr>
 <tr><td>整数・浮動小数点数・文字列のリテラル、<code>true</code> <code>false</code> <code>none</code>、<code>Quote</code> の中身、定数だけの M式</td><td><code>LOADK</code></td></tr>
@@ -121,19 +121,24 @@
 </table>
 
 <h3>正しいコードの条件</h3>
-<p>コードを生成する側は次を守ります。評価器はこれを検査しません。</p>
+<p>生成する側は次を守ります。</p>
 <ul>
-<li>ジャンプ先は命令列の中の命令の先頭です。</li>
-<li>命令列の最後は <code>RET</code> <code>TCALL</code> <code>JMP</code> <code>HALT</code> <code>NEXT</code> のいずれかです。</li>
-<li>条件の命令の次の語は <code>JMP</code> です。<code>MATCH</code> で始まる命令の次の語は <code>NEXT</code> か <code>JMP</code> です。</li>
-<li>局所変数は一時の値より小さい番号のレジスタに置きます。<code>CALL</code> <code>HANDLE</code> の時点で生きている値はすべて <code>R[B]</code> より下にあります（<code>HANDLE</code> は <code>R[B]</code> と <code>R[B+1]</code> も保ちます）。</li>
-<li><code>HANDLE</code> の本体のコードでは <code>TCALL</code> を使いません。</li>
-<li><code>NEWENV</code> はコードの中で1回だけ、パターンの照合がすべて成功した後に実行します。</li>
-<li>パターンの照合が終わるまで <code>R[0]</code> から <code>R[arity-1]</code> を書き換えません。</li>
+<li>ジャンプ先が、命令列の中の命令の先頭であること。</li>
+<li>命令列の最後が <code>RET</code> <code>TCALL</code> <code>JMP</code> <code>HALT</code> <code>NEXT</code> のいずれかであること。</li>
+<li>条件の命令の次の語が <code>JMP</code> であること。<code>MATCH</code> で始まる命令の次の語が <code>NEXT</code> か <code>JMP</code> であること。</li>
+<li>局所変数を、一時の値より小さい番号のレジスタに置くこと。<code>CALL</code> <code>HANDLE</code> の時点で生きている値は、すべて <code>R[B]</code> より下にあること（<code>HANDLE</code> は <code>R[B]</code> と <code>R[B+1]</code> も保つ）。</li>
+<li><code>HANDLE</code> の本体のコードで <code>TCALL</code> を使わないこと。</li>
+<li><code>NEWENV</code> を、コードの中で1回だけ、パターンの照合がすべて成功した後に実行すること。</li>
+<li>パターンの照合が終わるまで、<code>R[0]</code> から <code>R[arity-1]</code> を書き換えないこと。</li>
 </ul>
 
 <h2>命令</h2>
-<p>命令の形式は「形式」の列のとおりで、「オペランド」の列に書いていない語の欄は 0 です。印の意味は次のとおりです。<strong>S</strong> はセーフポイントで、確保などで GC が走る可能性があります。<strong>W</strong> はライトバリアです。<strong>T</strong> は条件を満たさないと止まることを表します。</p>
+<p>命令の形式は「形式」の列のとおりで、「オペランド」の列に書いていない語の欄は 0 です。表の末尾の3列は印です。</p>
+<ul>
+<li><strong>S</strong>: セーフポイント。確保などで GC が走る可能性がある。</li>
+<li><strong>W</strong>: ライトバリア。</li>
+<li><strong>T</strong>: 条件を満たさないと止まる。</li>
+</ul>
 <table>
 <tr><th>ニーモニック</th><th>オペコード</th><th>形式</th><th>オペランド</th><th>動作</th><th>組み込み</th><th>S</th><th>W</th><th>T</th></tr>
 <tr><td><code>MOVE</code></td><td>0x00</td><td>ABC</td><td>A B</td><td><code>R[A] := R[B]</code></td><td></td><td></td><td></td><td></td></tr>
@@ -162,7 +167,7 @@
 <tr><td><code>NEXT</code></td><td>0x17</td><td>ABC</td><td></td><td>同じ引数で残りの選択肢を試す。尽きたら <code>matching failed</code> で止まる。<code>PERFORM</code> がハンドラを呼んだフレームでは外側の境界へ進む</td><td></td><td>○</td><td></td><td>○</td></tr>
 <tr><td><code>HALT</code></td><td>0x18</td><td>ABC</td><td>A</td><td>命令ループを抜け、<code>R[A]</code> を評価器に渡す。入口のコードだけが使う</td><td></td><td></td><td></td><td></td></tr>
 <tr><td><code>CLOSURE</code></td><td>0x19</td><td>AD</td><td>A D</td><td><code>R[A] :=</code> <code>K[D]</code> のコードと現在の環境からなる Lambda</td><td></td><td>○</td><td></td><td></td></tr>
-<tr><td><code>FUSION</code></td><td>0x1A</td><td>ABC</td><td>A B C</td><td><code>R[A] := R[B] | R[C]</code>。<code>R[B]</code> が none なら <code>R[C]</code>。それ以外で <code>R[B]</code> か <code>R[C]</code> が関数でなければ止まる</td><td></td><td>○</td><td></td><td>○</td></tr>
+<tr><td><code>FUSION</code></td><td>0x1A</td><td>ABC</td><td>A B C</td><td><code>R[A] := R[B] | R[C]</code>。<code>R[B]</code> が none なら <code>R[C]</code>。none でないとき、<code>R[B]</code> か <code>R[C]</code> が関数でなければ止まる</td><td></td><td>○</td><td></td><td>○</td></tr>
 <tr><td><code>TUPLE</code></td><td>0x1B</td><td>ABC</td><td>A B C</td><td><code>R[A] := Tuple{R[B], ..., R[B+C-1]}</code></td><td></td><td>○</td><td></td><td></td></tr>
 <tr><td><code>CONS</code></td><td>0x1C</td><td>ABC</td><td>A B C</td><td><code>R[A] := Cons{R[B], R[C]}</code></td><td></td><td>○</td><td></td><td></td></tr>
 <tr><td><code>BUILD</code></td><td>0x1D</td><td>ABC</td><td>A B C</td><td><code>R[A] :=</code> 頭がシンボル <code>R[B]</code>、引数が <code>R[B+1], ..., R[B+C]</code> の M式。C が 64 を超えれば止まる</td><td></td><td>○</td><td></td><td>○</td></tr>
@@ -176,7 +181,7 @@
 <tr><td><code>ADD</code></td><td>0x25</td><td>ABC</td><td>A B C</td><td><code>R[A] := R[B] + R[C]</code></td><td><code>_add</code></td><td>○</td><td></td><td>○</td></tr>
 <tr><td><code>SUB</code></td><td>0x26</td><td>ABC</td><td>A B C</td><td><code>R[A] := R[B] - R[C]</code></td><td><code>_sub</code></td><td>○</td><td></td><td>○</td></tr>
 <tr><td><code>MUL</code></td><td>0x27</td><td>ABC</td><td>A B C</td><td><code>R[A] := R[B] * R[C]</code></td><td><code>_mul</code></td><td>○</td><td></td><td>○</td></tr>
-<tr><td><code>DIV</code></td><td>0x28</td><td>ABC</td><td>A B C</td><td><code>R[A] := R[B] / R[C]</code>。整数どうしなら 0 方向へ切り捨てた商で、除数が 0 なら止まる。それ以外は通常の割り算で、0 で割っても止まらない</td><td><code>_div</code></td><td>○</td><td></td><td>○</td></tr>
+<tr><td><code>DIV</code></td><td>0x28</td><td>ABC</td><td>A B C</td><td><code>R[A] := R[B] / R[C]</code>。整数どうしなら 0 方向へ切り捨てた商で、除数が 0 なら止まる。整数どうしでなければ通常の割り算で、0 で割っても止まらない</td><td><code>_div</code></td><td>○</td><td></td><td>○</td></tr>
 <tr><td><code>MOD</code></td><td>0x29</td><td>ABC</td><td>A B C</td><td>整数どうしなら <code>R[A] := b - c * (b / c)</code>（b, c は <code>R[B]</code>, <code>R[C]</code>、商は <code>DIV</code> のとおり）で、除数が 0 なら止まる</td><td><code>_mod</code></td><td>○</td><td></td><td>○</td></tr>
 <tr><td><code>ADDI</code></td><td>0x2A</td><td>ABC</td><td>A B sC</td><td><code>R[A] := R[B] + sC</code></td><td><code>_add</code></td><td>○</td><td></td><td>○</td></tr>
 <tr><td><code>LT</code></td><td>0x2B</td><td>ABC</td><td>A B C</td><td><code>R[A] := R[B] &lt; R[C]</code>（<code>true</code> か <code>false</code>）。複素数を含めば止まる</td><td><code>_lt</code></td><td></td><td></td><td>○</td></tr>
@@ -201,11 +206,11 @@
 </table>
 <p><strong>条件の命令</strong>（<code>TEST</code> から <code>TGEI</code> まで）は値を作りません。条件が <code>k</code> と一致すれば（<code>k = 1</code> なら真のとき、<code>k = 0</code> なら偽のとき）次の語の <code>JMP</code> を実行し、一致しなければ次の語を飛ばします。NaN を含むと <code>TLT</code> と <code>TGE</code> はどちらも偽です。</p>
 <p><code>ADD</code> <code>SUB</code> <code>MUL</code> <code>DIV</code> <code>MOD</code> <code>ADDI</code> <code>LT</code> <code>GE</code> <code>TLT</code> <code>TGE</code> <code>TLTI</code> <code>TGEI</code> は引数が数でなければ止まります。型の混在と結果の型については、実行モデルの「数」を参照してください。<code>HEAD</code> から <code>PLAINSET</code> までのうち T の印のある命令は、引数の型が違うときと範囲外のときに止まります（<code>ORD</code> の範囲外を除く）。</p>
-<p>「組み込み」の列に名前のある命令には、セルが上書きされているとき <code>CALL</code> と同じく S と T の印が当てはまります。</p>
+<p>「組み込み」の列に名前のある命令には、セルが上書きされているとき S と T の印が当てはまります。</p>
 
 <h2 id="builtins">組み込みと命令</h2>
-<p>高頻度で呼ばれるものだけを命令にします。どのプログラムでも実行する定数、変数、制御、呼び出し、照合、エフェクト、演算子の操作と、呼び出しの多い組み込みが該当します。それ以外は組み込み関数にします。型で分かれる演算は、値の型を見る1つの命令にします。</p>
-<p>式 <code>Apply{f, Tuple{...}}</code> の <code>f</code> が「組み込み」の列の名前で、そのセルに解決され、引数の個数が合うとき、コンパイラはその命令を使います。セルの上書きは命令の実行時に扱うので、コンパイラは上書きの有無を区別しません。</p>
+<p>命令は、定数、変数、制御、呼び出し、照合、エフェクト、演算子の操作と、呼び出しの多い組み込みです。型で分かれる演算は、値の型を見る1つの命令にします。</p>
+<p>式 <code>Apply{f, Tuple{...}}</code> の <code>f</code> が「組み込み」の列の名前で、そのセルに解決され、引数の個数が合うとき、コンパイラはその命令を使います。コンパイラは上書きの有無を区別しません。</p>
 
 <h3>命令にしない組み込み</h3>
 <p>次の表の組み込みは機械の組み込み（実行モデルの「呼び出し」の表の組み込み）です。<code>GETGLOBAL</code> で関数を <code>R[B]</code> に読み、引数をその上のレジスタに置いて <code>CALL</code> で呼びます。</p>
@@ -259,16 +264,16 @@
 <h3>レジスタの割り当て</h3>
 <ul>
 <li>パラメータの位置 i のパターンがレジスタの変数なら、その変数は <code>R[i]</code> です。</li>
-<li>それ以外のレジスタの変数は <code>R[arity]</code> から順に割り当てます。1つのコードの中で固定で、ブロックを抜けても再利用しません。</li>
-<li>一時の値は変数の次の番号からスタックのように使います。式の評価が終わると解放します。</li>
+<li>残りのレジスタの変数は <code>R[arity]</code> から順に割り当てます。割り当ては1つのコードの中で固定で、ブロックを抜けても再利用しません。</li>
+<li>一時の値は変数の次の番号からスタックのように使います。</li>
 <li><code>nregs</code> は arity、それ以外のレジスタの変数の個数、一時の値の最大の深さの和です。</li>
 </ul>
-<p><strong>被演算子</strong> <code>&lt;e:r&gt;</code> の r は次のように決めます。e がレジスタの変数で、後の被演算子の評価でその変数が書き換わらないなら、r はその変数のレジスタで命令は要りません。それ以外なら r は <code>t</code> で、e の値をそこに入れます。</p>
+<p><strong>被演算子</strong> <code>&lt;e:r&gt;</code> の r は次のように決めます。e がレジスタの変数で、後の被演算子の評価でその変数が書き換わらないなら、r はその変数のレジスタで命令は要りません。そうでなければ r は <code>t</code> で、e の値をそこに入れます。</p>
 <table>
 <tr><th>式</th><th>命令</th></tr>
 <tr><td>整数</td><td>-32768 〜 32767 なら <code>LOADI d v</code>、それ以外は <code>LOADK d k</code></td></tr>
 <tr><td>浮動小数点数（<code>1.5</code>）・文字列・<code>true</code> <code>false</code> <code>none</code>・<code>'e</code></td><td><code>LOADK d k</code></td></tr>
-<tr><td>定数だけの M式</td><td><code>LOADK d k</code>。M式と文字列は不変なので共有する</td></tr>
+<tr><td>定数だけの M式</td><td><code>LOADK d k</code>。M式と文字列は共有する</td></tr>
 <tr><td><code>!e</code> を含む準引用</td><td>差し込みのない部分木は <code>LOADK</code>。差し込みのある部分は子を <code>R[t]</code> から順に入れて <code>TUPLE</code> <code>CONS</code> <code>BUILD</code>。<code>!e</code> の e は式として評価する</td></tr>
 <tr><td>変数 <code>x</code></td><td>レジスタなら <code>MOVE d r</code>（同じなら無し）、環境なら <code>ENVGET d dep i</code>、大域なら <code>GETGLOBAL d k</code></td></tr>
 <tr><td><code>x := e</code> / <code>x = e</code></td><td>レジスタなら <code>&lt;e:r&gt;</code> を x のレジスタへ、環境なら <code>&lt;e:t&gt;</code> <code>ENVSET t dep i</code>、大域なら <code>&lt;e:t&gt;</code> <code>SETGLOBAL t k</code>。式の値は e の値</td></tr>
@@ -317,7 +322,7 @@
 <tr><td><code>a and b</code>、<code>k = 1</code></td><td><code>&lt;a, L1, 0&gt;</code> <code>&lt;b, L, 1&gt;</code> <code>L1:</code></td></tr>
 <tr><td><code>a or b</code>、<code>k = 1</code></td><td><code>&lt;a, L, 1&gt;</code> <code>&lt;b, L, 1&gt;</code></td></tr>
 <tr><td><code>a or b</code>、<code>k = 0</code></td><td><code>&lt;a, L1, 1&gt;</code> <code>&lt;b, L, 0&gt;</code> <code>L1:</code></td></tr>
-<tr><td>それ以外</td><td><code>&lt;c:r&gt;</code> <code>TEST r k</code> <code>JMP L</code></td></tr>
+<tr><td>上のどれでもない c</td><td><code>&lt;c:r&gt;</code> <code>TEST r k</code> <code>JMP L</code></td></tr>
 </table>
 
 <h3>パターンと命令</h3>
@@ -348,7 +353,7 @@
 0b  0x02010125  ADD R1 R1 R2
 0c  0x00000116  RET R1
 </pre>
-<p><code>counter() := { n := 0; () -&gt; { n = n + 1; n } }</code> の外側（arity 0、nregs 1、<code>K[0]</code> が内側のコード）と内側（arity 0、nregs 1）です。内側は <code>NEWENV</code> を実行しないので、現在の環境は外側が作った環境で、n は深さ 0 です。</p>
+<p><code>counter() := { n := 0; () -&gt; { n = n + 1; n } }</code> の外側（arity 0、nregs 1、<code>K[0]</code> が内側のコード）と内側（arity 0、nregs 1）を示します。内側は <code>NEWENV</code> を実行しないので、現在の環境は外側が作った環境で、n は深さ 0 です。</p>
 <pre>
 00  0x00010006  NEWENV 1           slot 0 is n
 01  0x00000001  LOADI R0 0

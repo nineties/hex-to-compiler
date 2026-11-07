@@ -1,9 +1,9 @@
 <!--title planckvm internal representation-->
 <h1>planckvm internal representation</h1>
-<p class="lead">Words, headers, the contents of each kind, and how the GC treats them on the heap.</p>
+<p class="lead">Words, headers, the contents of each kind, and how the GC treats them on the heap. The lowest bit of a word tells an immediate from a reference, and the kind of an object is read from its header. The GC follows only the fields of values.</p>
 
 <h2>Words</h2>
-<p>The words of the heap, the registers and the frames are all 32 bits, and the bits are numbered from 0 at the least significant bit. The lowest bit of a word tells what the word is.</p>
+<p>The words of the heap, the registers and the frames are all 32 bits, and the bits are numbered from 0 at the least significant bit.</p>
 <!--bits
 integer | value n (31)/31 | 1/1
 reference | index in the heap (31)/31 | 0/1
@@ -16,7 +16,6 @@ reference | index in the heap (31)/31 | 0/1
 <ul>
 <li>The integer of the language is one kind. An integer that fits an immediate is always an immediate, and only an integer that does not fit is a big integer object.</li>
 <li>Only integers are immediates. Floats, complex numbers, strings and symbols are all objects.</li>
-<li>A word does not hold the kind of an object. The kind is read from the header of the object.</li>
 </ul>
 
 <h2>Headers</h2>
@@ -31,8 +30,8 @@ header | size (26)/26 | kind (4)/4 | m (1)/1 | 1/1
 <tr><td><code>m</code></td><td>A mark that the GC uses. 0 in an image</td></tr>
 <tr><td>lowest bit</td><td>1 in a header</td></tr>
 </table>
-<p>A header is not a value, and it is not put in a register or in a field of an object. A word with the lowest bit 0 at the place of a header is the reference to the place that the GC moved the object to. An image has none.</p>
 <p><code>kind</code> uses 0 to 14 and does not use 15.</p>
+<p>A header is not a value, and it is not put in a register or in a field of an object. A word with the lowest bit 0 at the place of a header is the reference to the place that the GC moved the object to. An image has none.</p>
 <table>
 <tr><th>kind</th><th>Object</th><th>Head</th></tr>
 <tr><td>0</td><td>big integer</td><td><code>Int</code></td></tr>
@@ -68,7 +67,7 @@ header | size (26)/26 | kind (4)/4 | m (1)/1 | 1/1
 <ul>
 <li>A value is the sign and the absolute value. The digits of the absolute value are in base 2<sup>64</sup>, from the lowest digit.</li>
 <li><code>size</code> is <code>2 + 2n</code>. The number of digits is limited to what fits the <code>size</code> field.</li>
-<li>The top digit is not 0. An integer that fits the range of an immediate is not a big integer. 0 is an immediate.</li>
+<li>The top digit is not 0. 0 is an immediate.</li>
 </ul>
 
 <h3>Floats and complex numbers</h3>
@@ -92,7 +91,7 @@ header | size (26)/26 | kind (4)/4 | m (1)/1 | 1/1
 <tr><th>Word</th><th>Contents</th></tr>
 <tr><td>0</td><td>name (value. reference to a string)</td></tr>
 </table>
-<p>Symbols with the same name are one object, so a symbol is unique for each name. The string of the name does not change.</p>
+<p>Symbols with the same name are one object. The string of the name does not change.</p>
 
 <h3>M-exprs</h3>
 <table>
@@ -164,11 +163,11 @@ header | size (26)/26 | kind (4)/4 | m (1)/1 | 1/1
 <tr><td>code (14)</td><td>0-</td><td>all of the <a href="planckvm-isa.html#format">bytecode format</a> from word 0 to the table of constants (raw and values are mixed. the words of the table of constants are values)</td></tr>
 </table>
 
-<h3>同一性の番号</h3>
-<p>配列・plain 配列・Lambda・Fusion・組み込み・継続は、語 0 に同一性の番号を持ちます。作った直後は 0 で、番号を割り当てるまで 0 のままです。最初の <code>HASH</code> が 1 以上の番号を割り当て、以降は変わりません。同じ機械で割り当てる番号は互いに異なります。</p>
+<h3>Identity numbers</h3>
+<p>Arrays, plain arrays, Lambdas, Fusions, builtins and continuations hold an identity number in word 0. It is 0 until the first <code>HASH</code> assigns a number of 1 or more, and it does not change afterwards. The numbers assigned in one machine are all different.</p>
 
 <h2>How the GC treats objects</h2>
-<p>The GC reads <code>kind</code> in the header and follows only the fields of values. It does not follow raw fields.</p>
+<p>The GC reads <code>kind</code> in the header and does not follow raw fields.</p>
 <table>
 <tr><th>kind</th><th>Fields that are followed</th></tr>
 <tr><td>big integer, float, complex number, string, plain array</td><td>none (the contents are numbers and bytes)</td></tr>

@@ -1,6 +1,6 @@
 <!--title planckvm: 実行モデルと値-->
 <h1>planckvm: 実行モデルと値</h1>
-<p class="lead">planckvm は planck の全機能を実行するバイトコードです。planck で書いた評価器が式を planckvm の命令に変換し、命令ループで実行します。この頁と<a href="planckvm-isa.html">planckvm の命令</a>が外部仕様で、VM の利用者や planck からコードを生成する側が前提にしてよい動作を定めます。この頁では機械、値、数を説明します。実装の中の設計は<a href="planckvm-internals.html">planckvm の内部仕様</a>に書きます。</p>
+<p class="lead">planckvm は planck の全機能を実行するバイトコードです。planck で書いた評価器が式を planckvm の命令に変換し、命令ループで実行します。外部仕様はこの頁と<a href="planckvm-isa.html">planckvm の命令</a>、実装の設計は<a href="planckvm-internals.html">planckvm の内部仕様</a>です。変数はコンパイル時にセル・環境・レジスタへ解決され、実行時に名前は引きません。呼び出しは呼び出し元のレジスタに窓を重ね、引数をコピーしません。</p>
 
 <h2>実行モデル</h2>
 <p>機械はレジスタマシンです。すべての命令は現在のフレームのレジスタを読み書きします。</p>
@@ -15,29 +15,34 @@
 
 <h3>レジスタの窓</h3>
 <ul>
-<li>すべてのフレームのレジスタを1本のレジスタスタックの上に置きます。フレームのレジスタの範囲を窓と呼びます。</li>
-<li><code>CALL A B C</code> で呼ばれた Lambda の窓は、呼び出し元の <code>R[B+1]</code> から始まります。引数は呼び出し元が <code>R[B+1]</code> から <code>R[B+C]</code> に置くので、コピーせずに呼ばれた側の <code>R[0]</code> から <code>R[C-1]</code> になります。</li>
+<li>フレームのレジスタは1本のレジスタスタックの上にあり、その範囲を窓と呼びます。</li>
+<li><code>CALL A B C</code> で呼ばれた Lambda の窓は、呼び出し元の <code>R[B+1]</code> から始まります。引数 <code>R[B+1]</code> 〜 <code>R[B+C]</code> が呼ばれた側の <code>R[0]</code> 〜 <code>R[C-1]</code> です。</li>
 <li>呼び出しの間、呼び出し元の <code>R[B]</code> には呼ばれた関数が入ったままです。<code>R[B]</code> より上のレジスタの値は呼び出しで失われます。呼び出しをまたいで使う値は <code>R[B]</code> より下に置きます。</li>
-<li>引数以外のレジスタの初期値は決まっていないので、読む前に書きます。</li>
+<li>引数以外のレジスタの初期値は不定です。</li>
 <li>窓がレジスタスタックに収まらなければ <code>stack overflow</code> で止まります。</li>
 </ul>
 
 <h3>変数の置き場所</h3>
-<p>変数の指す先は書かれた位置で決まり、コンパイル時に次の3つのいずれかへ解決されます。名前の解決はコンパイル時に終わるので、実行時に未定義の変数は生じません。</p>
+<p>変数は書かれた位置で決まります。</p>
 <table>
 <tr><th>置き場所</th><th>変数</th><th>読み書き</th></tr>
 <tr><td>セル</td><td>大域変数</td><td><code>GETGLOBAL</code> <code>SETGLOBAL</code></td></tr>
-<tr><td>環境</td><td>関数の変数のうち、(1) 内側の Lambda か <code>Handle</code> の本体から参照されるもの、(2) 代入され、かつ同じコードに <code>CALL</code> <code>TCALL</code> <code>HANDLE</code> <code>PERFORM</code> のどれかがあるもの</td><td><code>ENVGET</code> <code>ENVSET</code></td></tr>
+<tr><td>環境</td><td>関数の変数のうち、(1) 内側の Lambda か <code>Handle</code> の本体から参照されるもの、(2) <code>Set</code> の対象になり、かつ同じコードに <code>CALL</code> <code>TCALL</code> <code>HANDLE</code> <code>PERFORM</code> のどれかがあるもの</td><td><code>ENVGET</code> <code>ENVSET</code></td></tr>
 <tr><td>レジスタ</td><td>それ以外の関数の変数</td><td>命令のオペランドに直接書く</td></tr>
 </table>
+<p><strong>規則</strong></p>
 <ul>
-<li>「代入される」とは <code>Set</code> の対象になることです。</li>
-<li>環境は1回の呼び出しにつき最大1つで、環境に置く変数があるコードだけが <code>NEWENV</code> で作ります。スロットの初期値は none です。<code>NEWENV</code> を実行しないコードの現在の環境は、Lambda が保持する環境です。</li>
-<li>環境の変数はコンパイル時に（深さ d, スロット i）へ解決されます。d は現在の環境から親をたどる回数です。</li>
-<li>Lambda は作られた場所の現在の環境を保持します。環境は共有されるので、Lambda の作成後に行った代入もその関数から見えます。</li>
+<li>環境の変数は（深さ d, スロット i）へ解決されます。d は現在の環境から親をたどる回数です。</li>
+<li>環境は1回の呼び出しにつき最大1つです。環境に置く変数があるコードだけが <code>NEWENV</code> で作り、スロットの初期値は none です。</li>
+<li>Lambda は作られた場所の現在の環境を保持します。環境は共有されるので、作成後の代入もその関数から見えます。</li>
+<li>大域変数の初期値は none です。<code>Def</code> は新しいセルを作り、<code>Set</code> は同じセルに書き込みます。</li>
+<li><code>true</code> <code>false</code> <code>none</code> はリテラルで、変数ではなく定数としてコンパイルします。<code>Def</code> <code>Set</code> <code>Declare</code> の対象に書くとコンパイルエラーです。</li>
+</ul>
+<p><strong>詳細</strong></p>
+<ul>
+<li><code>NEWENV</code> を実行しないコードでは、Lambda が保持する環境が現在の環境になります。</li>
 <li>定義を実行せずにレジスタの変数を読む経路があるときは、コードの入口で <code>LOADNONE</code> によりその変数を none にします。</li>
-<li>大域変数はセルで表し、初期値は none です。<code>Def</code> は新しいセルを作り、それ以降にコンパイルした式は新しいセルを指します。それ以前にコンパイルした式は古いセルを指したままです。<code>Set</code> は同じセルに書き込みます。</li>
-<li><code>true</code> <code>false</code> <code>none</code> はリテラルで、変数ではありません。レジスタにも環境にもセルにも置かず、定数としてコンパイルします。<code>Def</code> <code>Set</code> <code>Declare</code> の対象に書くとコンパイルエラーです。</li>
+<li><code>Def</code> の後にコンパイルした式は新しいセルを指し、前にコンパイルした式は古いセルを指したままです。</li>
 </ul>
 
 <h3>呼び出し</h3>
@@ -50,25 +55,35 @@
 <tr><td>継続</td><td>C が 1 のとき</td><td>再開する</td></tr>
 <tr><td>その他</td><td></td><td><code>not a function</code> で止まる</td></tr>
 </table>
-<p>コードの入口の命令列がパターンを照合します。一致しなければ <code>NEXT</code> が同じ引数で次の選択肢を試します。入口の命令列は引数のレジスタを書き換えません。選択肢が尽きると <code>matching failed</code> で止まります。</p>
-<p>呼ばれた側の <code>RET</code> の値は呼び出した命令に応じて受け取ります。</p>
+<p><strong>規則</strong></p>
+<ul>
+<li>コードの入口の命令列がパターンを照合します。一致しなければ <code>NEXT</code> が同じ引数で次の選択肢を試します。入口の命令列は引数のレジスタを書き換えません。</li>
+<li>選択肢が尽きると <code>matching failed</code> で止まります。</li>
+<li>呼ばれた側の <code>RET</code> の値は、呼び出した命令に応じて次の表のとおり受け取ります。</li>
+</ul>
 <table>
 <tr><th>呼び出した命令</th><th>受け取り方</th></tr>
 <tr><td>条件の命令（<code>TEST</code> から <code>TGEI</code> まで）</td><td>値が <code>false</code> 以外なら条件が真として、条件の命令の規則に従う</td></tr>
 <tr><td><code>ASET</code> <code>PLAINSET</code></td><td>捨てる</td></tr>
 <tr><td>それ以外</td><td><code>R[A]</code> に入れる</td></tr>
 </table>
-<p>命令の表の「組み込み」の欄に名前のある命令は、その名前のセルの値が元の組み込みのときだけ表の動作をします。セルに別の値が代入されていれば、窓の上に関数と引数を置いてその値を同じ引数で呼び、結果を上の表のとおりに受け取ります。即値は整数の引数として渡します。</p>
+<p><strong>詳細</strong> 命令の表の「組み込み」の欄に名前のある命令は、その名前のセルの値が元の組み込みのときだけ表の動作をします。セルに別の値が代入されていれば、窓の上に関数と引数を置いて同じ引数でその値を呼び、結果を上の表のとおりに受け取ります。即値は整数の引数として渡します。</p>
 
 <h3>継続とハンドラ</h3>
+<p><strong>規則</strong></p>
 <ul>
-<li><code>HANDLE</code> は本体を境界フレームで実行します。本体が正常に終わると、その値が <code>Handle</code> の値になります。</li>
-<li><code>PERFORM A B</code> は呼び出し元をたどって最も内側の境界を探し、そこまでのフレームとレジスタを複製して継続 <code>k</code> を作ります。次に、境界より上を捨て、境界のハンドラを引数 <code>(R[B], k)</code> で呼びます。結果は <code>Handle</code> の値になります。</li>
-<li>ハンドラのどの選択肢にも一致しなければ、次に外側の境界へ進みます。このとき <code>k</code> は外側の境界までの複製として作り直します。内側の境界もこの複製に含まれます。</li>
-<li>境界が見つからなければ <code>unhandled effect: v</code> で止まります。</li>
-<li><code>k</code> を呼ぶと、複製してあるフレームとレジスタを呼び出した窓の上に再び複製します。境界のハンドラは残ります（deep）。<code>PERFORM</code> の <code>R[A]</code> に <code>k</code> の引数を入れて実行を続けます。本体が終わると、その値は <code>k</code> を呼んだ側に返ります。</li>
+<li><code>HANDLE</code> は本体を境界フレームで実行し、本体が正常に終わるとその値が <code>Handle</code> の値になります。</li>
+<li><code>PERFORM A B</code> は、呼び出し元をたどって最も内側の境界を探します。そこまでのフレームとレジスタを複製して継続 <code>k</code> を作り、境界より上を捨てて、境界のハンドラを引数 <code>(R[B], k)</code> で呼びます。ハンドラの結果が <code>Handle</code> の値です。</li>
+<li>ハンドラのどの選択肢にも一致しなければ、次に外側の境界へ進みます。境界が見つからなければ <code>unhandled effect: v</code> で止まります。</li>
+<li><code>k</code> を呼ぶと、複製してあるフレームとレジスタを呼び出した窓の上に再び複製し、境界のハンドラを残したまま（deep）実行を続けます。<code>PERFORM</code> の <code>R[A]</code> に入るのは <code>k</code> の引数です。本体が終わると、その値は <code>k</code> を呼んだ側に返ります。</li>
 <li><code>k</code> は何度でも呼べます。</li>
-<li>再開しても環境とセルは複製しないので、環境とセルの変数は再開した複数のコピーで共有されます。レジスタの変数は値を複製します。レジスタの変数は捕捉の後で書き換わらないので、捕捉の時点で定義済みの変数はどのコピーからも同じ値に見えます。再開の後で実行した <code>x := e</code> は、レジスタの変数ならコピーごとに別の変数を定義します。</li>
+</ul>
+<p><strong>詳細</strong></p>
+<ul>
+<li>外側の境界へ進むと、<code>k</code> は外側の境界までの複製として作り直され、内側の境界もこの複製に含まれます。</li>
+<li>再開しても環境とセルは複製しないので、その変数は再開した複数のコピーで共有されます。</li>
+<li>レジスタの変数は値を複製します。捕捉の後で書き換わらないので、捕捉の時点で定義済みの変数はどのコピーからも同じ値に見えます。</li>
+<li>再開の後で実行した <code>x := e</code> は、レジスタの変数ならコピーごとに別の変数を定義します。</li>
 </ul>
 
 <h3>実行時エラー</h3>
@@ -76,7 +91,7 @@
 
 <h3>トップレベル</h3>
 <ul>
-<li>トップレベルの式1つが arity 0 のコード1つになります。ブロック内の局所変数は関数の変数と同じ規則で、このコードのレジスタか環境に置きます。</li>
+<li>トップレベルの式1つが arity 0 のコード1つになります。ブロック内の局所変数は関数の変数と同じ規則です。</li>
 <li>式を読んで実行するループは評価器の入口にあり、命令ではありません。式ごとに大域変数 <code>parse</code> と <code>eval</code> のセルを読み、次の入口のコードで呼び出します。</li>
 <li>入口のコードは <code>CALL R0 R0 n</code> と <code>HALT R0</code> の2語です。評価器は <code>R[0]</code> に関数を、<code>R[1]</code> 以降に引数を置いて、レジスタスタックの底で実行します。</li>
 <li><code>eval(e)</code> は e をコンパイルしたコードを呼び出したのと同じように実行します。</li>
@@ -98,18 +113,18 @@
 </table>
 <ul>
 <li><code>Tuple{...}</code> と <code>Cons{x, xs}</code> と <code>Nil{}</code> は頭が固定された M式です。<code>true</code> <code>false</code> <code>none</code> は同名のシンボルを表すリテラルです。</li>
-<li>偽として扱う値はシンボル <code>false</code> だけです。</li>
+<li>シンボル <code>false</code> だけが偽で、それ以外の値は真として扱われます。</li>
 <li>文字列の処理は 0 バイトも含む全長を対象にします。<code>EQ</code> の比較、<code>put</code> と <code>print</code> の出力、<code>STRLEN</code> <code>_strcat</code> <code>substr</code> は 0 バイトで打ち切りません。</li>
 <li>等しさ（<code>EQ</code>）: 数は値で比べます（次の「数」を参照）。文字列は中身で、M式は頭と引数を再帰的に、シンボルは同一性で比べます。配列、plain 配列、関数は同一のオブジェクトだけが等しくなります。</li>
-<li><code>HASH</code> は <code>EQ</code> で等しい値に同じ値を返します。整数に等しい浮動小数点数と、虚部が 0 で実部が整数に等しい複素数には、その整数と同じ値を返します。配列、関数、plain 配列には、オブジェクトごとに変わらない番号を割り当てます。</li>
+<li><code>EQ</code> で等しい値の <code>HASH</code> は同じです（<a href="planckvm-types.html">planckvm のデータ型</a>）。</li>
 </ul>
 
 <h2>数</h2>
 <ul>
-<li>整数は多倍長です。言語の整数は1種類で、範囲外の整数はなく、ラップアラウンドも切り詰めも起きません。</li>
+<li>整数は多倍長で1種類です。ラップアラウンドも切り詰めも起きません。</li>
 <li>浮動小数点数は IEEE 754 の binary64 で、丸めは最近接偶数です。複素数は浮動小数点数2つの組です。</li>
 <li><code>ADD</code> <code>SUB</code> <code>MUL</code> <code>DIV</code> はそれぞれ引数の型を見て動く1つの命令で、整数、浮動小数点数、複素数を受け取ります。型が混在するときは、整数→浮動小数点数→複素数の順で高い方の型に揃えて計算し、結果もその型になります。</li>
-<li>整数を浮動小数点数に揃えると、最も近い値に丸められます。2^53 を超える整数は精度が落ちます（<code>2^53 + 1 + 0.0</code> は浮動小数点数の <code>2^53</code>）。浮動小数点数で表せる範囲（約 1.8 x 10^308）を超える整数を揃えようとするとエラーです。</li>
+<li>整数を浮動小数点数に揃えるときは最も近い値に丸めるので、2^53 を超える整数は精度が落ちます（<code>2^53 + 1 + 0.0</code> は浮動小数点数の <code>2^53</code>）。浮動小数点数で表せる範囲（約 1.8 x 10^308）を超える整数を揃えようとするとエラーです。</li>
 <li>整数どうしの <code>DIV</code> は 0 方向へ切り捨てた商を返し、除数が 0 ならエラーです。浮動小数点数か複素数を含む割り算は、0 で割っても止まりません。浮動小数点数なら無限大か NaN になり、複素数なら各成分に同じ規則を適用した値になります。</li>
 <li><code>LT</code> と <code>GE</code> は整数と浮動小数点数が混在しても型を揃えず、数学的な値で比べます。NaN を含むと <code>false</code> です。複素数には順序がないので、<code>LT</code> と <code>GE</code> に複素数を渡すとエラーです。</li>
 <li><code>EQ</code> では型が違っても値が同じなら等しくなります（<code>1 == 1.0</code> <code>1 == complex(1, 0)</code>）。NaN は自分自身とも等しくありません。複素数は実部と虚部がともに等しいときに等しくなります。</li>

@@ -1,6 +1,6 @@
 <!--title planckvm: execution model and values-->
 <h1>planckvm: execution model and values</h1>
-<p class="lead">planckvm is the bytecode that runs all of planck. An evaluator written in planck translates an expression into planckvm instructions and runs them in an instruction loop. This page and <a href="planckvm-isa.html">planckvm instructions</a> are the external specification: what the user of the VM and a code generator from planck may rely on. This page covers the machine, the values and the numbers. The design inside an implementation is in <a href="planckvm-internals.html">planckvm internals</a>.</p>
+<p class="lead">planckvm is the bytecode that runs all of planck. An evaluator written in planck translates an expression into planckvm instructions and runs them in an instruction loop. This page and <a href="planckvm-isa.html">planckvm instructions</a> are the external specification. The design inside an implementation is in <a href="planckvm-internals.html">planckvm internals</a>. Every variable is resolved at compile time to a cell, an environment or a register, and no name is looked up at run time. A call overlaps a window on the registers of the caller and does not copy the arguments.</p>
 
 <h2>Execution model</h2>
 <p>The machine is a register machine. Every instruction reads and writes the registers of the current frame.</p>
@@ -23,21 +23,26 @@
 </ul>
 
 <h3>Where variables live</h3>
-<p>A variable is decided by where it is written, and it is resolved at compile time to one of the three places below. Name resolution ends at compile time, and at run time there is no state of an undefined variable.</p>
+<p>A variable is resolved to one of the three places below, by where it is written.</p>
 <table>
 <tr><th>Place</th><th>Variables</th><th>Access</th></tr>
 <tr><td>Cell</td><td>Global variables</td><td><code>GETGLOBAL</code> <code>SETGLOBAL</code></td></tr>
-<tr><td>Environment</td><td>The variables of a function that are (1) referred to from a lambda or the body of a <code>Handle</code> inside it, or (2) assigned, when the same code has any of <code>CALL</code>, <code>TCALL</code>, <code>HANDLE</code> and <code>PERFORM</code></td><td><code>ENVGET</code> <code>ENVSET</code></td></tr>
+<tr><td>Environment</td><td>The variables of a function that are (1) referred to from a lambda or the body of a <code>Handle</code> inside it, or (2) targets of a <code>Set</code>, when the same code has any of <code>CALL</code>, <code>TCALL</code>, <code>HANDLE</code> and <code>PERFORM</code></td><td><code>ENVGET</code> <code>ENVSET</code></td></tr>
 <tr><td>Register</td><td>The other variables of a function</td><td>Written directly as operands of instructions</td></tr>
 </table>
+<p><strong>Rules</strong></p>
 <ul>
-<li>A variable is assigned when it is the target of a <code>Set</code>.</li>
-<li>A call has at most one environment, and only a code with variables in an environment makes it with <code>NEWENV</code>. Every slot starts as <code>none</code>. The current environment of a code that does not run <code>NEWENV</code> is the environment that its lambda keeps.</li>
 <li>A variable in an environment is resolved at compile time to a depth <code>d</code> (the number of parent links to follow from the current environment) and a slot <code>i</code>.</li>
+<li>A call has at most one environment. Only a code with variables in an environment makes it, with <code>NEWENV</code>. Every slot starts as <code>none</code>.</li>
 <li>A lambda keeps the current environment of the place where it was made. The environment is shared, so an assignment after the lambda was made is seen by the lambda.</li>
+<li>A global variable starts as <code>none</code>. <code>Def</code> makes a new cell. <code>Set</code> writes the same cell.</li>
+<li><code>true</code>, <code>false</code> and <code>none</code> are literals, not variables, and are compiled as constants. Writing one as the target of <code>Def</code>, <code>Set</code> or <code>Declare</code> is a compile error.</li>
+</ul>
+<p><strong>Details</strong></p>
+<ul>
+<li>A code that does not run <code>NEWENV</code> uses the environment that its lambda keeps.</li>
 <li>When a path can reach a variable in a register without going through its definition, <code>LOADNONE</code> at the entry of the code sets it to <code>none</code>.</li>
-<li>A global variable is a cell, whose first value is <code>none</code>. <code>Def</code> makes a new cell, and the expressions compiled after it refer to the new cell. The expressions compiled before keep referring to the old one. <code>Set</code> writes the same cell.</li>
-<li><code>true</code>, <code>false</code> and <code>none</code> are literals, not variables. They are in no register, environment or cell, and are compiled as constants. Writing one as the target of <code>Def</code>, <code>Set</code> or <code>Declare</code> is a compile error.</li>
+<li>The expressions compiled after a <code>Def</code> refer to the new cell. The expressions compiled before keep referring to the old one.</li>
 </ul>
 
 <h3>Calls</h3>
@@ -50,25 +55,35 @@
 <tr><td>Continuation</td><td>C is 1</td><td>Resume</td></tr>
 <tr><td>Anything else</td><td></td><td>Stop with <code>not a function</code></td></tr>
 </table>
-<p>The instructions at the entry of a code match the patterns. When they do not match, <code>NEXT</code> tries the next alternative with the same arguments. The instructions at the entry do not write the registers of the arguments. When the alternatives run out, the program stops with <code>matching failed</code>.</p>
-<p>The value of <code>RET</code> in the callee is received according to the instruction that made the call.</p>
+<p><strong>Rules</strong></p>
+<ul>
+<li>The instructions at the entry of a code match the patterns. When they do not match, <code>NEXT</code> tries the next alternative with the same arguments. They do not write the registers of the arguments.</li>
+<li>When the alternatives run out, the program stops with <code>matching failed</code>.</li>
+<li>The value of <code>RET</code> in the callee is received according to the instruction that made the call (table below).</li>
+</ul>
 <table>
 <tr><th>Calling instruction</th><th>How the value is received</th></tr>
 <tr><td>A test instruction (<code>TEST</code> to <code>TGEI</code>)</td><td>The condition is true when the value is not <code>false</code>, and the rule of the test instructions applies</td></tr>
 <tr><td><code>ASET</code> <code>PLAINSET</code></td><td>Discarded</td></tr>
 <tr><td>Any other</td><td>Put in <code>R[A]</code></td></tr>
 </table>
-<p>An instruction with a name in the Builtin column of the instruction table does the action of the table only while the cell of that name holds the builtin. When another value has been assigned to the cell, the instruction places a call above its window, calls that value with the same arguments and receives the result by the table above. An immediate is passed as an integer argument.</p>
+<p><strong>Details</strong> An instruction with a name in the Builtin column of the instruction table does the action of the table only while the cell of that name holds the builtin. When another value has been assigned to the cell, the instruction places a call above its window, calls that value with the same arguments and receives the result by the table above. An immediate is passed as an integer argument.</p>
 
 <h3>Continuations and handlers</h3>
+<p><strong>Rules</strong></p>
 <ul>
 <li><code>HANDLE</code> runs its body in a boundary frame. When the body ends normally, its value is the value of the <code>Handle</code>.</li>
 <li><code>PERFORM A B</code> follows the callers to the innermost boundary, copies the frames and the registers up to it and makes a continuation <code>k</code>. It then drops what is above the boundary and calls the handler of the boundary with <code>(R[B], k)</code>. The result is the value of the <code>Handle</code>.</li>
-<li>When no alternative of the handler matches, the effect goes to the next boundary outside. Then <code>k</code> is made again as a copy up to that outer boundary, and the inner boundary is in the copy.</li>
-<li>With no boundary the program stops with <code>unhandled effect: v</code>.</li>
+<li>When no alternative of the handler matches, the effect goes to the next boundary outside. With no boundary the program stops with <code>unhandled effect: v</code>.</li>
 <li>Calling <code>k</code> copies the saved frames and registers again above the window of the caller. The handler of the boundary stays installed (deep handlers). The argument of <code>k</code> is put in <code>R[A]</code> of the <code>PERFORM</code> and the run goes on. When the body ends, its value returns to the caller of <code>k</code>.</li>
 <li><code>k</code> can be called any number of times.</li>
-<li>Resuming copies neither environments nor cells, so the variables in them are shared between the resumed copies. The variables in registers are copied by value. A variable in a register is not written after the capture, so a variable defined at the capture has the same value in every copy. An <code>x := e</code> that runs after the resumption defines a separate variable in each copy when <code>x</code> is in a register.</li>
+</ul>
+<p><strong>Details</strong></p>
+<ul>
+<li>When the effect goes to an outer boundary, <code>k</code> is made again as a copy up to that boundary, and the inner boundary is in the copy.</li>
+<li>Resuming copies neither environments nor cells, so the resumed copies share the variables in them.</li>
+<li>Resuming copies the variables in registers by value. A variable in a register is not written after the capture, so a variable defined at the capture has the same value in every copy.</li>
+<li>An <code>x := e</code> that runs after the resumption defines a separate variable in each copy when <code>x</code> is in a register.</li>
 </ul>
 
 <h3>Stopping</h3>
@@ -101,12 +116,12 @@
 <li>The only value treated as false is the symbol <code>false</code>.</li>
 <li>A string is handled by its whole length, including the 0 bytes. The comparison of <code>EQ</code>, the output of <code>put</code> and <code>print</code>, and <code>STRLEN</code>, <code>_strcat</code> and <code>substr</code> do not stop at a 0 byte.</li>
 <li>Equality (<code>EQ</code>): numbers are compared by value (see below). Strings are equal by contents, M-expressions by head and arguments recursively, and symbols by identity. Arrays, plain arrays and functions are equal only to themselves.</li>
-<li><code>HASH</code> gives equal values the same number. A float equal to an integer, and a complex number whose imaginary part is 0 and whose real part is equal to an integer, have the hash of that integer. Arrays, functions and plain arrays are given a number that stays the same for the object.</li>
+<li>Values equal by <code>EQ</code> have the same <code>HASH</code> (<a href="planckvm-types.html">planckvm data types</a>).</li>
 </ul>
 
 <h2>Numbers</h2>
 <ul>
-<li>Integers have arbitrary precision. There is one integer type in the language: no integer is out of range, and nothing wraps around or is truncated.</li>
+<li>Integers have arbitrary precision and are one type. Nothing wraps around or is truncated.</li>
 <li>A float is IEEE 754 binary64 with rounding to nearest even. A complex number is a pair of floats.</li>
 <li><code>ADD</code>, <code>SUB</code>, <code>MUL</code> and <code>DIV</code> look at the types of their arguments, as one instruction each, and take integers, floats and complex numbers. When the types are mixed, the operands are raised to the higher type in the order integer, float, complex, and the result has that type.</li>
 <li>An integer raised to a float is rounded to the nearest value. An integer above 2^53 loses precision: <code>2^53 + 1 + 0.0</code> is the float <code>2^53</code>. Raising an integer that is beyond the range of floats (about 1.8 x 10^308) is an error.</li>

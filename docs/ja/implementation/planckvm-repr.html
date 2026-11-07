@@ -38,10 +38,10 @@
 </ol></details></nav>
 <main>
 <h1>planckvm の内部表現</h1>
-<p class="lead">ヒープ上の値の word、ヘッダ、種類ごとの中身、GC から見た扱い。</p>
+<p class="lead">ヒープ上の値の word、ヘッダ、種類ごとの中身、GC から見た扱い。word の下位 1 ビットが即値か参照かを分け、オブジェクトの種類はヘッダで知ります。GC は値の欄だけをたどります。</p>
 
 <h2>word</h2>
-<p>ヒープ・レジスタ・フレームの word はすべて 32 ビットで、ビットの番号は最下位を 0 とします。word の下位 1 ビットが値の種別を分けます。</p>
+<p>ヒープ・レジスタ・フレームの word はすべて 32 ビットで、ビットの番号は最下位を 0 とします。</p>
 <table class="bits">
 <colgroup><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col></colgroup>
 <tr class="ruler"><td>3<br>1</td><td>3<br>0</td><td>2<br>9</td><td>2<br>8</td><td>2<br>7</td><td>2<br>6</td><td>2<br>5</td><td>2<br>4</td><td>2<br>3</td><td>2<br>2</td><td>2<br>1</td><td>2<br>0</td><td>1<br>9</td><td>1<br>8</td><td>1<br>7</td><td>1<br>6</td><td>1<br>5</td><td>1<br>4</td><td>1<br>3</td><td>1<br>2</td><td>1<br>1</td><td>1<br>0</td><td><br>9</td><td><br>8</td><td><br>7</td><td><br>6</td><td><br>5</td><td><br>4</td><td><br>3</td><td><br>2</td><td><br>1</td><td><br>0</td></tr>
@@ -58,7 +58,6 @@
 <ul>
 <li>言語の整数は 1 種類です。即値に収まる値は必ず即値で表し、収まらない値だけを多倍長整数のオブジェクトで表します。</li>
 <li>即値は整数だけです。float・complex・文字列・symbol はすべてオブジェクトです。</li>
-<li>word の中にオブジェクトの種類は入りません。種類はオブジェクトのヘッダを読んで知ります。</li>
 </ul>
 
 <h2>ヘッダ</h2>
@@ -113,7 +112,7 @@
 <ul>
 <li>値は符号と絶対値で表します。絶対値の桁は底 2<sup>64</sup> で、下位の桁から並べます。</li>
 <li><code>size</code> は <code>2 + 2n</code> です。桁数は <code>size</code> 欄に収まる範囲に限られます。</li>
-<li>最上位の桁は 0 ではありません。値が即値の範囲に収まる整数は、多倍長整数にしません。0 は即値です。</li>
+<li>最上位の桁は 0 ではありません。0 は即値です。</li>
 </ul>
 
 <h3>float と complex</h3>
@@ -137,7 +136,7 @@
 <tr><th>word</th><th>中身</th></tr>
 <tr><td>0</td><td>名前（値。文字列への参照）</td></tr>
 </table>
-<p>同じ名前の symbol は 1 つのオブジェクトで、名前ごとに一意です。名前の文字列は変わりません。</p>
+<p>同じ名前の symbol は 1 つのオブジェクトです。名前の文字列は変わりません。</p>
 
 <h3>M式</h3>
 <table>
@@ -173,7 +172,7 @@
 </table>
 <ul>
 <li>要素はタグを持たないビット列で、リトルエンディアンで隙間なく並べます。i 番目の要素はバイト位置 <code>i * (要素のバイト数)</code> から始まり、バイト位置 <code>b</code> は word <code>3 + b/4</code> の下位から <code>b mod 4</code> 番目のバイトです。</li>
-<li>整数型は 2 の補数です。<code>'bool</code> は <code>true</code> が 1、<code>false</code> が 0 です。浮動小数点型は IEEE 754 のビット列で、complex 型は実部、虚部の順に並べます。</li>
+<li>整数型は 2 の補数で、<code>'bool</code> は <code>true</code> が 1、<code>false</code> が 0 です。浮動小数点型は IEEE 754 のビット列で、complex 型は実部、虚部の順に並べます。</li>
 <li><code>size</code> は <code>2 + ceil(n * 要素のバイト数 / 4)</code> です。最後の word の使わないバイトは 0 です。</li>
 <li>作った直後の要素は全ビットが 0 で、<code>false</code>・<code>0</code>・<code>0.0</code>・<code>complex(0, 0)</code> を表します。</li>
 </ul>
@@ -210,10 +209,10 @@
 </table>
 
 <h3>identity の番号</h3>
-<p>array・plain array・Lambda・Fusion・組み込み・継続は、word 0 に identity の番号を持ちます。作った直後は 0 で、番号を割り当てるまで 0 のままです。最初の <code>HASH</code> が 1 以上の番号を割り当て、以降は変わりません。同じ機械で割り当てる番号は互いに異なります。</p>
+<p>array・plain array・Lambda・Fusion・組み込み・継続は、word 0 に identity の番号を持ちます。最初の <code>HASH</code> が 1 以上の番号を割り当てるまでは 0 で、割り当てた後は変わりません。同じ機械で割り当てる番号は互いに異なります。</p>
 
 <h2>GC から見た扱い</h2>
-<p>GC はヘッダの <code>kind</code> を見て、値の欄だけをたどります。生の欄はたどりません。</p>
+<p>GC はヘッダの <code>kind</code> を見て、生の欄はたどりません。</p>
 <table>
 <tr><th>kind</th><th>たどる欄</th></tr>
 <tr><td>多倍長整数・float・complex・文字列・plain array</td><td>なし（中身は数とバイト列）</td></tr>

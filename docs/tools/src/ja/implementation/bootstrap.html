@@ -11,24 +11,31 @@
 <!--file bootstrap/plisp.fs \ The 1st phase interpreter repeats execution-->
 
 <h2>plisp</h2>
-<p><a href="@REPO@/blob/main/bootstrap/plisp.fs">plisp.fs</a> は pforth への入力です。先頭は1文字の語だけで書いた列で、空白と改行を何もしない語として、<code>\</code> を行コメントの語として登録します（[[bootstrap/plisp.fs h@l@h@!h@C+h!k1k0-h@$k:k0 .. \ plancklisp -]]）。以降は自己拡張で Forth を組み立てます。</p>
+<p><a href="@REPO@/blob/main/bootstrap/plisp.fs">plisp.fs</a> は pforth への入力です。先頭は1文字の語だけの列です。空白と改行は何もしない語に、<code>\</code> は行コメントの語に登録します（[[bootstrap/plisp.fs h@l@h@!h@C+h!k1k0-h@$k:k0 .. \ plancklisp -]]）。以降は自己拡張で Forth を組み立てます。</p>
 <ul>
-<li>2番目の解釈器です。名前で語を引き、コンパイル状態を持ちます（[[bootstrap/plisp.fs \ The 2nd Phase Interpreter .. \ '\'' ( "name"]]）。</li>
-<li>条件分岐・ループ・再帰・構造体などの通常の Forth の語です（[[bootstrap/plisp.fs \ === Compilers === .. ( === 3rd Phase Interpreter === )]]）。</li>
-<li>3番目の解釈器です。辞書にない語を数として読み、数でもなければエラーを出して止まります（[[bootstrap/plisp.fs ( === 3rd Phase Interpreter === ) .. ( === Do-loop === )]]）。</li>
+<li>2番目の解釈器は、名前で語を引き、コンパイル状態を持ちます（[[bootstrap/plisp.fs \ The 2nd Phase Interpreter .. \ '\'' ( "name"]]）。</li>
+<li>通常の Forth の語として、条件分岐・ループ・再帰・構造体を定義します（[[bootstrap/plisp.fs \ === Compilers === .. ( === 3rd Phase Interpreter === )]]）。</li>
+<li>3番目の解釈器は、辞書にない語を数として読み、数でもなければエラーを出して止まります（[[bootstrap/plisp.fs ( === 3rd Phase Interpreter === ) .. ( === Do-loop === )]]）。</li>
 </ul>
-<p>その Forth で Lisp インタプリタを書きます（[[bootstrap/plisp.fs ( === Implementation of PlanckLISP === )]] 以降）。リスト、ノード、リーダとプリンタ、評価器の順で、最後に <code>bootstrap/plisp/init.lisp</code> を読みます（[[bootstrap/plisp.fs s" bootstrap/plisp/init.lisp" eval-file]]）。次のステージがアセンブラとコンパイラなので、構文木を直接扱えて内部 DSL を作りやすい Lisp を選んでいます。</p>
+<p>その Forth で Lisp インタプリタを書きます（[[bootstrap/plisp.fs ( === Implementation of PlanckLISP === )]] 以降）。リスト、ノード、リーダとプリンタ、評価器の順に作ります。最後に <code>bootstrap/plisp/init.lisp</code> を読みます（[[bootstrap/plisp.fs s" bootstrap/plisp/init.lisp" eval-file]]）。</p>
 
 <h2>asm と sasm</h2>
-<p>どちらも plisp の上で動き、次のステージを作るために使います。性能と安全性より実装の単純さを優先しています。</p>
+<p>どちらも plisp の上で動きます。性能と安全性より実装の単純さを優先しています。</p>
 <p><a href="@REPO@/blob/main/bootstrap/asm/core.lisp">asm/core.lisp</a> は x86 32ビットのアセンブラです。S式の命令列から ELF を直接書き出し、ヘッダ・コード・データを読み書き実行可能な1つの <code>PT_LOAD</code> に置きます。</p>
 <!--file bootstrap/asm/examples/hello.s-->
-<p><a href="@REPO@/blob/main/bootstrap/sasm/core.lisp">sasm/core.lisp</a> は構造化アセンブリ言語 sasm のコンパイラです。sasm は型のない C 風の言語で、変数・関数・<code>if</code>・<code>while</code> を持ち、plisp の内部 DSL として実装されています。レジスタ割り付けはしません。スタックへの push と pop を繰り返すコードを生成し、asm で機械語にします。</p>
+<p><a href="@REPO@/blob/main/bootstrap/sasm/core.lisp">sasm/core.lisp</a> は構造化アセンブリ言語 sasm のコンパイラです。sasm は型のない C 風の言語で、変数・関数・<code>if</code>・<code>while</code> があり、plisp の内部 DSL として実装されています。レジスタ割り付けはせず、スタックへの push と pop を繰り返すコードを生成して、asm で機械語にします。</p>
 <!--file bootstrap/sasm/examples/fib.sv-->
 
 <h2>plisp2</h2>
-<p>Forth の上の plisp は以降のステージには遅すぎるため、同じ Lisp を sasm で書き直したのが <a href="@REPO@/blob/main/bootstrap/plisp2.sv">plisp2.sv</a> です。メモリ確保（[[bootstrap/plisp2.sv ; === Memory Allocation .. ; === Utilities]]）、ノード（[[bootstrap/plisp2.sv ; === Nodes .. ; === Parser and Printer]]）、リーダとプリンタ（[[bootstrap/plisp2.sv ; === Parser and Printer .. ; === Eval]]）、評価器（[[bootstrap/plisp2.sv ; === Eval .. ; === Primitive Functions]]）、組み込み関数（[[bootstrap/plisp2.sv ; === Primitive Functions ..]]）の順に並んでいます。</p>
-<p>plisp2 は plisp の上の sasm でコンパイルし、できた plisp2 の上で同じ sasm が <code>bootstrap/planck0.sv</code> をコンパイルします。</p>
+<p><a href="@REPO@/blob/main/bootstrap/plisp2.sv">plisp2.sv</a> は同じ Lisp を sasm で書き直したものです。構成は次の順です。</p>
+<ul>
+<li>メモリ確保（[[bootstrap/plisp2.sv ; === Memory Allocation .. ; === Utilities]]）</li>
+<li>ノード（[[bootstrap/plisp2.sv ; === Nodes .. ; === Parser and Printer]]）</li>
+<li>リーダとプリンタ（[[bootstrap/plisp2.sv ; === Parser and Printer .. ; === Eval]]）</li>
+<li>評価器（[[bootstrap/plisp2.sv ; === Eval .. ; === Primitive Functions]]）</li>
+<li>組み込み関数（[[bootstrap/plisp2.sv ; === Primitive Functions ..]]）</li>
+</ul>
+<p>ビルドは2段です。まず plisp の上の sasm で plisp2 をコンパイルします。次に、できた plisp2 の上で同じ sasm が <code>bootstrap/planck0.sv</code> をコンパイルします。</p>
 
 <h2>planck0</h2>
 <p><a href="@REPO@/blob/main/bootstrap/planck0.sv">planck0.sv</a>も sasm で書かれています。中身は<a href="planck0.html">planck0</a>の頁にあります。</p>

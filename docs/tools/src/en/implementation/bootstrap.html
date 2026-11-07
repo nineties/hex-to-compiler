@@ -1,9 +1,10 @@
 <!--title From machine code to planck0-->
 <h1>From machine code to planck0</h1>
-<p class="lead">This page follows the path from a one-page hex dump of Forth to planck0, which is written in sasm.</p>
+<p class="lead">These are the bootstrap stages from a Forth written as a hex dump to planck0 written in sasm.</p>
+<p>Each stage builds the next stage using only the earlier stages. The order is pforth, plisp, asm and sasm, plisp2, planck0.</p>
 
 <h2>pforth</h2>
-<p><a href="@REPO@/blob/main/bootstrap/pforth.xxd">pforth.xxd</a> is a hex dump. <code>xxd -r -c 8</code> ignores the annotations on the right. The restored bytes are an executable ELF file. The current implementation produces a 32-bit x86 Linux ELF.</p>
+<p><a href="@REPO@/blob/main/bootstrap/pforth.xxd">pforth.xxd</a> is a hex dump. <code>xxd -r -c 8</code> ignores the annotations on the right. The restored bytes are an executable 32-bit x86 Linux ELF file.</p>
 <!--file bootstrap/pforth.xxd 00000000: .. 00000058:-->
 <p>The initial dictionary has only builtin words with one-letter names. <code>k</code> reads a character, <code>t</code> writes a character, <code>f</code> looks up a word from a character, <code>x</code> executes a word, and so on.</p>
 <!--file bootstrap/pforth.xxd 00000090: .. 000000d8:-->
@@ -17,18 +18,25 @@
 <li>The usual Forth words: conditionals, loops, recursion, structures ([[bootstrap/plisp.fs \ === Compilers === .. ( === 3rd Phase Interpreter === )]]).</li>
 <li>The third interpreter. It reads a word that is not in the dictionary as a number, and stops with an error if it is not a number ([[bootstrap/plisp.fs ( === 3rd Phase Interpreter === ) .. ( === Do-loop === )]]).</li>
 </ul>
-<p>A Lisp interpreter is written in that Forth ([[bootstrap/plisp.fs ( === Implementation of PlanckLISP === )]] onward). It is written in the order of lists, nodes, the reader and printer, and the evaluator. At the end it reads <code>bootstrap/plisp/init.lisp</code> ([[bootstrap/plisp.fs s" bootstrap/plisp/init.lisp" eval-file]]). The next stage is an assembler and a compiler, so the choice is a Lisp: it handles syntax trees directly and makes internal DSLs easy.</p>
+<p>A Lisp interpreter is written in that Forth ([[bootstrap/plisp.fs ( === Implementation of PlanckLISP === )]] onward). It is written in the order of lists, nodes, the reader and printer, and the evaluator. At the end it reads <code>bootstrap/plisp/init.lisp</code> ([[bootstrap/plisp.fs s" bootstrap/plisp/init.lisp" eval-file]]).</p>
 
 <h2>asm and sasm</h2>
-<p>Both run on plisp. They are tools for crossing to the next stage. They favor a simple implementation over performance and safety.</p>
+<p>Both run on plisp. They favor a simple implementation over performance and safety.</p>
 <p><a href="@REPO@/blob/main/bootstrap/asm/core.lisp">asm/core.lisp</a> is an assembler for 32-bit x86. It writes an ELF file directly from a list of S-expression instructions, and puts the header, code and data in one readable, writable and executable <code>PT_LOAD</code>.</p>
 <!--file bootstrap/asm/examples/hello.s-->
 <p><a href="@REPO@/blob/main/bootstrap/sasm/core.lisp">sasm/core.lisp</a> is the compiler of the structured assembly language sasm. sasm is an untyped C-like language with variables, functions, <code>if</code> and <code>while</code>, and is implemented as an internal DSL of plisp. It does not allocate registers. It emits code that repeats pushes and pops on the stack, and asm turns the code into machine code.</p>
 <!--file bootstrap/sasm/examples/fib.sv-->
 
 <h2>plisp2</h2>
-<p>plisp on Forth is too slow for the later stages. <a href="@REPO@/blob/main/bootstrap/plisp2.sv">plisp2.sv</a> is the same Lisp rewritten in sasm. It has, in order, memory allocation ([[bootstrap/plisp2.sv ; === Memory Allocation .. ; === Utilities]]), nodes ([[bootstrap/plisp2.sv ; === Nodes .. ; === Parser and Printer]]), the reader and printer ([[bootstrap/plisp2.sv ; === Parser and Printer .. ; === Eval]]), the evaluator ([[bootstrap/plisp2.sv ; === Eval .. ; === Primitive Functions]]) and builtin functions ([[bootstrap/plisp2.sv ; === Primitive Functions ..]]).</p>
-<p>plisp2 is compiled by sasm on plisp. The same sasm then compiles <code>bootstrap/planck0.sv</code> on the resulting plisp2.</p>
+<p><a href="@REPO@/blob/main/bootstrap/plisp2.sv">plisp2.sv</a> is the same Lisp rewritten in sasm. It has these parts, in order.</p>
+<ul>
+<li>Memory allocation ([[bootstrap/plisp2.sv ; === Memory Allocation .. ; === Utilities]])</li>
+<li>Nodes ([[bootstrap/plisp2.sv ; === Nodes .. ; === Parser and Printer]])</li>
+<li>The reader and printer ([[bootstrap/plisp2.sv ; === Parser and Printer .. ; === Eval]])</li>
+<li>The evaluator ([[bootstrap/plisp2.sv ; === Eval .. ; === Primitive Functions]])</li>
+<li>Builtin functions ([[bootstrap/plisp2.sv ; === Primitive Functions ..]])</li>
+</ul>
+<p>The build has two steps. First, sasm on plisp compiles plisp2. Then the same sasm, running on the resulting plisp2, compiles <code>bootstrap/planck0.sv</code>.</p>
 
 <h2>planck0</h2>
 <p><a href="@REPO@/blob/main/bootstrap/planck0.sv">planck0.sv</a> is also written in sasm. The page <a href="planck0.html">planck0</a> describes it.</p>
