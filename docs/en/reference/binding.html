@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Variable binding | hex-to-compiler project</title>
+<link rel="alternate" hreflang="ja" href="../../ja/reference/binding.html">
+<link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+<header class="site-header"><div class="inner">
+<a class="logo" href="../index.html"><span class="brand"><b>hex-to-compiler <i>project</i></b><small>A compiler that pulls itself up by its bootstraps.</small></span></a>
+<nav class="site-nav">
+<a href="../index.html">Overview</a>
+<a href="../tutorial/index.html">Tutorial</a>
+<a class="here" href="../reference/index.html">Reference</a>
+<a href="../library/index.html">Library</a>
+<a href="../implementation/index.html">Implementation</a>
+<a href="https://github.com/nineties/hex-to-compiler">GitHub</a>
+<a class="lang-switch" lang="ja" hreflang="ja" href="../../ja/reference/binding.html">日本語</a>
+</nav>
+</div></header>
+<div class="layout">
+<nav class="toc" aria-label="Reference contents"><details open><summary>Reference contents</summary>
+<h2>Reference</h2>
+<ol>
+<li><a href="index.html">Contents</a></li>
+<li><a href="datamodel.html">Data model</a></li>
+<li><a href="functions.html">Partial functions and fusion</a></li>
+<li><a href="closures.html">Closures</a></li>
+<li><a class="here" href="binding.html">Variable binding</a></li>
+<li><a href="control.html">Control structures</a></li>
+<li><a href="syntax.html">Syntax</a></li>
+<li><a href="grammar.html">Extending the grammar</a></li>
+<li><a href="builtins.html">Builtin functions</a></li>
+</ol></details></nav>
+<main>
+<h1>Variable binding</h1>
+<p class="lead">There are two kinds of binding: definition (<code>:=</code>) and assignment (<code>=</code>). Modules and imports, which handle names in groups, are also written here.</p>
+
+<h2>Definition and assignment</h2>
+<p>Defining the same name again by <code>x := e</code> or <code>fun f</code> makes a new variable. Functions made earlier keep the earlier variable. To overwrite an existing variable, write <code>x = e</code>: it assigns to the same variable, so functions made earlier see the new value.</p>
+<div class="example">
+<p class="file">r_scope_redefine.pk</p>
+<pre class="pk"><span class="tok-name">f</span><span class="tok-op">(</span><span class="tok-name">x</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-num">1</span>
+<span class="tok-name">g</span><span class="tok-op">(</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-name">f</span><span class="tok-op">(</span><span class="tok-num">0</span><span class="tok-op">)</span>
+<span class="tok-name">f</span> <span class="tok-op">:=</span> <span class="tok-op">(</span><span class="tok-name">x</span><span class="tok-op">)</span> <span class="tok-op">-&gt;</span> <span class="tok-num">2</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">g</span><span class="tok-op">(</span><span class="tok-op">)</span><span class="tok-op">)</span>
+
+<span class="tok-name">h</span><span class="tok-op">(</span><span class="tok-name">x</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-num">1</span>
+<span class="tok-name">k</span><span class="tok-op">(</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-name">h</span><span class="tok-op">(</span><span class="tok-num">0</span><span class="tok-op">)</span>
+<span class="tok-name">h</span> <span class="tok-op">=</span> <span class="tok-op">(</span><span class="tok-name">x</span><span class="tok-op">)</span> <span class="tok-op">-&gt;</span> <span class="tok-num">2</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">k</span><span class="tok-op">(</span><span class="tok-op">)</span><span class="tok-op">)</span></pre>
+<p class="label">Output</p>
+<pre class="out">1
+2</pre>
+</div>
+<p><code>x := e</code> defines the variable where it is written. The right side sees the earlier <code>x</code>, and if there is none, the <code>x</code> on the right side is undefined. Write a function that calls itself as <code>f(p, ...) := e</code>. This is the same at the top level and in a block.</p>
+
+<h2>!x on the left of a definition or an assignment</h2>
+<p>The <code>x</code> of <code>x := e</code> and <code>x = e</code> may be written <code>!x</code>, which are <code>Def{!x, e}</code> and <code>Set{!x, e}</code>. Inside a quasi-quote, <code>!x</code> is replaced by the symbol that <code>x</code> holds. When <code>x</code> holds <code>'i</code>, <code>`{ !x := 0; !x = !x + 1 }</code> is <code>Do{Def{i, 0}, Set{i, Apply{_add, Tuple{i, 1}}}}</code>. When <code>x</code> holds <code>'true</code>, it stops the program, as <code>Def{true, e}</code> does.</p>
+
+<h2 id="compound">Compound assignment and splitting a tuple</h2>
+<p><code>x += e</code> is the same as <code>x = x + e</code>, and <code>-=</code>, <code>*=</code>, <code>/=</code> and <code>%=</code> have the same form. <code>a[i] += e</code> is the same as <code>a[i] = a[i] + e</code>, except that <code>a</code> and <code>i</code> are evaluated once. The left side is a variable or <code>a[i]</code>; <code>t.f += e</code> is not allowed.</p>
+<div class="example">
+<p class="file">t1_compound.pk</p>
+<pre class="pk"><span class="tok-com"># x += e is x = x + e. The same goes for -=, *=, /= and %=.</span>
+
+<span class="tok-name">x</span> <span class="tok-op">:=</span> <span class="tok-num">10</span>
+<span class="tok-name">x</span> <span class="tok-op">+=</span> <span class="tok-num">5</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">x</span><span class="tok-op">)</span>
+<span class="tok-name">x</span> <span class="tok-op">-=</span> <span class="tok-num">3</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">x</span><span class="tok-op">)</span>
+<span class="tok-name">x</span> <span class="tok-op">*=</span> <span class="tok-num">2</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">x</span><span class="tok-op">)</span>
+<span class="tok-name">x</span> <span class="tok-op">/=</span> <span class="tok-num">4</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">x</span><span class="tok-op">)</span>
+<span class="tok-name">x</span> <span class="tok-op">%=</span> <span class="tok-num">4</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">x</span><span class="tok-op">)</span>
+
+<span class="tok-com"># the element of an array</span>
+<span class="tok-name">a</span> <span class="tok-op">:=</span> <span class="tok-name">array</span><span class="tok-op">(</span><span class="tok-num">3</span><span class="tok-op">)</span>
+<span class="tok-name">a</span><span class="tok-op">[</span><span class="tok-num">0</span><span class="tok-op">]</span> <span class="tok-op">=</span> <span class="tok-num">1</span>
+<span class="tok-name">a</span><span class="tok-op">[</span><span class="tok-num">1</span><span class="tok-op">]</span> <span class="tok-op">=</span> <span class="tok-num">2</span>
+<span class="tok-name">a</span><span class="tok-op">[</span><span class="tok-num">2</span><span class="tok-op">]</span> <span class="tok-op">=</span> <span class="tok-num">3</span>
+<span class="tok-name">a</span><span class="tok-op">[</span><span class="tok-num">1</span><span class="tok-op">]</span> <span class="tok-op">*=</span> <span class="tok-num">10</span>
+<span class="tok-name">a</span><span class="tok-op">[</span><span class="tok-num">2</span><span class="tok-op">]</span> <span class="tok-op">+=</span> <span class="tok-name">a</span><span class="tok-op">[</span><span class="tok-num">1</span><span class="tok-op">]</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">a</span><span class="tok-op">[</span><span class="tok-num">0</span><span class="tok-op">]</span><span class="tok-op">,</span> <span class="tok-name">a</span><span class="tok-op">[</span><span class="tok-num">1</span><span class="tok-op">]</span><span class="tok-op">,</span> <span class="tok-name">a</span><span class="tok-op">[</span><span class="tok-num">2</span><span class="tok-op">]</span><span class="tok-op">}</span><span class="tok-op">)</span>
+
+<span class="tok-com"># the index is evaluated once</span>
+<span class="tok-name">n</span> <span class="tok-op">:=</span> <span class="tok-num">0</span>
+<span class="tok-name">next</span><span class="tok-op">(</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-op">{</span>
+    <span class="tok-name">n</span> <span class="tok-op">+=</span> <span class="tok-num">1</span>
+    <span class="tok-name">n</span> <span class="tok-op">-</span> <span class="tok-num">1</span>
+<span class="tok-op">}</span>
+<span class="tok-name">a</span><span class="tok-op">[</span><span class="tok-name">next</span><span class="tok-op">(</span><span class="tok-op">)</span><span class="tok-op">]</span> <span class="tok-op">+=</span> <span class="tok-num">100</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">a</span><span class="tok-op">[</span><span class="tok-num">0</span><span class="tok-op">]</span><span class="tok-op">,</span> <span class="tok-name">a</span><span class="tok-op">[</span><span class="tok-num">1</span><span class="tok-op">]</span><span class="tok-op">,</span> <span class="tok-name">n</span><span class="tok-op">}</span><span class="tok-op">)</span>
+
+<span class="tok-com"># in a loop</span>
+<span class="tok-name">sum</span> <span class="tok-op">:=</span> <span class="tok-num">0</span>
+<span class="tok-name">i</span> <span class="tok-op">:=</span> <span class="tok-num">1</span>
+<span class="tok-kw">while</span> <span class="tok-op">(</span><span class="tok-name">i</span> <span class="tok-op">&lt;=</span> <span class="tok-num">10</span><span class="tok-op">)</span> <span class="tok-op">{</span>
+    <span class="tok-name">sum</span> <span class="tok-op">+=</span> <span class="tok-name">i</span>
+    <span class="tok-name">i</span> <span class="tok-op">+=</span> <span class="tok-num">1</span>
+<span class="tok-op">}</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">sum</span><span class="tok-op">)</span></pre>
+<p class="label">Output</p>
+<pre class="out">15
+12
+24
+6
+2
+Tuple{1, 20, 23}
+Tuple{101, 20, 1}
+55</pre>
+</div>
+
+<h3 id="destructure">Splitting a tuple</h3>
+<p><code>(a, b) := e</code> defines variables from the elements of the tuple <code>e</code>, and <code>(a, b) = e</code> assigns to defined variables. The right side is evaluated completely first, so <code>(a, b) = (b, a)</code> swaps. A tuple whose number of elements differs from the number of names, and a value that is not a tuple, stop the program with a message.</p>
+<div class="example">
+<p class="file">t1_destructure.pk</p>
+<pre class="pk"><span class="tok-com"># (a, b) := e defines several variables from the elements of a tuple</span>
+
+<span class="tok-op">(</span><span class="tok-name">a</span><span class="tok-op">,</span> <span class="tok-name">b</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-op">(</span><span class="tok-num">1</span><span class="tok-op">,</span> <span class="tok-num">2</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">a</span> <span class="tok-op">+</span> <span class="tok-name">b</span><span class="tok-op">)</span>
+
+<span class="tok-com"># swap</span>
+<span class="tok-op">(</span><span class="tok-name">a</span><span class="tok-op">,</span> <span class="tok-name">b</span><span class="tok-op">)</span> <span class="tok-op">=</span> <span class="tok-op">(</span><span class="tok-name">b</span><span class="tok-op">,</span> <span class="tok-name">a</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">a</span><span class="tok-op">,</span> <span class="tok-name">b</span><span class="tok-op">}</span><span class="tok-op">)</span>
+
+<span class="tok-com"># a function that returns two values</span>
+<span class="tok-name">divmod</span><span class="tok-op">(</span><span class="tok-name">x</span><span class="tok-op">,</span> <span class="tok-name">y</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-op">(</span><span class="tok-name">x</span> <span class="tok-op">/</span> <span class="tok-name">y</span><span class="tok-op">,</span> <span class="tok-name">x</span> <span class="tok-op">%</span> <span class="tok-name">y</span><span class="tok-op">)</span>
+<span class="tok-op">(</span><span class="tok-name">q</span><span class="tok-op">,</span> <span class="tok-name">r</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-name">divmod</span><span class="tok-op">(</span><span class="tok-num">17</span><span class="tok-op">,</span> <span class="tok-num">5</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">q</span><span class="tok-op">,</span> <span class="tok-name">r</span><span class="tok-op">}</span><span class="tok-op">)</span>
+
+<span class="tok-com"># in a function and in a loop</span>
+<span class="tok-name">fib</span><span class="tok-op">(</span><span class="tok-name">n</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-op">{</span>
+    <span class="tok-op">(</span><span class="tok-name">x</span><span class="tok-op">,</span> <span class="tok-name">y</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-op">(</span><span class="tok-num">0</span><span class="tok-op">,</span> <span class="tok-num">1</span><span class="tok-op">)</span>
+    <span class="tok-name">i</span> <span class="tok-op">:=</span> <span class="tok-num">0</span>
+    <span class="tok-kw">while</span> <span class="tok-op">(</span><span class="tok-name">i</span> <span class="tok-op">&lt;</span> <span class="tok-name">n</span><span class="tok-op">)</span> <span class="tok-op">{</span>
+        <span class="tok-op">(</span><span class="tok-name">x</span><span class="tok-op">,</span> <span class="tok-name">y</span><span class="tok-op">)</span> <span class="tok-op">=</span> <span class="tok-op">(</span><span class="tok-name">y</span><span class="tok-op">,</span> <span class="tok-name">x</span> <span class="tok-op">+</span> <span class="tok-name">y</span><span class="tok-op">)</span>
+        <span class="tok-name">i</span> <span class="tok-op">=</span> <span class="tok-name">i</span> <span class="tok-op">+</span> <span class="tok-num">1</span>
+    <span class="tok-op">}</span>
+    <span class="tok-name">x</span>
+<span class="tok-op">}</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">fib</span><span class="tok-op">(</span><span class="tok-num">10</span><span class="tok-op">)</span><span class="tok-op">)</span></pre>
+<p class="label">Output</p>
+<pre class="out">3
+Tuple{2, 1}
+Tuple{3, 2}
+55</pre>
+</div>
+
+<h2 id="module">module</h2>
+<p><code>module m { ... }</code> puts definitions together under the name <code>m</code>. The value the body returns is the module value, with the definitions marked <code>export</code> as fields. Reading a name that is not a field (a <code>helper</code> without <code>export</code>) with <code>.</code> stops the program with a message.</p>
+<pre>module bitset {
+    export new(n) := i32_array(n / 30 + 1)
+    helper(i) := i / 30
+    export add(s, i) := {
+        w := helper(i)
+        s[w] = bit_or(s[w], bit_shl(1, i % 30))
+    }
+}</pre>
+<p>The fields of this <code>bitset</code> are <code>new</code> and <code>add</code>.</p>
+<ul>
+<li>The scope of the body is that of the body of a function with no parameters. To call something defined later from earlier code, use <code>fun f</code> and <code>f(p, ...) = e</code>.</li>
+<li>The definitions of the body are variables of the body, not global variables. They do not hide a same name outside, and cannot be assigned from outside. To let outside code add cases, <code>export</code> the function to add to (<code>m.f(p, ...) = e</code> is not allowed).</li>
+<li><code>m</code> is defined after the body is evaluated, so the body cannot see <code>m</code>. Functions in the body call each other by name.</li>
+<li>The body is read as a whole, so replacing <code>parse</code> inside it does not affect the rest of the body. Replace a grammar outside the <code>module</code>.</li>
+</ul>
+
+<h3>export</h3>
+<p><code>export</code> can be written only before <code>f(p, ...) := e</code>, <code>x := e</code> and <code>module n { ... }</code> directly in the body of a module; anywhere else is a syntax error. The field of <code>export x := e</code> is the value of <code>x</code> when the body returns, and later assignments do not change it. To show the current value, <code>export</code> a function that reads <code>x</code>.</p>
+<pre>module counter {
+    n := 0
+    export start := n
+    export next() := {
+        n = n + 1
+        n
+    }
+    export current() := n
+}</pre>
+<p>An inner <code>module n { ... }</code> defines the variable <code>n</code> of the body and is invisible from outside. To show it, write <code>export module n { ... }</code>. The inner body sees the variables the outer body defined earlier.</p>
+<pre>module outer {
+    module hidden {
+        export f(x) := x + 1
+    }
+    export module inner {
+        export g(x) := hidden.f(x) * 2
+    }
+}
+outer.inner.g(3)</pre>
+
+<h3 id="test">test</h3>
+<p><code>test { ... }</code> can be written directly in the body of a module. It is sugar for <code>if (_testing) { ... }</code>, and <code>_testing</code> is <code>false</code> at first, so nothing runs normally. <code>planck0 tools/test.pk &lt;library&gt; ...</code> sets <code>_testing</code> to <code>true</code>, loads the libraries, and runs the <code>test</code> of those and of the libraries they use.</p>
+<p>The scope is that of the body of the module, so functions without <code>export</code> can be called. A <code>test</code> runs while the body is being evaluated, so it sees the variables defined before it, and <code>m</code> is not defined yet. <code>assert(c, msg)</code> writes <code>msg</code> and stops with status 1 unless <code>c</code> is true. A block holds at most 64 expressions, so split a long <code>test</code>.</p>
+<pre>module bitset {
+    export new(n) := i32_array(n / 30 + 1)
+    helper(i) := i / 30
+    export add(s, i) := {
+        w := helper(i)
+        s[w] = bit_or(s[w], bit_shl(1, i % 30))
+    }
+    test {
+        assert(helper(65) == 2, &quot;helper&quot;)
+        s := new(100)
+        add(s, 3)
+        assert(s[0] == 8, &quot;add&quot;)
+    }
+}</pre>
+
+<h2 id="import">import</h2>
+<p><code>import a::b</code> loads the same way as <code>use("a/b")</code>, and the same file is loaded once. The last name is the name of the <a href="#module">module</a> the file defines. It can be written wherever an expression can. How to take names follows the path.</p>
+<table>
+<tr><th>Form</th><th>Meaning</th></tr>
+<tr><td><code>import m</code></td><td>Only loads. Fields are read as <code>m.f</code>.</td></tr>
+<tr><td><code>import m as n</code></td><td>Adds <code>n := m</code>.</td></tr>
+<tr><td><code>import m (x, y)</code></td><td>Defines <code>x := m.x</code> and <code>y := m.y</code>.</td></tr>
+<tr><td><code>import m (*)</code></td><td>Defines every field under the same name.</td></tr>
+<tr><td><code>import m hiding (x, y)</code></td><td>Defines every field except <code>x</code> and <code>y</code> under the same name.</td></tr>
+</table>
+<ul>
+<li><code>as n</code> can come before <code>(x, y)</code>, <code>(*)</code> and <code>hiding (...)</code>. <code>as</code>, <code>(...)</code> and <code>hiding</code> are on the same line as <code>m</code>.</li>
+<li>Naming a field that <code>m</code> lacks in <code>(x, y)</code> stops with the same message as reading it with <code>.</code>.</li>
+<li>The names defined by <code>(*)</code> and <code>hiding</code> are global variables even when <code>import</code> is written in a function. The names defined by <code>(x, y)</code> and <code>as</code> are local variables in a function.</li>
+</ul>
+<div class="example">
+<p class="file">i_import.pk</p>
+<pre class="pk"><span class="tok-com"># import: the module of a library under the names that are chosen</span>
+
+<span class="tok-kw">import</span> <span class="tok-name">bitset</span> <span class="tok-kw">as</span> <span class="tok-name">bs</span>
+<span class="tok-name">s</span> <span class="tok-op">:=</span> <span class="tok-name">bs</span><span class="tok-op">.</span><span class="tok-name">new</span><span class="tok-op">(</span><span class="tok-num">100</span><span class="tok-op">)</span>
+<span class="tok-name">bs</span><span class="tok-op">.</span><span class="tok-name">add</span><span class="tok-op">(</span><span class="tok-name">s</span><span class="tok-op">,</span> <span class="tok-num">3</span><span class="tok-op">)</span>
+<span class="tok-name">bs</span><span class="tok-op">.</span><span class="tok-name">add</span><span class="tok-op">(</span><span class="tok-name">s</span><span class="tok-op">,</span> <span class="tok-num">42</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">bs</span><span class="tok-op">.</span><span class="tok-name">to_list</span><span class="tok-op">(</span><span class="tok-name">s</span><span class="tok-op">)</span><span class="tok-op">)</span>
+
+<span class="tok-com"># only the listed fields are defined</span>
+<span class="tok-kw">import</span> <span class="tok-name">bitset</span> <span class="tok-op">(</span><span class="tok-name">has</span><span class="tok-op">,</span> <span class="tok-name">count</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">has</span><span class="tok-op">(</span><span class="tok-name">s</span><span class="tok-op">,</span> <span class="tok-num">42</span><span class="tok-op">)</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">count</span><span class="tok-op">(</span><span class="tok-name">s</span><span class="tok-op">)</span><span class="tok-op">)</span>
+
+<span class="tok-com"># all the fields but the hidden ones</span>
+<span class="tok-kw">import</span> <span class="tok-name">bitset</span> <span class="tok-kw">hiding</span> <span class="tok-op">(</span><span class="tok-name">new</span><span class="tok-op">,</span> <span class="tok-name">add</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">to_list</span><span class="tok-op">(</span><span class="tok-name">s</span><span class="tok-op">)</span><span class="tok-op">)</span></pre>
+<p class="label">Output</p>
+<pre class="out">Cons{3, Cons{42, Nil{}}}
+true
+2
+Cons{3, Cons{42, Nil{}}}</pre>
+</div>
+
+<nav class="pager"><a class="prev" href="closures.html"><small>Previous</small>Closures</a><a class="next" href="control.html"><small>Next</small>Control structures</a></nav>
+</main>
+</div>
+<footer><div class="inner"><a href="https://github.com/nineties/hex-to-compiler">github.com/nineties/hex-to-compiler</a></div></footer>
+<script src="../../assets/page.js"></script>
+</body>
+</html>
