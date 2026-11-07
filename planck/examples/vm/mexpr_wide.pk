@@ -1,0 +1,25 @@
+# m-exprs with many arguments on planckvm: the program is written with the instructions and run by planck/vm; the image path is the first argument
+use("pvm/image")
+
+# println of R[x]
+show(x) := [GETGLOBAL{3, 1}, MOVE{4, x}, CALL{3, 3, 1}]
+
+# BUILD of 100 arguments 0 to 99, then PUSH of 0 to 299 until the number of arguments is 300
+body := concat_map(x -> x, [
+    [LOADK{10, 0}],
+    map(i -> LOADI{11 + i, i}, list.range(0, 100)),
+    [BUILD{1, 10, 100}, ARITY{2, 1}],
+    show(2),
+    [ARGI{2, 1, 99}],
+    show(2),
+    [LOADK{1, 2}, LOADI{6, 0}, LOADI{7, 300}, Label{'loop}, TGE{6, 7, 1}, JMP{'done}, PUSH{1, 1, 6}, ADDI{6, 6, 1}, JMP{'loop}, Label{'done}],
+    [ARITY{2, 1}],
+    show(2),
+    [LOADI{8, 299}, ARG{2, 1, 8}],
+    show(2),
+    [LOADNONE{0, 1}, RET{0}]
+])
+
+main := Code{"main", 0, 120, body, [Y{"Wide"}, C{"println"}, M{"Wide", []}]}
+
+write_file(array_get(argv(), 1), bytes.to_u8(pvm_image.build([main], "main")))
