@@ -60,14 +60,54 @@ fn size_of[r](h: &r [u32], v: i64) -> i64 {
     g(h, v >> 1) >> 6
 }
 
+# The heap array h has three parts. The old generation is the words from 0 to ns (the image and the promoted objects, up to st[8]); the nursery is
+# the words from ns to ne, where the new objects are made up to st[0]; the remembered set is the last 262144 words: the objects of the old
+# generation that may have a reference to the nursery. Big objects and the objects that do not fit in the nursery are made in the old generation.
+# The machine state st: 0 the first free word of the nursery, 4 and 5 ln2 and pi (roots), 6 ns, 7 ne, 8 the first free word of the old generation,
+# 9 the number of the remembered objects, 10 the highest base of the frames (the registers above it are none), 11 the remembered set overflowed,
+# 12 a collection is wanted, 13 the nursery top where it is wanted, 14 the old generation top where a major collection is wanted, 15 the size of
+# the big objects, 16 to 19 the state of the collector (gc.native), 17 the size of the nursery, 18 the slack of the old generation (0: automatic).
+
+# remember puts the object at the index idx of the old generation in the remembered set
+fn remember[r](h: &mut r [u32], st: &mut r [u32], idx: i64) {
+    let c = g(st, 9)
+    if c >= 262144 {
+        p(st, 11, 1)
+        return
+    }
+    p(h, len(h) - 262144 + c, idx)
+    p(st, 9, c + 1)
+}
+
+# wb is called when the value v is put in the object obj that already exists: the object of the old generation that has a reference to the nursery is remembered
+fn wb[r](h: &mut r [u32], st: &mut r [u32], obj: i64, v: i64) {
+    if (v & 1) == 1 { return }
+    if (v >> 1) < g(st, 6) { return }
+    if (obj >> 1) >= g(st, 6) { return }
+    remember(h, st, obj >> 1)
+}
+
 # alloc_obj makes an object of the kind and the size (words after the header), and returns its reference; the words are 0
 fn alloc_obj[r](h: &mut r [u32], st: &mut r [u32], kind: i64, size: i64) -> i64 {
     let at = g(st, 0)
-    if at + 1 + size > len(h) { die("out of memory") }
-    p(h, at, size * 64 + kind * 4 + 1)
-    for i in 0 as i64..size {
-        p(h, at + 1 + i, 0)
+    if size < g(st, 15) and at + 1 + size <= g(st, 7) {
+        p(h, at, size * 64 + kind * 4 + 1)
+        for i in 0 as i64..size {
+            p(h, at + 1 + i, 0)
+        }
+        p(st, 0, at + 1 + size)
+        if at + 1 + size >= g(st, 13) { p(st, 12, 1) }
+        return at * 2
     }
-    p(st, 0, at + 1 + size)
-    at * 2
+    let ot = g(st, 8)
+    if ot + 1 + size > g(st, 6) { die("out of memory") }
+    p(h, ot, size * 64 + kind * 4 + 1)
+    for i in 0 as i64..size {
+        p(h, ot + 1 + i, 0)
+    }
+    p(st, 8, ot + 1 + size)
+    if ot + 1 + size > g(st, 14) { p(st, 12, 1) }
+    if size < g(st, 15) { p(st, 12, 1) }
+    remember(h, st, ot)
+    ot * 2
 }

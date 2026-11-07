@@ -10,6 +10,7 @@ import big
 import num
 import ctl
 import ops
+import gc
 
 # the file is read into the heap from the index 0, 4 bytes for a word; the number of words is the result
 fn load[r](h: &mut r [u32], path: &static [u8]) -> i64 {
@@ -52,8 +53,9 @@ fn load[r](h: &mut r [u32], path: &static [u8]) -> i64 {
 
 
 # run runs the code of the Lambda entry in a stub frame whose code is the Lambda stub, and gives the value that HALT has
-fn run[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], fs: &mut r [u32], stub: i64, entry: i64) -> i64 {
-    let vfalse = g(h, 1)
+fn run[r](h: &mut r [u32], t: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], fs: &mut r [u32], stub: i64, entry: i64) -> i64 {
+    var vfalse: i64
+    vfalse = g(h, 1)
     var fp: i64
     var base: i64
     var code: i64
@@ -84,6 +86,16 @@ fn run[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], fs: &mut r [u32],
     ip = code + 5
     kb = code + 5 + g(h, code + 2)
     while running == 1 {
+        if g(st, 12) != 0 {
+            # a collection is wanted: it is done between two instructions, and the code, the pc and the base are read again from the top frame
+            p(fs, fp + 5, ip - (code + 5))
+            collect(h, t, st, rs, fs, fp)
+            vfalse = g(h, 1)
+            base = g(fs, fp + 4)
+            code = g(h, (g(fs, fp) >> 1) + 2) >> 1
+            ip = code + 5 + g(fs, fp + 5)
+            kb = code + 5 + g(h, code + 2)
+        }
         w = g(h, ip)
         ip += 1
         op = w & 255
@@ -104,6 +116,7 @@ fn run[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], fs: &mut r [u32],
         } else if op == 4 {
             p(rs, base + a, g(h, (g(h, kb + ((w >> 16) & 65535)) >> 1) + 1))
         } else if op == 5 {
+            wb(h, st, g(h, kb + ((w >> 16) & 65535)), g(rs, base + a))
             p(h, (g(h, kb + ((w >> 16) & 65535)) >> 1) + 1, g(rs, base + a))
         } else if op == 9 {
             ip += s24(w >> 8)
@@ -146,6 +159,7 @@ fn run[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], fs: &mut r [u32],
             code = g(h, (g(fs, fp) >> 1) + 2) >> 1
             ip = code + 5 + g(fs, fp + 5)
             kb = code + 5 + g(h, code + 2)
+            if base > g(st, 10) { p(st, 10, base) }
         } else if op == 24 {
             result = g(rs, base + a)
             running = 0
@@ -171,6 +185,32 @@ fn run[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], fs: &mut r [u32],
     result
 }
 
+# the number of the decimal digits s
+fn parse_num(s: &static [u8]) -> i64 {
+    var n: i64
+    n = 0
+    for i in 0 as i64..len(s) {
+        n = n * 10 + (s[i] as i64) - 48
+    }
+    n
+}
+
+fn err_num(n: i64) {
+    if n >= 10 { err_num(n / 10) }
+    let d = n % 10
+    if d == 0 { write(2, "0") }
+    if d == 1 { write(2, "1") }
+    if d == 2 { write(2, "2") }
+    if d == 3 { write(2, "3") }
+    if d == 4 { write(2, "4") }
+    if d == 5 { write(2, "5") }
+    if d == 6 { write(2, "6") }
+    if d == 7 { write(2, "7") }
+    if d == 8 { write(2, "8") }
+    if d == 9 { write(2, "9") }
+}
+
+# usage: vm <image> [nursery words [slack of the old generation words]]; the arguments after the image are for testing the collector, and the numbers of the collections are written to stderr
 fn main() -> i64 {
     if argc() < 2 { die("usage: vm <image>") }
     var heap: own [u32]
@@ -178,7 +218,9 @@ fn main() -> i64 {
     var regs: own [u32]
     var frames: own [u32]
     heap = alloc(33554432, 0 as u32)
-    machine = alloc(16, 0 as u32)
+    machine = alloc(32, 0 as u32)
+    var scratch: own [u32]
+    scratch = alloc(33554432 - 262144 + 16, 0 as u32)
     regs = alloc(1048576, 0 as u32)
     frames = alloc(458752, 0 as u32)
     var result: i64
@@ -187,6 +229,8 @@ fn main() -> i64 {
         var st: &mut r [u32]
         var rs: &mut r [u32]
         var fs: &mut r [u32]
+        var sc: &mut r [u32]
+        sc = &mut r scratch
         h = &mut r heap
         st = &mut r machine
         rs = &mut r regs
@@ -205,13 +249,41 @@ fn main() -> i64 {
         p(h, n + 8, 0)
         p(h, n + 9, n * 2)
         p(h, n + 10, g(h, 3))
-        p(st, 0, n + 11)
+        # the old generation is the image and the stub; the nursery is the end of the heap before the remembered set
+        var nsize: i64
+        nsize = 4194304
+        if argc() >= 3 { nsize = parse_num(argv(2)) }
+        let ns = len(h) - 262144 - nsize
+        if n + 11 > ns { die("the image is too big") }
+        p(st, 0, ns)
+        p(st, 6, ns)
+        p(st, 7, ns + nsize)
+        p(st, 8, n + 11)
+        p(st, 13, ns + nsize / 4 * 3)
+        p(st, 15, nsize / 8)
+        p(st, 17, nsize)
+        if argc() >= 4 { p(st, 18, parse_num(argv(3))) }
+        var slack: i64
+        slack = g(st, 18)
+        if slack == 0 { slack = (ns - n - 11) / 2 }
+        var thr: i64
+        thr = n + 11 + slack
+        if thr > ns - nsize { thr = ns - nsize }
+        p(st, 14, thr)
         for i in 0 as i64..len(rs) {
             p(rs, i, g(h, 3))
         }
-        result = run(h, st, rs, fs, (n + 7) * 2, g(h, 0))
+        result = run(h, sc, st, rs, fs, (n + 7) * 2, g(h, 0))
+        if argc() >= 3 {
+            write(2, "minor ")
+            err_num(g(st, 20))
+            write(2, " major ")
+            err_num(g(st, 21))
+            write(2, "\n")
+        }
     }
     free(heap)
+    free(scratch)
     free(machine)
     free(regs)
     free(frames)
