@@ -36,23 +36,43 @@
 </ol></details></nav>
 <main>
 <h1>Data types</h1>
-<p class="lead">Types of values, immutability, equality and identity.</p>
+<p class="lead">M-expressions and atoms, the types of atoms, equality and identity.</p>
 
-<h2 id="kinds">Types of values</h2>
-<p>There are eight builtin types. A user can make new types (user data).</p>
+<h2 id="kinds">M-expressions and atoms</h2>
+<p>A value is an M-expression or an atom. An atom is a value that is not an M-expression: an integer, a float, a string, a symbol, a function, an array, a plain array or user data.</p>
+<ul>
+<li>The <code>head</code> of an M-expression is a symbol. Two libraries can use the same head. A head is not registered, and values with the same head are treated as values of the same form.</li>
+<li>The <code>head</code> of an atom is its type itself, which is a value (a type value). The pattern <code>x @ Int</code> matches an atom whose type is <code>Int</code>.</li>
+<li><code>head(x)</code> is a symbol if <code>x</code> is an M-expression, and a type value if <code>x</code> is an atom.</li>
+<li><code>x @ T</code> compares the head symbol if <code>x</code> is an M-expression, and the type value if <code>x</code> is an atom.</li>
+<li>A type value can be a table key. A table that dispatches on <code>head</code> can hold both symbols and type values as keys.</li>
+<li>A type value is shown by the name of its type. Two types with the same name look the same when shown.</li>
+</ul>
+<p>The M-expression <code>Set{1}</code> and a type whose name is <code>Set</code> are different things, so a name never collides with the head of an M-expression.</p>
+
+<h2 id="mexpr">M-expressions</h2>
+<ul>
+<li>A head symbol and any number of arguments.</li>
+<li>Immutable. Literals: <code>Head{a, b}</code>, <code>(a, b)</code>, <code>[a, b]</code> and <code>[]</code>.</li>
+<li>Sugar: <code>(a, b)</code> (<code>Tuple</code>), <code>[a, b]</code> and <code>::</code> (<code>Cons</code>), <code>[]</code> (<code>Nil</code>).</li>
+<li>A mutable value cannot be an argument. Neither can immutable user data that holds a mutable value. Neither can a NaN. Making such an M-expression is a runtime error.</li>
+<li>Interned. <code>==</code> and <code>is</code> are the same test, and O(1). Equality across numeric types applies only to the numbers themselves, so <code>f{1}</code> and <code>f{1.0}</code> are not equal.</li>
+<li>Can be a table key. <code>a[i]</code> can be read.</li>
+</ul>
+
+<h2 id="atoms">Types of atoms</h2>
+<p>There are seven builtin types of atoms. A user can make new types (user data). In the table, a type value is written with the name of its type.</p>
 <table>
-<tr><th>Type</th><th><code>head</code></th><th>Literal</th><th>Mutable?</th><th><code>==</code></th><th><code>is</code></th><th>Table key</th></tr>
+<tr><th>Type</th><th><code>head</code> (type value)</th><th>Literal</th><th>Mutable?</th><th><code>==</code></th><th><code>is</code></th><th>Table key</th></tr>
 <tr><td>integer</td><td><code>Int</code></td><td><code>42</code> <code>0x1f</code> <code>0b101</code></td><td>immutable</td><td>value</td><td>value</td><td>yes</td></tr>
 <tr><td>float</td><td><code>Float</code></td><td><code>1.5</code> <code>2.5e-3</code></td><td>immutable</td><td>value</td><td>object</td><td>yes, except NaN</td></tr>
 <tr><td>string</td><td><code>String</code></td><td><code>"abc"</code></td><td>immutable</td><td>identity</td><td>intern</td><td>yes</td></tr>
 <tr><td>symbol</td><td><code>Symbol</code></td><td><code>x</code></td><td>immutable</td><td>identity</td><td>intern</td><td>yes</td></tr>
-<tr><td>M-expression</td><td>each M-expression</td><td><code>Head{a, b}</code> <code>(a, b)</code> <code>[a, b]</code> <code>[]</code></td><td>immutable</td><td>identity</td><td>intern</td><td>yes</td></tr>
 <tr><td>function</td><td><code>Function</code></td><td><code>(p) -&gt; e</code> <code>f | g</code></td><td>immutable</td><td>identity</td><td>object</td><td>yes</td></tr>
 <tr><td>array</td><td><code>Array</code></td><td>—</td><td>mutable</td><td>true if identical, otherwise element by element</td><td>object</td><td>no</td></tr>
 <tr><td>plain array</td><td><code>Plain</code></td><td>—</td><td>mutable</td><td>true if identical, otherwise element by element</td><td>object</td><td>no</td></tr>
-<tr><td>user data</td><td>symbol of the type name</td><td>—</td><td>specified when made</td><td>identity. The given function if <code>==</code> is given</td><td>immutable: intern. mutable: object. object if <code>==</code> is given</td><td>yes</td></tr>
+<tr><td>user data</td><td>the type value of its type</td><td>—</td><td>specified when made</td><td>identity. The given function if <code>==</code> is given</td><td>immutable: intern. mutable: object. object if <code>==</code> is given</td><td>yes</td></tr>
 </table>
-<p>The type of a value is told by <code>head</code>. The pattern <code>x @ Int</code> matches a value whose <code>head</code> is <code>Int</code>.</p>
 
 <h2 id="notes">Notes on each type</h2>
 
@@ -83,15 +103,6 @@
 <li>Unique for each name. <code>==</code> and <code>is</code> are the same test. A name that starts with a letter, <code>_</code> or <code>%</code>. For <code>true</code>, <code>false</code> and <code>none</code>, see <a href="syntax.html#lexical">Lexical rules</a>.</li>
 </ul>
 
-<h3>M-expression</h3>
-<ul>
-<li>A head symbol and any number of arguments.</li>
-<li>Sugar: <code>(a, b)</code> (<code>Tuple</code>), <code>[a, b]</code> and <code>::</code> (<code>Cons</code>), <code>[]</code> (<code>Nil</code>).</li>
-<li>A mutable value cannot be an argument. Neither can immutable user data that holds a mutable value. Neither can a NaN. Making such an M-expression is a runtime error.</li>
-<li><code>==</code> and <code>is</code> are the same test, and O(1). Equality across numeric types applies only to the numbers themselves, so <code>f{1}</code> and <code>f{1.0}</code> are not equal.</li>
-<li><code>a[i]</code> can be read.</li>
-</ul>
-
 <h3>function</h3>
 <ul>
 <li>Lambda, Fusion, builtin function, continuation.</li>
@@ -119,7 +130,7 @@
 <h3>user data</h3>
 <ul>
 <li>Made by a builtin function. Whether it is immutable or mutable must be specified when it is made. There is no default.</li>
-<li>Making user data whose type name is the same as a builtin type name or another user data type name is an error. The symbols of the eight builtin type names and of user data type names cannot be the head of an M-expression.</li>
+<li>Each type of user data is a unique value made each time a type is made. Its name is only used for display. A type with the same name made elsewhere is a different type.</li>
 <li>A function for <code>==</code> and a function for hash can be given when the type is made. If given, give both. A type with <code>==</code> given is not interned, and <code>is</code> compares objects. <code>==</code> and hash are the given functions.</li>
 <li>For the given functions, the person who makes the type must keep these: if <code>a is b</code> then <code>a == b</code>, and equal values have the same hash.</li>
 <li>For a type without them, the hash of immutable user data is decided by the contents and the hash of mutable user data is decided for each object. <code>==</code> is identity.</li>
@@ -134,7 +145,7 @@
 <h3>Where equality is used</h3>
 <ul>
 <li>A pattern that writes the same name twice (<code>f(a, a)</code>) matches only when the two values are equal by <code>==</code>. User data uses the given <code>==</code>.</li>
-<li>The builtin table (<code>table_get</code>, <code>table_set</code> and <code>t[key]</code>) treats two keys as the same if they are identical or equal. User data uses the given <code>==</code> and hash. An array, a plain array or a NaN as the key is an error.</li>
+<li>The builtin table (<code>table_get</code>, <code>table_set</code> and <code>t[key]</code>) treats two keys as the same if they are identical or equal. User data uses the given <code>==</code> and hash. An array, a plain array or a NaN as the key is an error. A type value can be a key.</li>
 <li><code>hash(x)</code> is an integer of 0 or more. Values that are equal by <code>==</code> give the same value. For user data with <code>==</code> given, it is the value of the given hash. The exact values of <code>hash</code> are not defined.</li>
 </ul>
 
@@ -142,7 +153,7 @@
 <p><code>a is b</code> is true if a and b are identical, and false otherwise. Its negation is written <code>a is not b</code>. It has the same precedence as <code>==</code>, at the level of the comparison operators. Like the comparisons it does not group, so <code>a is b is c</code> is an error. <code>is</code> cannot be written in a pattern.</p>
 <ul>
 <li>Identical values are always equal: if <code>a is b</code>, then <code>a == b</code>; an array or a plain array that holds a NaN keeps this because <code>==</code> returns true first for identical ones. A NaN is not identical even to itself.</li>
-<li>Integers, strings, symbols, M-expressions and immutable user data without <code>==</code> given are interned. Floats, functions, arrays, plain arrays, mutable user data and user data with <code>==</code> given are objects.</li>
+<li>M-expressions, integers, strings, symbols and immutable user data without <code>==</code> given are interned. Floats, functions, arrays, plain arrays, mutable user data and user data with <code>==</code> given are objects.</li>
 <li>Interning means that equal values are made into one object, so making the same value twice returns the same object. For an interned type, equal values are identical. User data with <code>==</code> given is not interned, so equal values are not always identical. So <code>==</code> is the same test as <code>is</code>, and O(1).</li>
 <li>Values of different types are not identical. <code>1 == 1.0</code> is true, but <code>1 is 1.0</code> is false.</li>
 <li>Testing whether values are identical is O(1) except for arbitrary precision integers.</li>

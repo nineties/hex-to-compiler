@@ -36,23 +36,43 @@
 </ol></details></nav>
 <main>
 <h1>データ型</h1>
-<p class="lead">値の型、immutability、equality、identity。</p>
+<p class="lead">M式と atom、atom の型、equality、identity。</p>
 
-<h2 id="kinds">値の型</h2>
-<p>組み込みの型は次の8つです。利用者は新しい型（ユーザーデータ）を作れます。</p>
+<h2 id="kinds">M式と atom</h2>
+<p>値は M式か atom のどちらかです。atom は M式でない値で、整数・float・文字列・symbol・function・array・plain array・ユーザーデータです。</p>
+<ul>
+<li>M式の <code>head</code> は symbol です。2つのライブラリが同じ head を使えます。head は登録せず、同じ head の値は同じ形の値として扱われます。</li>
+<li>atom の <code>head</code> は型そのもので、値（型の値）です。パターンの <code>x @ Int</code> は型が <code>Int</code> の atom に合います。</li>
+<li><code>head(x)</code> は、<code>x</code> が M式なら symbol、atom なら型の値を返します。</li>
+<li><code>x @ T</code> は、<code>x</code> が M式なら head の symbol を、atom なら型の値を比べます。</li>
+<li>型の値は table の key にできます。<code>head</code> で振り分ける table の key に、symbol と型の値が混ざってかまいません。</li>
+<li>型の値は表示では型の名前で出ます。同じ名前の型が2つあると、表示では区別できません。</li>
+</ul>
+<p>M式の <code>Set{1}</code> と、名前が <code>Set</code> の型は別物です。だから名前が M式の head とぶつかることはありません。</p>
+
+<h2 id="mexpr">M式</h2>
+<ul>
+<li>head の symbol と任意の個数の引数を持ちます。</li>
+<li>immutable です。リテラルは <code>Head{a, b}</code>・<code>(a, b)</code>・<code>[a, b]</code>・<code>[]</code> です。</li>
+<li>糖衣は <code>(a, b)</code>（<code>Tuple</code>）・<code>[a, b]</code> と <code>::</code>（<code>Cons</code>）・<code>[]</code>（<code>Nil</code>）です。</li>
+<li>引数に mutable な値は入れられません。mutable な値を中に持つ immutable なユーザーデータも入れられません。NaN も入れられません。M式を作るときに実行時エラーになります。</li>
+<li>intern します。<code>==</code> と <code>is</code> は同じ判定で、O(1) です。数の型をまたぐ equality は数そのものだけの規則なので、<code>f{1}</code> と <code>f{1.0}</code> は equal ではありません。</li>
+<li>table の key にできます。<code>a[i]</code> は読めます。</li>
+</ul>
+
+<h2 id="atoms">atom の型</h2>
+<p>組み込みの atom の型は次の7つです。利用者は新しい型（ユーザーデータ）を作れます。表では、型の値を型の名前で書きます。</p>
 <table>
-<tr><th>型</th><th><code>head</code></th><th>リテラル</th><th>mutable か</th><th><code>==</code></th><th><code>is</code></th><th>table の key</th></tr>
+<tr><th>型</th><th><code>head</code>（型の値）</th><th>リテラル</th><th>mutable か</th><th><code>==</code></th><th><code>is</code></th><th>table の key</th></tr>
 <tr><td>整数</td><td><code>Int</code></td><td><code>42</code> <code>0x1f</code> <code>0b101</code></td><td>immutable</td><td>値</td><td>値</td><td>可</td></tr>
 <tr><td>float</td><td><code>Float</code></td><td><code>1.5</code> <code>2.5e-3</code></td><td>immutable</td><td>値</td><td>object</td><td>NaN 以外は可</td></tr>
 <tr><td>文字列</td><td><code>String</code></td><td><code>"abc"</code></td><td>immutable</td><td>identity</td><td>intern</td><td>可</td></tr>
 <tr><td>symbol</td><td><code>Symbol</code></td><td><code>x</code></td><td>immutable</td><td>identity</td><td>intern</td><td>可</td></tr>
-<tr><td>M式</td><td>M式ごと</td><td><code>Head{a, b}</code> <code>(a, b)</code> <code>[a, b]</code> <code>[]</code></td><td>immutable</td><td>identity</td><td>intern</td><td>可</td></tr>
 <tr><td>function</td><td><code>Function</code></td><td><code>(p) -&gt; e</code> <code>f | g</code></td><td>immutable</td><td>identity</td><td>object</td><td>可</td></tr>
 <tr><td>array</td><td><code>Array</code></td><td>—</td><td>mutable</td><td>identical なら true、そうでなければ要素ごと</td><td>object</td><td>不可</td></tr>
 <tr><td>plain array</td><td><code>Plain</code></td><td>—</td><td>mutable</td><td>identical なら true、そうでなければ要素ごと</td><td>object</td><td>不可</td></tr>
-<tr><td>ユーザーデータ</td><td>型名の symbol</td><td>—</td><td>作るときに指定</td><td>identity。<code>==</code> を渡したときはその関数</td><td>immutable は intern、mutable は object。<code>==</code> を渡したときは object</td><td>可</td></tr>
+<tr><td>ユーザーデータ</td><td>その型の型の値</td><td>—</td><td>作るときに指定</td><td>identity。<code>==</code> を渡したときはその関数</td><td>immutable は intern、mutable は object。<code>==</code> を渡したときは object</td><td>可</td></tr>
 </table>
-<p>値の型は <code>head</code> で調べます。パターンの <code>x @ Int</code> は <code>head</code> が <code>Int</code> の値に合います。</p>
 
 <h2 id="notes">型ごとの補足</h2>
 
@@ -83,15 +103,6 @@
 <li>名前ごとに一意です。<code>==</code> と <code>is</code> は同じ判定です。英字・<code>_</code>・<code>%</code> で始まる名前です。<code>true</code> <code>false</code> <code>none</code> は <a href="syntax.html#lexical">字句</a>を参照してください。</li>
 </ul>
 
-<h3>M式</h3>
-<ul>
-<li>head の symbol と任意の個数の引数を持ちます。</li>
-<li>糖衣は <code>(a, b)</code>（<code>Tuple</code>）・<code>[a, b]</code> と <code>::</code>（<code>Cons</code>）・<code>[]</code>（<code>Nil</code>）です。</li>
-<li>引数に mutable な値は入れられません。mutable な値を中に持つ immutable なユーザーデータも入れられません。NaN も入れられません。M式を作るときに実行時エラーになります。</li>
-<li><code>==</code> と <code>is</code> は同じ判定で、O(1) です。数の型をまたぐ equality は数そのものだけの規則なので、<code>f{1}</code> と <code>f{1.0}</code> は equal ではありません。</li>
-<li><code>a[i]</code> は読めます。</li>
-</ul>
-
 <h3>function</h3>
 <ul>
 <li>Lambda・Fusion・組み込み関数・継続です。</li>
@@ -119,7 +130,7 @@
 <h3>ユーザーデータ</h3>
 <ul>
 <li>組み込み関数で作ります。作るときに immutable か mutable かを必ず指定します。既定はありません。</li>
-<li>型名が組み込みの型名や別のユーザーデータの型名と同じときは、型を作るときにエラーです。組み込みの8つの型名の symbol とユーザーデータの型名の symbol は、M式の head にできません。</li>
+<li>ユーザーデータの型は、型を作るたびに一意の値になります。名前は表示に使うだけです。別の所で作った同じ名前の型は別の型です。</li>
 <li>作るときに <code>==</code> の関数と hash の関数を渡せます。渡すなら両方です。<code>==</code> を渡した型は intern せず、<code>is</code> は object の比較です。<code>==</code> と hash は渡した関数です。</li>
 <li>渡した関数について、<code>a is b</code> なら <code>a == b</code> であること、equal なら hash が同じであることは、型を作る人が守ります。</li>
 <li>渡さない型は、immutable は hash が中身で決まり、mutable はオブジェクトごとに決まります。<code>==</code> は identity です。</li>
@@ -134,7 +145,7 @@
 <h3>equality を使う所</h3>
 <ul>
 <li>同じ名前を2回書いたパターン（<code>f(a, a)</code>）は、2つの値が <code>==</code> で equal なときだけ合います。ユーザーデータは渡された <code>==</code> を使います。</li>
-<li>table（<code>table_get</code>・<code>table_set</code>・<code>t[key]</code>）は、key が identical か equal なら同じ key とみなします。ユーザーデータは渡された <code>==</code> と hash を使います。array・plain array・NaN を key にするとエラーです。</li>
+<li>table（<code>table_get</code>・<code>table_set</code>・<code>t[key]</code>）は、key が identical か equal なら同じ key とみなします。ユーザーデータは渡された <code>==</code> と hash を使います。array・plain array・NaN を key にするとエラーです。型の値は key にできます。</li>
 <li><code>hash(x)</code> は 0 以上の整数です。<code>==</code> で equal な値は同じ値になります。<code>==</code> を渡したユーザーデータは、渡された hash の値です。<code>hash</code> の具体的な値は定めません。</li>
 </ul>
 
