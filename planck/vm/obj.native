@@ -19,6 +19,49 @@ fn str_byte[r](h: &r [u32], s: i64, i: i64) -> i64 {
     (w >> ((i % 4) * 8)) & 255
 }
 
+# A string is UTF-8: a byte of the form 10xxxxxx continues the character before it. strlen, ord and substr count the characters.
+fn str_chars[r](h: &r [u32], s: i64) -> i64 {
+    let n = str_len(h, s)
+    var c: i64
+    var i: i64
+    c = 0
+    i = 0
+    while i < n {
+        if (str_byte(h, s, i) & 192) != 128 { c += 1 }
+        i += 1
+    }
+    c
+}
+
+# the position in bytes of the character i (the number of bytes when i is the number of characters), or -1 when i is beyond
+fn char_pos[r](h: &r [u32], s: i64, i: i64) -> i64 {
+    let n = str_len(h, s)
+    var c: i64
+    var b: i64
+    c = 0
+    b = 0
+    while b < n {
+        if (str_byte(h, s, b) & 192) != 128 {
+            if c == i { return b }
+            c += 1
+        }
+        b += 1
+    }
+    if c == i { return n }
+    -1
+}
+
+# the code point of the character that starts at the byte b
+fn char_at[r](h: &r [u32], s: i64, b: i64) -> i64 {
+    let c0 = str_byte(h, s, b)
+    if c0 < 128 { return c0 }
+    let c1 = str_byte(h, s, b + 1) & 63
+    if c0 < 224 { return ((c0 & 31) << 6) | c1 }
+    let c2 = str_byte(h, s, b + 2) & 63
+    if c0 < 240 { return ((c0 & 15) << 12) | (c1 << 6) | c2 }
+    ((c0 & 7) << 18) | (c1 << 12) | (c2 << 6) | (str_byte(h, s, b + 3) & 63)
+}
+
 fn new_string[r](h: &mut r [u32], st: &mut r [u32], n: i64) -> i64 {
     let s = alloc_obj(h, st, 3, 1 + (n + 3) / 4)
     p(h, (s >> 1) + 1, n)
