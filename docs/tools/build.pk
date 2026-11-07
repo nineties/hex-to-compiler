@@ -8,6 +8,9 @@
 # <!--title TITLE-->. These marks in a piece are replaced:
 #   <!--ex NAME-->     examples/NAME.pk and examples/NAME.out, as the code and its output
 #   <!--src NAME-->    only examples/NAME.pk
+#   <!--repl NAME-->   examples/NAME.out as a session at the prompt of the REPL (a line "> expression", the
+#                      lines of it that go on "... expression", and then the lines of the output and the value).
+#                      examples/NAME.repl is the input, and run_examples.sh makes the .out with repl.pk
 #   <!--out NAME-->    only examples/NAME.out
 #   <!--text NAME-->   examples/NAME.txt, as code that is not planck
 #   <!--bits ... -->   a diagram of 32-bit words as an HTML table. A line is one word,
@@ -569,6 +572,21 @@ code_block(name) := f"<p class=\"file\">{name}.pk</p>\n<pre class=\"pk\">{highli
 
 out_block(name) := f"<p class=\"label\">{ui("out")}</p>\n<pre class=\"out\">{html_escape(rstrip_nl(ex_file(name, "out")))}</pre>"
 
+# a session at the prompt: the lines of the input are highlighted and the others are the output
+repl_block(name) := {
+    ls := split_lines(rstrip_nl(ex_file(name, "out")))
+    b := strbuf.new()
+    i := 0
+    while (i < vector.len(ls)) {
+        l := ls[i]
+        if (starts_at(l, 0, "> ")) strbuf.add(b, f"<span class=\"prompt\">&gt; </span>{highlighted(substr(l, 2, strlen(l)))}\n")
+        else if (starts_at(l, 0, "... ")) strbuf.add(b, f"<span class=\"prompt\">... </span>{highlighted(substr(l, 4, strlen(l)))}\n")
+        else strbuf.add(b, f"<span class=\"res\">{html_escape(l)}</span>\n")
+        i = i + 1
+    }
+    f"<pre class=\"repl\">{rstrip_nl(strbuf.str(b))}</pre>"
+}
+
 # === Excerpts of the source files ===
 
 blank_line(l) := lead(l) == strlen(l)
@@ -744,6 +762,7 @@ expand(body) := {
     })
     body = by_name(body, "ex", name -> f"<div class=\"example\">\n{code_block(name)}\n{out_block(name)}\n</div>")
     body = by_name(body, "src", name -> f"<div class=\"example\">\n{code_block(name)}\n</div>")
+    body = by_name(body, "repl", name -> f"<div class=\"example\">\n{repl_block(name)}\n</div>")
     body = by_name(body, "out", name -> f"<div class=\"example\">\n{out_block(name)}\n</div>")
     body = by_name(body, "text", name -> f"<pre>{html_escape(rstrip_nl(ex_file(name, "txt")))}</pre>")
     body = expand_file(body)
