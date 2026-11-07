@@ -36,12 +36,11 @@
 </ol></details></nav>
 <main>
 <h1>native</h1>
-<p class="lead"><code>use("native/compile")</code> defines a systems language. Its meaning is that of <a href="vasm.html">vasm</a>, with a higher-level notation. <code>native_compile.compile</code> expands the functions and structs written in <code>native{| ... |}</code> to a vasm module. Ownership and borrowing are checked on the expanded vasm.</p>
+<p class="lead"><code>use("native/compile")</code> defines a systems language. Its meaning is that of <a href="vasm.html">vasm</a>, with a higher-level notation. <code>native_compile.compile</code> expands the functions and structs written in <code>native{| ... |}</code> to a vasm module, and ownership and borrowing are checked on the expanded vasm. Types come from the declarations of variables and functions, and are written only there.</p>
 
 <h2>Programs</h2>
-<p>A program is a list of structs and functions, which can follow <code>import</code> lines. Types, structs and function declarations are written as in vasm. The body of a function is a list of statements, separated by newlines or <code>;</code>.</p>
-<p><code>import lib</code> names the unit <code>lib</code>. Only the structs and functions of the units named so can be used from other units; see <a href="vasmc.html">vasmc</a>. Write the imports at the start of the file, one on each line.</p>
-<p>The value of <code>native{| ... |}</code> is <code>PModule{[...]}</code>; its list starts with <code>PImport{at, name}</code> for each import. The functions of <code>native_compile</code> take it as follows.</p>
+<p>A program is a list of structs and functions. Types, structs and function declarations are written as in vasm. The body of a function is a list of statements, separated by newlines or <code>;</code>. If the last statement of a function that gives a value is an expression, its value is the result.</p>
+<p>To use other units, write <code>import lib</code> at the start of the file, one on each line (see <a href="vasmc.html">vasmc</a>). The value of <code>native{| ... |}</code> is <code>PModule{[...]}</code>; its list starts with <code>PImport{at, name}</code> for each import.</p>
 <table>
 <tr><th>Function</th><th>Returns</th></tr>
 <tr><td><code>native_compile.compile(m)</code></td><td>The vasm <code>Module{[...]}</code>, which <code>vasm_check</code> and <code>vasm_build</code> take as it is</td></tr>
@@ -49,40 +48,26 @@
 <tr><td><code>native_compile.errors(file, errors)</code></td><td>The errors, with the positions as <code>Loc</code> of the file</td></tr>
 </table>
 
-<h2>Expressions</h2>
-<p>Expressions nest. The precedence grows from the top row to the bottom row.</p>
+<h2>Expressions and statements</h2>
+<p>Precedence grows from the top row of the table to the bottom row. Arguments are computed from left to right.</p>
 <table>
 <tr><th>Form</th><th>Meaning</th></tr>
-<tr><td><code>a or b</code></td><td><code>b</code> is not computed if <code>a</code> is true</td></tr>
-<tr><td><code>a and b</code></td><td><code>b</code> is not computed if <code>a</code> is false</td></tr>
+<tr><td><code>a or b</code> <code>a and b</code></td><td>The right side is not computed if the left decides</td></tr>
 <tr><td><code>==</code> <code>!=</code> <code>&lt;</code> <code>&lt;=</code> <code>&gt;</code> <code>&gt;=</code></td><td>Comparison. The result is <code>bool</code></td></tr>
-<tr><td><code>|</code></td><td>Bitwise or</td></tr>
-<tr><td><code>^</code></td><td>Bitwise xor</td></tr>
-<tr><td><code>&amp;</code></td><td>Bitwise and. It binds tighter than a comparison</td></tr>
-<tr><td><code>&lt;&lt;</code> <code>&gt;&gt;</code></td><td>Shifts</td></tr>
-<tr><td><code>+</code> <code>-</code></td><td>Addition and subtraction</td></tr>
-<tr><td><code>*</code> <code>/</code> <code>%</code></td><td>Multiplication and division. A <code>*</code> is on the same line as its left operand</td></tr>
+<tr><td><code>|</code> <code>^</code> <code>&amp;</code></td><td>Bitwise or, xor, and, each tighter than the one before. and binds tighter than a comparison</td></tr>
+<tr><td><code>&lt;&lt;</code> <code>&gt;&gt;</code> <code>+</code> <code>-</code> <code>*</code> <code>/</code> <code>%</code></td><td>Shifts, addition and subtraction, multiplication and division, each tighter than the one before. A <code>*</code> is on the same line as its left operand</td></tr>
 <tr><td><code>e as T</code></td><td>Changes the integer type</td></tr>
 <tr><td><code>-e</code> <code>not e</code> <code>*p</code> <code>&amp;r y</code> <code>&amp;mut r y</code></td><td>Negation, logical not, the contents of a box, a borrow</td></tr>
 <tr><td><code>a[i]</code> <code>s.f</code> <code>f(a, ...)</code> <code>S{f: a, ...}</code></td><td>An element, a field, a call, a struct value</td></tr>
-<tr><td><code>'name</code> <code>"text"</code> <code>val H(a, ...)</code> <code>fn f(a, ...)</code> <code>true</code> <code>false</code></td><td>Values of val, strings and booleans</td></tr>
 </table>
-<p>Parentheses group. Arguments are computed from left to right. The <code>a</code> of <code>a[i]</code> and the <code>s</code> of <code>s.f</code> are variables. A struct value starts with a field, so it is told from the <code>{</code> that starts the body of an <code>if</code> or a <code>for</code>.</p>
-
-<h2>Statements</h2>
-<table>
-<tr><th>Form</th><th>Meaning</th></tr>
-<tr><td><code>let x = e</code> <code>let x: T = e</code></td><td>Declares a variable and initializes it. Its type is that of <code>e</code>, or the type given after <code>:</code></td></tr>
-<tr><td><code>var x: T</code></td><td>Declares an uninitialized variable</td></tr>
-<tr><td><code>x = e</code> <code>*p = e</code> <code>a[i] = e</code> <code>s.f = e</code></td><td>Assignment. The right-hand side is computed first</td></tr>
-<tr><td><code>x += e</code> and the like</td><td>Compound assignment: <code>+= -= *= /= %= &amp;= |= ^= &lt;&lt;= &gt;&gt;=</code>. The place on the left is read once</td></tr>
-<tr><td><code>f(a, ...)</code></td><td>A call as a statement</td></tr>
-<tr><td><code>if c {...} else {...}</code> <code>else if</code></td><td>The condition needs no parentheses</td></tr>
-<tr><td><code>while c {...}</code></td><td>The condition is computed again at each round</td></tr>
-<tr><td><code>for i in a..b {...}</code></td><td><code>i</code> runs from <code>a</code> up to just before <code>b</code>. <code>b</code> is computed once, at the start. <code>i</code> is visible only in the body</td></tr>
-<tr><td><code>region r {...}</code> <code>return</code> <code>return e</code></td><td>As in vasm</td></tr>
-</table>
-<p>If the last statement of the body of a function that gives a value is an expression, its value is the result.</p>
+<p>A struct value starts with a field, so it is told from the <code>{</code> that starts the body of an <code>if</code> or a <code>for</code>. <code>'name</code>, <code>"text"</code>, <code>val H(a, ...)</code>, <code>fn f(a, ...)</code>, <code>true</code> and <code>false</code> are values as in vasm.</p>
+<ul>
+<li><code>let x = e</code>, <code>let x: T = e</code>, <code>var x: T</code> (uninitialized). A name can be declared again, and the earlier variable is hidden.</li>
+<li>Assignments <code>x = e</code>, <code>*p = e</code>, <code>a[i] = e</code> and <code>s.f = e</code> compute the right-hand side first. A compound assignment such as <code>+=</code> reads the place on the left once.</li>
+<li><code>if c {...} else if c {...} else {...}</code> and <code>while c {...}</code>. The condition needs no parentheses.</li>
+<li><code>for i in a..b {...}</code>: <code>i</code> runs from <code>a</code> up to just before <code>b</code>, and is visible only in the body. <code>b</code> is computed once, at the start.</li>
+<li><code>region r {...}</code>, <code>return</code> and <code>return e</code> are as in vasm.</li>
+</ul>
 <div class="example">
 <p class="file">native_compile.pk</p>
 <pre class="pk"><span class="tok-name">use</span><span class="tok-op">(</span><span class="tok-str">"native/compile"</span><span class="tok-op">)</span>
@@ -135,16 +120,15 @@ fn bump[r](m: &amp;mut r [i32], n: i32) {
 
 <h2>How types are fixed</h2>
 <ul>
-<li>The type of an expression comes from the declarations of the variables and functions and from the types of the built-in functions. Types are written only at <code>let</code>, <code>var</code>, parameters, results of functions and <code>as</code>.</li>
-<li>An integer literal alone has no type. The type of the place it is put in, of the parameter, of the other operand or of the result of the function is its type. A literal that has nothing to fix its type, as in <code>let x = 5</code>, is an error. Write <code>let x: i64 = 5</code> or <code>5 as i64</code> instead.</li>
-<li>The type of the variable of <code>for i in a..b</code> is the type of whichever of <code>a</code> and <code>b</code> is not a literal. If both are literals it is an error; give one of them a type, as in <code>0 as i64..10</code>.</li>
-<li>The type of a call whose result holds a borrow is inferred only when the region of the result is fixed by the arguments to one. Otherwise write <code>let x: T = f(...)</code>.</li>
-<li>The index of an array is <code>i64</code>. An index of another integer type gets <code>as i64</code>.</li>
-<li>A name can be declared again. The earlier variable is hidden.</li>
+<li>Types are written only at <code>let</code>, <code>var</code>, parameters, results of functions and <code>as</code>.</li>
+<li>An integer literal alone has no type. It takes the type of the place it is put in, the parameter, the other operand or the result of the function. A literal with nothing to fix its type, as in <code>let x = 5</code>, is an error. Write <code>let x: i64 = 5</code> or <code>5 as i64</code>.</li>
+<li>The type of <code>i</code> in <code>for i in a..b</code> is that of whichever of <code>a</code> and <code>b</code> is not a literal. If both are literals it is an error; give one a type, as in <code>0 as i64..10</code>.</li>
+<li>The index of an array is <code>i64</code>. An index of another integer type needs <code>as i64</code>.</li>
+<li>The type of a call whose result holds a borrow is inferred only when the arguments fix the region of the result to one. Otherwise write <code>let x: T = f(...)</code>.</li>
 </ul>
 
 <h2>Large literals</h2>
-<p>A literal of vasm is from -32768 to 32767. native accepts an integer literal beyond it. A literal outside the range of its type is an error.</p>
+<p>A literal of vasm is from -32768 to 32767, but native accepts an integer literal beyond it. A literal outside the range of its type is an error.</p>
 <div class="example">
 <p class="file">native_logic.pk</p>
 <pre class="pk"><span class="tok-name">use</span><span class="tok-op">(</span><span class="tok-str">"native/compile"</span><span class="tok-op">)</span>
@@ -186,7 +170,7 @@ fn mask(x: i32) -&gt; i32 {
 </div>
 
 <h2>Errors</h2>
-<p>The <code>kind</code> of an error of the expansion is <code>'type</code> (the type is not known, a literal is outside the range of its type, a statement that is an expression is not a call) or <code>'undefined</code> (a variable, function or struct that is not declared). Ownership, borrowing and initialization are not checked by the expansion; <code>vasm_check.check</code> checks the expanded vasm. The positions of the errors are those of the native source.</p>
+<p>The <code>kind</code> of an error of the expansion is <code>'type</code> (the type is not known, a literal is outside the range of its type, a statement that is an expression is not a call) or <code>'undefined</code> (a variable, function or struct that is not declared). <code>vasm_check.check</code> checks ownership, borrowing and initialization on the expanded vasm. The positions of the errors are those of the native source.</p>
 <div class="example">
 <p class="file">native_errors.pk</p>
 <pre class="pk"><span class="tok-name">use</span><span class="tok-op">(</span><span class="tok-str">"native/compile"</span><span class="tok-op">)</span>

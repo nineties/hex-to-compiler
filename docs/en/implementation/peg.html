@@ -38,10 +38,10 @@
 </ol></details></nav>
 <main>
 <h1>The packrat parser</h1>
-<p class="lead"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk">planck/peg.pk</a> (written in M-expressions) is a parser that interprets a PEG. The grammar is M-expression data, and the parser memoizes results for each (position, rule).</p>
+<p class="lead"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk">planck/peg.pk</a> is an interpreter of PEG written in M-expressions. A grammar is data in M-expressions, and results are memoized per (position, rule).</p>
 
 <h2>The grammar as data</h2>
-<p>The forms of parsing expressions, the right-hand sides of rules, are at the top of the file.</p>
+<p>The forms of parsing expressions (the right-hand sides of rules) are at the top of the file. Giving one a name with <code>_define_rule</code> makes a rule, and <code>::=</code> is translated into a call of it (<a href="syntax.html#decl">Defining the syntax</a>).</p>
 <div class="example">
 <p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L4-L24">planck/peg.pk: A grammar is data.</a></p>
 <pre class="pk"><span class="tok-str">" A grammar is data. A parsing expression is one of "</span>
@@ -66,7 +66,6 @@
 <span class="tok-str">" Results of rules are memoized for each position. "</span>
 <span class="tok-str">" Direct left recursion (sum ::= sum \"+\" term | term) is handled by growing the seed. "</span></pre>
 </div>
-<p>One or more repetitions of <code>"7"</code> are <code>Many1{"7"}</code>. To take their count as the value, write <code>Act{Many1{"7"}, t -> arity(t)}</code>. Giving it a name with <code>_define_rule</code> makes it a rule.</p>
 <div class="example">
 <p class="file">i_define.pk</p>
 <pre class="pk"><span class="tok-name">_define_rule</span><span class="tok-op">(</span><span class="tok-op">'</span><span class="tok-name">sevens</span><span class="tok-op">,</span> <span class="tok-op">'</span><span class="tok-name">Act</span><span class="tok-op">{</span><span class="tok-name">Many1</span><span class="tok-op">{</span><span class="tok-str">"7"</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">t</span> <span class="tok-op">-&gt;</span> <span class="tok-name">arity</span><span class="tok-op">(</span><span class="tok-name">t</span><span class="tok-op">)</span><span class="tok-op">}</span><span class="tok-op">)</span>
@@ -76,10 +75,9 @@
 <pre class="out">Tuple{3, &quot;rest&quot;}
 4</pre>
 </div>
-<p>A rule defined without <code>::=</code> is also usable in <code>sevens{| ... |}</code>. <code>::=</code> itself is translated to a call of <code>_define_rule</code> (<a href="syntax.html#decl">Defining the syntax</a>).</p>
 
 <h2>Interpretation</h2>
-<p><code>peg_px(e, p)</code> tries the parsing expression <code>e</code> at the position <code>p</code>. On success it returns the next position and puts the value in <code>peg_pv</code>. A failure is <code>-1</code>. <code>peg_px</code>, <code>peg_call_rule</code> and <code>peg_run_rule</code> call each other, so their names are declared first with <code>Def{name, none}</code> and defined later with <code>Set</code> (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L166-L167"><code>planck/peg.pk: peg_px(e, p) returns</code></a>).</p>
+<p><code>peg_px(e, p)</code> tries the parsing expression <code>e</code> at position <code>p</code>. On success it returns the next position and puts the value in <code>peg_pv</code>. A failure is <code>-1</code>, and the furthest position reached stays in <code>peg_far</code> and gives the position of a syntax error. <code>peg_px</code>, <code>peg_call_rule</code> and <code>peg_run_rule</code> call each other, so they are declared first with <code>Def{name, none}</code> and defined with <code>Set</code>.</p>
 <div class="example">
 <p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L271-L276">planck/peg.pk: Set{peg_px,</a></p>
 <pre class="pk"><span class="tok-name">Set</span><span class="tok-op">{</span><span class="tok-name">peg_px</span><span class="tok-op">,</span> <span class="tok-name">Lambda</span><span class="tok-op">{</span><span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">e</span><span class="tok-op">,</span> <span class="tok-name">p</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">Do</span><span class="tok-op">{</span>
@@ -89,11 +87,9 @@
     <span class="tok-name">If</span><span class="tok-op">{</span><span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">_eq</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">t</span><span class="tok-op">,</span> <span class="tok-name">Quote</span><span class="tok-op">{</span><span class="tok-name">function</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">e</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">p</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">,</span>
         <span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">table_get</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">peg_handlers</span><span class="tok-op">,</span> <span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">head</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">e</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">none</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">e</span><span class="tok-op">,</span> <span class="tok-name">p</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span></pre>
 </div>
-<p>A string is matched after skipping whitespace. A symbol is called as a rule. A function is called as it is. For M-expressions such as <code>Seq</code> and <code>Choice</code>, the table <code>peg_handlers</code> gives the handler for each head (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L227-L269"><code>planck/peg.pk: Def{peg_handlers</code></a>).</p>
-<p>At every failure, the parser records the farthest position reached in <code>peg_far</code> (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L60-L62"><code>planck/peg.pk: Def{peg_fail</code></a>) and reports a syntax error at that position.</p>
 
 <h2>Memoization and direct left recursion</h2>
-<p>The parser memoizes the result of a rule for each (position, rule) pair (packrat parsing). Backtracking does not recompute the same rule at the same position.</p>
+<p>Backtracking never recomputes a rule at the same position.</p>
 <div class="example">
 <p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L278-L284">planck/peg.pk: Rules and memoization</a></p>
 <pre class="pk"><span class="tok-str">" === Rules and memoization === "</span>
@@ -104,8 +100,7 @@
 <span class="tok-str">" the inner call fails, which is the seed. Then the rule is run again "</span>
 <span class="tok-str">" while it consumes more than the last result. "</span></pre>
 </div>
-<p>The memo is an array for each position. For each rule it has three fields: the end position, the value and a left-recursion mark. <code>peg_call_rule</code> first looks up the memo (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L293-L309"><code>planck/peg.pk: Set{peg_call_rule</code></a>).</p>
-<p>The memo also handles direct left recursion (<code>sum ::= sum "+" term | term</code>). While a rule runs, its memo entry is marked as running, and a recursive call at the same position fails. The parser stores the result obtained with this failure as a seed in the memo and runs the rule again. It repeats this as long as the rule reads more than before (seed growing).</p>
+<p>Direct left recursion (<code>sum ::= sum "+" term | term</code>) is also handled with the memo. A call of the running rule at the same position fails, and this failure is the seed to run the rule again. This repeats while the match gets longer. <code>1 - 2 - 3</code> becomes <code>(1 - 2) - 3</code>.</p>
 <div class="example">
 <p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L311-L329">planck/peg.pk: Set{peg_run_rule</a></p>
 <pre class="pk"><span class="tok-name">Set</span><span class="tok-op">{</span><span class="tok-name">peg_run_rule</span><span class="tok-op">,</span> <span class="tok-name">Lambda</span><span class="tok-op">{</span><span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">r</span><span class="tok-op">,</span> <span class="tok-name">p</span><span class="tok-op">,</span> <span class="tok-name">row</span><span class="tok-op">,</span> <span class="tok-name">b</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">Do</span><span class="tok-op">{</span>
@@ -128,9 +123,9 @@
         <span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">array_get</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">row</span><span class="tok-op">,</span> <span class="tok-name">b</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">,</span>
     <span class="tok-name">q</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span></pre>
 </div>
-<p>As a result, <code>1 - 2 - 3</code> is <code>(1 - 2) - 3</code>.</p>
 
-<h2>Defining a rule</h2>
+<h2>Defining a rule and the entry point</h2>
+<p><code>_define_rule</code> evaluates <code>f</code> of the action <code>Act{e, f}</code> before it stores the rule. <code>Prev{}</code> in an alternative (<code>...</code> in <code>::=</code>) is the previous definition of the rule.</p>
 <div class="example">
 <p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L357-L366">planck/peg.pk: _define_rule(name, e) defines or replaces</a></p>
 <pre class="pk"><span class="tok-str">" _define_rule(name, e) defines or replaces the rule "</span>
@@ -144,11 +139,7 @@
     <span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">table_set</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">peg_rules</span><span class="tok-op">,</span> <span class="tok-name">name</span><span class="tok-op">,</span> <span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">peg_subst_prev</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">peg_prepare</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">e</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">old</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">,</span>
     <span class="tok-name">name</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span></pre>
 </div>
-<p><code>_define_rule</code> numbers the rule, evaluates <code>f</code> of the action <code>Act{e, f}</code>, and enters the rule in the table. <code>Prev{}</code> in an alternative is replaced by the previous definition of the rule. The <code>...</code> of <code>::=</code> is this <code>Prev{}</code>.</p>
-<p>The form before evaluation is kept in <code>peg_sources</code>. Tools that read the grammar, such as <code>unparse</code>, use this table.</p>
-
-<h2>Entry point</h2>
-<p><code>peg_parse(rule, s)</code> rebuilds the memo, calls the rule and returns <code>Tuple{value, rest}</code> (<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L375-L391"><code>planck/peg.pk: peg_parse(rule, s) parses a prefix</code></a>). On failure it returns <code>SyntaxError{...}</code> with the text from the position of <code>peg_far</code> to the end of the line.</p>
+<p><code>peg_parse(rule, s)</code> returns <code>Tuple{value, rest}</code> on success. On failure it returns <code>SyntaxError{...}</code> with the text from the position to the end of the line.</p>
 
 <nav class="pager"><a class="prev" href="init.html"><small>Previous</small>init.pk and M-expressions</a><a class="next" href="syntax.html"><small>Next</small>Defining the syntax</a></nav>
 </main>

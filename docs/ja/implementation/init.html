@@ -38,10 +38,10 @@
 </ol></details></nav>
 <main>
 <h1>init.pk と M式</h1>
-<p class="lead">planck0 が最初に読む <a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/init.pk">planck/init.pk</a> は、以降で使う関数と表を定義します。planck0 のリーダは M式しか読めないので、全体を M式で書き、末尾で構文に切り替えます。</p>
+<p class="lead">planck0 のリーダは M式しか読めません。<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/init.pk">planck/init.pk</a> は全体を M式で書き、以降で使う関数と表を定義して、末尾で構文に切り替えます。</p>
 
 <h2>M式だけの記述</h2>
-<p>演算子も <code>if</code> の構文もないので、特殊形式と関数呼び出しだけで書きます。<code>_not</code> は次のとおりです。</p>
+<p>演算子も <code>if</code> もないので、特殊形式と関数呼び出しだけで書きます。トップレベルの文字列は何も起きず、コメントになります。冒頭で <code>true</code>・<code>false</code>・<code>none</code> を同名のシンボルに束縛します。</p>
 <div class="example">
 <p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/init.pk#L12-L15">planck/init.pk: Basic Functions</a></p>
 <pre class="pk"><span class="tok-str">" === Basic Functions === "</span>
@@ -49,11 +49,9 @@
     <span class="tok-name">Lambda</span><span class="tok-op">{</span><span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">Quote</span><span class="tok-op">{</span><span class="tok-name">false</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">true</span><span class="tok-op">}</span><span class="tok-op">,</span>
     <span class="tok-name">Lambda</span><span class="tok-op">{</span><span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">_</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">false</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span></pre>
 </div>
-<p><code>Fusion</code> は2つの <code>Lambda</code> をつなぎ、引数が <code>false</code> なら1つ目、それ以外なら2つ目を使います。<code>Quote{false}</code> はシンボル <code>false</code> に合うパターンです。トップレベルの文字列 <code>" ... "</code> は評価しても何も起きないので、コメントに使います。</p>
-<p>冒頭で <code>true</code>・<code>false</code>・<code>none</code> を同名のシンボルに束縛します（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/init.pk#L8-L10"><code>planck/init.pk: Def{true, Quote{true}}</code></a>）。</p>
 
-<h2>表</h2>
-<p>planck0 の組み込みは配列と <code>hash</code> までです。ハッシュ表は init.pk が配列で実装します（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/init.pk#L18-L77"><code>planck/init.pk: A table is Table{a}</code></a>）。</p>
+<h2>表とファイルの読み込み</h2>
+<p>planck0 の組み込みは配列と <code>hash</code> までなので、ハッシュ表は配列で実装します。</p>
 <div class="example">
 <p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/init.pk#L18-L25">planck/init.pk: A table is Table{a}</a></p>
 <pre class="pk"><span class="tok-str">" A table is Table{a}, where a is an array | buckets | number of entries |. Each bucket is a chain of entries "</span>
@@ -65,10 +63,7 @@
     <span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">array_set</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">t</span><span class="tok-op">,</span> <span class="tok-num">1</span><span class="tok-op">,</span> <span class="tok-num">0</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">,</span>
     <span class="tok-name">Table</span><span class="tok-op">{</span><span class="tok-name">t</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span></pre>
 </div>
-<p>表は <code>Table{a}</code> で、<code>a</code> はバケットの配列と項目数を持つ配列です。項目数がバケット数を超えるとバケットを倍にします。キーは <code>==</code> と同じ比較で比べます。</p>
-
-<h2>ファイルの読み込み</h2>
-<p><code>load</code> は planck0 の <code>interpret_file</code> と同じく、その時点の <code>parse</code> と <code>eval</code> でファイルを1式ずつ評価します。評価の間は <code>_set_file</code> で読み込み中のファイルを切り替えます。そのため、トップレベルで定義した大域変数には、定義したファイルが記録されます（<a href="../reference/syntax.html#scope">変数の範囲</a>）。</p>
+<p><code>load</code> はその時点の <code>parse</code> と <code>eval</code> でファイルを1式ずつ評価し、大域変数に定義したファイルを記録します（<a href="../reference/syntax.html#scope">変数の範囲</a>）。</p>
 <div class="example">
 <p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/init.pk#L80-L102">planck/init.pk: load(path) parses and evaluates</a></p>
 <pre class="pk"><span class="tok-str">" load(path) parses and evaluates the file by the current parse and eval. "</span>
@@ -95,10 +90,8 @@
     <span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">_set_file</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">prev</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">,</span>
     <span class="tok-name">none</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span></pre>
 </div>
-<p><code>use</code> は、読み込み済みを記録して同じライブラリを1回だけ <code>load</code> する関数です。構文に切り替えたあとで <code>planck/lib/use.pk</code> が定義します（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/lib/use.pk#L51-L69"><code>planck/lib/use.pk: use(name</code></a>）。</p>
 
 <h2>構文への切り替え</h2>
-<p>末尾で packrat パーサ、構文、<code>use</code> を読み込みます。</p>
 <div class="example">
 <p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/init.pk#L104-L110">planck/init.pk: Syntax</a></p>
 <pre class="pk"><span class="tok-str">" === Syntax === "</span>
@@ -109,13 +102,7 @@
 <span class="tok-str">" planck/lib/use.pk defines use(name), which loads planck/lib/&lt;name&gt;.pk once. It is written in the syntax above. "</span>
 <span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">load</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-str">"planck/lib/use.pk"</span><span class="tok-op">}</span><span class="tok-op">}</span></pre>
 </div>
-<p>読み込むのは次の3つです。</p>
-<ul>
-<li><code>planck/peg.pk</code>: M式で書いたパーサ（<a href="peg.html">packrat パーサ</a>）。</li>
-<li><code>planck/syntax.pk</code>: そのパーサで planck の構文を定義し、<code>parse</code> を差し替えるファイル（<a href="syntax.html">構文の定義</a>）。</li>
-<li><code>planck/lib/use.pk</code>: 構文で書かれたファイル。</li>
-</ul>
-<p>これ以降に読むファイルは、<code>planck/lib</code> も利用者のプログラムも planck の構文で読まれます。</p>
+<p>末尾で<a href="peg.html">packrat パーサ</a>と<a href="syntax.html">構文</a>を読み込みます。以降のファイルは planck の構文で読まれます。</p>
 
 <nav class="pager"><a class="prev" href="planck0.html"><small>前のページ</small>planck0</a><a class="next" href="peg.html"><small>次のページ</small>packrat パーサ</a></nav>
 </main>

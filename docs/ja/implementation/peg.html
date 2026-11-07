@@ -38,10 +38,10 @@
 </ol></details></nav>
 <main>
 <h1>packrat パーサ</h1>
-<p class="lead"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk">planck/peg.pk</a>（M式で書かれています）は PEG を解釈実行するパーサです。文法は M式のデータで、結果は（位置, 規則）ごとにメモ化します。</p>
+<p class="lead"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk">planck/peg.pk</a> は、M式で書いた PEG の解釈実行器です。文法は M式のデータで、結果は（位置, 規則）ごとにメモ化します。</p>
 
 <h2>データとしての文法</h2>
-<p>構文解析式（規則の右辺）の形はファイルの先頭にあります。</p>
+<p>構文解析式（規則の右辺）の形はファイルの先頭にあります。<code>_define_rule</code> で名前を付けると規則になります。<code>::=</code> もこの呼び出しに読み替えられます（<a href="syntax.html#decl">構文の定義</a>）。</p>
 <div class="example">
 <p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L4-L24">planck/peg.pk: A grammar is data.</a></p>
 <pre class="pk"><span class="tok-str">" A grammar is data. A parsing expression is one of "</span>
@@ -66,7 +66,6 @@
 <span class="tok-str">" Results of rules are memoized for each position. "</span>
 <span class="tok-str">" Direct left recursion (sum ::= sum \"+\" term | term) is handled by growing the seed. "</span></pre>
 </div>
-<p><code>"7"</code> の1回以上の繰り返しは <code>Many1{"7"}</code>、その個数を値にするなら <code>Act{Many1{"7"}, t -> arity(t)}</code> です。<code>_define_rule</code> で名前を付けると規則になります。</p>
 <div class="example">
 <p class="file">i_define.pk</p>
 <pre class="pk"><span class="tok-name">_define_rule</span><span class="tok-op">(</span><span class="tok-op">'</span><span class="tok-name">sevens</span><span class="tok-op">,</span> <span class="tok-op">'</span><span class="tok-name">Act</span><span class="tok-op">{</span><span class="tok-name">Many1</span><span class="tok-op">{</span><span class="tok-str">"7"</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">t</span> <span class="tok-op">-&gt;</span> <span class="tok-name">arity</span><span class="tok-op">(</span><span class="tok-name">t</span><span class="tok-op">)</span><span class="tok-op">}</span><span class="tok-op">)</span>
@@ -76,10 +75,9 @@
 <pre class="out">Tuple{3, &quot;rest&quot;}
 4</pre>
 </div>
-<p><code>::=</code> を使わずに定義した規則も <code>sevens{| ... |}</code> で使えます。<code>::=</code> 自体も <code>_define_rule</code> の呼び出しに読み替えられます（<a href="syntax.html#decl">構文の定義</a>）。</p>
 
 <h2>解釈実行</h2>
-<p><code>peg_px(e, p)</code> は構文解析式 <code>e</code> を位置 <code>p</code> から試し、成功すれば次の位置を返して値を <code>peg_pv</code> に置きます。失敗は <code>-1</code> です。<code>peg_px</code>・<code>peg_call_rule</code>・<code>peg_run_rule</code> は互いに呼び合います。そのため <code>Def{名前, none}</code> で名前を先に宣言し、あとで <code>Set</code> で定義します（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L166-L167"><code>planck/peg.pk: peg_px(e, p) returns</code></a>）。</p>
+<p><code>peg_px(e, p)</code> は構文解析式 <code>e</code> を位置 <code>p</code> から試し、成功すれば次の位置を返して値を <code>peg_pv</code> に置きます。失敗は <code>-1</code> で、最も先まで進んだ位置が <code>peg_far</code> に残り、構文エラーの位置になります。<code>peg_px</code>・<code>peg_call_rule</code>・<code>peg_run_rule</code> は互いに呼び合うので、<code>Def{名前, none}</code> で先に宣言して <code>Set</code> で定義します。</p>
 <div class="example">
 <p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L271-L276">planck/peg.pk: Set{peg_px,</a></p>
 <pre class="pk"><span class="tok-name">Set</span><span class="tok-op">{</span><span class="tok-name">peg_px</span><span class="tok-op">,</span> <span class="tok-name">Lambda</span><span class="tok-op">{</span><span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">e</span><span class="tok-op">,</span> <span class="tok-name">p</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">Do</span><span class="tok-op">{</span>
@@ -89,11 +87,9 @@
     <span class="tok-name">If</span><span class="tok-op">{</span><span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">_eq</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">t</span><span class="tok-op">,</span> <span class="tok-name">Quote</span><span class="tok-op">{</span><span class="tok-name">function</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">e</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">p</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">,</span>
         <span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">table_get</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">peg_handlers</span><span class="tok-op">,</span> <span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">head</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">e</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">none</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">e</span><span class="tok-op">,</span> <span class="tok-name">p</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span></pre>
 </div>
-<p>文字列は空白を読み飛ばしてから照合し、シンボルは規則として呼び、関数はそのまま呼びます。<code>Seq</code>・<code>Choice</code> などの M式は、頭ごとの処理を表 <code>peg_handlers</code> から引きます（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L227-L269"><code>planck/peg.pk: Def{peg_handlers</code></a>）。</p>
-<p>失敗のたびに最も先まで進んだ位置を <code>peg_far</code> に記録し（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L60-L62"><code>planck/peg.pk: Def{peg_fail</code></a>）、構文エラーはその位置で報告します。</p>
 
 <h2>メモ化と直接左再帰</h2>
-<p>規則の結果を（位置, 規則）ごとにメモ化します（packrat 構文解析）。バックトラックしても同じ規則を同じ位置で再計算しません。</p>
+<p>バックトラックしても同じ規則を同じ位置で再計算しません。</p>
 <div class="example">
 <p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L278-L284">planck/peg.pk: Rules and memoization</a></p>
 <pre class="pk"><span class="tok-str">" === Rules and memoization === "</span>
@@ -104,8 +100,7 @@
 <span class="tok-str">" the inner call fails, which is the seed. Then the rule is run again "</span>
 <span class="tok-str">" while it consumes more than the last result. "</span></pre>
 </div>
-<p>メモは位置ごとの配列で、規則ごとに終了位置・値・左再帰の印の3欄を持ちます。<code>peg_call_rule</code> はまずメモを引きます（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L293-L309"><code>planck/peg.pk: Set{peg_call_rule</code></a>）。</p>
-<p>直接左再帰（<code>sum ::= sum "+" term | term</code>）もメモで扱います。規則の実行中はメモを実行中の印にしておき、同じ位置で再帰呼び出しされたら失敗を返します。この失敗を種として得た結果をメモに置いて規則を再実行し、前より長く読めた間はこれを繰り返します（seed growing）。</p>
+<p>直接左再帰（<code>sum ::= sum "+" term | term</code>）もメモで扱います。実行中の規則を同じ位置で呼ぶと失敗を返し、この失敗を種にして規則を再実行します。前より長く読めた間は繰り返します。<code>1 - 2 - 3</code> は <code>(1 - 2) - 3</code> になります。</p>
 <div class="example">
 <p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L311-L329">planck/peg.pk: Set{peg_run_rule</a></p>
 <pre class="pk"><span class="tok-name">Set</span><span class="tok-op">{</span><span class="tok-name">peg_run_rule</span><span class="tok-op">,</span> <span class="tok-name">Lambda</span><span class="tok-op">{</span><span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">r</span><span class="tok-op">,</span> <span class="tok-name">p</span><span class="tok-op">,</span> <span class="tok-name">row</span><span class="tok-op">,</span> <span class="tok-name">b</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">Do</span><span class="tok-op">{</span>
@@ -128,9 +123,9 @@
         <span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">array_get</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">row</span><span class="tok-op">,</span> <span class="tok-name">b</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">,</span>
     <span class="tok-name">q</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span></pre>
 </div>
-<p>この結果 <code>1 - 2 - 3</code> は <code>(1 - 2) - 3</code> になります。</p>
 
-<h2>規則の定義</h2>
+<h2>規則の定義と入口</h2>
+<p><code>_define_rule</code> は動作 <code>Act{e, f}</code> の <code>f</code> を評価してから表に入れます。選択肢の <code>Prev{}</code>（<code>::=</code> の <code>...</code>）は直前の定義です。</p>
 <div class="example">
 <p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L357-L366">planck/peg.pk: _define_rule(name, e) defines or replaces</a></p>
 <pre class="pk"><span class="tok-str">" _define_rule(name, e) defines or replaces the rule "</span>
@@ -144,11 +139,7 @@
     <span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">table_set</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">peg_rules</span><span class="tok-op">,</span> <span class="tok-name">name</span><span class="tok-op">,</span> <span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">peg_subst_prev</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">peg_prepare</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">e</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">old</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">,</span>
     <span class="tok-name">name</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span></pre>
 </div>
-<p><code>_define_rule</code> は規則に番号を振り、動作 <code>Act{e, f}</code> の <code>f</code> を評価してから表に入れます。選択肢の <code>Prev{}</code> はその規則の直前の定義に置き換えます。<code>::=</code> の <code>...</code> はこの <code>Prev{}</code> です。</p>
-<p>評価前の形は <code>peg_sources</code> に残します。<code>unparse</code> のように文法を読む道具はこの表を使います。</p>
-
-<h2>入口の関数</h2>
-<p><code>peg_parse(rule, s)</code> はメモを作り直してから規則を呼びます。成功すると <code>Tuple{値, 残り}</code> を返します（<a href="https://github.com/nineties/hex-to-compiler/blob/main/planck/peg.pk#L375-L391"><code>planck/peg.pk: peg_parse(rule, s) parses a prefix</code></a>）。失敗すると、<code>peg_far</code> の位置から行末までを添えた <code>SyntaxError{...}</code> を返します。</p>
+<p><code>peg_parse(rule, s)</code> は成功すると <code>Tuple{値, 残り}</code> を、失敗すると位置から行末までを添えた <code>SyntaxError{...}</code> を返します。</p>
 
 <nav class="pager"><a class="prev" href="init.html"><small>前のページ</small>init.pk と M式</a><a class="next" href="syntax.html"><small>次のページ</small>構文の定義</a></nav>
 </main>

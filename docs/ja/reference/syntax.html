@@ -36,7 +36,7 @@
 </ol></details></nav>
 <main>
 <h1>構文</h1>
-<p class="lead">構文は糖衣です。式は下の表の M式に読み替えられてから評価され、意味は M式で決まります。M式もそのままこの構文の式です。糖衣が呼ぶ関数は <code>_</code> で始まる名前で（<a href="#names">糖衣が呼ぶ名前</a>）、利用者の名前と重なりません。</p>
+<p class="lead">構文は糖衣です。式は下の表の M式に読み替えられてから評価され、意味は M式で決まります。M式もそのままこの構文の式です。以下は表で足りない所、つまり束縛の範囲と、関数の定義が足し込まれる規則、module、パターンの書き方です。</p>
 
 <h2>式と M式</h2>
 <p>表の上の行ほど結合が弱く、下の行ほど結合が強くなります。</p>
@@ -135,29 +135,21 @@ Apply{_record_declare, Tuple{Quote{T}, Quote{Tuple{a, b}}}}</pre>
 
 <h2>結合</h2>
 <ul>
-<li><code>|</code>・<code>-></code>・<code>::</code> は右結合です。<code>+ - * / %</code> は左結合です。比較は結合しません（<code>a &lt; b &lt; c</code> とは書けません）。</li>
-<li><code>::</code> は比較より強く <code>+ -</code> より弱く結合します。<code>a + 1 :: b == c</code> は <code>Cons{a + 1, b} == c</code> です。</li>
-<li><code>..</code> は <code>::</code> より強く <code>+ -</code> より弱く結合し、結合しません（<code>a..b..c</code> とは書けません）。<code>a + 1..b * 2</code> は <code>Range{a + 1, b * 2}</code> です。</li>
+<li><code>|</code>・<code>-></code>・<code>::</code> は右結合、<code>+ - * / %</code> は左結合です。比較は結合しません（<code>a &lt; b &lt; c</code> とは書けません）。</li>
+<li><code>::</code> は比較より強く <code>+ -</code> より弱く結合します（<code>a + 1 :: b == c</code> は <code>Cons{a + 1, b} == c</code>）。<code>..</code> はさらに <code>::</code> より強く <code>+ -</code> より弱く、結合しません（<code>a + 1..b * 2</code> は <code>Range{a + 1, b * 2}</code>）。</li>
+<li><code>if</code> と <code>while</code> の条件は括弧で囲みます。<code>if</code> の枝は括弧の外に <code>|</code> を含まない式で、<code>if (c) a else b | g</code> は <code>(if (c) a else b) | g</code> です。複数の式はブロック <code>{ ... }</code> にします。<code>else</code> はまだ <code>else</code> のない最も近い <code>if</code> に対応します。</li>
 </ul>
 
 <h2>定義と代入の左辺の !x</h2>
-<p><code>x := e</code> と <code>x = e</code> の左辺 <code>x</code> は <code>!x</code> とも書けます。それぞれ <code>Def{!x, e}</code> と <code>Set{!x, e}</code> です。準クオートの中では、<code>!x</code> は <code>x</code> の値のシンボルに置き換わります。たとえば <code>x</code> の値が <code>'i</code> のとき、<code>`{ !x := 0; !x = !x + 1 }</code> は <code>Do{Def{i, 0}, Set{i, Apply{_add, Tuple{i, 1}}}}</code> です。</p>
+<p><code>x := e</code> と <code>x = e</code> の左辺 <code>x</code> は <code>!x</code> とも書け、それぞれ <code>Def{!x, e}</code> と <code>Set{!x, e}</code> です。準クオートの中では、<code>!x</code> は <code>x</code> の値のシンボルに置き換わります。<code>x</code> の値が <code>'i</code> のとき、<code>`{ !x := 0; !x = !x + 1 }</code> は <code>Do{Def{i, 0}, Set{i, Apply{_add, Tuple{i, 1}}}}</code> です。<code>x</code> の値が <code>'true</code> のとき、<code>Def{true, e}</code> と同じくプログラムを止めます。</p>
 
-<h2>if と while</h2>
-<p><code>if</code> と <code>while</code> の条件は括弧で囲みます。<code>while</code> の本体 <code>e</code> は任意の式です。<code>if</code> の枝 <code>a</code>・<code>b</code> は括弧の外に <code>|</code> を含まない式なので、<code>if (c) a else b | g</code> は <code>(if (c) a else b) | g</code> です。複数の式はブロック <code>{ ... }</code> にします。</p>
-<p><code>else</code> はまだ <code>else</code> のない最も近い <code>if</code> に対応します。<code>if (a) if (b) x else y</code> は <code>if (a) { if (b) x else y }</code> です。<code>else if (c) ...</code> は <code>else</code> のあとに <code>if</code> の式が続いたものです。</p>
-
-<h2>record</h2>
-<p><code>record T(f, g, ...)</code> は値 <code>T{a, b, ...}</code> の引数の名前を宣言します。名前を付けた引数を欄と呼びます。値の作り方は変わりません。<code>t.f</code> は <code>t</code> の頭の宣言で <code>f</code> の位置にある引数です。</p>
+<h2 id="record">record</h2>
+<p><code>record T(f, g, ...)</code> は、値 <code>T{a, b, ...}</code> の引数に欄の名前を付けます。値の作り方は変わりません。<code>t.f</code> は <code>t</code> の頭の宣言で <code>f</code> の位置にある引数で、<code>.</code> は左の式に空白なしで続けます。</p>
 <ul>
-<li>頭が違えば、同じ名前の欄を持てます。</li>
-<li>同じ <code>T</code> をもう一度宣言すると、名前が置き換わります。</li>
-<li><code>.</code> は左の式に空白なしで続けます。</li>
-<li>頭が宣言されていない値や欄 <code>f</code> がない値に <code>.f</code> を使うと、メッセージを出してプログラムが止まります。</li>
+<li>頭が違えば同じ名前の欄を持てます。同じ <code>T</code> をもう一度宣言すると名前が置き換わります。</li>
+<li>頭が宣言されていない値や、欄 <code>f</code> がない値に <code>.f</code> を使うと、メッセージを出してプログラムが止まります。</li>
+<li><code>t with { f = e, g = e2 }</code> は欄を替えた新しい値です（<code>t</code> は変わりません）。欄は左から順に替えるので、<code>e</code> は元の <code>t</code> の欄も参照できます。<code>with { ... }</code> は続けて書けます。</li>
 </ul>
-
-<p><code>t with { f = e, g = e2 }</code> は <code>t</code> の欄 <code>f</code>・<code>g</code> を <code>e</code>・<code>e2</code> の値に替えた新しい値で、<code>t</code> は変わりません。欄は左から順に替えるので、<code>e</code> は元の <code>t</code> の欄も参照できます。</p>
-<p><code>t</code> は <code>x</code>・<code>f(x)</code>・<code>t.f</code> のような後置の式で、<code>with { ... }</code> は続けて書けます（<code>t with { f = 1 } with { g = 2 }</code>）。欄がない値や M式でない値に使うと、メッセージを出してプログラムが止まります。</p>
 <div class="example">
 <p class="file">t1_with.pk</p>
 <pre class="pk"><span class="tok-kw">record</span> <span class="tok-name">Point</span><span class="tok-op">(</span><span class="tok-name">x</span><span class="tok-op">,</span> <span class="tok-name">y</span><span class="tok-op">)</span>
@@ -175,8 +167,8 @@ Point{2, 1}
 Point{7, 8}</pre>
 </div>
 
-<h2 id="compound">複合代入</h2>
-<p><code>x += e</code> は <code>x = x + e</code> と同じです。<code>-=</code>・<code>*=</code>・<code>/=</code>・<code>%=</code> も同じ形で、それぞれ <code>-</code>・<code>*</code>・<code>/</code>・<code>%</code> の演算子を使います。<code>a[i] += e</code> は <code>a[i] = a[i] + e</code> と同じですが、<code>a</code> と <code>i</code> は1回だけ評価します。左辺は変数か <code>a[i]</code> で、<code>t.f += e</code> は書けません。値は代入した値です。</p>
+<h2 id="compound">複合代入と組の分割</h2>
+<p><code>x += e</code> は <code>x = x + e</code> と同じで、<code>-=</code>・<code>*=</code>・<code>/=</code>・<code>%=</code> も同じ形です。<code>a[i] += e</code> は <code>a[i] = a[i] + e</code> と同じですが、<code>a</code> と <code>i</code> は1回だけ評価します。左辺は変数か <code>a[i]</code> で、<code>t.f += e</code> は書けません。</p>
 <div class="example">
 <p class="file">t1_compound.pk</p>
 <pre class="pk"><span class="tok-com"># x += e is x = x + e. The same goes for -=, *=, /= and %=.</span>
@@ -229,9 +221,8 @@ Tuple{1, 20, 23}
 Tuple{101, 20, 1}
 55</pre>
 </div>
-
-<h2 id="destructure">組の分割</h2>
-<p><code>(a, b) := e</code> は組 <code>e</code> の要素で <code>a</code> と <code>b</code> を定義し、<code>(a, b) = e</code> は定義済みの <code>a</code> と <code>b</code> に代入します。左辺は2つ以上の名前を <code>,</code> で区切って括弧で囲んだものです。右辺を先にすべて評価してから代入するので、<code>(a, b) = (b, a)</code> は2つの値を入れ替えます。組の要素の数が名前の数と違う値と、組でない値は、メッセージを出してプログラムが止まります。</p>
+<h3 id="destructure">組の分割</h3>
+<p><code>(a, b) := e</code> は組 <code>e</code> の要素で変数を定義し、<code>(a, b) = e</code> は定義済みの変数に代入します。右辺を先にすべて評価するので、<code>(a, b) = (b, a)</code> は入れ替えです。要素の数が名前の数と違う値と、組でない値は、メッセージを出して止まります。</p>
 <div class="example">
 <p class="file">t1_destructure.pk</p>
 <pre class="pk"><span class="tok-com"># (a, b) := e defines several variables from the elements of a tuple</span>
@@ -267,14 +258,10 @@ Tuple{3, 2}
 </div>
 
 <h2 id="scope">変数の範囲</h2>
-<p><code>true</code>・<code>false</code>・<code>none</code> はリテラルで識別子ではないので、変数の名前にできません。<code>true := e</code>・<code>true = e</code>・<code>fun true</code>・<code>true(p) := e</code> は構文エラーです。引数に書いた <code>true</code> は、値 <code>true</code> に合って何も束縛しないパターンです。<code>x</code> の値が <code>'true</code> のとき、<code>!x := e</code> と <code>!x = e</code> は <code>Def{true, e}</code>・<code>Set{true, e}</code> と同じくプログラムを止めます。</p>
-
-<p>変数の範囲は静的（字句的）で、名前がどの変数を指すかは式を実行する前に決まります。</p>
+<p>変数の範囲は静的（字句的）で、名前がどの変数を指すかは式を実行する前に決まります。関数は作られた場所の変数を参照し、変数は共有されるので、作ったあとの代入も関数から見えます。呼んだ側の変数は見えません。どの変数も指さない名前があると、その式を実行する前にメッセージを出してプログラムが止まります。</p>
 <ul>
-<li>関数の本体の変数は、その関数か外側の関数の引数と、それらの関数でそれより前に定義した変数です。どれでもなければ、トップレベルでそれより前に定義した変数（大域変数）です。</li>
-<li>呼んだ側の変数は見えません。</li>
-<li>どの変数も指さない名前があると、その式を実行する前にメッセージを出してプログラムが止まります。</li>
-<li>関数は作られた場所の変数を参照します。変数は共有されるので、関数を作ったあとの代入も関数から見えます。</li>
+<li>関数の本体から見えるのは、その関数か外側の関数の引数と、それらの関数でそれより前に定義した変数、トップレベルでそれより前に定義した変数（大域変数）です。</li>
+<li><code>true</code>・<code>false</code>・<code>none</code> はリテラルで変数の名前にできません。<code>true := e</code>・<code>fun true</code>・<code>true(p) := e</code> は構文エラーです。引数に書いた <code>true</code> は、値 <code>true</code> に合って何も束縛しないパターンです。</li>
 </ul>
 <div class="example">
 <p class="file">t1_scope.pk</p>
@@ -308,8 +295,7 @@ undefined variable: later</pre>
 </div>
 
 <h3>定義と代入</h3>
-<p>トップレベルの定義は書いた順に処理されます。後ろに書いた定義はそれより前の式から見えません。関数の定義 <code>f(p, ...) := e</code> の本体からは <code>f</code> 自身が見えます。</p>
-<p>同じ名前を <code>x := e</code> か <code>fun f</code> でもう一度定義すると新しい変数になります。前に作った関数は前の変数を指したままで、新しい変数が見えるのは定義より後ろの式だけです。今ある変数を上書きするときは <code>x = e</code> と書きます。これは同じ変数への代入なので、前に作った関数からも新しい値が見えます。</p>
+<p>同じ名前を <code>x := e</code> か <code>fun f</code> でもう一度定義すると、新しい変数になります。前に作った関数は前の変数を指したままです。今ある変数を上書きするのは <code>x = e</code> で、同じ変数への代入なので、前に作った関数からも新しい値が見えます。</p>
 <div class="example">
 <p class="file">r_scope_redefine.pk</p>
 <pre class="pk"><span class="tok-name">f</span><span class="tok-op">(</span><span class="tok-name">x</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-num">1</span>
@@ -325,23 +311,11 @@ undefined variable: later</pre>
 <pre class="out">1
 2</pre>
 </div>
-<p><code>x := e</code>（<code>x := (p) -&gt; e</code> も含む）は書いた場所で変数を定義するので、それより前の式からは外側の <code>x</code> が見えます。右辺 <code>e</code> から見えるのも前の <code>x</code> です。新しい <code>x</code> は右辺の評価後に作られるので、前の <code>x</code> がなければ右辺の <code>x</code> は未定義です。そのため、自分を呼ぶ関数は <code>f(p, ...) := e</code> と書きます。トップレベルでもブロックの中でも同じです。ブロックの変数は、ブロックを含む関数かプログラムの変数です。</p>
+<p><code>x := e</code> は書いた場所で変数を定義します。右辺から見えるのは前の <code>x</code> で、前の <code>x</code> がなければ右辺の <code>x</code> は未定義です。自分を呼ぶ関数は <code>f(p, ...) := e</code> と書きます。トップレベルでもブロックの中でも同じです。</p>
 
 <h3>関数に定義が加わるとき</h3>
-<p>関数の定義 <code>f(p, ...) := e</code> は、書いた場所の変数に <code>f</code> があるかどうかで読み方が変わります。</p>
-<ul>
-<li>すでにあれば、<code>f(p, ...) = e</code> と同じです。</li>
-<li>なければ、<code>fun f</code> と <code>f(p, ...) = e</code> を続けて書いたのと同じで、書いた場所で新しい <code>f</code> を定義します。</li>
-</ul>
-<p>同じ場所に書いた <code>f</code> の定義は1つの関数になり、書いた順に試されます。</p>
-<p>定義にもガードを付けられます。<code>f(p, ...) if c := e</code> は、引数が <code>p, ...</code> に合って <code>c</code> が真のときに <code>e</code> を返す腕を <code>f</code> に足します。<code>c</code> が偽のときと引数が合わないときは、同じ引数でそのあとの腕を試します。そのあとの腕とは、同じ場所に続けて書いた <code>f</code> の定義で、間に別の式を書いた定義は続きません。たとえば <code>f(x) if x &gt; 0 := "正"</code> のあとに <code>f(_) := "それ以外"</code> と書くと、<code>f(-1)</code> は <code>"それ以外"</code> です。<code>export</code> を付けた定義と <code>f(p, ...) = e</code> にはガードを付けられません。</p>
-<p>書いた場所の変数は次のとおりです。</p>
-<ul>
-<li>トップレベルでは、同じファイルで定義した大域変数。</li>
-<li>関数の中では、その関数の引数と、その関数でそれより前に定義した変数。</li>
-<li>トップレベルの <code>if</code> の枝や <code>while</code> の本体では、その枝や本体でそれより前に定義した変数。</li>
-</ul>
-<p>外側の関数の変数や関数の中から見た大域変数は、書いた場所の変数ではありません。したがって、これらと同じ名前の <code>f(p, ...) := e</code> は新しい <code>f</code> を定義し、外の <code>f</code> を変えません。</p>
+<p>関数の定義 <code>f(p, ...) := e</code> は、書いた場所の変数に <code>f</code> があるかで読み方が変わります。あれば <code>f(p, ...) = e</code> と同じで、なければ新しい <code>f</code> をその場所で定義します（<code>fun f</code> のあとに <code>f(p, ...) = e</code>）。同じ場所に続けて書いた <code>f</code> の定義は1つの関数になり、書いた順に<a href="values.html#partial">試されます</a>。</p>
+<p>書いた場所の変数は、トップレベルでは同じファイルで定義した大域変数、関数の中ではその関数の引数とそれより前に定義した変数、トップレベルの <code>if</code> の枝や <code>while</code> の本体ではその中でそれより前に定義した変数です。外側の関数の変数、関数の中から見た大域変数、別のファイル（<code>use</code> で読んだライブラリや <code>planck/init.pk</code>）の大域変数や組み込み関数は、書いた場所の変数ではありません。これらと同じ名前の <code>f(p, ...) := e</code> は、隠す新しい <code>f</code> を定義し、外の <code>f</code> を変えません。別のファイルの <code>f</code> に定義を追加するときは <code>f(p, ...) = e</code> と書きます。</p>
 <div class="example">
 <p class="file">r_scope_same.pk</p>
 <pre class="pk"><span class="tok-name">fib</span><span class="tok-op">(</span><span class="tok-num">0</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-num">0</span>
@@ -373,7 +347,6 @@ undefined variable: later</pre>
 <pre class="out">55
 Tuple{&quot;inner&quot;, &quot;outer&quot;, &quot;outer&quot;}</pre>
 </div>
-<p>別のファイル（<code>use</code> で読んだライブラリや <code>planck/init.pk</code>）で定義した大域変数や組み込み関数も、書いた場所の変数ではありません。プログラムのトップレベルの <code>f(p, ...) := e</code> は、それを隠す新しい <code>f</code> を定義します。別のファイルで定義した <code>f</code> に定義を追加するときは <code>f(p, ...) = e</code> と書きます。</p>
 <div class="example">
 <p class="file">t8_library.pk</p>
 <pre class="pk"><span class="tok-name">use</span><span class="tok-op">(</span><span class="tok-str">"list"</span><span class="tok-op">)</span>
@@ -385,14 +358,10 @@ Tuple{&quot;inner&quot;, &quot;outer&quot;, &quot;outer&quot;}</pre>
 <pre class="out">Tuple{6, 9}
 &quot;mine&quot;</pre>
 </div>
+<p>ガードは定義にも付けられます。<code>f(p, ...) if c := e</code> は、引数が合って <code>c</code> が真のときに <code>e</code> を返す腕を足します。偽のときと合わないときは、同じ場所に続けて書いた次の定義を試します（間に別の式があると続きません）。<code>f(x) if x &gt; 0 := "正"</code> のあとに <code>f(_) := "それ以外"</code> と書けば、<code>f(-1)</code> は <code>"それ以外"</code> です。<code>export</code> を付けた定義と <code>f(p, ...) = e</code> にはガードを付けられません。</p>
 
 <h3>互いに呼び合う関数</h3>
-<p>互いに呼び合う関数は、先に <code>fun f</code> で名前だけを宣言し、あとで <code>f(p, ...) = e</code> で埋めます。</p>
-<ul>
-<li><code>fun f</code> は、値が <code>none</code> の変数 <code>f</code> を書いた場所で定義します。</li>
-<li><code>f(p, ...) = e</code> は代入 <code>f = f | (p, ...) -&gt; e</code> で、<code>f</code> の関数の後ろに関数を足します。足した関数は書いた順に試され、引数の数が違う関数も足せます。</li>
-<li><code>none | g</code> は <code>g</code> なので、<code>fun f</code> のあとの最初の <code>f(p, ...) = e</code> は関数 <code>(p, ...) -&gt; e</code> そのものを代入します。</li>
-</ul>
+<p>先に <code>fun f</code> で名前だけを宣言し（値は <code>none</code>）、あとで <code>f(p, ...) = e</code> で埋めます。<code>f(p, ...) = e</code> は <code>f = f | (p, ...) -&gt; e</code> で、<code>f</code> の関数の後ろに足します。<code>none | g</code> は <code>g</code> なので、最初の <code>f(p, ...) = e</code> は関数そのものを代入します。埋める前に呼ぶと <code>none</code> を呼ぶことになって止まります。</p>
 <div class="example">
 <p class="file">r_scope_fun.pk</p>
 <pre class="pk"><span class="tok-kw">fun</span> <span class="tok-name">odd</span>
@@ -408,7 +377,6 @@ Tuple{&quot;inner&quot;, &quot;outer&quot;, &quot;outer&quot;}</pre>
 <pre class="out">Tuple{true, true}
 120</pre>
 </div>
-<p>埋める前に <code>f</code> を呼ぶと、<code>none</code> を呼ぶことになってプログラムが止まります。</p>
 <div class="example">
 <p class="file">e_call_before_fill.pk</p>
 <pre class="pk"><span class="tok-kw">fun</span> <span class="tok-name">f</span>
@@ -419,10 +387,27 @@ Tuple{&quot;inner&quot;, &quot;outer&quot;, &quot;outer&quot;}</pre>
 <pre class="out">&quot;run&quot;
 not a function: none</pre>
 </div>
-<p><code>f</code> の値がガード付きの関数のとき（<code>f = (n) if n &gt; 0 -&gt; 1</code> のあと）は、ガードが偽でも <code>f(p, ...) = e</code> で追加した関数は呼ばれません。下の <code>h | g</code> と同じです。</p>
+<p>値がガード付きの関数のとき（<code>f = (n) if n &gt; 0 -&gt; 1</code> のあと）、ガードが偽でも <code>f(p, ...) = e</code> で追加した関数は呼ばれません。変数で渡したガード付きの関数は、あとにつないだ <code>| g</code> を呼ばないのと同じです。</p>
+
+<h2>for と return・break・continue</h2>
+<p><code>for (p in e) a</code> は、リスト・ベクタ・範囲 <code>e</code> の要素ごとに、要素をパターン <code>p</code> と照合して <code>a</code> を評価します。値は <code>none</code> で、<code>a</code> から見えるループの外の変数は共有されます。</p>
+<p><code>return e</code> はそれを含む関数の呼び出しを値 <code>e</code> で終え（<code>e</code> がなければ <code>none</code>）、<code>break</code> と <code>continue</code> は最も内側の <code>while</code> か <code>for</code> を終えるか次の回に進めます。<code>e</code> は <code>return</code> と同じ行で始めます。これらはエフェクトに読み替えられます。</p>
+<ul>
+<li>本体に <code>return</code> がある関数は <code>Handle{body, (Return{v}, k) -&gt; v}</code>、<code>break</code> があるループは <code>Handle{loop, (Break{}, k) -&gt; none}</code>、<code>continue</code> があるループは本体が <code>Handle{body, (Continue{}, k) -&gt; none}</code> になります。</li>
+<li><code>for</code> の本体や <code>match</code> の腕の中の <code>return</code> は、それらを囲む関数を終えます。中に書いた関数の中の <code>return</code> は、その関数を終えます。ループの外の <code>continue</code> は <code>unhandled effect: Continue{}</code> で止まります。</li>
+</ul>
+
+<h2>match</h2>
+<p><code>match e { f }</code> は <code>e</code> を1回だけ評価し、その値を引数に関数 <code>f</code> を呼びます。<code>f</code> はふつう1引数の関数を <code>|</code> でつないだもので、つないだ各関数を腕と呼び、<code>e</code> に合うパターンを持つ最初の腕が選ばれます。どの腕にも合わなければ、関数呼び出しと同じくプログラムが止まります（<a href="values.html#partial">部分関数と融合</a>）。腕の引数は1つで、組を取るのは <code>((a, b)) -&gt; x</code> です。<code>|</code> は行頭に書けます。</p>
+<pre>match e {
+    p -&gt; a
+  | q -&gt; b
+}</pre>
+<p>ガード <code>(p, ...) if c -&gt; e | g</code> の <code>c</code> は、引数が合ったあとにその変数を使って評価されます。偽のとき、または引数が合わないときは、同じ引数で <code>g</code> を呼びます。<code>g</code> は、ソース上で <code>|</code> によってその関数の後ろにつないだ式です（括弧の中にあっても同じ）。<code>h := p if c -&gt; a</code> のあとの <code>h | g</code> のように変数で渡したガード付きの関数は <code>g</code> を呼びません。</p>
+<p><code>match</code> のガードと <code>e</code> は <code>or</code> の階層までの式なので、無名関数は括弧で囲みます。</p>
 
 <h2 id="module">module</h2>
-<p><code>module m { ... }</code> は定義をまとめて名前 <code>m</code> の下に置く式です。<code>m := (() -&gt; { ... })()</code> の糖衣として読めます。ただし本体が返す値は module の値で、<code>export</code> を付けた定義を欄に持ちます。</p>
+<p><code>module m { ... }</code> は定義をまとめて名前 <code>m</code> の下に置きます。本体が返す値が module の値で、<code>export</code> を付けた定義を欄に持ちます。欄にない名前（<code>export</code> のない <code>helper</code> など）を <code>.</code> で読むと、メッセージを出してプログラムが止まります。</p>
 <pre>module bitset {
     export new(n) := i32_array(n / 30 + 1)
     helper(i) := i / 30
@@ -431,19 +416,16 @@ not a function: none</pre>
         s[w] = bit_or(s[w], bit_shl(1, i % 30))
     }
 }</pre>
-<p>この <code>bitset</code> の値の欄は <code>new</code> と <code>add</code> です。</p>
-<p>module の値の頭はどれも <code>Module</code> で、欄は module の値ごとに違います。<code>.</code> の読み方は他の <a href="#record">record</a> の欄と同じで、欄にない名前（<code>export</code> を付けていない <code>helper</code> など）を読むとメッセージを出してプログラムが止まります。</p>
+<p>この <code>bitset</code> の欄は <code>new</code> と <code>add</code> です。</p>
 <ul>
-<li>本体の変数の範囲は引数のない関数の本体と同じです。本体の変数は、それより前に本体で定義した変数と外側の変数です。あとで定義するものを前から呼ぶには <code>fun f</code> で宣言し、<code>f(p, ...) = e</code> で場合を足します。</li>
-<li>本体の定義は本体の変数で、大域変数になりません。同じ名前が外にあっても隠さず、外から書き換えることもできません。本体の中の <code>f(p, ...) := e</code> は外に <code>f</code> があっても本体の新しい <code>f</code> を定義します。</li>
-<li><code>m</code> は <code>m := e</code> と同じく本体を評価したあとに定義されます。本体から <code>m</code> は見えないので、本体の中の関数どうしは名前でそのまま呼び合います。<code>module m { ... }</code> を同じ名前でもう一度書くと、<code>x := e</code> と同じく新しい変数になります。</li>
-<li>本体は丸ごと読まれます。本体の中で <code>parse</code> を差し替えても、その本体の残りには反映されません。文法を差し替えるときは <code>module</code> の外に書きます。</li>
-<li><code>module</code> はトップレベルの1つの式です。</li>
+<li>本体の変数の範囲は引数のない関数の本体と同じです。あとで定義するものを前から呼ぶには <code>fun f</code> と <code>f(p, ...) = e</code> を使います。</li>
+<li>本体の定義は本体の変数で、大域変数になりません。同じ名前が外にあっても隠さず、外から書き換えることもできません。外から場合を足せるようにするには、足す関数を <code>export</code> します（<code>m.f(p, ...) = e</code> とは書けません）。</li>
+<li><code>m</code> は本体を評価したあとに定義されるので、本体から <code>m</code> は見えません。本体の中の関数どうしは名前でそのまま呼び合います。</li>
+<li>本体は丸ごと読まれるので、本体の中で <code>parse</code> を差し替えても残りには反映されません。文法を差し替えるときは <code>module</code> の外に書きます。</li>
 </ul>
 
 <h3>export</h3>
-<p><code>export</code> を書けるのは、module の本体の直下にある <code>f(p, ...) := e</code> と <code>x := e</code> と <code>module n { ... }</code> の前だけです。関数の中・<code>if</code> の枝・ブロックの中・トップレベルなど、ほかの場所に書くと構文エラーです。<code>export</code> を付けた定義の名前が module の値の欄になり、付けない定義は外から見えません。</p>
-<p><code>export x := e</code> の欄の値は、本体が値を返した時点の <code>x</code> の値です。あとで本体の関数が <code>x</code> に代入しても欄は変わりません。今の値を見せるには、<code>x</code> を読む関数を <code>export</code> します。次の <code>counter</code> では <code>counter.start</code> が <code>0</code> のままで、<code>counter.current()</code> が今の値を返します。</p>
+<p><code>export</code> を書けるのは、module の本体の直下にある <code>f(p, ...) := e</code>・<code>x := e</code>・<code>module n { ... }</code> の前だけで、ほかの場所は構文エラーです。<code>export x := e</code> の欄の値は、本体が値を返した時点の <code>x</code> の値で、あとで代入しても欄は変わりません。今の値を見せるには、<code>x</code> を読む関数を <code>export</code> します。</p>
 <pre>module counter {
     n := 0
     export start := n
@@ -453,9 +435,7 @@ not a function: none</pre>
     }
     export current() := n
 }</pre>
-
-<h3>module の入れ子</h3>
-<p>module の本体の中に module を書けます。内側の <code>module n { ... }</code> は本体の変数 <code>n</code> を定義し、外からは見えません。内側を外に見せるには <code>export module n { ... }</code> と書きます。このとき <code>n</code> は外側の module の欄で、その値も module の値です。内側の本体からは外側の本体でそれより前に定義した変数が見えます。</p>
+<p>内側の <code>module n { ... }</code> は本体の変数 <code>n</code> を定義し、外からは見えません。外に見せるには <code>export module n { ... }</code> と書きます。内側の本体からは、外側の本体でそれより前に定義した変数が見えます。</p>
 <pre>module outer {
     module hidden {
         export f(x) := x + 1
@@ -466,13 +446,9 @@ not a function: none</pre>
 }
 outer.inner.g(3)</pre>
 
-<h3>module の外からの定義の追加</h3>
-<p><code>m.f(p, ...) = e</code> と書いて、module の外から関数に場合を足せません。外から場合を足せるようにするには、足す関数を module の中で <code>export</code> します。</p>
-
 <h3 id="test">test</h3>
-<p>module の本体の直下に <code>test { ... }</code> を書けます。<code>test { e }</code> は <code>if (_testing) { e }</code> の糖衣で、変数 <code>_testing</code> は初めは <code>false</code> です。ふだんの読み込みでは何も実行されません。<code>planck0 tools/test.pk &lt;ライブラリ&gt; ...</code> は <code>_testing</code> を <code>true</code> にしてからライブラリを読み込み、<code>test</code> の中の式を実行します。読み込まれるライブラリが使うライブラリの <code>test</code> も実行されます。</p>
-<p><code>test</code> の中の変数の範囲は module の本体と同じで、<code>export</code> を付けていない関数も呼べます。<code>test</code> は本体を評価する途中で実行されるので、その前に定義した変数が見え、<code>m</code> はまだ定義されていません。</p>
-<p><code>assert(c, msg)</code> は <code>c</code> が真でなければ <code>msg</code> を書いてステータス 1 で止まります。<code>test</code> の <code>{ ... }</code> は普通のブロックなので、1つに書ける式は 64 個までです。それより多いときは <code>test</code> を分けます。<code>test</code> は module の本体の直下だけに書けて、その外では普通の名前です。</p>
+<p>module の本体の直下に <code>test { ... }</code> を書けます。<code>if (_testing) { ... }</code> の糖衣で、<code>_testing</code> は初めは <code>false</code> なので、ふだんは何も実行されません。<code>planck0 tools/test.pk &lt;ライブラリ&gt; ...</code> は <code>_testing</code> を <code>true</code> にしてから読み込み、使うライブラリの <code>test</code> も含めて実行します。</p>
+<p>変数の範囲は module の本体と同じで、<code>export</code> のない関数も呼べます。<code>test</code> は本体を評価する途中で実行されるので、その前に定義した変数が見え、<code>m</code> はまだ定義されていません。<code>assert(c, msg)</code> は <code>c</code> が真でなければ <code>msg</code> を書いてステータス 1 で止まります。1つのブロックに書ける式は 64 個までなので、多いときは <code>test</code> を分けます。</p>
 <pre>module bitset {
     export new(n) := i32_array(n / 30 + 1)
     helper(i) := i / 30
@@ -489,21 +465,19 @@ outer.inner.g(3)</pre>
 }</pre>
 
 <h2 id="import">import</h2>
-<p><code>import a::b</code> はライブラリのファイルを読み込みます。<code>use("a/b")</code> と同じ読み込みで、同じファイルは1度だけ読まれます。パスは <code>::</code> で区切った名前で、最後の名前はそのファイルが定義する <a href="#module">module</a> の名前です。<code>import</code> を書ける場所は式を書ける場所です。</p>
-<p>名前の取り込み方を、パスのあとに次のように続けて書きます。</p>
+<p><code>import a::b</code> は <code>use("a/b")</code> と同じ読み込みで、同じファイルは1度だけ読まれます。最後の名前は、そのファイルが定義する <a href="#module">module</a> の名前です。式を書ける場所に書けます。取り込み方は、パスのあとに続けます。</p>
 <table>
 <tr><th>書き方</th><th>意味</th></tr>
-<tr><td><code>import m</code></td><td>module <code>m</code> を読み込むだけです。欄は <code>m.f</code> で読みます。</td></tr>
+<tr><td><code>import m</code></td><td>読み込むだけです。欄は <code>m.f</code> で読みます。</td></tr>
 <tr><td><code>import m as n</code></td><td><code>n := m</code> を足します。</td></tr>
-<tr><td><code>import m (x, y)</code></td><td>欄 <code>x</code> と <code>y</code> を <code>x := m.x</code>・<code>y := m.y</code> として定義します。</td></tr>
+<tr><td><code>import m (x, y)</code></td><td><code>x := m.x</code>・<code>y := m.y</code> を定義します。</td></tr>
 <tr><td><code>import m (*)</code></td><td>すべての欄を同じ名前で定義します。</td></tr>
 <tr><td><code>import m hiding (x, y)</code></td><td><code>x</code> と <code>y</code> 以外のすべての欄を同じ名前で定義します。</td></tr>
 </table>
 <ul>
-<li><code>as n</code> は <code>(x, y)</code>・<code>(*)</code>・<code>hiding (...)</code> の前に置けます。</li>
-<li><code>as</code> と <code>(...)</code> と <code>hiding</code> は <code>m</code> と同じ行に書きます。</li>
-<li><code>m</code> にない欄を <code>(x, y)</code> に書くと、<code>.</code> で欄を読むときと同じメッセージを出して止まります。</li>
-<li><code>(*)</code> と <code>hiding</code> が定義する名前は、<code>import</code> を関数の中に書いても大域変数です。<code>(x, y)</code> と <code>as</code> が定義する名前は、関数の中では局所変数です。</li>
+<li><code>as n</code> は <code>(x, y)</code>・<code>(*)</code>・<code>hiding (...)</code> の前に置けます。<code>as</code> と <code>(...)</code> と <code>hiding</code> は <code>m</code> と同じ行に書きます。</li>
+<li><code>m</code> にない欄を <code>(x, y)</code> に書くと、<code>.</code> で読むときと同じメッセージで止まります。</li>
+<li><code>(*)</code> と <code>hiding</code> が定義する名前は、関数の中に書いても大域変数です。<code>(x, y)</code> と <code>as</code> が定義する名前は、関数の中では局所変数です。</li>
 </ul>
 <div class="example">
 <p class="file">i_import.pk</p>
@@ -531,25 +505,21 @@ Cons{3, Cons{42, Nil{}}}</pre>
 </div>
 
 <h2 id="names">糖衣が呼ぶ名前</h2>
-<p>糖衣の読み替え先の関数は名前が <code>_</code> で始まり、<code>_</code> のない同名の関数はありません。したがってプログラムで <code>add</code> や <code>index_get</code> という変数を定義しても、<code>a + b</code> や <code>a[i]</code> の意味は変わりません。</p>
+<p>糖衣の読み替え先の関数は名前が <code>_</code> で始まり、<code>_</code> のない同名の関数はありません。プログラムで <code>add</code> や <code>index_get</code> を定義しても、<code>a + b</code> や <code>a[i]</code> の意味は変わりません。演算子を引数に取る関数には、無名関数を渡します（<code>sort((a, b) -&gt; a &lt; b, xs)</code>）。</p>
 <table>
 <tr><th>糖衣</th><th>呼ぶ関数</th></tr>
 <tr><td>演算子</td><td><code>_add</code> <code>_sub</code> <code>_mul</code> <code>_div</code> <code>_quo</code> <code>_mod</code> <code>_lt</code> <code>_le</code> <code>_gt</code> <code>_ge</code> <code>_eq</code> <code>_ne</code> <code>_is</code> <code>_not</code></td></tr>
 <tr><td>浮動小数点数のリテラル</td><td><code>_float</code></td></tr>
 <tr><td>値を埋め込んだ文字列</td><td><code>_strcat</code> <code>_to_text</code></td></tr>
-<tr><td><code>t.f</code></td><td><code>_record_get</code></td></tr>
+<tr><td><code>t.f</code>・<code>record</code>・<code>with</code></td><td><code>_record_get</code> <code>_record_declare</code> <code>_record_with</code></td></tr>
 <tr><td><code>import</code></td><td><code>_import_module</code> <code>_import_defs</code></td></tr>
-<tr><td><code>record</code></td><td><code>_record_declare</code></td></tr>
-<tr><td><code>with</code></td><td><code>_record_with</code></td></tr>
 <tr><td><code>(a, b) := e</code></td><td><code>_destructure</code></td></tr>
 <tr><td><code>::=</code></td><td><code>_define_rule</code></td></tr>
 <tr><td><code>a[i]</code>・<code>a[i] = e</code></td><td><code>_index_get</code> <code>_index_set</code></td></tr>
 </table>
-<p>演算子を引数に取る関数には、糖衣を使った無名関数を渡します（<code>sort((a, b) -&gt; a &lt; b, xs)</code>）。</p>
 
 <h2 id="index">添字と置き換え</h2>
-<p><code>a[i]</code> は <code>_index_get(a, i)</code>、<code>a[i] = e</code> は <code>_index_set(a, i, e)</code> で、値は <code>e</code> の値です。<code>[</code> は <code>a</code> に空白なしで続けます。空白や改行をはさんだ <code>[1, 2]</code> は別の式です。<code>a</code> は <code>x</code>・<code>f(x)</code>・<code>t.f</code>・<code>b[j]</code> のような後置式で、<code>a[i][j] = e</code> は <code>Apply{_index_set, Tuple{a[i], j, e}}</code> です。</p>
-<p><code>_index_get</code> と <code>_index_set</code> は、<code>a</code> の種類ごとの関数を <code>|</code> でつないだもので、次の順に試されます。</p>
+<p><code>a[i]</code> は <code>_index_get(a, i)</code>、<code>a[i] = e</code> は <code>_index_set(a, i, e)</code> で、値は <code>e</code> の値です。<code>[</code> は <code>a</code> に空白なしで続けます（空白をはさんだ <code>[1, 2]</code> は別の式です）。<code>a[i][j] = e</code> は <code>Apply{_index_set, Tuple{a[i], j, e}}</code> です。種類ごとの関数を <code>|</code> でつないだもので、次の順に試されます。</p>
 <table>
 <tr><th><code>a</code></th><th><code>i</code></th><th><code>a[i]</code></th><th><code>a[i] = e</code></th></tr>
 <tr><td>配列</td><td>整数</td><td><code>array_get(a, i)</code></td><td><code>array_set(a, i, e)</code></td></tr>
@@ -560,10 +530,9 @@ Cons{3, Cons{42, Nil{}}}</pre>
 <tr><td>任意の値</td><td>関数</td><td><code>subst(a, i)</code></td><td></td></tr>
 <tr><td>リスト</td><td>整数</td><td>0から数えた要素</td><td>止まる</td></tr>
 <tr><td>M式</td><td>シンボル</td><td><code>_record_get(a, i)</code>（欄）</td><td>止まる</td></tr>
-<tr><td>M式</td><td>整数</td><td><code>arg(a, i)</code></td><td>止まる</td></tr>
+<tr><td>M式</td><td>整数</td><td><code>arg(a, i)</code>（位置）</td><td>止まる</td></tr>
 </table>
-<p>文字列・リスト・組・M式は不変です。これらへの <code>a[i] = e</code> は、<code>cannot assign to an element of a string, which is immutable: ...</code> のようなメッセージを出して止まります。書き換えられるのは、配列・平らな配列・表・ベクタと、利用者が足した種類です。文字列・リスト・M式の範囲外の添字と、どの種類にも合わない <code>a[i]</code>・<code>a[i] = e</code> も、メッセージを出して止まります。</p>
-<p>利用者は <code>_index_get</code> と <code>_index_set</code> に代入して、独自の種類を先頭に足します。</p>
+<p>文字列・リスト・組・M式は不変なので、これらへの <code>a[i] = e</code> は、<code>cannot assign to an element of a string, which is immutable: ...</code> のようなメッセージを出して止まります。範囲外の添字と、どの種類にも合わない <code>a[i]</code> も止まります。利用者は <code>_index_get</code> と <code>_index_set</code> に代入して、独自の種類を先頭に足せます。</p>
 <div class="example">
 <p class="file">r_index_kind.pk</p>
 <pre class="pk"><span class="tok-name">_index_get</span> <span class="tok-op">=</span> <span class="tok-op">(</span><span class="tok-name">Matrix</span><span class="tok-op">{</span><span class="tok-name">w</span><span class="tok-op">,</span> <span class="tok-name">_</span><span class="tok-op">,</span> <span class="tok-name">d</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-op">(</span><span class="tok-name">i</span><span class="tok-op">,</span> <span class="tok-name">j</span><span class="tok-op">)</span><span class="tok-op">)</span> <span class="tok-op">-&gt;</span> <span class="tok-name">d</span><span class="tok-op">[</span><span class="tok-name">i</span> <span class="tok-op">*</span> <span class="tok-name">w</span> <span class="tok-op">+</span> <span class="tok-name">j</span><span class="tok-op">]</span> <span class="tok-op">|</span> <span class="tok-name">_index_get</span>
@@ -577,14 +546,8 @@ Cons{3, Cons{42, Nil{}}}</pre>
 <pre class="out">12
 none</pre>
 </div>
-<p><code>subst(t, f)</code> は木 <code>t</code> を関数 <code>f</code> で書き換えます。<code>t</code> の各部分を根から順に試します。</p>
-<ul>
-<li><code>f</code> のパターンが合えば、その部分を <code>f</code> の値に置き換え、その内側は試しません。</li>
-<li>合わなければ、頭は残して引数を順に試します。</li>
-<li>M式でない部分は、それ以上分解しません。</li>
-</ul>
-<p><code>t[p -&gt; a | q -&gt; b]</code> は、<code>p -&gt; a | q -&gt; b</code> を括弧に入れた式なので、腕は順に試されます。<code>match</code> と同じくガードを付けられ、<code>t[p if c -&gt; a | q -&gt; b]</code> は <code>p</code> が合って <code>c</code> が成り立つときにその腕を使い、そうでなければ次の腕を試します。どの腕も合わない部分は、その内側を試します。</p>
-<p>腕の本体は <code>-&gt;</code> の階層までの式なので、本体の中の <code>|</code> は括弧で囲みます。クオートについては、<code>'t[f]</code> は <code>t[f]</code> のクオートです。クオートした木を書き換えるには <code>('e)[f]</code> と書きます。</p>
+<p><code>subst(t, f)</code> は木 <code>t</code> を関数 <code>f</code> で書き換えます。<code>t</code> の各部分を根から順に試し、<code>f</code> のパターンが合えばその部分を <code>f</code> の値に置き換えて、その内側は試しません。合わなければ頭は残して引数を順に試し、M式でない部分はそれ以上分解しません。</p>
+<p><code>t[p -&gt; a | q -&gt; b]</code> は腕を順に試します。<code>match</code> と同じくガードを付けられ、<code>t[p if c -&gt; a | q -&gt; b]</code> は <code>p</code> が合って <code>c</code> が成り立つときにその腕を使います。どの腕も合わない部分は、その内側を試します。腕の本体は <code>-&gt;</code> の階層までの式なので、中の <code>|</code> は括弧で囲みます。<code>'t[f]</code> は <code>t[f]</code> のクオートなので、クオートした木を書き換えるには <code>('e)[f]</code> と書きます。</p>
 <div class="example">
 <p class="file">r_rewrite.pk</p>
 <pre class="pk"><span class="tok-name">use</span><span class="tok-op">(</span><span class="tok-str">"unparse"</span><span class="tok-op">)</span>
@@ -598,38 +561,8 @@ none</pre>
 &quot;1 * 2 + 12&quot;</pre>
 </div>
 
-<h2>for</h2>
-<p><code>for (p in e) a</code> は、リスト・ベクタ・範囲 <code>e</code> の要素ごとに要素をパターン <code>p</code> と照合して <code>a</code> を評価します。値は <code>none</code> です。<code>a</code> から見えるループの外の変数は共有され、<code>a</code> から書き換えられます。</p>
-
-<h2>return・break・continue</h2>
-<p><code>return e</code> はそれを含む関数の呼び出しを値 <code>e</code> で終えます。<code>e</code> がなければ <code>none</code> です。<code>e</code> は <code>return</code> と同じ行で始め、<code>-&gt;</code> の階層までの式で、括弧の外に <code>|</code>・<code>:=</code>・<code>=</code> を含みません。<code>break</code> はそれを含む最も内側の <code>while</code> か <code>for</code> を終えます。</p>
-<p>これらはエフェクトで、次のように読み替えられます。</p>
-<ul>
-<li>本体に <code>return</code> がある関数は、<code>Handle{body, (Return{v}, k) -&gt; v}</code> になります。</li>
-<li>本体に <code>break</code> があるループは、<code>Handle{loop, (Break{}, k) -&gt; none}</code> になります。</li>
-<li>本体に <code>continue</code> があるループでは、本体が <code>Handle{body, (Continue{}, k) -&gt; none}</code> になります。</li>
-</ul>
-<p><code>continue</code> はそれを含む最も内側の <code>while</code> か <code>for</code> の次の回に進みます。ループの外の <code>continue</code> は <code>unhandled effect: Continue{}</code> でプログラムを止めます。</p>
-<p><code>for</code> の本体や <code>match</code> の腕の中の <code>return</code> は、それらを囲む関数の呼び出しを終えます。中に書いた関数の中の <code>return</code> は、その関数の呼び出しを終えます。</p>
-
-<h2>match</h2>
-<p><code>match e { f }</code> は <code>e</code> を1回だけ評価し、その値を引数に関数 <code>f</code> を呼びます。<code>f</code> は <code>|</code> の階層までの式で、ふつうは1引数の関数を <code>|</code> でつないだものです。つないだ各関数を腕と呼び、<code>e</code> に合うパターンを持つ最初の腕が選ばれます。腕の引数は1つです。<code>(a, b) -&gt; x</code> は2引数の関数で、組を取るのは <code>((a, b)) -&gt; x</code> です。</p>
-<p><code>|</code> は行頭に書けます。2つ目以降の腕はふつう次のように書きます。</p>
-<pre>match e {
-    p -&gt; a
-  | q -&gt; b
-}</pre>
-<p><code>(p, ...) if c -&gt; e | g</code> のガード <code>if c</code> は、引数が合ったあとにその変数を使って評価されます。偽のとき、または引数が合わないときは、同じ引数で <code>g</code> を呼びます。<code>| g</code> がなければ、パターンの合わない関数を呼んだときと同じく失敗します。</p>
-<p><code>g</code> はそのあとの腕で、ソース上で <code>|</code> によってその関数の後ろにつないだ式です。関数が括弧の中にあっても同じです（<code>(p if c -&gt; a) | g</code>）。<code>h := p if c -&gt; a</code> のあとの <code>h | g</code> のように変数で渡したガード付きの関数は、<code>g</code> を呼びません。</p>
-<p><code>match</code> のガードと <code>e</code> は <code>or</code> の階層までの式なので、無名関数は括弧で囲みます。関数は <code>%</code> で始まる名前の変数を束縛します。これらはどの識別子とも重なりません。</p>
-
 <h2 id="rest">残りの引数</h2>
-<p>関数の最後の引数は <code>x...</code> と書けます。<code>x</code> は、前の引数を除いた残りの引数を並べた <code>Tuple</code> に束縛されます。残りがなければ <code>Tuple{}</code> です。<code>x...</code> は <code>_Rest{x}</code> という木になります。</p>
-<ul>
-<li>書ける位置は、関数 <code>f(p, x...) := e</code>・<code>(p, x...) -> e</code> の最後の引数と、パターン <code>Head{p, x...}</code> の最後の引数です。</li>
-<li>前の引数の数より引数が少ない呼び出しは合いません。</li>
-<li><code>x...</code> を最後以外に書く、呼び出しの引数に書く、ガード付きの関数に書く、のいずれも、式を実行する前にメッセージを出してプログラムが止まります。</li>
-</ul>
+<p>関数の最後の引数は <code>x...</code> と書けます。<code>x</code> は残りの引数の <code>Tuple</code>（なければ <code>Tuple{}</code>）に束縛されます。関数 <code>f(p, x...) := e</code>・<code>(p, x...) -> e</code> とパターン <code>Head{p, x...}</code> の最後の引数にだけ書けて、前の引数の数より少ない呼び出しは合いません。最後以外・呼び出しの引数・ガード付きの関数に書くと、式を実行する前にメッセージを出して止まります。</p>
 <div class="example">
 <p class="file">r_rest.pk</p>
 <pre class="pk"><span class="tok-com"># A rest parameter x... takes the remaining arguments as a Tuple</span>
@@ -686,25 +619,13 @@ Tuple{2, 3}</pre>
 </div>
 
 <h2>引数のパターン</h2>
-<p>引数 <code>p</code> と <code>for</code> のパターンは、<code>or</code> の階層までの式として書きます。これを上の表の M式にしたうえで、<a href="values.html#patterns">値・パターン・M式</a>のパターンとして照合します。規則は次のとおりです。</p>
+<p>引数 <code>p</code> と <code>for</code> のパターンは、<code>or</code> の階層までの式として書きます。表の M式にしたうえで、<a href="values.html#patterns">パターン</a>として照合します。原則は、式と同じ書き方で、識別子が変数になることです。例外は次のとおりです。</p>
 <ul>
-<li>演算子や呼ばれる関数の名前はシンボルです。<code>a + b</code> は <code>Apply{Quote{_add}, Tuple{a, b}}</code>、<code>-a</code> は <code>Apply{Quote{_sub}, Tuple{0, a}}</code>、<code>f(p, ...)</code> は <code>Apply{Quote{f}, Tuple{p, ...}}</code> なので、<code>x + 1</code>・<code>-x</code>・<code>f(1)</code> の木に合います。</li>
-<li>ほかの識別子は変数です。<code>Head{p, ...}</code> の引数はパターンなので、<code>Apply{f, Tuple{x}}</code> は引数1つの任意の関数の呼び出しに合い、<code>f</code> を束縛します。</li>
-<li><code>(f)(p, ...)</code> は <code>Apply{f, Tuple{p, ...}}</code> で、括弧の中の名前をシンボルでなく変数にします。<code>(f)(x)</code> は引数1つの任意の関数の呼び出しに合い、<code>f</code> を束縛します。</li>
-<li><code>'e</code> は式 <code>e</code> の <code>Quote{e}</code> です。</li>
-<li><code>x...</code> は最後の引数にだけ書けます（<a href="#rest">残りの引数</a>）。</li>
-<li><code>p or q</code> は <code>p</code> と <code>q</code> のどちらかに合います。<code>a or b or c</code> のように並べられ、引数の中のどこにでも書けます（<code>F{1 or 2, x}</code>）。どれにも合わなければ、パターンが合わないときと同じです。</li>
-<li><code>or</code> の枝に変数を書けるのは、どの枝も同じ変数を束縛するときだけです（<code>f((x, 0) or (0, x)) := x</code>）。それ以外はエラーで止まります。</li>
-<li>引数に同じ名前を2回書く <code>f(a, a)</code> は、2つの値が <code>==</code> で等しいときだけ合います。<code>f([1], [1])</code> は合います。</li>
-<li>式の <code>or</code> の M式 <code>If{a, true, b}</code> に合わせるには、<code>If{a, 'true, b}</code> と書きます。</li>
-<li>書ける形は次のものです。結合は式と同じで、<code>a @ Int + b @ Int</code> は <code>(a @ Int) + (b @ Int)</code> です。
-<ul>
-<li>演算子: <code>or and not == != &lt;= &gt;= &lt; &gt; :: + - * / %</code>、単項の <code>-</code> と <code>'</code></li>
-<li>呼び出しと型: <code>f(p, ...)</code>・<code>p @ type</code>・<code>Head{p, ...}</code>・<code>(f)(p, ...)</code></li>
-<li>値: 識別子・<code>true</code>・<code>false</code>・<code>none</code>・整数・文字列</li>
-<li>組とリスト: <code>()</code>・<code>(p)</code>・<code>(p, q, ...)</code>・<code>[p, ...]</code></li>
-</ul>
-</li>
+<li>演算子と呼ばれる関数の名前はシンボルです。<code>x + 1</code> は <code>Apply{Quote{_add}, Tuple{x, 1}}</code>、<code>f(p, ...)</code> は <code>Apply{Quote{f}, Tuple{p, ...}}</code> の木に合います。呼ばれる関数を変数にするには <code>(f)(p, ...)</code> と書きます（<code>Apply{f, Tuple{p, ...}}</code>）。</li>
+<li><code>'e</code> は <code>Quote{e}</code>、<code>p @ type</code> は型の検査、<code>x...</code> は最後の引数の残りです。</li>
+<li>同じ名前を2回書く <code>f(a, a)</code> は、2つの値が <code>==</code> で等しいときだけ合います。</li>
+<li><code>p or q</code> はどちらかに合います。変数を書けるのは、どの枝も同じ変数を束縛するときだけです（<code>f((x, 0) or (0, x)) := x</code>）。式の <code>or</code> の M式 <code>If{a, true, b}</code> に合わせるには <code>If{a, 'true, b}</code> と書きます。</li>
+<li>書ける形は、演算子（<code>or and not == != &lt;= &gt;= &lt; &gt; :: + - * / %</code>、単項の <code>-</code> と <code>'</code>）・<code>f(p, ...)</code>・<code>Head{p, ...}</code>・識別子・<code>true</code> <code>false</code> <code>none</code>・整数・文字列・組・リストです。結合は式と同じです。</li>
 </ul>
 <div class="example">
 <p class="file">r_pattern.pk</p>
@@ -765,7 +686,7 @@ g</pre>
 </div>
 
 <h2 id="macro">macro</h2>
-<p><code>macro p := e</code> は、評価の前に木を書き換える規則を足します。<code>p</code> は引数のパターンと同じ書き方で、木の形を表します。<code>e</code> は <code>p</code> の変数を使って評価され、その値が新しい木です。<code>macro</code> は M式を別の M式に直すもので、文字列を M式にする構文には触れません。</p>
+<p><code>macro p := e</code> は、評価の前に木を書き換える規則を足します。<code>p</code> は引数のパターンと同じ書き方で木の形を表し、<code>e</code> は <code>p</code> の変数を使って評価されて新しい木になります。文字列を M式にする構文には触れません。</p>
 <div class="example">
 <p class="file">r_macro.pk</p>
 <pre class="pk"><span class="tok-kw">macro</span> <span class="tok-name">Twice</span><span class="tok-op">{</span><span class="tok-name">x</span><span class="tok-op">}</span> <span class="tok-op">:=</span> <span class="tok-op">`</span><span class="tok-op">(</span><span class="tok-op">!</span><span class="tok-name">x</span> <span class="tok-op">+</span> <span class="tok-op">!</span><span class="tok-name">x</span><span class="tok-op">)</span>
@@ -782,15 +703,12 @@ g</pre>
 &quot;shown&quot;
 Twice{1}</pre>
 </div>
-<p>書き換えは、読み終わった式を評価する前に行います。<code>eval</code> に渡した木も同じです。次の順に進みます。</p>
 <ul>
-<li>木の根から順に、各部分を規則で書き換えます。規則は後に足したものから試し、どれにも合わなければその部分はそのままです。</li>
-<li>書き換えた部分に、変わらなくなるまで規則を当てます。そのあとで、結果の中の部分を書き換えます。</li>
-<li>クオート <code>'e</code> の中は書き換えません。準クオート <code>`e</code> の中は、アンクオート <code>!e</code> の中だけを書き換えます。</li>
-<li>関数の引数のパターンと、<code>Def</code>・<code>Set</code>・<code>Declare</code> が定義する名前は書き換えません。関数の本体は書き換えます。</li>
+<li>読み終わった式を評価する前（<code>eval</code> に渡した木も同じ）に、根から順に各部分を書き換えます。規則は後に足したものから試し、合わなければそのままです。書き換えた部分は、変わらなくなるまで規則を当ててから、その中を書き換えます。</li>
+<li>クオート <code>'e</code> の中は書き換えません。準クオート <code>`e</code> の中は <code>!e</code> の中だけを書き換えます。関数の引数のパターンと、<code>Def</code>・<code>Set</code>・<code>Declare</code> が定義する名前も書き換えません。</li>
+<li>1つの式の書き換えで規則を 1000 回より多く当てるとエラーで止まります（終わらない規則も止まります）。</li>
+<li>規則が有効なのは、<code>macro</code> の位置から、それを囲む一番内側の関数か module の本体の終わりまでです。何も囲んでいなければ以降のすべての式です。module の中の <code>export macro</code> は、その module の定義のあとから module の外でも有効です。</li>
 </ul>
-<p>1つの式を書き換える間に規則を 1000 回より多く当てると、書き換えはエラーで止まります（<code>macro A{x} := `A{!x + 1}`</code> のような終わらない規則も止まります）。</p>
-<p>規則は、読み終わった式の中の <code>macro</code> の位置から足されます。規則が有効な範囲は、<code>macro</code> を囲む一番内側の関数か module の本体の終わりまでで、その中の部分も含みます。何も囲んでいなければ、以降のすべての式が対象です。module の中の <code>export macro</code> は、module の外でも、その module の定義のあとから有効です。<code>macro</code> は予約語です。</p>
 <div class="example">
 <p class="file">r_macro_module.pk</p>
 <pre class="pk"><span class="tok-kw">module</span> <span class="tok-name">shapes</span> <span class="tok-op">{</span>
@@ -809,15 +727,12 @@ Inside{1}</pre>
 
 <h2 id="lexical">字句</h2>
 <ul>
-<li>識別子は <code>[A-Za-z_][A-Za-z0-9_]*[?!]?</code> です。ただし次の予約語は除きます。<br><code>if else while and or handle with perform match record for in return break continue fun macro module export import is</code><br>リテラル <code>true false none</code> も除きます。</li>
-<li>名前の直後に空白なしで付く <code>?</code> か <code>!</code> は名前の一部です。<code>empty?(x)</code> と <code>x?</code> は名前です。<code>x!=y</code> は <code>x != y</code> です。文法では、規則の名前の直後の <code>?</code> は省略可能を表します（<code>x:digits?</code>）。</li>
-<li>整数は10進（<code>10</code>・<code>-3</code>）・<code>0x1f</code>・<code>0o17</code>・<code>0b101</code> です。桁数に制限はありません。</li>
-<li>浮動小数点数は小数点のある10進（<code>1.5</code>・<code>-0.25</code>）です。小数点の前後に数字が要ります。<code>e</code> か <code>E</code> と、<code>-</code> を付けてもよい整数の指数を続けられます（<code>1.5e-3</code>・<code>2.0E10</code>・<code>6.02e23</code>）。</li>
-<li><code>true</code>・<code>false</code>・<code>none</code> はリテラルで、同じ名前の symbol を値とします。</li>
-<li>虚数リテラルは整数か浮動小数点数の直後に <code>i</code> を付けます（<code>2i</code>・<code>1.5i</code>）。<code>2i</code> は <code>complex(0, 2)</code> です。</li>
-<li>文字列は1行の <code>"..."</code> で、エスケープ <code>\0 \a \b \t \n \v \f \r \" \' \\</code> が使えます。<code>f"...{e}..."</code> は式 <code>e</code> の値を埋め込みます。<code>e</code> には文字列や f 文字列も書けます。<code>{{</code> と <code>}}</code> は波括弧1つを表します。<code>f</code> の付かない文字列には何も埋め込みません。</li>
+<li>識別子は <code>[A-Za-z_][A-Za-z0-9_]*[?!]?</code> です。予約語 <code>if else while and or handle with perform match record for in return break continue fun macro module export import is</code> とリテラル <code>true false none</code> は除きます。名前の直後に空白なしで付く <code>?</code> か <code>!</code> は名前の一部です（<code>empty?(x)</code>、<code>x!=y</code> は <code>x != y</code>）。</li>
+<li>整数は10進・<code>0x1f</code>・<code>0o17</code>・<code>0b101</code> で、桁数に制限はありません。浮動小数点数は小数点の前後に数字が要り、指数を続けられます（<code>1.5e-3</code>・<code>6.02e23</code>）。虚数リテラルは直後に <code>i</code> を付けます（<code>2i</code> は <code>complex(0, 2)</code>）。</li>
+<li>文字列は1行の <code>"..."</code> で、エスケープ <code>\0 \a \b \t \n \v \f \r \" \' \\</code> が使えます。<code>f"...{e}..."</code> は式 <code>e</code> の値を埋め込み（<code>e</code> には文字列や f 文字列も書ける）、<code>{{</code> と <code>}}</code> は波括弧1つです。</li>
 <li><code>#</code> から行の終わりまではコメントです。</li>
 <li><code>f(a)</code> の <code>f</code> と <code>(</code> の間、<code>a[i]</code> の <code>a</code> と <code>[</code> の間、<code>Head{a}</code> の <code>Head</code> と <code>{</code> の間には空白を入れません。</li>
+<li>ブロックの中の式は <code>;</code> か改行で区切ります。トップレベルの式は <code>;</code>・改行・次の式の始まりのどれかで終わります。二項の <code>-</code> は左の式と同じ行に書くので、<code>-1</code> で始まる行は新しい式です。ほかの二項演算子は行頭に書けます。</li>
 </ul>
 <div class="example">
 <p class="file">r_strings.pk</p>
@@ -830,10 +745,6 @@ Inside{1}</pre>
 {x} = 7
 42 inner n7</pre>
 </div>
-
-<h2>式の区切り</h2>
-<p>ブロックの中の式は <code>;</code> か改行で区切ります。トップレベルの式は <code>;</code>・改行・次の式の始まりのどれかで終わります。</p>
-<p>二項の <code>-</code> は左の式と同じ行に書きます。したがって <code>-1</code> で始まる行は新しい式です。ほかの二項演算子は行頭に書けます。</p>
 
 <nav class="pager"><a class="prev" href="index.html"><small>前のページ</small>目次</a><a class="next" href="values.html"><small>次のページ</small>値・パターン・M式</a></nav>
 </main>

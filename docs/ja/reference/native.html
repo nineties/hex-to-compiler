@@ -36,11 +36,11 @@
 </ol></details></nav>
 <main>
 <h1>native</h1>
-<p class="lead"><code>use("native/compile")</code> が定義するシステム言語です。意味は <a href="vasm.html">vasm</a> と同じで、書き方が高級です。<code>native{| ... |}</code> に書いた関数と構造体を、<code>native_compile.compile</code> が vasm のモジュールに展開します。所有と借用の検査は展開した vasm に対して行います。</p>
+<p class="lead"><code>use("native/compile")</code> が定義するシステム言語です。意味は <a href="vasm.html">vasm</a> と同じで、書き方が高級です。<code>native{| ... |}</code> に書いた関数と構造体を <code>native_compile.compile</code> が vasm のモジュールに展開し、所有と借用は展開した vasm に対して検査します。型は変数と関数の宣言から決まり、書くのは宣言の所だけです。</p>
 
 <h2>プログラム</h2>
-<p>プログラムは構造体と関数の並びで、その前に <code>import</code> を置けます。<code>import lib</code> は単位 <code>lib</code> を指し、ほかの単位の構造体と関数は、こう書いた単位のものだけ使えます（<a href="vasmc.html">vasmc</a>）。<code>import</code> はファイルの先頭に1行に1つ書きます。型・構造体・関数の宣言は vasm と同じ書き方です。関数の本体は文の並びで、文は改行か <code>;</code> で区切ります。</p>
-<p><code>native{| ... |}</code> の値は <code>PModule{[...]}</code> で、リストの先頭に import ごとの <code>PImport{at, name}</code> が並びます。<code>native_compile</code> の関数は、これを次のように扱います。</p>
+<p>プログラムは構造体と関数の並びで、型・構造体・関数の宣言は vasm と同じ書き方です。関数の本体は文の並びで、文は改行か <code>;</code> で区切ります。値を返す関数は、最後の文が式ならその値を返します。</p>
+<p>ほかの単位を使うには、ファイルの先頭に <code>import lib</code> を1行に1つ書きます（<a href="vasmc.html">vasmc</a>）。<code>native{| ... |}</code> の値は <code>PModule{[...]}</code> で、先頭に import ごとの <code>PImport{at, name}</code> が並びます。</p>
 <table>
 <tr><th>関数</th><th>返す値</th></tr>
 <tr><td><code>native_compile.compile(m)</code></td><td>vasm の <code>Module{[...]}</code>。<code>vasm_check</code> と <code>vasm_build</code> がそのまま受け取る</td></tr>
@@ -48,40 +48,26 @@
 <tr><td><code>native_compile.errors(file, 誤り)</code></td><td>位置をファイルの <code>Loc</code> にした誤り</td></tr>
 </table>
 
-<h2>式</h2>
-<p>式は入れ子にでき、優先順位は上から下へ強くなります。</p>
+<h2>式と文</h2>
+<p>式の優先順位は、表の上から下へ強くなります。引数は左から順に計算します。</p>
 <table>
 <tr><th>形</th><th>意味</th></tr>
-<tr><td><code>a or b</code></td><td><code>a</code> が真なら <code>b</code> を計算しない</td></tr>
-<tr><td><code>a and b</code></td><td><code>a</code> が偽なら <code>b</code> を計算しない</td></tr>
+<tr><td><code>a or b</code> <code>a and b</code></td><td>左で決まれば右を計算しない</td></tr>
 <tr><td><code>==</code> <code>!=</code> <code>&lt;</code> <code>&lt;=</code> <code>&gt;</code> <code>&gt;=</code></td><td>比較。結果は <code>bool</code></td></tr>
-<tr><td><code>|</code></td><td>ビットの or</td></tr>
-<tr><td><code>^</code></td><td>ビットの xor</td></tr>
-<tr><td><code>&amp;</code></td><td>ビットの and。比較より強い</td></tr>
-<tr><td><code>&lt;&lt;</code> <code>&gt;&gt;</code></td><td>シフト</td></tr>
-<tr><td><code>+</code> <code>-</code></td><td>加減算</td></tr>
-<tr><td><code>*</code> <code>/</code> <code>%</code></td><td>乗除算。<code>*</code> は左の項と同じ行に書く</td></tr>
+<tr><td><code>|</code> <code>^</code> <code>&amp;</code></td><td>ビットの or・xor・and。この順に強く、and は比較より強い</td></tr>
+<tr><td><code>&lt;&lt;</code> <code>&gt;&gt;</code> <code>+</code> <code>-</code> <code>*</code> <code>/</code> <code>%</code></td><td>シフト・加減算・乗除算の順に強い。<code>*</code> は左の項と同じ行に書く</td></tr>
 <tr><td><code>e as T</code></td><td>整数の型を変える</td></tr>
 <tr><td><code>-e</code> <code>not e</code> <code>*p</code> <code>&amp;r y</code> <code>&amp;mut r y</code></td><td>符号の反転・否定・箱の中身・借用</td></tr>
 <tr><td><code>a[i]</code> <code>s.f</code> <code>f(a, ...)</code> <code>S{f: a, ...}</code></td><td>要素・フィールド・呼び出し・構造体の値</td></tr>
-<tr><td><code>'name</code> <code>"text"</code> <code>val H(a, ...)</code> <code>fn f(a, ...)</code> <code>true</code> <code>false</code></td><td>val の値と文字列と真偽</td></tr>
 </table>
-<p>括弧でまとめられます。引数は左から順に計算します。<code>a[i]</code> と <code>s.f</code> の <code>a</code> と <code>s</code> は変数です。構造体の値は、先頭にフィールドを書くので、<code>if</code> や <code>for</code> の本体の <code>{</code> と区別できます。</p>
-
-<h2>文</h2>
-<table>
-<tr><th>形</th><th>意味</th></tr>
-<tr><td><code>let x = e</code> <code>let x: T = e</code></td><td>変数を宣言して初期化する。型は <code>e</code> の型で、<code>: T</code> で指定もできる</td></tr>
-<tr><td><code>var x: T</code></td><td>未初期化の変数を宣言する</td></tr>
-<tr><td><code>x = e</code> <code>*p = e</code> <code>a[i] = e</code> <code>s.f = e</code></td><td>代入。右辺を先に計算する</td></tr>
-<tr><td><code>x += e</code> など</td><td>複合代入。<code>+= -= *= /= %= &amp;= |= ^= &lt;&lt;= &gt;&gt;=</code>。左辺の場所は1回だけ読む</td></tr>
-<tr><td><code>f(a, ...)</code></td><td>呼び出しの文</td></tr>
-<tr><td><code>if c {...} else {...}</code> <code>else if</code></td><td>条件に括弧は要らない</td></tr>
-<tr><td><code>while c {...}</code></td><td>条件は周のたびに計算し直す</td></tr>
-<tr><td><code>for i in a..b {...}</code></td><td><code>i</code> は <code>a</code> から <code>b</code> の手前まで。<code>b</code> は始めに1回だけ計算する。<code>i</code> は本体の中だけで見える</td></tr>
-<tr><td><code>region r {...}</code> <code>return</code> <code>return e</code></td><td>vasm と同じ</td></tr>
-</table>
-<p>値を返す関数の本体は、最後の文が式なら、その値を返します。</p>
+<p>構造体の値は先頭にフィールドを書くので、<code>if</code> や <code>for</code> の本体の <code>{</code> と区別できます。<code>'name</code>・<code>"text"</code>・<code>val H(a, ...)</code>・<code>fn f(a, ...)</code>・<code>true</code>・<code>false</code> は vasm と同じ値です。</p>
+<ul>
+<li><code>let x = e</code>・<code>let x: T = e</code>・<code>var x: T</code>（未初期化）。同じ名前を宣言し直すと、前の変数は見えなくなります。</li>
+<li>代入 <code>x = e</code>・<code>*p = e</code>・<code>a[i] = e</code>・<code>s.f = e</code> は右辺を先に計算します。<code>+=</code> などの複合代入は左辺の場所を1回だけ読みます。</li>
+<li><code>if c {...} else if c {...} else {...}</code>・<code>while c {...}</code>。条件に括弧は要りません。</li>
+<li><code>for i in a..b {...}</code>：<code>i</code> は <code>a</code> から <code>b</code> の手前までで、本体の中だけで見えます。<code>b</code> は始めに1回だけ計算します。</li>
+<li><code>region r {...}</code>・<code>return</code>・<code>return e</code> は vasm と同じです。</li>
+</ul>
 <div class="example">
 <p class="file">native_compile.pk</p>
 <pre class="pk"><span class="tok-name">use</span><span class="tok-op">(</span><span class="tok-str">"native/compile"</span><span class="tok-op">)</span>
@@ -134,16 +120,15 @@ fn bump[r](m: &amp;mut r [i32], n: i32) {
 
 <h2>型の決まり方</h2>
 <ul>
-<li>式の型は、変数と関数の宣言と組み込みの型から決まります。型を書く場所は <code>let</code>・<code>var</code>・パラメータ・関数の結果・<code>as</code> だけです。</li>
-<li>整数のリテラルは、それだけでは型がありません。代入先・引数・相手の項・関数の結果の型が、リテラルの型になります。<code>let x = 5</code> のように型を決める手がかりのないリテラルは誤りです。<code>let x: i64 = 5</code> か <code>5 as i64</code> が正しい書き方です。</li>
-<li><code>for i in a..b</code> の変数の型は、<code>a</code> と <code>b</code> のうちリテラルでない方の型です。両方リテラルなら誤りで、<code>0 as i64..10</code> のように一方に型を付けます。</li>
-<li>借用を結果に持つ関数の呼び出しは、結果の領域が引数から1つに決まるときだけ、型を推論します。決まらないときは <code>let x: T = f(...)</code> のように型を書きます。</li>
-<li>配列の添字は <code>i64</code> です。ほかの整数型の添字には <code>as i64</code> が必要です。</li>
-<li>同じ名前を宣言し直せます。前の変数は見えなくなります。</li>
+<li>型を書くのは <code>let</code>・<code>var</code>・パラメータ・関数の結果・<code>as</code> だけです。</li>
+<li>整数のリテラルはそれだけでは型がなく、代入先・引数・相手の項・関数の結果の型になります。手がかりのない <code>let x = 5</code> は誤りで、<code>let x: i64 = 5</code> か <code>5 as i64</code> と書きます。</li>
+<li><code>for i in a..b</code> の <code>i</code> は、リテラルでない方の型です。両方リテラルなら誤りで、<code>0 as i64..10</code> のように一方に型を付けます。</li>
+<li>配列の添字は <code>i64</code> で、ほかの整数型には <code>as i64</code> が必要です。</li>
+<li>借用を結果に持つ関数の呼び出しは、結果の領域が引数から1つに決まるときだけ型を推論します。決まらないときは <code>let x: T = f(...)</code> と書きます。</li>
 </ul>
 
 <h2>大きなリテラル</h2>
-<p>vasm のリテラルは -32768 から 32767 までです。native はそれを超える整数のリテラルを書けます。リテラルは型の範囲に入らなければ誤りです。</p>
+<p>vasm のリテラルは -32768 から 32767 までですが、native はそれを超える整数のリテラルを書けます。型の範囲に入らなければ誤りです。</p>
 <div class="example">
 <p class="file">native_logic.pk</p>
 <pre class="pk"><span class="tok-name">use</span><span class="tok-op">(</span><span class="tok-str">"native/compile"</span><span class="tok-op">)</span>
@@ -185,7 +170,7 @@ fn mask(x: i32) -&gt; i32 {
 </div>
 
 <h2>誤り</h2>
-<p>展開の誤りの <code>kind</code> は <code>'type</code>（型が決まらない・リテラルが型の範囲にない・式の文が呼び出しでない）と <code>'undefined</code>（宣言のない変数・関数・構造体）です。所有・借用・初期化の誤りは展開では調べず、展開した vasm を <code>vasm_check.check</code> が調べます。誤りの位置は native のソースの位置です。</p>
+<p>展開の誤りの <code>kind</code> は <code>'type</code>（型が決まらない・リテラルが型の範囲にない・式の文が呼び出しでない）と <code>'undefined</code>（宣言のない変数・関数・構造体）です。所有・借用・初期化の誤りは、展開した vasm を <code>vasm_check.check</code> が調べます。誤りの位置は native のソースの位置です。</p>
 <div class="example">
 <p class="file">native_errors.pk</p>
 <pre class="pk"><span class="tok-name">use</span><span class="tok-op">(</span><span class="tok-str">"native/compile"</span><span class="tok-op">)</span>
