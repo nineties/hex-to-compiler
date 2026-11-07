@@ -1,0 +1,54 @@
+# EQ and HASH of arrays and plain arrays on planckvm: the program is written with the instructions and run by planck/vm; the image path is the first argument
+use("pvm/image")
+
+# R[r] := array(n) and plain_array(kind K[k], n)
+mk_array(r, n) := [GETGLOBAL{30, 0}, LOADI{31, n}, CALL{r, 30, 1}]
+mk_plain(r, k, n) := [GETGLOBAL{30, 1}, LOADK{31, k}, LOADI{32, n}, CALL{r, 30, 2}]
+set_array(a, i, v) := [LOADI{33, i}, ASET{a, 33, v}]
+set_plain(a, i, v) := [LOADI{33, i}, PLAINSET{a, 33, v}]
+
+# println of R[x]
+show(x) := [GETGLOBAL{30, 2}, MOVE{31, x}, CALL{30, 30, 1}]
+eq(a, b) := concat_map(x -> x, [[EQ{34, a, b}], show(34)])
+ne(a, b) := concat_map(x -> x, [[NE{34, a, b}], show(34)])
+same_hash(a, b) := concat_map(x -> x, [[HASH{35, a}, HASH{36, b}, EQ{34, 35, 36}], show(34)])
+
+body := concat_map(x -> x, [
+    # arrays: equal by the elements
+    mk_array(1, 2), mk_array(2, 2), mk_array(3, 0), mk_array(4, 0), mk_array(5, 3),
+    [LOADI{20, 5}, LOADK{21, 6}],
+    set_array(1, 0, 20), set_array(1, 1, 21), set_array(2, 0, 20), set_array(2, 1, 21),
+    eq(1, 2), same_hash(1, 2), eq(3, 4), eq(1, 5), eq(1, 1),
+    [LOADI{22, 7}], set_array(2, 1, 22),
+    eq(1, 2), ne(1, 2),
+    # arrays in arrays
+    mk_array(6, 1), mk_array(7, 1), set_array(6, 0, 1), set_array(7, 0, 1),
+    eq(6, 7),
+    set_array(7, 0, 2), eq(6, 7),
+    set_array(2, 1, 21), eq(6, 7),
+    # plain arrays: equal by the elements as values, also when the types differ
+    mk_plain(10, 3, 3), mk_plain(11, 3, 3), mk_plain(12, 4, 3), mk_plain(13, 3, 4),
+    eq(10, 11),
+    [LOADI{23, 9}], set_plain(10, 1, 23),
+    eq(10, 11),
+    set_plain(11, 1, 23), set_plain(12, 1, 23),
+    eq(10, 11), eq(10, 12), same_hash(10, 12), eq(10, 13),
+    # an array and a plain array are never equal
+    mk_plain(14, 3, 0), eq(3, 14),
+    # floats: NaN is equal to nothing but the same plain array, 0.0 is -0.0, and 1 is 1.0
+    mk_plain(15, 5, 1), mk_plain(16, 5, 1), mk_plain(17, 5, 1), mk_plain(18, 5, 1),
+    [LOADK{24, 7}], set_plain(15, 0, 24), set_plain(16, 0, 24),
+    eq(15, 15), eq(15, 16),
+    [LOADK{25, 8}], set_plain(17, 0, 25),
+    eq(17, 18),
+    mk_plain(19, 4, 1), mk_plain(20, 5, 1), [LOADI{26, 1}, LOADK{27, 9}], set_plain(19, 0, 26), set_plain(20, 0, 27),
+    eq(19, 20), same_hash(19, 20),
+    [LOADNONE{0, 1}, RET{0}]
+])
+
+main := Code{"main", 0, 40, body, [
+    C{"array"}, C{"plain_array"}, C{"println"}, Y{"u8"}, Y{"i32"}, Y{"f64"}, S{"x"},
+    Fl{2146959360, 0}, Fl{2147483648, 0}, Fl{1072693248, 0}
+]}
+
+write_file(array_get(argv(), 1), bytes.to_u8(pvm_image.build([main], "main")))
