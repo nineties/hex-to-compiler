@@ -1,0 +1,41 @@
+# repl.pk: put in front of a session (examples/NAME.repl) to write the transcript of a prompt.
+# Each expression is written after "> " (the following lines of it after "... "), then its value,
+# except for none and for definitions (Def, Set, Declare and rules), which write no value.
+repl_on := false
+repl_depth := 0
+repl_old_parse := parse
+repl_old_eval := eval
+repl_is_def(e) := typeof(e) == 'mexpr and (head(e) == Quote{Def} or head(e) == Quote{Set} or head(e) == Quote{Declare} or
+    (head(e) == Quote{Apply} and arg(e, 0) == Quote{_define_rule}) or
+    (head(e) == Quote{Do} and arity(e) > 0 and repl_is_def(arg(e, arity(e) - 1))))
+repl_show(text) := {
+    n := strlen(text)
+    i := 0
+    while (i < n and (ord(text, i) == 10 or ord(text, i) == 32)) i = i + 1
+    while (n > i and (ord(text, n - 1) == 10 or ord(text, n - 1) == 32)) n = n - 1
+    k := i
+    first := true
+    while (k <= n) {
+        j := k
+        while (j < n and ord(text, j) != 10) j = j + 1
+        put(if (first) "> " else "... ")
+        put(substr(text, k, j))
+        put("\n")
+        first = false
+        k = j + 1
+    }
+}
+parse = s -> {
+    r := repl_old_parse(s)
+    if (repl_on and repl_depth == 0 and r[0] != Quote{Eof{}}) repl_show(substr(s, 0, strlen(s) - strlen(r[1])))
+    r
+}
+eval = e -> {
+    top := repl_depth == 0
+    repl_depth = repl_depth + 1
+    v := repl_old_eval(e)
+    repl_depth = repl_depth - 1
+    if (repl_on and top and v != none and not repl_is_def(e)) println(v)
+    v
+}
+Do{Set{repl_on, true}, none}
