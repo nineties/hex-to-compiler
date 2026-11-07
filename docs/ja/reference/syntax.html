@@ -34,14 +34,14 @@
 </ol></details></nav>
 <main>
 <h1>文法</h1>
-<p class="lead">式は下の表の M式に読み替えられて評価されます。</p>
+<p class="lead">標準の構文は糖衣で、下の表のコア言語の M式に展開されて評価されます。</p>
 
 <h2 id="lexical">字句</h2>
 <ul>
 <li>識別子は <code>[A-Za-z_][A-Za-z0-9_]*[?!]?</code> で、予約語とリテラル <code>true false none</code> は除きます。予約語は <code>if else while and or handle with perform match record for in return break continue fun macro module export import is</code> です。</li>
 <li>整数は10進・<code>0x1f</code>・<code>0o17</code>・<code>0b101</code>、float は <code>1.5e-3</code>、complex は <code>2i</code> です。</li>
 <li>文字列は1行の <code>"..."</code> で、エスケープは <code>\0 \a \b \t \n \v \f \r \" \' \\</code> です。<code>f"...{e}..."</code> は <code>e</code> の値を埋め込み、<code>{{</code> と <code>}}</code> は波括弧1つです。</li>
-<li><code>#</code> から行末まではコメントです。</li>
+<li><code>#</code> から行末まではコメントです。トップレベルの文字列もコメントです。</li>
 <li><code>f(a)</code>・<code>a[i]</code>・<code>Head{a}</code> は、<code>(</code>・<code>[</code>・<code>{</code> の前に空白を入れません。</li>
 <li>ブロックの式は <code>;</code> か改行で区切ります。二項の <code>-</code> は左の式と同じ行に書き、<code>-1</code> で始まる行は新しい式です。ほかの二項演算子は行頭に書けます。</li>
 </ul>
@@ -78,14 +78,14 @@ Apply{_strcat, Tuple{Apply{_strcat, Tuple{&quot;a&quot;, Apply{_to_text, Tuple{e
 42 inner n7</pre>
 </div>
 
-<h2>式と M式</h2>
+<h2 id="table">糖衣と展開先</h2>
 <p>上の行ほど結合が弱くなります。</p>
 <table>
-<tr><th>式</th><th>M式</th></tr>
+<tr><th>糖衣</th><th>展開先</th></tr>
 <tr><td><code>x := e</code></td><td><code>Def{x, e}</code></td></tr>
 <tr><td><code>(x, y, ...) := e</code>・<code>(x, y, ...) = e</code></td><td class="wrap"><code>Do{Def{t, e}, Def{x, Apply{_destructure, Tuple{t, 0, n}}}, ...}</code>（<code>t</code> は新しい変数、<code>n</code> は名前の数、<code>=</code> では <code>Def</code> が <code>Set</code>）</td></tr>
-<tr><td><code>f(p, ...) := e</code></td><td><code>Do{Declare{f}, Set{f, Fusion{f, Lambda{Tuple{p, ...}, e}}}}</code></td></tr>
-<tr><td><code>f(p, ...) if c := e</code></td><td class="wrap">ガード付きの関数 <code>(p, ...) if c -&gt; e</code> を <code>f</code> に足す</td></tr>
+<tr><td><code>f(p, ...) := body</code></td><td><code>Do{Declare{f}, Set{f, Fusion{f, Lambda{Tuple{p, ...}, body}}}}</code></td></tr>
+<tr><td><code>f(p, ...) if cond := body</code></td><td class="wrap">ガード付きの関数 <code>(p, ...) if cond -&gt; body</code> を <code>f</code> に足す</td></tr>
 <tr><td><code>record T(f, ...)</code></td><td><code>Apply{_record_declare, Tuple{Quote{T}, Quote{Tuple{f, ...}}}}</code></td></tr>
 <tr><td><code>x = e</code></td><td><code>Set{x, e}</code></td></tr>
 <tr><td><code>x += e</code> <code>x -= e</code> <code>x *= e</code> <code>x /= e</code> <code>x %= e</code></td><td><code>Set{x, Apply{_add, Tuple{x, e}}}</code>。ほかは <code>_sub</code> <code>_mul</code> <code>_div</code> <code>_mod</code></td></tr>
@@ -93,8 +93,8 @@ Apply{_strcat, Tuple{Apply{_strcat, Tuple{&quot;a&quot;, Apply{_to_text, Tuple{e
 <tr><td><code>a[i] += e</code>（<code>-=</code> <code>*=</code> <code>/=</code> <code>%=</code> も同じ）</td><td class="wrap"><code>Do{Def{ta, a}, Def{ti, i}, Apply{_index_set, Tuple{ta, ti, Apply{_add, Tuple{Apply{_index_get, Tuple{ta, ti}}, e}}}}}</code>（<code>ta</code>・<code>ti</code> は新しい変数）</td></tr>
 <tr><td><code>t with { f = e, ... }</code></td><td class="wrap"><code>Apply{_record_with, Tuple{t, Quote{f}, e}}</code>。欄が複数なら欄の順に入れ子</td></tr>
 <tr><td><code>f | g</code></td><td><code>Fusion{f, g}</code></td></tr>
-<tr><td><code>(p, ...) if c -&gt; e | g</code>・<code>p if c -&gt; e | g</code></td><td class="wrap">合わないか <code>c</code> が偽なら同じ引数で <code>g</code> を呼ぶ関数</td></tr>
-<tr><td><code>(p, ...) -> e</code>・<code>p -> e</code></td><td><code>Lambda{Tuple{p, ...}, e}</code></td></tr>
+<tr><td><code>(p, ...) if cond -&gt; body | g</code>・<code>p if cond -&gt; body | g</code></td><td class="wrap">合わないか <code>cond</code> が偽なら同じ引数で <code>g</code> を呼ぶ関数</td></tr>
+<tr><td><code>(p, ...) -&gt; body</code>・<code>p -&gt; body</code></td><td><code>Lambda{Tuple{p, ...}, body}</code></td></tr>
 <tr><td><code>a or b</code>・<code>a and b</code></td><td><code>If{a, true, b}</code>・<code>If{a, b, false}</code></td></tr>
 <tr><td><code>not a</code></td><td><code>Apply{_not, Tuple{a}}</code></td></tr>
 <tr><td><code>a is not b</code></td><td><code>Apply{_not, Tuple{Apply{_is, Tuple{a, b}}}}</code></td></tr>
@@ -112,18 +112,24 @@ Apply{_strcat, Tuple{Apply{_strcat, Tuple{&quot;a&quot;, Apply{_to_text, Tuple{e
 <tr><td><code>t[p -&gt; a | q if c -&gt; b]</code></td><td class="wrap"><code>Apply{_index_get, Tuple{t, f}}</code>。<code>f</code> は腕を <code>|</code> でつないだ関数（<a href="#index">下記</a>）</td></tr>
 <tr><td><code>p @ type</code></td><td><code>_TypeOf{p, type}</code></td></tr>
 <tr><td><code>{ e; ... }</code></td><td><code>Do{e, ...}</code></td></tr>
-<tr><td><code>if (c) a else b</code>・<code>if (c) a</code></td><td><code>If{c, a, b}</code>・<code>If{c, a, none}</code></td></tr>
-<tr><td><code>while (c) e</code></td><td><code>While{c, e}</code></td></tr>
-<tr><td><code>for (p in e) a</code></td><td><code>Apply{peg_for, Tuple{e, Lambda{Tuple{p}, a}}}</code></td></tr>
+<tr><td><code>if (cond) a else b</code>・<code>if (cond) a</code></td><td><code>If{cond, a, b}</code>・<code>If{cond, a, none}</code></td></tr>
+<tr><td><code>while (cond) body</code></td><td><code>While{cond, body}</code></td></tr>
+<tr><td><code>for (p in e) body</code></td><td class="wrap"><code>e</code> の要素ごとに、要素をパターン <code>p</code> と照合して <code>body</code> を評価する。値は <code>none</code></td></tr>
 <tr><td><code>return e</code>・<code>return</code>・<code>break</code>・<code>continue</code></td><td><code>Perform{Return{e}}</code>・<code>Perform{Return{none}}</code>・<code>Perform{Break{}}</code>・<code>Perform{Continue{}}</code></td></tr>
+<tr><td>本体に <code>return</code> がある関数 <code>(p, ...) -&gt; body</code></td><td class="wrap"><code>Lambda{Tuple{p, ...}, Handle{body, Lambda{Tuple{Return{v}, k}, v}}}</code></td></tr>
+<tr><td>本体に <code>break</code> があるループ</td><td class="wrap"><code>Handle{While{cond, body}, Lambda{Tuple{Break{}, k}, none}}</code></td></tr>
+<tr><td>本体に <code>continue</code> があるループ</td><td class="wrap"><code>While{cond, Handle{body, Lambda{Tuple{Continue{}, k}, none}}}</code></td></tr>
 <tr><td><code>match e { f }</code></td><td><code>Apply{f, Tuple{e}}</code></td></tr>
-<tr><td><code>f"a{e}b"</code></td><td class="wrap"><code>Apply{_strcat, Tuple{Apply{_strcat, Tuple{"a", Apply{_to_text, Tuple{e}}}}, "b"}}</code></td></tr>
+<tr><td><code>x...</code></td><td><code>_Rest{x}</code></td></tr>
+<tr><td><code>f"a{e}b"</code></td><td class="wrap"><code>Apply{_strcat, Tuple{Apply{_strcat, Tuple{"a", Apply{_to_text, Tuple{e}}}}, "b"}}</code>。左から <code>_strcat</code> でつなぎ、空の部分は省く</td></tr>
 <tr><td><code>fun f</code></td><td><code>Def{f, none}</code></td></tr>
-<tr><td><code>f(p, ...) = e</code></td><td><code>Set{f, Fusion{f, Lambda{Tuple{p, ...}, e}}}</code></td></tr>
+<tr><td><code>f(p, ...) = body</code></td><td><code>Set{f, Fusion{f, Lambda{Tuple{p, ...}, body}}}</code></td></tr>
 <tr><td><code>handle e with h</code></td><td><code>Handle{e, h}</code></td></tr>
 <tr><td><code>perform e</code></td><td><code>Perform{e}</code></td></tr>
 <tr><td><code>()</code>・<code>(a, b, ...)</code></td><td><code>Tuple{}</code>・<code>Tuple{a, b, ...}</code></td></tr>
 <tr><td><code>[a, b, ...]</code>・<code>[]</code></td><td><code>Cons{a, Cons{b, ... Nil{}}}</code>・<code>Nil{}</code></td></tr>
+<tr><td><code>module m { body }</code></td><td class="wrap"><code>Def{m, Apply{Lambda{Tuple{}, Do{body, Apply{_module, Tuple{Quote{names}, names}}}}, Tuple{}}}</code>（<code>names</code> は <code>export</code> した名前のリスト）</td></tr>
+<tr><td><code>test { e; ... }</code></td><td><code>If{_testing, Do{e, ...}, none}</code></td></tr>
 <tr><td><code>name{| text |}</code></td><td class="wrap"><code>Quote{v}</code>。<code>v</code> は規則 <code>name</code> で <code>text</code> を読んだ値（<a href="syntax.html#text">規則で読む文字列</a>）</td></tr>
 </table>
 
@@ -177,9 +183,9 @@ Apply{_record_declare, Tuple{Quote{T}, Quote{Tuple{a, b}}}}</pre>
 
 <h2>結合</h2>
 <ul>
-<li>右結合：<code>|</code>・<code>-></code>・<code>::</code>。左結合：<code>+ - * / %</code>。比較は結合せず、<code>a &lt; b &lt; c</code> は構文エラーです。</li>
+<li>右結合：<code>|</code>・<code>-></code>・<code>::</code>。左結合：<code>+ - * / %</code>。比較と <code>is</code> は結合せず、<code>a &lt; b &lt; c</code> は構文エラーです。<code>is</code> の優先順位は <code>==</code> と同じで、パターンには書けません。</li>
 <li><code>::</code> は比較より強く <code>+ -</code> より弱く、<code>..</code> はさらに <code>+ -</code> より弱いだけで結合しません。</li>
-<li><code>if</code> と <code>while</code> の条件は括弧で囲み、枝は <code>|</code> を含まない式です。複数の式は <code>{ ... }</code> にします。<code>else</code> は、まだ <code>else</code> のない最も近い <code>if</code> に付きます。</li>
+<li><code>if</code> と <code>while</code> の条件 <code>cond</code> は括弧で囲み、枝と <code>body</code> は <code>|</code> を含まない式です。複数の式は <code>{ ... }</code> にします。<code>else</code> は、まだ <code>else</code> のない最も近い <code>if</code> に付きます。</li>
 </ul>
 <div class="example">
 <p class="file">sx_assoc.pk</p>
@@ -199,6 +205,384 @@ Range{Apply{_add, Tuple{a, 1}}, Apply{_mul, Tuple{b, 2}}}
 Fusion{If{c, a, b}, g}
 If{a, If{b, x, y}, none}</pre>
 </div>
+
+<h2 id="rules">構文ごとの規則</h2>
+
+<h3 id="pattern-forms">引数に書くパターン</h3>
+<p>引数 <code>p</code> と <code>for</code> のパターンは、<code>or</code> の階層までの式として書き、コア言語のパターンにして照合します。式と同じ書き方で、識別子が変数になります。例外は次のとおりです。</p>
+<ul>
+<li>演算子と呼ばれる関数の名前は symbol です。<code>x + 1</code> は <code>Apply{Quote{_add}, Tuple{x, 1}}</code>、<code>f(p, ...)</code> は <code>Apply{Quote{f}, Tuple{p, ...}}</code> の木に合います。呼ばれる関数を変数にするには <code>(f)(p, ...)</code> と書きます。</li>
+<li><code>'e</code> は <code>Quote{e}</code>、<code>p @ type</code> は <code>_TypeOf{p, type}</code>、<code>x...</code> は最後の引数の残り <code>_Rest{x}</code> です。</li>
+<li>同じ名前を2回書く <code>f(a, a)</code> は、2つの値が equal なときだけ合います。</li>
+<li><code>p or q</code> はどちらかに合います。変数を書けるのは、どの枝も同じ変数を束縛するときだけです（<code>f((x, 0) or (0, x)) := x</code>）。式の <code>or</code> の M式 <code>If{a, true, b}</code> に合わせるには <code>If{a, 'true, b}</code> と書きます。</li>
+<li>書ける形：演算子（<code>or and not == != &lt;= &gt;= &lt; &gt; :: + - * / %</code>、単項の <code>-</code> と <code>'</code>）・<code>f(p, ...)</code>・<code>Head{p, ...}</code>・識別子・<code>true</code> <code>false</code> <code>none</code>・整数・文字列・組・リスト。</li>
+</ul>
+<div class="example">
+<p class="file">r_pattern_or.pk</p>
+<pre class="pk"><span class="tok-name">size</span><span class="tok-op">(</span><span class="tok-num">0</span> <span class="tok-kw">or</span> <span class="tok-num">1</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-str">"small"</span>
+<span class="tok-name">size</span><span class="tok-op">(</span><span class="tok-name">_</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-str">"big"</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">size</span><span class="tok-op">(</span><span class="tok-num">1</span><span class="tok-op">)</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">size</span><span class="tok-op">(</span><span class="tok-num">2</span><span class="tok-op">)</span><span class="tok-op">)</span>
+<span class="tok-name">kind</span><span class="tok-op">(</span><span class="tok-name">F</span><span class="tok-op">{</span><span class="tok-num">1</span> <span class="tok-kw">or</span> <span class="tok-num">2</span><span class="tok-op">,</span> <span class="tok-name">x</span><span class="tok-op">}</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-str">"small first"</span>
+<span class="tok-name">kind</span><span class="tok-op">(</span><span class="tok-name">_</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-str">"other"</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">kind</span><span class="tok-op">(</span><span class="tok-name">F</span><span class="tok-op">{</span><span class="tok-num">2</span><span class="tok-op">,</span> <span class="tok-num">0</span><span class="tok-op">}</span><span class="tok-op">)</span><span class="tok-op">)</span>
+<span class="tok-name">sign</span><span class="tok-op">(</span><span class="tok-name">x</span><span class="tok-op">)</span> <span class="tok-kw">if</span> <span class="tok-name">x</span> <span class="tok-op">&gt;</span> <span class="tok-num">0</span> <span class="tok-op">:=</span> <span class="tok-str">"positive"</span>
+<span class="tok-name">sign</span><span class="tok-op">(</span><span class="tok-num">0</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-str">"zero"</span>
+<span class="tok-name">sign</span><span class="tok-op">(</span><span class="tok-name">_</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-str">"negative"</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">sign</span><span class="tok-op">(</span><span class="tok-num">5</span><span class="tok-op">)</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">sign</span><span class="tok-op">(</span><span class="tok-num">0</span><span class="tok-op">)</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">sign</span><span class="tok-op">(</span><span class="tok-num">-5</span><span class="tok-op">)</span><span class="tok-op">)</span>
+<span class="tok-name">same</span><span class="tok-op">(</span><span class="tok-name">a</span><span class="tok-op">,</span> <span class="tok-name">a</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-str">"same"</span>
+<span class="tok-name">same</span><span class="tok-op">(</span><span class="tok-name">_</span><span class="tok-op">,</span> <span class="tok-name">_</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-str">"differ"</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">same</span><span class="tok-op">(</span><span class="tok-op">[</span><span class="tok-num">1</span><span class="tok-op">]</span><span class="tok-op">,</span> <span class="tok-op">[</span><span class="tok-num">1</span><span class="tok-op">]</span><span class="tok-op">)</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">same</span><span class="tok-op">(</span><span class="tok-op">[</span><span class="tok-num">1</span><span class="tok-op">]</span><span class="tok-op">,</span> <span class="tok-op">[</span><span class="tok-num">2</span><span class="tok-op">]</span><span class="tok-op">)</span><span class="tok-op">)</span>
+<span class="tok-name">origin</span><span class="tok-op">(</span><span class="tok-op">(</span><span class="tok-name">x</span><span class="tok-op">,</span> <span class="tok-num">0</span><span class="tok-op">)</span> <span class="tok-kw">or</span> <span class="tok-op">(</span><span class="tok-num">0</span><span class="tok-op">,</span> <span class="tok-name">x</span><span class="tok-op">)</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-name">x</span>
+<span class="tok-name">origin</span><span class="tok-op">(</span><span class="tok-name">_</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-str">"none"</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">origin</span><span class="tok-op">(</span><span class="tok-op">(</span><span class="tok-num">0</span><span class="tok-op">,</span> <span class="tok-num">4</span><span class="tok-op">)</span><span class="tok-op">)</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">origin</span><span class="tok-op">(</span><span class="tok-op">(</span><span class="tok-num">1</span><span class="tok-op">,</span> <span class="tok-num">2</span><span class="tok-op">)</span><span class="tok-op">)</span><span class="tok-op">)</span></pre>
+<p class="label">出力</p>
+<pre class="out">&quot;small&quot;
+&quot;big&quot;
+&quot;small first&quot;
+&quot;positive&quot;
+&quot;zero&quot;
+&quot;negative&quot;
+&quot;same&quot;
+&quot;differ&quot;
+4
+&quot;none&quot;</pre>
+</div>
+<ul>
+<li>ガード付きの関数に <code>x...</code> を書くと、実行前にメッセージを出して止まります。</li>
+<li>値がガード付きの関数なら、ガードが偽でも <code>f(p, ...) = body</code> で足した関数は呼ばれません。変数で渡したガード付きの関数に <code>| g</code> をつないでも、<code>g</code> は呼ばれないのと同じです。</li>
+</ul>
+<div class="example">
+<p class="file">e_fn_guard_chain.pk</p>
+<pre class="pk"><span class="tok-kw">fun</span> <span class="tok-name">f</span>
+<span class="tok-name">f</span> <span class="tok-op">=</span> <span class="tok-op">(</span><span class="tok-name">n</span><span class="tok-op">)</span> <span class="tok-kw">if</span> <span class="tok-name">n</span> <span class="tok-op">&gt;</span> <span class="tok-num">0</span> <span class="tok-op">-&gt;</span> <span class="tok-str">"positive"</span>
+<span class="tok-name">f</span><span class="tok-op">(</span><span class="tok-name">n</span><span class="tok-op">)</span> <span class="tok-op">=</span> <span class="tok-str">"other"</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">f</span><span class="tok-op">(</span><span class="tok-num">5</span><span class="tok-op">)</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">f</span><span class="tok-op">(</span><span class="tok-num">-1</span><span class="tok-op">)</span><span class="tok-op">)</span></pre>
+<p class="label">出力</p>
+<pre class="out">&quot;positive&quot;
+matching failed: &lt;lambda:(_TypeOf{_, nomatch})&gt; &lt;-&gt; (-1)</pre>
+</div>
+
+<h3 id="def-arms">定義の続き</h3>
+<ul>
+<li>同じ場所に続けて書いた <code>f(0) := ...</code> の定義は、書いた順に試す1つの関数です。</li>
+<li><code>f(p, ...) if cond := body</code> は、引数が合って <code>cond</code> が真のときだけ <code>body</code> を返します。偽のときと合わないときは、続けて書いた次の定義を試します（間に別の式があると続きません）。</li>
+<li><code>export</code> を付けた定義と <code>f(p, ...) = body</code> にはガードを付けられません。</li>
+</ul>
+
+<h3 id="compound">複合代入と組の分割</h3>
+<p><code>x += e</code> は <code>x = x + e</code> と同じで、<code>-=</code>・<code>*=</code>・<code>/=</code>・<code>%=</code> も同じ形です。<code>a[i] += e</code> は <code>a</code> と <code>i</code> を1回だけ評価します。左辺は変数か <code>a[i]</code> で、<code>t.f += e</code> は書けません。</p>
+<div class="example">
+<p class="file">t1_compound.pk</p>
+<pre class="pk"><span class="tok-com"># x += e is x = x + e. The same goes for -=, *=, /= and %=.</span>
+
+<span class="tok-name">x</span> <span class="tok-op">:=</span> <span class="tok-num">10</span>
+<span class="tok-name">x</span> <span class="tok-op">+=</span> <span class="tok-num">5</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">x</span><span class="tok-op">)</span>
+<span class="tok-name">x</span> <span class="tok-op">-=</span> <span class="tok-num">3</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">x</span><span class="tok-op">)</span>
+<span class="tok-name">x</span> <span class="tok-op">*=</span> <span class="tok-num">2</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">x</span><span class="tok-op">)</span>
+<span class="tok-name">x</span> <span class="tok-op">/=</span> <span class="tok-num">4</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">x</span><span class="tok-op">)</span>
+<span class="tok-name">x</span> <span class="tok-op">%=</span> <span class="tok-num">4</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">x</span><span class="tok-op">)</span>
+
+<span class="tok-com"># the element of an array</span>
+<span class="tok-name">a</span> <span class="tok-op">:=</span> <span class="tok-name">array</span><span class="tok-op">(</span><span class="tok-num">3</span><span class="tok-op">)</span>
+<span class="tok-name">a</span><span class="tok-op">[</span><span class="tok-num">0</span><span class="tok-op">]</span> <span class="tok-op">=</span> <span class="tok-num">1</span>
+<span class="tok-name">a</span><span class="tok-op">[</span><span class="tok-num">1</span><span class="tok-op">]</span> <span class="tok-op">=</span> <span class="tok-num">2</span>
+<span class="tok-name">a</span><span class="tok-op">[</span><span class="tok-num">2</span><span class="tok-op">]</span> <span class="tok-op">=</span> <span class="tok-num">3</span>
+<span class="tok-name">a</span><span class="tok-op">[</span><span class="tok-num">1</span><span class="tok-op">]</span> <span class="tok-op">*=</span> <span class="tok-num">10</span>
+<span class="tok-name">a</span><span class="tok-op">[</span><span class="tok-num">2</span><span class="tok-op">]</span> <span class="tok-op">+=</span> <span class="tok-name">a</span><span class="tok-op">[</span><span class="tok-num">1</span><span class="tok-op">]</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">a</span><span class="tok-op">[</span><span class="tok-num">0</span><span class="tok-op">]</span><span class="tok-op">,</span> <span class="tok-name">a</span><span class="tok-op">[</span><span class="tok-num">1</span><span class="tok-op">]</span><span class="tok-op">,</span> <span class="tok-name">a</span><span class="tok-op">[</span><span class="tok-num">2</span><span class="tok-op">]</span><span class="tok-op">}</span><span class="tok-op">)</span>
+
+<span class="tok-com"># the index is evaluated once</span>
+<span class="tok-name">n</span> <span class="tok-op">:=</span> <span class="tok-num">0</span>
+<span class="tok-name">next</span><span class="tok-op">(</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-op">{</span>
+    <span class="tok-name">n</span> <span class="tok-op">+=</span> <span class="tok-num">1</span>
+    <span class="tok-name">n</span> <span class="tok-op">-</span> <span class="tok-num">1</span>
+<span class="tok-op">}</span>
+<span class="tok-name">a</span><span class="tok-op">[</span><span class="tok-name">next</span><span class="tok-op">(</span><span class="tok-op">)</span><span class="tok-op">]</span> <span class="tok-op">+=</span> <span class="tok-num">100</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">a</span><span class="tok-op">[</span><span class="tok-num">0</span><span class="tok-op">]</span><span class="tok-op">,</span> <span class="tok-name">a</span><span class="tok-op">[</span><span class="tok-num">1</span><span class="tok-op">]</span><span class="tok-op">,</span> <span class="tok-name">n</span><span class="tok-op">}</span><span class="tok-op">)</span>
+
+<span class="tok-com"># in a loop</span>
+<span class="tok-name">sum</span> <span class="tok-op">:=</span> <span class="tok-num">0</span>
+<span class="tok-name">i</span> <span class="tok-op">:=</span> <span class="tok-num">1</span>
+<span class="tok-kw">while</span> <span class="tok-op">(</span><span class="tok-name">i</span> <span class="tok-op">&lt;=</span> <span class="tok-num">10</span><span class="tok-op">)</span> <span class="tok-op">{</span>
+    <span class="tok-name">sum</span> <span class="tok-op">+=</span> <span class="tok-name">i</span>
+    <span class="tok-name">i</span> <span class="tok-op">+=</span> <span class="tok-num">1</span>
+<span class="tok-op">}</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">sum</span><span class="tok-op">)</span></pre>
+<p class="label">出力</p>
+<pre class="out">15
+12
+24
+6
+2
+Tuple{1, 20, 23}
+Tuple{101, 20, 1}
+55</pre>
+</div>
+
+<h4 id="destructure">組の分割</h4>
+<p><code>(a, b) := e</code> は組 <code>e</code> の要素で変数を定義し、<code>(a, b) = e</code> は定義済みの変数に代入します。右辺を先にすべて評価するので、<code>(a, b) = (b, a)</code> は入れ替えです。</p>
+<div class="example">
+<p class="file">t1_destructure.pk</p>
+<pre class="pk"><span class="tok-com"># (a, b) := e defines several variables from the elements of a tuple</span>
+
+<span class="tok-op">(</span><span class="tok-name">a</span><span class="tok-op">,</span> <span class="tok-name">b</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-op">(</span><span class="tok-num">1</span><span class="tok-op">,</span> <span class="tok-num">2</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">a</span> <span class="tok-op">+</span> <span class="tok-name">b</span><span class="tok-op">)</span>
+
+<span class="tok-com"># swap</span>
+<span class="tok-op">(</span><span class="tok-name">a</span><span class="tok-op">,</span> <span class="tok-name">b</span><span class="tok-op">)</span> <span class="tok-op">=</span> <span class="tok-op">(</span><span class="tok-name">b</span><span class="tok-op">,</span> <span class="tok-name">a</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">a</span><span class="tok-op">,</span> <span class="tok-name">b</span><span class="tok-op">}</span><span class="tok-op">)</span>
+
+<span class="tok-com"># a function that returns two values</span>
+<span class="tok-name">divmod</span><span class="tok-op">(</span><span class="tok-name">x</span><span class="tok-op">,</span> <span class="tok-name">y</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-op">(</span><span class="tok-name">x</span> <span class="tok-op">/</span> <span class="tok-name">y</span><span class="tok-op">,</span> <span class="tok-name">x</span> <span class="tok-op">%</span> <span class="tok-name">y</span><span class="tok-op">)</span>
+<span class="tok-op">(</span><span class="tok-name">q</span><span class="tok-op">,</span> <span class="tok-name">r</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-name">divmod</span><span class="tok-op">(</span><span class="tok-num">17</span><span class="tok-op">,</span> <span class="tok-num">5</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">q</span><span class="tok-op">,</span> <span class="tok-name">r</span><span class="tok-op">}</span><span class="tok-op">)</span>
+
+<span class="tok-com"># in a function and in a loop</span>
+<span class="tok-name">fib</span><span class="tok-op">(</span><span class="tok-name">n</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-op">{</span>
+    <span class="tok-op">(</span><span class="tok-name">x</span><span class="tok-op">,</span> <span class="tok-name">y</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-op">(</span><span class="tok-num">0</span><span class="tok-op">,</span> <span class="tok-num">1</span><span class="tok-op">)</span>
+    <span class="tok-name">i</span> <span class="tok-op">:=</span> <span class="tok-num">0</span>
+    <span class="tok-kw">while</span> <span class="tok-op">(</span><span class="tok-name">i</span> <span class="tok-op">&lt;</span> <span class="tok-name">n</span><span class="tok-op">)</span> <span class="tok-op">{</span>
+        <span class="tok-op">(</span><span class="tok-name">x</span><span class="tok-op">,</span> <span class="tok-name">y</span><span class="tok-op">)</span> <span class="tok-op">=</span> <span class="tok-op">(</span><span class="tok-name">y</span><span class="tok-op">,</span> <span class="tok-name">x</span> <span class="tok-op">+</span> <span class="tok-name">y</span><span class="tok-op">)</span>
+        <span class="tok-name">i</span> <span class="tok-op">=</span> <span class="tok-name">i</span> <span class="tok-op">+</span> <span class="tok-num">1</span>
+    <span class="tok-op">}</span>
+    <span class="tok-name">x</span>
+<span class="tok-op">}</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">fib</span><span class="tok-op">(</span><span class="tok-num">10</span><span class="tok-op">)</span><span class="tok-op">)</span></pre>
+<p class="label">出力</p>
+<pre class="out">3
+Tuple{2, 1}
+Tuple{3, 2}
+55</pre>
+</div>
+<p>要素の数が名前の数と違う組と、組でない値はエラーです。</p>
+<div class="example">
+<p class="file">e_bd_destructure_size.pk</p>
+<pre class="pk"><span class="tok-op">(</span><span class="tok-name">a</span><span class="tok-op">,</span> <span class="tok-name">b</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-op">(</span><span class="tok-num">1</span><span class="tok-op">,</span> <span class="tok-num">2</span><span class="tok-op">,</span> <span class="tok-num">3</span><span class="tok-op">)</span></pre>
+<p class="label">出力</p>
+<pre class="out">cannot assign Tuple{1, 2, 3} to 2 names</pre>
+</div>
+<div class="example">
+<p class="file">e_bd_destructure_atom.pk</p>
+<pre class="pk"><span class="tok-op">(</span><span class="tok-name">a</span><span class="tok-op">,</span> <span class="tok-name">b</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-num">5</span></pre>
+<p class="label">出力</p>
+<pre class="out">cannot assign 5 to 2 names</pre>
+</div>
+
+<h3 id="record">record と with</h3>
+<p><code>.</code> は左の式に空白なしで続けます。<code>with</code> の欄は左から順に替わり、右辺は元の <code>t</code> の欄を参照できます。<code>with { ... }</code> は続けて書けます。</p>
+<div class="example">
+<p class="file">sx_with.pk</p>
+<pre class="pk"><span class="tok-kw">record</span> <span class="tok-name">Point</span><span class="tok-op">(</span><span class="tok-name">x</span><span class="tok-op">,</span> <span class="tok-name">y</span><span class="tok-op">)</span>
+
+<span class="tok-name">p</span> <span class="tok-op">:=</span> <span class="tok-name">Point</span><span class="tok-op">{</span><span class="tok-num">1</span><span class="tok-op">,</span> <span class="tok-num">2</span><span class="tok-op">}</span>
+<span class="tok-name">q</span> <span class="tok-op">:=</span> <span class="tok-name">p</span> <span class="tok-kw">with</span> <span class="tok-op">{</span> <span class="tok-name">y</span> <span class="tok-op">=</span> <span class="tok-num">5</span> <span class="tok-op">}</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">p</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">q</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">p</span> <span class="tok-kw">with</span> <span class="tok-op">{</span> <span class="tok-name">x</span> <span class="tok-op">=</span> <span class="tok-name">p</span><span class="tok-op">.</span><span class="tok-name">y</span><span class="tok-op">,</span> <span class="tok-name">y</span> <span class="tok-op">=</span> <span class="tok-name">p</span><span class="tok-op">.</span><span class="tok-name">x</span> <span class="tok-op">}</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">p</span> <span class="tok-kw">with</span> <span class="tok-op">{</span> <span class="tok-name">x</span> <span class="tok-op">=</span> <span class="tok-num">7</span> <span class="tok-op">}</span> <span class="tok-kw">with</span> <span class="tok-op">{</span> <span class="tok-name">y</span> <span class="tok-op">=</span> <span class="tok-num">8</span> <span class="tok-op">}</span><span class="tok-op">)</span></pre>
+<p class="label">出力</p>
+<pre class="out">Point{1, 2}
+Point{1, 5}
+Point{2, 1}
+Point{7, 8}</pre>
+</div>
+
+<h3 id="loop">for と return・break・continue</h3>
+<p><code>return e</code> は含む関数の呼び出しを値 <code>e</code> で終え（<code>e</code> がなければ <code>none</code>）、<code>break</code> は最も内側の <code>while</code> か <code>for</code> を終え、<code>continue</code> は次の回に進めます。</p>
+<div class="example">
+<p class="file">bd_loop.pk</p>
+<pre class="pk"><span class="tok-name">first_even</span><span class="tok-op">(</span><span class="tok-name">xs</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-op">{</span>
+    <span class="tok-kw">for</span> <span class="tok-op">(</span><span class="tok-name">x</span> <span class="tok-kw">in</span> <span class="tok-name">xs</span><span class="tok-op">)</span> <span class="tok-op">{</span>
+        <span class="tok-kw">if</span> <span class="tok-op">(</span><span class="tok-name">x</span> <span class="tok-op">%</span> <span class="tok-num">2</span> <span class="tok-op">==</span> <span class="tok-num">0</span><span class="tok-op">)</span> <span class="tok-kw">return</span> <span class="tok-name">x</span>
+    <span class="tok-op">}</span>
+    <span class="tok-name">none</span>
+<span class="tok-op">}</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">first_even</span><span class="tok-op">(</span><span class="tok-op">[</span><span class="tok-num">3</span><span class="tok-op">,</span> <span class="tok-num">5</span><span class="tok-op">,</span> <span class="tok-num">6</span><span class="tok-op">,</span> <span class="tok-num">8</span><span class="tok-op">]</span><span class="tok-op">)</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">first_even</span><span class="tok-op">(</span><span class="tok-op">[</span><span class="tok-num">3</span><span class="tok-op">,</span> <span class="tok-num">5</span><span class="tok-op">]</span><span class="tok-op">)</span><span class="tok-op">)</span>
+
+<span class="tok-kw">for</span> <span class="tok-op">(</span><span class="tok-name">i</span> <span class="tok-kw">in</span> <span class="tok-op">[</span><span class="tok-num">1</span><span class="tok-op">,</span> <span class="tok-num">2</span><span class="tok-op">,</span> <span class="tok-num">3</span><span class="tok-op">,</span> <span class="tok-num">4</span><span class="tok-op">,</span> <span class="tok-num">5</span><span class="tok-op">,</span> <span class="tok-num">6</span><span class="tok-op">]</span><span class="tok-op">)</span> <span class="tok-op">{</span>
+    <span class="tok-kw">if</span> <span class="tok-op">(</span><span class="tok-name">i</span> <span class="tok-op">%</span> <span class="tok-num">2</span> <span class="tok-op">==</span> <span class="tok-num">1</span><span class="tok-op">)</span> <span class="tok-kw">continue</span>
+    <span class="tok-kw">if</span> <span class="tok-op">(</span><span class="tok-name">i</span> <span class="tok-op">==</span> <span class="tok-num">6</span><span class="tok-op">)</span> <span class="tok-kw">break</span>
+    <span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">i</span><span class="tok-op">)</span>
+<span class="tok-op">}</span></pre>
+<p class="label">出力</p>
+<pre class="out">6
+none
+2
+4</pre>
+</div>
+<ul>
+<li><code>e</code> は <code>return</code> と同じ行で始めます。</li>
+<li><code>for</code> の本体や <code>match</code> の腕の中の <code>return</code> は、それらを囲む関数を終えます。中に書いた関数の中の <code>return</code> は、その関数を終えます。</li>
+<li>ループの外の <code>continue</code> は <code>unhandled effect: Continue{}</code> で止まります。</li>
+</ul>
+<div class="example">
+<p class="file">e_bd_continue_outside.pk</p>
+<pre class="pk"><span class="tok-kw">continue</span></pre>
+<p class="label">出力</p>
+<pre class="out">unhandled effect: Continue{}</pre>
+</div>
+
+<h3 id="match">match</h3>
+<p><code>match e { f }</code> は <code>e</code> を1回だけ評価し、その値を引数に関数 <code>f</code> を呼びます。<code>f</code> はふつう1引数の関数を <code>|</code> でつないだもので、各関数が腕です。<code>e</code> に合うパターンを持つ最初の腕が選ばれ、どれにも合わなければ <code>MatchingFailed</code> を <code>Perform</code> します。<code>|</code> は行頭に書けます。</p>
+<div class="example">
+<p class="file">bd_match.pk</p>
+<pre class="pk"><span class="tok-name">sign</span><span class="tok-op">(</span><span class="tok-name">n</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-kw">match</span> <span class="tok-name">n</span> <span class="tok-op">{</span>
+    <span class="tok-op">(</span><span class="tok-name">x</span><span class="tok-op">)</span> <span class="tok-kw">if</span> <span class="tok-name">x</span> <span class="tok-op">&gt;</span> <span class="tok-num">0</span> <span class="tok-op">-&gt;</span> <span class="tok-str">"positive"</span>
+  <span class="tok-op">|</span> <span class="tok-op">(</span><span class="tok-num">0</span><span class="tok-op">)</span> <span class="tok-op">-&gt;</span> <span class="tok-str">"zero"</span>
+  <span class="tok-op">|</span> <span class="tok-op">(</span><span class="tok-name">_</span><span class="tok-op">)</span> <span class="tok-op">-&gt;</span> <span class="tok-str">"negative"</span>
+<span class="tok-op">}</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">sign</span><span class="tok-op">(</span><span class="tok-num">5</span><span class="tok-op">)</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">sign</span><span class="tok-op">(</span><span class="tok-num">0</span><span class="tok-op">)</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">sign</span><span class="tok-op">(</span><span class="tok-num">-3</span><span class="tok-op">)</span><span class="tok-op">)</span>
+<span class="tok-name">swap</span><span class="tok-op">(</span><span class="tok-name">p</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-kw">match</span> <span class="tok-name">p</span> <span class="tok-op">{</span>
+    <span class="tok-op">(</span><span class="tok-op">(</span><span class="tok-name">a</span><span class="tok-op">,</span> <span class="tok-name">b</span><span class="tok-op">)</span><span class="tok-op">)</span> <span class="tok-op">-&gt;</span> <span class="tok-op">(</span><span class="tok-name">b</span><span class="tok-op">,</span> <span class="tok-name">a</span><span class="tok-op">)</span>
+<span class="tok-op">}</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">swap</span><span class="tok-op">(</span><span class="tok-op">(</span><span class="tok-num">1</span><span class="tok-op">,</span> <span class="tok-num">2</span><span class="tok-op">)</span><span class="tok-op">)</span><span class="tok-op">)</span></pre>
+<p class="label">出力</p>
+<pre class="out">&quot;positive&quot;
+&quot;zero&quot;
+&quot;negative&quot;
+Tuple{2, 1}</pre>
+</div>
+<ul>
+<li>腕の引数は1つです。組を取るのは <code>((a, b)) -&gt; x</code> です。</li>
+<li>ガード <code>(p, ...) if cond -&gt; body | g</code> の <code>cond</code> は、引数が合ったあとにその変数を使って評価されます。偽のとき、または引数が合わないときは、同じ引数で <code>g</code> を呼びます。<code>g</code> は、ソース上で <code>|</code> によってその関数の後ろにつないだ式です（括弧の中にあっても同じ）。</li>
+<li>ガードと <code>body</code> は <code>or</code> の階層までの式なので、無名関数は括弧で囲みます。</li>
+</ul>
+
+<h3 id="module">module</h3>
+<p><code>module m { body }</code> は、本体の定義を名前 <code>m</code> の下にまとめます。本体が返す値が module の値で、<code>export</code> を付けた定義が欄になります。欄にない名前を <code>.</code> で読むとエラーです。</p>
+<div class="example">
+<p class="file">bd_module.pk</p>
+<pre class="pk"><span class="tok-kw">module</span> <span class="tok-name">counter</span> <span class="tok-op">{</span>
+    <span class="tok-name">n</span> <span class="tok-op">:=</span> <span class="tok-num">0</span>
+    <span class="tok-kw">export</span> <span class="tok-name">start</span> <span class="tok-op">:=</span> <span class="tok-name">n</span>
+    <span class="tok-kw">export</span> <span class="tok-name">next</span><span class="tok-op">(</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-op">{</span>
+        <span class="tok-name">n</span> <span class="tok-op">=</span> <span class="tok-name">n</span> <span class="tok-op">+</span> <span class="tok-num">1</span>
+        <span class="tok-name">n</span>
+    <span class="tok-op">}</span>
+    <span class="tok-kw">export</span> <span class="tok-name">current</span><span class="tok-op">(</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-name">n</span>
+<span class="tok-op">}</span>
+<span class="tok-name">counter</span><span class="tok-op">.</span><span class="tok-name">next</span><span class="tok-op">(</span><span class="tok-op">)</span>
+<span class="tok-name">counter</span><span class="tok-op">.</span><span class="tok-name">next</span><span class="tok-op">(</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">counter</span><span class="tok-op">.</span><span class="tok-name">start</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">counter</span><span class="tok-op">.</span><span class="tok-name">current</span><span class="tok-op">(</span><span class="tok-op">)</span><span class="tok-op">)</span>
+
+<span class="tok-kw">module</span> <span class="tok-name">outer</span> <span class="tok-op">{</span>
+    <span class="tok-kw">module</span> <span class="tok-name">hidden</span> <span class="tok-op">{</span>
+        <span class="tok-kw">export</span> <span class="tok-name">f</span><span class="tok-op">(</span><span class="tok-name">x</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-name">x</span> <span class="tok-op">+</span> <span class="tok-num">1</span>
+    <span class="tok-op">}</span>
+    <span class="tok-kw">export</span> <span class="tok-kw">module</span> <span class="tok-name">inner</span> <span class="tok-op">{</span>
+        <span class="tok-kw">export</span> <span class="tok-name">g</span><span class="tok-op">(</span><span class="tok-name">x</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-name">hidden</span><span class="tok-op">.</span><span class="tok-name">f</span><span class="tok-op">(</span><span class="tok-name">x</span><span class="tok-op">)</span> <span class="tok-op">*</span> <span class="tok-num">2</span>
+    <span class="tok-op">}</span>
+<span class="tok-op">}</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">outer</span><span class="tok-op">.</span><span class="tok-name">inner</span><span class="tok-op">.</span><span class="tok-name">g</span><span class="tok-op">(</span><span class="tok-num">3</span><span class="tok-op">)</span><span class="tok-op">)</span></pre>
+<p class="label">出力</p>
+<pre class="out">0
+2
+8</pre>
+</div>
+<div class="example">
+<p class="file">e_bd_module_private.pk</p>
+<pre class="pk"><span class="tok-kw">module</span> <span class="tok-name">m</span> <span class="tok-op">{</span>
+    <span class="tok-name">helper</span><span class="tok-op">(</span><span class="tok-name">i</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-name">i</span> <span class="tok-op">/</span> <span class="tok-num">30</span>
+    <span class="tok-kw">export</span> <span class="tok-name">f</span><span class="tok-op">(</span><span class="tok-name">i</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-name">helper</span><span class="tok-op">(</span><span class="tok-name">i</span><span class="tok-op">)</span>
+<span class="tok-op">}</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">m</span><span class="tok-op">.</span><span class="tok-name">f</span><span class="tok-op">(</span><span class="tok-num">65</span><span class="tok-op">)</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">m</span><span class="tok-op">.</span><span class="tok-name">helper</span><span class="tok-op">(</span><span class="tok-num">65</span><span class="tok-op">)</span><span class="tok-op">)</span></pre>
+<p class="label">出力</p>
+<pre class="out">2
+no field helper in Module{}</pre>
+</div>
+<ul>
+<li>本体の変数の範囲は引数のない関数の本体と同じです。あとで定義するものを前から呼ぶには <code>fun f</code> と <code>f(p, ...) = body</code> を使います（<a href="functions.html#mutual-recursion">相互再帰</a>）。</li>
+<li>本体の定義は本体の変数で、大域変数になりません。外から書き換えられず、外に同じ名前があっても隠しません。外から場合を足せるようにするには、足す関数を <code>export</code> します（<code>m.f(p, ...) = body</code> は書けません）。</li>
+<li><code>m</code> は本体を評価したあとに定義されるので、本体から <code>m</code> は見えません。</li>
+<li>本体の中で <code>parse</code> を差し替えても残りには反映されません。文法を差し替えるときは <code>module</code> の外に書きます。</li>
+</ul>
+
+<h4>export</h4>
+<ul>
+<li>書けるのは、module の本体の直下にある <code>f(p, ...) := body</code>・<code>x := e</code>・<code>module n { ... }</code> の前だけです。ほかは構文エラーです。</li>
+<li><code>export x := e</code> の欄は、本体が値を返した時点の <code>x</code> の値です。あとで代入しても変わらないので、今の値を見せるには <code>x</code> を読む関数を <code>export</code> します（上の <code>start</code> と <code>current</code>）。</li>
+<li>内側の <code>module n { ... }</code> は本体の変数 <code>n</code> を定義し、外からは見えません。外に見せるには <code>export module n { ... }</code> と書きます。内側の本体からは、外側の本体でそれより前に定義した変数が見えます。</li>
+</ul>
+
+<h4 id="test">test</h4>
+<p>module の本体の直下に <code>test { ... }</code> を書けます。ふだんは何も実行されません。<code>tools/test.pk &lt;ライブラリ&gt; ...</code> を実行すると、使うライブラリの <code>test</code> も含めて実行されます。</p>
+<pre>module bitset {
+    export new(n) := i32_array(n / 30 + 1)
+    helper(i) := i / 30
+    export add(s, i) := {
+        w := helper(i)
+        s[w] = bit_or(s[w], bit_shl(1, i % 30))
+    }
+    test {
+        assert(helper(65) == 2, &quot;helper&quot;)
+        s := new(100)
+        add(s, 3)
+        assert(s[0] == 8, &quot;add&quot;)
+    }
+}</pre>
+<ul>
+<li>変数の範囲は module の本体と同じで、<code>export</code> のない関数も呼べます。</li>
+<li><code>test</code> は本体の評価の途中で実行されるので、その前に定義した変数が見え、<code>m</code> はまだ定義されていません。</li>
+<li><code>assert(c, msg)</code> は <code>c</code> が真でなければ <code>msg</code> を書いてステータス 1 で止まります。</li>
+<li>1つのブロックに書ける式は 64 個までです。</li>
+</ul>
+
+<h3 id="import">import</h3>
+<p><code>import a::b</code> は <code>use("a/b")</code> と同じ読み込みで、同じファイルは1度だけ読まれます。最後の名前が、そのファイルが定義する <a href="#module">module</a> の名前です。取り込み方はパスのあとに続けます。<code>M</code> は <code>Apply{_import_module, Tuple{"a/b", Quote{b}}}</code> です。</p>
+<table>
+<tr><th>書き方</th><th>展開先</th></tr>
+<tr><td><code>import m</code></td><td class="wrap"><code>Do{M, none}</code></td></tr>
+<tr><td><code>import m as n</code></td><td class="wrap"><code>Do{Def{n, M}, none}</code></td></tr>
+<tr><td><code>import m (x, y)</code></td><td class="wrap"><code>Do{M, Def{x, Apply{_record_get, Tuple{M, Quote{x}}}}, Def{y, ...}, none}</code></td></tr>
+<tr><td><code>import m (*)</code></td><td class="wrap"><code>Do{M, Apply{eval, Tuple{Apply{_import_defs, Tuple{M, Quote{Tuple{}}}}}}, none}</code></td></tr>
+<tr><td><code>import m hiding (x, y)</code></td><td class="wrap"><code>Do{M, Apply{eval, Tuple{Apply{_import_defs, Tuple{M, Quote{Tuple{x, y}}}}}}, none}</code></td></tr>
+</table>
+<p><code>import m</code> は読み込むだけで、欄は <code>m.f</code> で読みます。<code>as n</code> は <code>n := m</code> を足します。<code>(x, y)</code> は指定した欄を、<code>(*)</code> はすべての欄を、<code>hiding (x, y)</code> は <code>x</code> と <code>y</code> 以外のすべての欄を、同じ名前の変数に定義します。</p>
+<div class="example">
+<p class="file">i_import.pk</p>
+<pre class="pk"><span class="tok-com"># import: the module of a library under the names that are chosen</span>
+
+<span class="tok-kw">import</span> <span class="tok-name">bitset</span> <span class="tok-kw">as</span> <span class="tok-name">bs</span>
+<span class="tok-name">s</span> <span class="tok-op">:=</span> <span class="tok-name">bs</span><span class="tok-op">.</span><span class="tok-name">new</span><span class="tok-op">(</span><span class="tok-num">100</span><span class="tok-op">)</span>
+<span class="tok-name">bs</span><span class="tok-op">.</span><span class="tok-name">add</span><span class="tok-op">(</span><span class="tok-name">s</span><span class="tok-op">,</span> <span class="tok-num">3</span><span class="tok-op">)</span>
+<span class="tok-name">bs</span><span class="tok-op">.</span><span class="tok-name">add</span><span class="tok-op">(</span><span class="tok-name">s</span><span class="tok-op">,</span> <span class="tok-num">42</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">bs</span><span class="tok-op">.</span><span class="tok-name">to_list</span><span class="tok-op">(</span><span class="tok-name">s</span><span class="tok-op">)</span><span class="tok-op">)</span>
+
+<span class="tok-com"># only the listed fields are defined</span>
+<span class="tok-kw">import</span> <span class="tok-name">bitset</span> <span class="tok-op">(</span><span class="tok-name">has</span><span class="tok-op">,</span> <span class="tok-name">count</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">has</span><span class="tok-op">(</span><span class="tok-name">s</span><span class="tok-op">,</span> <span class="tok-num">42</span><span class="tok-op">)</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">count</span><span class="tok-op">(</span><span class="tok-name">s</span><span class="tok-op">)</span><span class="tok-op">)</span>
+
+<span class="tok-com"># all the fields but the hidden ones</span>
+<span class="tok-kw">import</span> <span class="tok-name">bitset</span> <span class="tok-kw">hiding</span> <span class="tok-op">(</span><span class="tok-name">new</span><span class="tok-op">,</span> <span class="tok-name">add</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">to_list</span><span class="tok-op">(</span><span class="tok-name">s</span><span class="tok-op">)</span><span class="tok-op">)</span></pre>
+<p class="label">出力</p>
+<pre class="out">Cons{3, Cons{42, Nil{}}}
+true
+2
+Cons{3, Cons{42, Nil{}}}</pre>
+</div>
+<ul>
+<li><code>as n</code> は <code>(x, y)</code>・<code>(*)</code>・<code>hiding (...)</code> の前に置けます。<code>as</code>・<code>(...)</code>・<code>hiding</code> は <code>m</code> と同じ行に書きます。</li>
+<li><code>m</code> にない欄を <code>(x, y)</code> に書くと、<code>.</code> で読むときと同じエラーです。</li>
+<li>関数の中に書くと、<code>(*)</code> と <code>hiding</code> は大域変数を、<code>(x, y)</code> と <code>as</code> は局所変数を定義します。</li>
+</ul>
 
 <h2 id="index">添字と置き換え</h2>
 <p><code>a[i]</code> は <code>_index_get(a, i)</code>、<code>a[i] = e</code> は <code>_index_set(a, i, e)</code> を呼び、値は <code>e</code> です。<code>[</code> は <code>a</code> に空白なしで続けます。</p>
@@ -282,17 +666,6 @@ none</pre>
 
 <h2 id="names">糖衣が呼ぶ名前</h2>
 <p>読み替え先の関数は名前が <code>_</code> で始まります。プログラムで <code>add</code> を定義しても <code>a + b</code> は変わりません。演算子を関数として渡すには無名関数を使います（<code>sort((a, b) -&gt; a &lt; b, xs)</code>）。</p>
-<table>
-<tr><th>糖衣</th><th>呼ぶ関数</th></tr>
-<tr><td>演算子</td><td><code>_add</code> <code>_sub</code> <code>_mul</code> <code>_div</code> <code>_quo</code> <code>_mod</code> <code>_lt</code> <code>_le</code> <code>_gt</code> <code>_ge</code> <code>_eq</code> <code>_ne</code> <code>_is</code> <code>_not</code></td></tr>
-<tr><td>float のリテラル</td><td><code>_float</code></td></tr>
-<tr><td>値を埋め込んだ文字列</td><td><code>_strcat</code> <code>_to_text</code></td></tr>
-<tr><td><code>t.f</code>・<code>record</code>・<code>with</code></td><td><code>_record_get</code> <code>_record_declare</code> <code>_record_with</code></td></tr>
-<tr><td><code>import</code></td><td><code>_import_module</code> <code>_import_defs</code></td></tr>
-<tr><td><code>(a, b) := e</code></td><td><code>_destructure</code></td></tr>
-<tr><td><code>::=</code></td><td><code>_define_rule</code></td></tr>
-<tr><td><code>a[i]</code>・<code>a[i] = e</code></td><td><code>_index_get</code> <code>_index_set</code></td></tr>
-</table>
 
 <h2 id="extend">文法の拡張</h2>
 <p><code>::=</code> で文法の規則を定義します。planck の構文も同じ規則で定義されているので、規則を足すと、後に続く式の構文を拡張できます。</p>

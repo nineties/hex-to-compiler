@@ -3,11 +3,10 @@
 <p class="lead">値は M式か atom のどちらかです。</p>
 
 <h2 id="mexpr">M式</h2>
-<p>M式は <code>Head{a, b, ...}</code> と書く値で、head（symbol）と引数の列を持ちます。</p>
+<p>M式は <code>Head{a, b, ...}</code> と書く値で、head（symbol）と引数の列を持ちます。組は <code>Tuple</code>、リストは <code>Cons</code> と <code>Nil</code> を head とします。</p>
 <!--ex dm_mexpr-->
 <ul>
 <li>型は <code>Expr</code> で、immutable です。</li>
-<li>糖衣：<code>(a, b)</code> は <code>Tuple</code>、<code>[a, b]</code> と <code>::</code> は <code>Cons</code>、<code>[]</code> は <code>Nil</code> です。</li>
 <li>引数の数に限度はありません。mutable な値と NaN は引数に入れられず、作るときに実行時エラーです。</li>
 <li><code>head(x)</code> は M式だけに使えます。</li>
 </ul>
@@ -18,36 +17,35 @@
 <table>
 <tr><th>型</th><th><code>type</code></th><th>リテラル</th><th>mutable か</th><th>備考</th></tr>
 <tr><td>整数</td><td><code>Int</code></td><td><code>42</code> <code>0x1f</code> <code>0b101</code></td><td>immutable</td><td>多倍長</td></tr>
-<tr><td>float</td><td><code>Float</code></td><td><code>1.5</code> <code>2.5e-3</code></td><td>immutable</td><td>IEEE 754 binary64</td></tr>
+<tr><td>float</td><td><code>Float</code></td><td><code>Apply{_float, Tuple{"1.5"}}</code></td><td>immutable</td><td>IEEE 754 binary64。引数は <code>"2.5e-3"</code> のような字面</td></tr>
 <tr><td>complex</td><td><code>Complex</code></td><td><code>2i</code></td><td>immutable</td><td><code>complex(re, im)</code> でも作る</td></tr>
-<tr><td>文字列</td><td><code>String</code></td><td><code>"abc"</code></td><td>immutable</td><td>0 のバイトを含むバイト列、65535バイトまで。<code>s[i]</code> は長さ1の文字列</td></tr>
-<tr><td>symbol</td><td><code>Symbol</code></td><td><code>x</code></td><td>immutable</td><td>名前は英字・<code>_</code>・<code>%</code> で始まる</td></tr>
-<tr><td>function</td><td><code>Function</code></td><td><code>(p) -&gt; e</code> <code>f | g</code></td><td>immutable</td><td>Lambda・Fusion・組み込み関数・継続</td></tr>
+<tr><td>文字列</td><td><code>String</code></td><td><code>"abc"</code></td><td>immutable</td><td>0 のバイトを含むバイト列、65535バイトまで</td></tr>
+<tr><td>symbol</td><td><code>Symbol</code></td><td><code>Quote{x}</code></td><td>immutable</td><td>名前は英字・<code>_</code>・<code>%</code> で始まる</td></tr>
+<tr><td>function</td><td><code>Function</code></td><td><code>Lambda{Tuple{p}, body}</code> <code>Fusion{f, g}</code></td><td>immutable</td><td>Lambda・Fusion・組み込み関数・継続</td></tr>
 <tr><td>array</td><td><code>Array</code></td><td>—</td><td>mutable</td><td>固定長。<code>array(n)</code> の要素は初め <code>none</code></td></tr>
-<tr><td>plain array</td><td><code>Plain</code></td><td>—</td><td>mutable</td><td>要素の型は <code>'bool</code>・<code>'i8</code> から <code>'u64</code>・<code>'f16</code> から <code>'f64</code>・<code>'c64</code>・<code>'c128</code> の1つ</td></tr>
+<tr><td>plain array</td><td><code>Plain</code></td><td>—</td><td>mutable</td><td>要素の型は symbol の <code>bool</code>・<code>i8</code> から <code>u64</code>・<code>f16</code> から <code>f64</code>・<code>c64</code>・<code>c128</code> の1つ</td></tr>
 <tr><td>型の値</td><td><code>Type</code></td><td>—</td><td>immutable</td><td></td></tr>
 <tr><td>ユーザーデータ</td><td>その型の型の値</td><td>—</td><td>作るときに指定</td><td></td></tr>
 </table>
-<p>型は値（型の値）で、<code>type(x)</code> が返します。<code>type(1)</code> は <code>Int</code>、<code>type(Int)</code> は <code>Type</code> です。<code>x @ T</code> は <code>type(x)</code> が <code>T</code> かを調べ、<code>x @ Expr</code> は M式すべてに合います。</p>
+<p>型は値（型の値）で、<code>type(x)</code> が返します。<code>type(1)</code> は <code>Int</code>、<code>type(Int)</code> は <code>Type</code> です。</p>
 <!--ex dm_array-->
 <!--ex e_dm_array_range-->
-<p>array と plain array は <code>a[i] = e</code> で書き換えます。範囲外と、plain array に入らない値はエラーです。</p>
+<p>array と plain array は <code>array_set</code>・<code>plain_set</code> で書き換えます。範囲外と、plain array に入らない値はエラーです。</p>
 
 <h2 id="equality">equality</h2>
-<p><code>a == b</code> は値として等しい（equal）かを調べます。</p>
+<p><code>_eq(a, b)</code> は値として等しい（equal）かを調べます。</p>
 <ul>
-<li>整数・float・complex は、型が違っても値が同じなら equal です（<code>1 == 1.0</code>）。NaN はどの値とも equal ではありません。</li>
+<li>整数・float・complex は、型が違っても値が同じなら equal です。NaN はどの値とも equal ではありません。</li>
 <li>M式は head と引数が equal なら equal です。</li>
 <li>array と plain array は、identical なら equal で、そうでなければ要素ごとに比べます。</li>
-<li>同じ名前を2回書いたパターン <code>f(a, a)</code> は、2つの値が equal なときだけ合います。</li>
 <li><code>hash(x)</code> は 0 以上の整数で、equal な値は同じ値です。</li>
 </ul>
 
-<h2 id="identity">identity と <code>is</code></h2>
-<p><code>a is b</code> は同じ物（identical）なら true です。identical な値は必ず equal で、型が違う値は identical ではありません（<code>1 == 1.0</code> は true、<code>1 is 1.0</code> は false）。否定は <code>is not</code> です。優先順位は <code>==</code> と同じで、結合せず、パターンには書けません。</p>
-<p>intern は、equal な値を1つの object にまとめることです。intern する型では equal な値が identical で、<code>is</code> は O(1) です（多倍長整数を除く）。</p>
+<h2 id="identity">identity</h2>
+<p><code>_is(a, b)</code> は同じ物（identical）なら true です。identical な値は必ず equal です。型が違う値は identical ではなく、整数 1 と float 1.0 は equal でも identical ではありません。</p>
+<p>intern は、equal な値を1つの object にまとめることです。intern する型では equal な値が identical で、<code>_is</code> は O(1) です（多倍長整数を除く）。</p>
 <table>
-<tr><th>型</th><th><code>==</code></th><th><code>is</code></th><th>table の key</th></tr>
+<tr><th>型</th><th><code>_eq</code></th><th><code>_is</code></th><th>table の key</th></tr>
 <tr><td>整数</td><td>値</td><td>値</td><td>可</td></tr>
 <tr><td>float</td><td>値</td><td>object</td><td>NaN 以外は可</td></tr>
 <tr><td>complex</td><td>値</td><td>—</td><td>可</td></tr>
@@ -58,16 +56,16 @@
 <tr><td>plain array</td><td>identical なら true、そうでなければ要素ごと</td><td>object</td><td>不可</td></tr>
 <tr><td>型の値</td><td>identity</td><td>—</td><td>可</td></tr>
 <tr><td>M式</td><td>head と引数</td><td>intern</td><td>可</td></tr>
-<tr><td>ユーザーデータ</td><td>identity。<code>==</code> を渡したときはその関数</td><td>immutable は intern、mutable は object。<code>==</code> を渡したときは object</td><td>可</td></tr>
+<tr><td>ユーザーデータ</td><td>identity。equal の関数を渡したときはその関数</td><td>immutable は intern、mutable は object。equal の関数を渡したときは object</td><td>可</td></tr>
 </table>
-<p>table（<code>table_get</code>・<code>table_set</code>・<code>t[key]</code>）は、key が identical か equal なら同じ key とします。</p>
+<p>table（<code>table_get</code>・<code>table_set</code>）は、key が identical か equal なら同じ key とします。</p>
 
 <h2 id="userdata">ユーザーデータ</h2>
 <ul>
 <li>組み込み関数で作り、immutable か mutable かを必ず指定します。</li>
 <li>immutable なユーザーデータは mutable な値を中身に持てず、作るときに実行時エラーです。</li>
-<li>型は作るたびに別の値です。名前は表示にしか使わず、同じ名前の型は <code>is</code> で区別します。</li>
-<li>作るときに <code>==</code> と hash の関数をまとめて渡せます。<code>a is b</code> なら <code>a == b</code>、equal なら hash が同じであることは、作る人が守ります。</li>
+<li>型は作るたびに別の値です。名前は表示にしか使わず、同じ名前の型は <code>_is</code> で区別します。</li>
+<li>作るときに equal と hash の関数をまとめて渡せます。<code>_is(a, b)</code> なら <code>_eq(a, b)</code>、equal なら hash が同じであることは、作る人が守ります。</li>
 <li>渡さない型の hash は、immutable なら中身、mutable なら object で決まります。</li>
 </ul>
 
@@ -75,20 +73,19 @@
 <p>型が混ざる演算は、高い型に揃えます。</p>
 <!--ex dm_int-->
 <ul>
-<li><code>_div</code> は0方向へ切り捨て、<code>_quo</code>（<code>//</code>）は負の無限大方向へ丸めます。<code>_mod(a, b)</code> は <code>a - b * (a // b)</code> で、符号は除数と同じです。</li>
+<li><code>_div</code> は0方向へ切り捨て、<code>_quo</code> は負の無限大方向へ丸めます。<code>_mod(a, b)</code> は <code>_sub(a, _mul(b, _quo(a, b)))</code> で、符号は除数と同じです。</li>
 <li>除数が0なら実行時エラーです。float か complex を含む <code>_div</code> は無限大か NaN（complex は成分ごと）になります。</li>
 <li><code>_lt</code> <code>_le</code> <code>_gt</code> <code>_ge</code> は整数と float を数学的な値で比べます。NaN があれば <code>false</code>、complex は実行時エラーです。</li>
 <li>整数を float に揃えると最も近い float になり、範囲外は実行時エラーです。</li>
 </ul>
 
 <h2>リテラル</h2>
-<p><code>true</code>・<code>false</code>・<code>none</code> は同じ名前の symbol を値とするリテラルで、変数ではありません。トップレベルの文字列はコメントです。</p>
+<p><code>true</code>・<code>false</code>・<code>none</code> は同じ名前の symbol を値とするリテラルで、変数ではありません。</p>
 
 <h2 id="record">record</h2>
-<p><code>record T(f, g, ...)</code> は <code>T{a, b, ...}</code> の引数に欄の名前を付けます。<code>t.f</code> は <code>f</code> の位置の引数で、<code>.</code> は左の式に空白なしで続けます。<code>t with { f = e }</code> は欄を替えた新しい値です。</p>
+<p><code>_record_declare(Quote{T}, Quote{Tuple{f, g, ...}})</code> は、<code>T{a, b, ...}</code> の引数に欄の名前を付けます。<code>_record_get(t, Quote{f})</code> は <code>f</code> の位置の引数で、<code>_record_with(t, Quote{f}, e)</code> は欄を替えた新しい値です。</p>
 <!--ex t1_with-->
 <ul>
 <li>head が違えば同じ名前の欄を持てます。同じ <code>T</code> を宣言し直すと名前が置き換わります。</li>
-<li>宣言のない head や、欄がない値に <code>.f</code> を使うと、メッセージを出して止まります。</li>
-<li><code>with</code> の欄は左から順に替わり、右辺は元の <code>t</code> の欄を参照できます。<code>with { ... }</code> は続けて書けます。</li>
+<li>宣言のない head や、欄がない値に <code>_record_get</code> を使うと、メッセージを出して止まります。</li>
 </ul>
