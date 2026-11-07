@@ -6,12 +6,13 @@
 # 9 f16, 10 f32, 11 f64, 12 c64, 13 c128. The bytes of an element: 1 1 2 4 8 1 2 4 8 2 4 8 8 16. A new plain array is all zero bits, which is
 # false, 0, 0.0 or complex(0, 0).
 # The builtin ids: 30 array, 31 plain_array, 32 plain_len, 33 plain_kind, 34 array_get, 35 array_set, 36 array_len, 37 plain_get, 38 plain_set,
-# 39 str_to_bytes, 40 bytes_to_str.
+# 39 str_to_bytes, 40 bytes_to_str, 41 bit_not, 42 bit_shr.
 import mem
 import obj
 import big
 import flt
 import num
+import bit
 
 # the bytes of the name of a type packed from the low end of a word (the data word of the string), and its length
 fn tn_code(t: i64) -> i64 {
@@ -534,6 +535,21 @@ fn call_abuiltin[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], id: i64, a:
     }
     if id == 39 { return do_str_to_bytes(h, st, g(rs, a)) }
     if id == 40 { return do_bytes_to_str(h, st, g(rs, a)) }
+    if id == 41 {
+        let x = g(rs, a)
+        if not is_integer(h, x) { die("bit_not: not an integer") }
+        return int_add(h, st, small(-1), x, 1)
+    }
+    if id == 42 {
+        let x = g(rs, a)
+        let y = g(rs, a + 1)
+        if not is_integer(h, x) { die("bit_shr: not an integer") }
+        if not is_integer(h, y) { die("bit_shr: not an integer") }
+        if i_sign(h, x) == 1 { die("bit_shr: negative number") }
+        if not is_int(y) { die("bit shift: the shift is too large") }
+        if int_of(y) < 0 { die("bit shift: negative shift") }
+        return int_sar(h, st, x, int_of(y))
+    }
     die("unknown builtin")
     1
 }
