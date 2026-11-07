@@ -1,0 +1,45 @@
+# strings of UTF-8 characters on planckvm: strlen, ord and substr count characters; str_to_bytes and bytes_to_str convert from and to a plain array of u8
+use("pvm/image")
+
+cat(xs) := concat_map(x -> x, xs)
+
+# println of R[x]
+show(x) := [GETGLOBAL{30, 0}, MOVE{31, x}, CALL{30, 30, 1}]
+
+# R[1] := the u8 plain array of the bytes
+bytes_of(bs) := cat([
+    [GETGLOBAL{30, 1}, LOADK{31, 2}, LOADI{32, length(bs)}, CALL{1, 30, 2}],
+    cat(map(p -> [LOADI{33, p[0]}, LOADI{34, p[1]}, PLAINSET{1, 33, 34}], list.zip(list.range(0, length(bs)), bs)))
+])
+
+# "あいa😀" is e3 81 82, e3 81 84, 61, f0 9f 98 80
+body := cat([
+    bytes_of([227, 129, 130, 227, 129, 132, 97, 240, 159, 152, 128]),
+    [GETGLOBAL{30, 3}, MOVE{31, 1}, CALL{2, 30, 1}], show(2),
+    [STRLEN{3, 2}], show(3),
+    [LOADI{4, 0}, ORD{3, 2, 4}], show(3),
+    [LOADI{4, 1}, ORD{3, 2, 4}], show(3),
+    [LOADI{4, 2}, ORD{3, 2, 4}], show(3),
+    [LOADI{4, 3}, ORD{3, 2, 4}], show(3),
+    [LOADI{4, 4}, ORD{3, 2, 4}], show(3),
+    [LOADI{4, -1}, ORD{3, 2, 4}], show(3),
+    # substr counts characters
+    [GETGLOBAL{5, 4}, MOVE{6, 2}, LOADI{7, 1}, LOADI{8, 3}, CALL{5, 5, 3}], show(5),
+    [GETGLOBAL{5, 4}, MOVE{6, 2}, LOADI{7, 3}, LOADI{8, 4}, CALL{5, 5, 3}], show(5),
+    [GETGLOBAL{5, 4}, MOVE{6, 2}, LOADI{7, 4}, LOADI{8, 4}, CALL{5, 5, 3}, STRLEN{9, 5}], show(9),
+    # _strcat joins the bytes, so the characters add up
+    [GETGLOBAL{5, 5}, MOVE{6, 2}, MOVE{7, 2}, CALL{5, 5, 2}, STRLEN{9, 5}], show(9),
+    # str_to_bytes gives back the bytes of a substring
+    [GETGLOBAL{5, 4}, MOVE{6, 2}, LOADI{7, 1}, LOADI{8, 3}, CALL{5, 5, 3}, GETGLOBAL{10, 6}, MOVE{11, 5}, CALL{10, 10, 1}],
+    [GETGLOBAL{12, 7}, MOVE{13, 10}, CALL{12, 12, 1}], show(12),
+    [LOADI{14, 3}, GETGLOBAL{12, 8}, MOVE{13, 10}, CALL{12, 12, 2}], show(12),
+    # an ASCII string and the empty string
+    [LOADK{5, 9}, STRLEN{6, 5}], show(6),
+    [LOADI{4, 1}, ORD{6, 5, 4}], show(6),
+    [LOADK{5, 10}, STRLEN{6, 5}], show(6),
+    [LOADNONE{0, 1}, RET{0}]
+])
+
+main := Code{"main", 0, 40, body, [C{"println"}, C{"plain_array"}, Y{"u8"}, C{"bytes_to_str"}, C{"substr"}, C{"_strcat"}, C{"str_to_bytes"}, C{"plain_len"}, C{"plain_get"}, S{"abc"}, S{""}]}
+
+write_file(array_get(argv(), 1), bytes.to_u8(pvm_image.build([main], "main")))
