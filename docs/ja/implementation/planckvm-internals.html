@@ -68,14 +68,14 @@
 <ul>
 <li><code>CALL A B C</code> が Lambda を選ぶと、<code>pc</code> を保存して、<code>base</code> が現在の base + B + 1、<code>ret</code> の <code>reg</code> が A のフレームを積みます。引数は動かしません。<code>HANDLE A B</code> は <code>base + B + 2</code>、<code>kind = 1</code> のフレームを積みます。</li>
 <li><code>RET</code> はフレームを捨て、その <code>ret</code> のとおりに値を渡します。<code>TCALL</code> は引数を <code>R[-1]</code> から移して現在のフレームを置き換え、<code>ret</code> は <code>kind</code> だけ 0 にして引き継ぎます。</li>
-<li><code>NEXT</code> は <code>next</code> から順に、引数の個数が合う選択肢を選びます。Lambda なら <code>fn</code> と <code>env</code> を置き換えて <code>pc</code> を 0 にします。尽きたとき、<code>kind</code> が 2 なら転送に進み、それ以外は <code>matching failed</code> で止まります。</li>
+<li><code>NEXT</code> は <code>next</code> から順に、引数の個数が合う選択肢を選びます。Lambda なら <code>fn</code> と <code>env</code> を置き換えて <code>pc</code> を 0 にします。尽きたとき、<code>kind</code> が 2 なら転送に進み、それ以外は呼び出し元のフレームから <code>PERFORM</code> と同じ手順で <code>MatchingFailed{f, args, loc}</code> を送ります。継続の再開では、渡した値が失敗した呼び出しの結果になります。境界が無ければ <code>matching failed</code> で止まります。</li>
 <li>組み込みの上書きは、語 <code>guard</code> の各ビット（命令の組み込みの欄の名前に1つずつ対応）で判定します。<code>SETGLOBAL</code> が名前のセルに書くときにビットを更新し、命令はまず <code>guard</code> が 0 かを見ます。上書きされていれば <code>R[nregs]</code> に関数、その上に引数を置いて <code>CALL</code> と同じに呼びます。</li>
 </ul>
 
 <h3>継続</h3>
 <p>継続はヒープ上のオブジェクトで、フレームスタックとレジスタスタックの切片のコピーです。</p>
 <ol>
-<li><code>PERFORM A B</code> は、現在のフレームから下へ <code>kind = 1</code> のフレーム F を探します。無ければ <code>unhandled effect</code> で止まります。</li>
+<li><code>PERFORM A B</code> は、現在のフレームから下へ <code>kind = 1</code> のフレーム F を探します。無ければ <code>unhandled effect</code> で止まります（<code>MatchingFailed</code> は <code>matching failed</code>）。</li>
 <li>F から現在のフレームまでのフレームと、<code>F.base - 2</code> から現在の <code>R[nregs-1]</code> までのレジスタをコピーして継続を作ります。コピーの <code>base</code> は切片の先頭からの差です。</li>
 <li>F より上を捨て、F の位置に <code>kind = 2</code> のフレームを作り、送られた値と継続を <code>R[0]</code> と <code>R[1]</code> に入れてハンドラを選びます。一致が無ければ、下の次の境界 G までの切片に元の切片をつないだ新しい継続を作り、G で同じことを繰り返します。</li>
 <li>再開は、切片を呼び出した窓の上にコピーして各フレームの <code>base</code> にその位置を足し、最後のフレームを現在のフレームにして、保存した <code>pc</code> から続けます。最初のフレーム（境界）の <code>ret</code> は <code>CALL</code> が積むフレームと同じに決めます。</li>
@@ -90,7 +90,7 @@
 </ul>
 <p>レジスタの生死の表は持たず、レジスタスタックの要素は常に有効な値か none です。起動時に全要素を none で埋め、GC が根より上の使われた範囲を none で埋めて、この状態を保ちます。範囲の上端は、窓を作るときに更新する語 <code>high</code> に記録します。</p>
 <p>古い世代のオブジェクトに若いオブジェクトへの参照を書くとき（<code>ENVSET</code> <code>SETGLOBAL</code> <code>ASET</code>）、ヘッダの <code>r</code> が 0 ならそのオブジェクトを記憶集合に記録して <code>r</code> を 1 にします。</p>
-<p>配列、plain array、関数の identity（<code>EQ</code> と <code>HASH</code>）は、アドレスでなく、最初の <code>HASH</code> のときに割り当てる番号で表します。</p>
+<p>関数の identity（<code>EQ</code> と <code>HASH</code>）は、アドレスでなく、最初の <code>HASH</code> のときに割り当てる番号で表します。</p>
 
 <nav class="pager"><a class="prev" href="planckvm-repr.html"><small>前のページ</small>planckvm の値の表し方</a></nav>
 </main>

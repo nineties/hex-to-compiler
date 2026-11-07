@@ -22,12 +22,12 @@
 <tr><td><code>(x, y, ...) := e</code>・<code>(x, y, ...) = e</code></td><td class="wrap"><code>Do{Def{t, e}, Def{x, Apply{_destructure, Tuple{t, 0, n}}}, ...}</code>（<code>t</code> は新しい変数、<code>n</code> は名前の数、<code>=</code> では <code>Def</code> が <code>Set</code>）</td></tr>
 <tr><td><code>f(p, ...) := body</code></td><td><code>Do{Declare{f}, Set{f, Fusion{f, Lambda{Tuple{p, ...}, body}}}}</code></td></tr>
 <tr><td><code>f(p, ...) if cond := body</code></td><td class="wrap">ガード付きの関数 <code>(p, ...) if cond -&gt; body</code> を <code>f</code> に足す</td></tr>
-<tr><td><code>record T(f, ...)</code></td><td><code>Apply{_record_declare, Tuple{Quote{T}, Quote{Tuple{f, ...}}}}</code></td></tr>
+<tr><td><code>record T(f, ...) = make</code></td><td class="wrap"><code>Do{Def{%record, Apply{_record, Tuple{Quote{T}, Quote{Tuple{f, ...}}}}}, Def{T, Apply{arg, Tuple{%record, 0}}}, Def{make, Apply{arg, Tuple{%record, 1}}}, Declare{_with}, Set{_with, Fusion{_with, Apply{_record_with, Tuple{T, make}}}}}</code></td></tr>
 <tr><td><code>x = e</code></td><td><code>Set{x, e}</code></td></tr>
 <tr><td><code>x += e</code> <code>x -= e</code> <code>x *= e</code> <code>x /= e</code> <code>x %= e</code></td><td><code>Set{x, Apply{_add, Tuple{x, e}}}</code>。ほかは <code>_sub</code> <code>_mul</code> <code>_div</code> <code>_mod</code></td></tr>
 <tr><td><code>a[i] = e</code></td><td><code>Apply{_index_set, Tuple{a, i, e}}</code></td></tr>
 <tr><td><code>a[i] += e</code>（<code>-=</code> <code>*=</code> <code>/=</code> <code>%=</code> も同じ）</td><td class="wrap"><code>Do{Def{ta, a}, Def{ti, i}, Apply{_index_set, Tuple{ta, ti, Apply{_add, Tuple{Apply{_index_get, Tuple{ta, ti}}, e}}}}}</code>（<code>ta</code>・<code>ti</code> は新しい変数）</td></tr>
-<tr><td><code>t with { f = e, ... }</code></td><td class="wrap"><code>Apply{_record_with, Tuple{t, Quote{f}, e}}</code>。欄が複数なら欄の順に入れ子</td></tr>
+<tr><td><code>t with { f = e, ... }</code></td><td class="wrap"><code>Apply{_with, Tuple{t, Quote{f}, e}}</code>。欄が複数なら欄の順に入れ子</td></tr>
 <tr><td><code>f | g</code></td><td><code>Fusion{f, g}</code></td></tr>
 <tr><td><code>(p, ...) if cond -&gt; body | g</code>・<code>p if cond -&gt; body | g</code></td><td class="wrap">合わないか <code>cond</code> が偽なら同じ引数で <code>g</code> を呼ぶ関数</td></tr>
 <tr><td><code>(p, ...) -&gt; body</code>・<code>p -&gt; body</code></td><td><code>Lambda{Tuple{p, ...}, body}</code></td></tr>
@@ -117,7 +117,12 @@
 <!--repl e_bd_destructure_atom-->
 
 <h3 id="record">record と with</h3>
-<p><code>.</code> は左の式に空白なしで続けます。<code>with</code> の欄は左から順に替わり、右辺は元の <code>t</code> の欄を参照できます。<code>with { ... }</code> は続けて書けます。</p>
+<p><code>record T(f, ...) = make</code> は型 <code>T</code> と、データを作る関数 <code>make</code> を別々に定義します。<code>make(a, ...)</code> で作り、<code>x.f</code> で欄を読みます。<code>x @ T</code> は型を調べるパターンで、module の型は <code>x @ m.T</code> と書きます。</p>
+<p><code>.</code> は左の式に空白なしで続けます。<code>t with { f = e, ... }</code> は欄を替えたコピーで、欄は左から順に替わり、右辺は元の <code>t</code> の欄を参照できます。<code>with { ... }</code> は続けて書けます。</p>
+<ul>
+<li><code>with</code> は <code>record</code> を書いた場所（module の中ならその module の中）だけで使えます。外で使うと <code>_with</code> が未定義でエラーです。</li>
+<li>module の中の <code>export record</code> は型 <code>T</code> だけを export します。<code>make</code> は module の外から使えません。</li>
+</ul>
 <!--repl sx_with-->
 
 <h3 id="loop">for と return・break・continue</h3>
@@ -198,7 +203,6 @@
 <tr><td>vector（<code>use("vector")</code> が先頭に足す）</td><td>整数</td><td><code>vector.get(a, i)</code></td><td><code>vector.set(a, i, e)</code></td></tr>
 <tr><td>任意の値</td><td>関数</td><td><code>subst(a, i)</code></td><td></td></tr>
 <tr><td>リスト</td><td>整数</td><td>0から数えた要素</td><td>止まる</td></tr>
-<tr><td>M式</td><td>symbol</td><td><code>_record_get(a, i)</code>（欄）</td><td>止まる</td></tr>
 <tr><td>M式</td><td>整数</td><td><code>arg(a, i)</code>（位置）</td><td>止まる</td></tr>
 </table>
 <p>immutable な値（文字列・リスト・組・M式）への代入、範囲外の添字、どの種類にも合わない <code>a[i]</code> は止まります。</p>
