@@ -36,16 +36,40 @@
 <pre>f := (0) -&gt; "zero" | (1) -&gt; "one"
 f(1)   // "one"
 f(7)   // matches no arm, and the program stops</pre>
-<p>What happens when nothing matches is the same everywhere.</p>
-<ul>
-<li>A function call, a <code>match</code> and a fused function return no value: they print an error message (<code>matching failed</code>) and the program stops. Only the next function of a fusion is tried.</li>
-<li><code>Perform</code> is the exception. If no pattern of a handler of <code>Handle</code> matches, the next outer handler is searched, and with none the program stops with <code>unhandled effect</code>.</li>
-</ul>
+<p>When a function call, a <code>match</code> or the last function of a fusion has no arm that matches, it performs <code>MatchingFailed{f, args, loc}</code> instead of stopping. <code>match e { f }</code> is the same call as <code>f(e)</code>. With no handler for it, the program prints an error message (<code>matching failed</code>) and stops. It does not become <code>unhandled effect</code>.</p>
+<table>
+<tr><th>Field</th><th>Contents</th></tr>
+<tr><td><code>f</code></td><td>the function that was called (the whole fusion for a fusion)</td></tr>
+<tr><td><code>args</code></td><td>a <code>Tuple{...}</code> of the arguments that did not match</td></tr>
+<tr><td><code>loc</code></td><td>the position in the source of the failed call or <code>match</code>: <code>Loc{file, line, column}</code></td></tr>
+</table>
+<pre>a := handle f(7) with (MatchingFailed{_, Tuple{n}, _}, k) -&gt; n
+println(a)</pre>
+<pre class="out">7</pre>
+<p>The value of the handler is the value of the <code>Handle</code>, not the value of the expression that called <code>f(7)</code>.</p>
+<p>The next function of a fusion is chosen only by the entry patterns and guards. When the entry of an arm matches, a <code>MatchingFailed</code> raised deep in the body of that arm does not move on to the next function: it propagates outward.</p>
+<pre>g(0) := "zero"
+h := (x) -&gt; g(x) | (x) -&gt; "second arm"
+
+r := handle h(5) with (MatchingFailed{f, _, _}, k) -&gt; "failed in g"
+println(r)</pre>
+<pre class="out">"failed in g"</pre>
+<p><code>h(5)</code> enters the first arm, and <code>g(5)</code> inside it fails with <code>MatchingFailed</code>. The second arm is not tried.</p>
+<p>When no pattern of a handler of <code>Handle</code> matches a <code>Perform</code>, the next outer handler is searched. A handler that accepts only <code>Return{v}</code> or <code>Break{}</code> is passed through, and a handler <code>(e, k) -&gt; ...</code> whose pattern matches anything also receives <code>MatchingFailed</code>. A <code>Perform</code> other than <code>MatchingFailed</code> with no handler stops with <code>unhandled effect</code>.</p>
 
 <h2>Algebraic effects</h2>
 <p><code>Perform{v}</code> calls the nearest <code>handler(v, k)</code> that has a matching pattern. Handlers stay installed in the continuation. <code>k</code> is an ordinary function and can be called any number of times, even after <code>Handle</code> has returned.</p>
 <p>Variables defined when the continuation is captured are shared between the resumed copies. Variables defined after the resumption are separate.</p>
 <!--ex t5_resume-->
+<p>The handler of a <code>MatchingFailed</code> can also resume with <code>k</code>. The <code>x</code> of <code>k(x)</code> becomes the value of the failed function call or <code>match</code>.</p>
+<pre>b := handle [f(7), 1] with (MatchingFailed{_, _, _}, k) -&gt; k("other")
+println(b)</pre>
+<pre class="out">Cons{"other", Cons{1, Nil{}}}</pre>
+<p>The handler stays installed in the resumed continuation, so a second failure after the resumption is received by the same handler.</p>
+<pre>c := handle [f(8), f(9)] with (MatchingFailed{_, Tuple{n}, _}, k) -&gt; k(n)
+println(c)</pre>
+<pre class="out">Cons{8, Cons{9, Nil{}}}</pre>
+
 
 <h2>Top level</h2>
 <p>The loop looks up the global variables <code>parse</code> and <code>eval</code> for every expression, so replacing them takes effect from the next expression. <code>Apply{eval, ...}</code> also calls the replaced <code>eval</code>.</p>

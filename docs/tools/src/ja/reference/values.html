@@ -36,16 +36,40 @@
 <pre>f := (0) -&gt; "zero" | (1) -&gt; "one"
 f(1)   // "one"
 f(7)   // どの腕にも合わず、プログラムが止まる</pre>
-<p>どれにも合わなかったときの挙動は、どこでも同じです。</p>
-<ul>
-<li>関数呼び出し・<code>match</code>・融合した関数は、値を返さずエラーのメッセージ（<code>matching failed</code>）を出してプログラムが止まります。次を探すのは、融合のつなぎ先だけです。</li>
-<li><code>Perform</code> は例外です。<code>Handle</code> のハンドラのどのパターンにも合わなければ、さらに外側のハンドラを探し、なければ <code>unhandled effect</code> で止まります。</li>
-</ul>
+<p>どの腕にも合わなかった関数呼び出し・<code>match</code>・融合の最後のつなぎ先は、止まる代わりに <code>MatchingFailed{f, args, loc}</code> を <code>Perform</code> します。<code>match e { f }</code> は <code>f(e)</code> と同じ呼び出しです。受け手のハンドラが無ければ、エラーのメッセージ（<code>matching failed</code>）を出してプログラムが止まります。<code>unhandled effect</code> にはなりません。</p>
+<table>
+<tr><th>フィールド</th><th>中身</th></tr>
+<tr><td><code>f</code></td><td>呼ばれた関数（融合なら融合全体）</td></tr>
+<tr><td><code>args</code></td><td>合わなかった引数の <code>Tuple{...}</code></td></tr>
+<tr><td><code>loc</code></td><td>失敗した呼び出しや <code>match</code> のソース上の位置。<code>Loc{file, line, column}</code></td></tr>
+</table>
+<pre>a := handle f(7) with (MatchingFailed{_, Tuple{n}, _}, k) -&gt; n
+println(a)</pre>
+<pre class="out">7</pre>
+<p>ハンドラの値が <code>Handle</code> の値になります。<code>f(7)</code> を呼んだ式の値にはなりません。</p>
+<p>融合の次のつなぎ先は、入口のパターンとガードだけで決まります。腕の入口が合えば、その腕の本体の奥で起きた <code>MatchingFailed</code> は次のつなぎ先へ移らず、外側へ伝わります。</p>
+<pre>g(0) := "zero"
+h := (x) -&gt; g(x) | (x) -&gt; "second arm"
+
+r := handle h(5) with (MatchingFailed{f, _, _}, k) -&gt; "failed in g"
+println(r)</pre>
+<pre class="out">"failed in g"</pre>
+<p><code>h(5)</code> は1つ目の腕に入り、その中の <code>g(5)</code> が合わずに <code>MatchingFailed</code> になります。2つ目の腕には移りません。</p>
+<p><code>Perform</code> は、<code>Handle</code> のハンドラのどのパターンにも合わなければ、さらに外側のハンドラを探します。<code>Return{v}</code> や <code>Break{}</code> だけを受けるハンドラは通り抜け、どのパターンにも合う <code>(e, k) -&gt; ...</code> のハンドラは <code>MatchingFailed</code> も受けます。<code>MatchingFailed</code> 以外の <code>Perform</code> は、受け手が無ければ <code>unhandled effect</code> で止まります。</p>
 
 <h2>代数的エフェクト</h2>
 <p><code>Perform{v}</code> は、合うパターンを持つ一番近い <code>handler(v, k)</code> を呼びます。ハンドラは継続の中でも有効です。<code>k</code> は通常の関数で、<code>Handle</code> が値を返したあとでも何度でも呼べます。</p>
 <p>継続を捕捉した時点で定義済みの変数は、再開した計算のあいだで共有されます。再開のあとに定義した変数は別です。</p>
 <!--ex t5_resume-->
+<p><code>MatchingFailed</code> のハンドラも <code>k</code> で再開できます。<code>k(x)</code> の <code>x</code> が、失敗した関数呼び出しや <code>match</code> の値になります。</p>
+<pre>b := handle [f(7), 1] with (MatchingFailed{_, _, _}, k) -&gt; k("other")
+println(b)</pre>
+<pre class="out">Cons{"other", Cons{1, Nil{}}}</pre>
+<p>ハンドラは再開した続きの中でも有効なので、再開後に2回目の失敗が起きても同じハンドラが受けます。</p>
+<pre>c := handle [f(8), f(9)] with (MatchingFailed{_, Tuple{n}, _}, k) -&gt; k(n)
+println(c)</pre>
+<pre class="out">Cons{8, Cons{9, Nil{}}}</pre>
+
 
 <h2>トップレベル</h2>
 <p>式を読むたびに大域変数 <code>parse</code> と <code>eval</code> を引き直すので、差し替えると次の式から新しい定義で処理されます。<code>Apply{eval, ...}</code> も差し替えた <code>eval</code> を呼びます。</p>
