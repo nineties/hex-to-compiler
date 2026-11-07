@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Partial functions and fusion | hex-to-compiler project</title>
-<link rel="alternate" hreflang="ja" href="../../ja/reference/functions.html">
+<title>Core language | hex-to-compiler project</title>
+<link rel="alternate" hreflang="ja" href="../../ja/reference/core.html">
 <link rel="stylesheet" href="../../assets/style.css">
 </head>
 <body>
@@ -17,7 +17,7 @@
 <a href="../library/index.html">Library</a>
 <a href="../implementation/index.html">Implementation</a>
 <a href="https://github.com/nineties/hex-to-compiler">GitHub</a>
-<a class="lang-switch" lang="ja" hreflang="ja" href="../../ja/reference/functions.html">日本語</a>
+<a class="lang-switch" lang="ja" hreflang="ja" href="../../ja/reference/core.html">日本語</a>
 </nav>
 </div></header>
 <div class="layout">
@@ -25,16 +25,249 @@
 <h2>Reference</h2>
 <ol>
 <li><a href="index.html">Contents</a></li>
-<li><a href="datamodel.html">Data model</a></li>
-<li><a class="here" href="functions.html">Partial functions and fusion</a></li>
-<li><a href="binding.html">Variable binding</a></li>
-<li><a href="control.html">Special forms</a></li>
+<li><a class="here" href="core.html">Core language</a></li>
 <li><a href="syntax.html">Grammar</a></li>
 <li><a href="builtins.html">Builtin functions</a></li>
 </ol></details></nav>
 <main>
-<h1>Partial functions and fusion</h1>
-<p class="lead">A function takes its arguments by patterns. A pattern describes the shape of an argument as an M-expression, and binds variables when it matches. <code>Fusion{f, g}</code> (fusion) writes cases.</p>
+<h1>Core language</h1>
+<p class="lead">The core language consists of values, special forms, patterns and fusion, and algebraic effects.</p>
+
+<h2 id="mexpr">M-expressions</h2>
+<p>An M-expression is a value written <code>Head{a, b, ...}</code>. It has a head (a symbol) and a sequence of arguments. A tuple has the head <code>Tuple</code>, and a list has <code>Cons</code> and <code>Nil</code>.</p>
+<div class="example">
+<p class="file">dm_mexpr.pk</p>
+<pre class="pk"><span class="tok-name">Def</span><span class="tok-op">{</span><span class="tok-name">p</span><span class="tok-op">,</span> <span class="tok-name">Point</span><span class="tok-op">{</span><span class="tok-num">3</span><span class="tok-op">,</span> <span class="tok-num">4</span><span class="tok-op">}</span><span class="tok-op">}</span>
+<span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">println</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">p</span><span class="tok-op">}</span><span class="tok-op">}</span>
+<span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">println</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">head</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">p</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span>
+<span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">println</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">arity</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">p</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span>
+<span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">println</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">arg</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">p</span><span class="tok-op">,</span> <span class="tok-num">1</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span>
+<span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">println</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">push</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">p</span><span class="tok-op">,</span> <span class="tok-num">5</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span>
+<span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">println</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">Point</span><span class="tok-op">{</span><span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">_add</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-num">1</span><span class="tok-op">,</span> <span class="tok-num">1</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-num">2</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span>
+<span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">println</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-num">1</span><span class="tok-op">,</span> <span class="tok-num">2</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span>
+<span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">println</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">Cons</span><span class="tok-op">{</span><span class="tok-num">1</span><span class="tok-op">,</span> <span class="tok-name">Cons</span><span class="tok-op">{</span><span class="tok-num">2</span><span class="tok-op">,</span> <span class="tok-name">Nil</span><span class="tok-op">{</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span>
+<span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">println</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">Nil</span><span class="tok-op">{</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span>
+<span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">println</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">_eq</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">Point</span><span class="tok-op">{</span><span class="tok-num">1</span><span class="tok-op">,</span> <span class="tok-num">2</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">Point</span><span class="tok-op">{</span><span class="tok-num">1</span><span class="tok-op">,</span> <span class="tok-num">2</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span>
+<span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">println</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">_eq</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">Point</span><span class="tok-op">{</span><span class="tok-num">1</span><span class="tok-op">,</span> <span class="tok-num">2</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">Point</span><span class="tok-op">{</span><span class="tok-num">1</span><span class="tok-op">,</span> <span class="tok-num">3</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span></pre>
+<p class="label">Output</p>
+<pre class="out">Point{3, 4}
+Point
+2
+4
+Point{3, 4, 5}
+Point{2, 2}
+Tuple{1, 2}
+Cons{1, Cons{2, Nil{}}}
+Nil{}
+true
+false</pre>
+</div>
+<ul>
+<li>The type is <code>Expr</code>, and it is immutable.</li>
+<li>The number of arguments has no limit. A mutable value and a NaN cannot be arguments. Making an M-expression with one is a runtime error.</li>
+<li><code>head(x)</code> works on M-expressions only.</li>
+</ul>
+<div class="example">
+<p class="file">e_dm_head_atom.pk</p>
+<pre class="pk"><span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">println</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">head</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-num">1</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span></pre>
+<p class="label">Output</p>
+<pre class="out">Mexpr is expected: 1</pre>
+</div>
+
+<h2 id="atoms">Atoms</h2>
+<p>A value that is not an M-expression is an atom. User data makes new types.</p>
+<table>
+<tr><th>Type</th><th><code>type</code></th><th>Literal</th><th>Mutable?</th><th>Notes</th></tr>
+<tr><td>integer</td><td><code>Int</code></td><td><code>42</code> <code>0x1f</code> <code>0b101</code></td><td>immutable</td><td>Arbitrary precision</td></tr>
+<tr><td>float</td><td><code>Float</code></td><td><code>Apply{_float, Tuple{"1.5"}}</code></td><td>immutable</td><td>IEEE 754 binary64. The argument is the text, such as <code>"2.5e-3"</code></td></tr>
+<tr><td>complex number</td><td><code>Complex</code></td><td><code>2i</code></td><td>immutable</td><td>Also made by <code>complex(re, im)</code></td></tr>
+<tr><td>string</td><td><code>String</code></td><td><code>"abc"</code></td><td>immutable</td><td>Bytes, 0 bytes included, up to 65535</td></tr>
+<tr><td>symbol</td><td><code>Symbol</code></td><td><code>Quote{x}</code></td><td>immutable</td><td>The name starts with a letter, <code>_</code> or <code>%</code></td></tr>
+<tr><td>function</td><td><code>Function</code></td><td><code>Lambda{Tuple{p}, body}</code> <code>Fusion{f, g}</code></td><td>immutable</td><td>Lambda, Fusion, builtin function, continuation</td></tr>
+<tr><td>array</td><td><code>Array</code></td><td>—</td><td>mutable</td><td>Fixed length. The elements of <code>array(n)</code> are <code>none</code> at first</td></tr>
+<tr><td>plain array</td><td><code>Plain</code></td><td>—</td><td>mutable</td><td>The element type is one of the symbols <code>bool</code>, <code>i8</code> to <code>u64</code>, <code>f16</code> to <code>f64</code>, <code>c64</code>, <code>c128</code></td></tr>
+<tr><td>type value</td><td><code>Type</code></td><td>—</td><td>immutable</td><td></td></tr>
+<tr><td>user data</td><td>the type value of its type</td><td>—</td><td>specified when made</td><td></td></tr>
+</table>
+<p>A type is a value (a type value), which <code>type(x)</code> returns. <code>type(1)</code> is <code>Int</code>, and <code>type(Int)</code> is <code>Type</code>.</p>
+<div class="example">
+<p class="file">dm_array.pk</p>
+<pre class="pk"><span class="tok-name">Def</span><span class="tok-op">{</span><span class="tok-name">a</span><span class="tok-op">,</span> <span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">array</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-num">2</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span>
+<span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">println</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">array_get</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">a</span><span class="tok-op">,</span> <span class="tok-num">0</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span>
+<span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">array_set</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">a</span><span class="tok-op">,</span> <span class="tok-num">0</span><span class="tok-op">,</span> <span class="tok-num">5</span><span class="tok-op">}</span><span class="tok-op">}</span>
+<span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">println</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">array_get</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">a</span><span class="tok-op">,</span> <span class="tok-num">0</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span>
+<span class="tok-name">Def</span><span class="tok-op">{</span><span class="tok-name">b</span><span class="tok-op">,</span> <span class="tok-name">a</span><span class="tok-op">}</span>
+<span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">array_set</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">b</span><span class="tok-op">,</span> <span class="tok-num">1</span><span class="tok-op">,</span> <span class="tok-num">6</span><span class="tok-op">}</span><span class="tok-op">}</span>
+<span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">println</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">array_get</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">a</span><span class="tok-op">,</span> <span class="tok-num">1</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span></pre>
+<p class="label">Output</p>
+<pre class="out">none
+5
+6</pre>
+</div>
+<div class="example">
+<p class="file">e_dm_array_range.pk</p>
+<pre class="pk"><span class="tok-name">Def</span><span class="tok-op">{</span><span class="tok-name">a</span><span class="tok-op">,</span> <span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">array</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-num">2</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span>
+<span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">array_set</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">a</span><span class="tok-op">,</span> <span class="tok-num">2</span><span class="tok-op">,</span> <span class="tok-num">1</span><span class="tok-op">}</span><span class="tok-op">}</span></pre>
+<p class="label">Output</p>
+<pre class="out">array index out of range: 2</pre>
+</div>
+<p>An array or a plain array is changed by <code>array_set</code> or <code>plain_set</code>. Out of range is an error, and so is a value that does not fit a plain array.</p>
+
+<h2 id="equality">Equality</h2>
+<p><code>_eq(a, b)</code> tests whether a and b are equal as values.</p>
+<ul>
+<li>Integers, floats and complex numbers are equal if the values are the same, even when the types differ. A NaN is not equal to any value.</li>
+<li>M-expressions are equal if the heads and the arguments are equal.</li>
+<li>Arrays and plain arrays are equal if identical, and otherwise are compared element by element.</li>
+<li><code>hash(x)</code> is an integer of 0 or more, and equal values give the same value.</li>
+</ul>
+
+<h2 id="identity">Identity</h2>
+<p><code>_is(a, b)</code> is true if a and b are the same thing (identical). Identical values are always equal. Values of different types are not identical: the integer 1 and the float 1.0 are equal but not identical.</p>
+<p>Interning makes equal values into one object. For an interned type, equal values are identical, and <code>_is</code> is O(1) (except for arbitrary precision integers).</p>
+<table>
+<tr><th>Type</th><th><code>_eq</code></th><th><code>_is</code></th><th>Table key</th></tr>
+<tr><td>integer</td><td>value</td><td>value</td><td>yes</td></tr>
+<tr><td>float</td><td>value</td><td>object</td><td>yes, except NaN</td></tr>
+<tr><td>complex number</td><td>value</td><td>—</td><td>yes</td></tr>
+<tr><td>string</td><td>identity</td><td>intern</td><td>yes</td></tr>
+<tr><td>symbol</td><td>identity</td><td>intern</td><td>yes</td></tr>
+<tr><td>function</td><td>identity</td><td>object</td><td>yes</td></tr>
+<tr><td>array</td><td>true if identical, otherwise element by element</td><td>object</td><td>no</td></tr>
+<tr><td>plain array</td><td>true if identical, otherwise element by element</td><td>object</td><td>no</td></tr>
+<tr><td>type value</td><td>identity</td><td>—</td><td>yes</td></tr>
+<tr><td>M-expression</td><td>head and arguments</td><td>intern</td><td>yes</td></tr>
+<tr><td>user data</td><td>identity. The given function if an equal function is given</td><td>immutable: intern. mutable: object. object if an equal function is given</td><td>yes</td></tr>
+</table>
+<p>A table (<code>table_get</code> and <code>table_set</code>) treats two keys as the same if they are identical or equal.</p>
+
+<h2 id="userdata">User data</h2>
+<ul>
+<li>Made by a builtin function. You must specify whether it is immutable or mutable.</li>
+<li>Immutable user data cannot hold a mutable value. Making one that does is a runtime error.</li>
+<li>Each type made is a different value. The name is only used for display, and types with the same name are told apart by <code>_is</code>.</li>
+<li>You may give a function for equal and a function for hash, both together. The author must keep two rules: if <code>_is(a, b)</code> then <code>_eq(a, b)</code>, and equal values have the same hash.</li>
+<li>Without them, the hash is decided by the contents if immutable and by the object if mutable.</li>
+</ul>
+
+<h2 id="numbers">Numbers</h2>
+<p>An operation on mixed number types raises them to the highest type.</p>
+<div class="example">
+<p class="file">dm_int.pk</p>
+<pre class="pk"><span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">println</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">_quo</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-num">-7</span><span class="tok-op">,</span> <span class="tok-num">2</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span>
+<span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">println</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">_div</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-num">-7</span><span class="tok-op">,</span> <span class="tok-num">2</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span>
+<span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">println</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">_mod</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-num">-7</span><span class="tok-op">,</span> <span class="tok-num">2</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span>
+<span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">println</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">_mod</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-num">7</span><span class="tok-op">,</span> <span class="tok-num">-2</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span></pre>
+<p class="label">Output</p>
+<pre class="out">-4
+-3
+1
+-1</pre>
+</div>
+<ul>
+<li><code>_div</code> truncates toward 0, and <code>_quo</code> rounds toward minus infinity. <code>_mod(a, b)</code> is <code>_sub(a, _mul(b, _quo(a, b)))</code> and has the sign of the divisor.</li>
+<li>A zero divisor is a runtime error. <code>_div</code> with a float or a complex number gives an infinity or NaN (per component for a complex number).</li>
+<li><code>_lt</code> <code>_le</code> <code>_gt</code> <code>_ge</code> compare an integer and a float by their mathematical values. They give <code>false</code> when a NaN is involved and are a runtime error on a complex number.</li>
+<li>An integer raised to a float becomes the nearest float, and one beyond the range of floats is a runtime error.</li>
+</ul>
+
+<h2>Literals</h2>
+<p><code>true</code>, <code>false</code> and <code>none</code> are literals whose value is the symbol of the same name. They are not variables.</p>
+
+<h2 id="record">record</h2>
+<p><code>_record_declare(Quote{T}, Quote{Tuple{f, g, ...}})</code> names the arguments of <code>T{a, b, ...}</code>. <code>_record_get(t, Quote{f})</code> is the argument at the position of <code>f</code>, and <code>_record_with(t, Quote{f}, e)</code> is a new value with that field replaced.</p>
+<div class="example">
+<p class="file">t1_with.pk</p>
+<pre class="pk"><span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">_record_declare</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">Quote</span><span class="tok-op">{</span><span class="tok-name">Point</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">Quote</span><span class="tok-op">{</span><span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">x</span><span class="tok-op">,</span> <span class="tok-name">y</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span>
+<span class="tok-name">Def</span><span class="tok-op">{</span><span class="tok-name">p</span><span class="tok-op">,</span> <span class="tok-name">Point</span><span class="tok-op">{</span><span class="tok-num">1</span><span class="tok-op">,</span> <span class="tok-num">2</span><span class="tok-op">}</span><span class="tok-op">}</span>
+<span class="tok-name">Def</span><span class="tok-op">{</span><span class="tok-name">q</span><span class="tok-op">,</span> <span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">_record_with</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">p</span><span class="tok-op">,</span> <span class="tok-name">Quote</span><span class="tok-op">{</span><span class="tok-name">y</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-num">5</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span>
+<span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">println</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">p</span><span class="tok-op">}</span><span class="tok-op">}</span>
+<span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">println</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">q</span><span class="tok-op">}</span><span class="tok-op">}</span>
+<span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">println</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">_record_get</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">q</span><span class="tok-op">,</span> <span class="tok-name">Quote</span><span class="tok-op">{</span><span class="tok-name">y</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span></pre>
+<p class="label">Output</p>
+<pre class="out">Point{1, 2}
+Point{1, 5}
+5</pre>
+</div>
+<ul>
+<li>Values with different heads can have fields of the same name. Declaring the same <code>T</code> again replaces the names.</li>
+<li>Using <code>_record_get</code> on a value whose head is not declared, or that has no field <code>f</code>, stops the program with a message.</li>
+</ul>
+
+<h2 id="forms">Special forms</h2>
+<table>
+<tr><th>Form</th><th>Meaning</th></tr>
+<tr><td><code>Def{x, e}</code></td><td>Defines the variable <code>x</code>. The right side sees the variables before <code>x</code>. <code>true</code>, <code>false</code> and <code>none</code> are not variables, so <code>Def{true, e}</code>, <code>Set{true, e}</code> and <code>Declare{true}</code> stop the program before it runs</td></tr>
+<tr><td><code>Set{x, e}</code></td><td>Assignment</td></tr>
+<tr><td><code>Declare{x}</code></td><td>Same as <code>Def{x, none}</code>. Does nothing if <code>x</code> already exists</td></tr>
+<tr><td><code>If{cond, a, b}</code></td><td><code>b</code> only when <code>cond</code> is <code>false</code></td></tr>
+<tr><td><code>Fusion{f, g}</code></td><td>Tries <code>g</code> if no pattern of <code>f</code> matches. <code>Fusion{none, g}</code> is <code>g</code></td></tr>
+<tr><td><code>Do{e, ...}</code></td><td>Evaluates <code>e, ...</code> in order and returns the last value</td></tr>
+<tr><td><code>While{cond, body}</code></td><td>Evaluates <code>body</code> until <code>cond</code> is <code>false</code>. The value is <code>none</code></td></tr>
+<tr><td><code>Lambda{Tuple{p, ...}, body}</code></td><td>A function. Takes its arguments by the patterns <code>p, ...</code> and evaluates <code>body</code></td></tr>
+<tr><td><code>Apply{f, Tuple{a, ...}}</code></td><td>Evaluates <code>f</code> and <code>a, ...</code> and calls <code>f</code></td></tr>
+<tr><td><code>Quote{e}</code></td><td>The value <code>e</code> itself, not evaluated</td></tr>
+<tr><td><code>QuasiQuote{e}</code></td><td><code>e</code> with only the <code>x</code> of each <code>UnQuote{x}</code> evaluated and embedded</td></tr>
+<tr><td><code>Handle{body, h}</code>, <code>Perform{e}</code></td><td><a href="#effects">Algebraic effects</a></td></tr>
+</table>
+<div class="example">
+<p class="file">bd_forms.pk</p>
+<pre class="pk"><span class="tok-name">Def</span><span class="tok-op">{</span><span class="tok-name">x</span><span class="tok-op">,</span> <span class="tok-num">1</span><span class="tok-op">}</span>
+<span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">println</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">Do</span><span class="tok-op">{</span><span class="tok-name">Set</span><span class="tok-op">{</span><span class="tok-name">x</span><span class="tok-op">,</span> <span class="tok-num">5</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">x</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span>
+<span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">println</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">While</span><span class="tok-op">{</span><span class="tok-name">false</span><span class="tok-op">,</span> <span class="tok-num">1</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span>
+<span class="tok-name">Def</span><span class="tok-op">{</span><span class="tok-name">n</span><span class="tok-op">,</span> <span class="tok-num">0</span><span class="tok-op">}</span>
+<span class="tok-name">While</span><span class="tok-op">{</span><span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">_lt</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">n</span><span class="tok-op">,</span> <span class="tok-num">3</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">Set</span><span class="tok-op">{</span><span class="tok-name">n</span><span class="tok-op">,</span> <span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">_add</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">n</span><span class="tok-op">,</span> <span class="tok-num">1</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span>
+<span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">println</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">n</span><span class="tok-op">}</span><span class="tok-op">}</span></pre>
+<p class="label">Output</p>
+<pre class="out">5
+none
+3</pre>
+</div>
+
+<h2 id="binding">Definition and assignment</h2>
+<p><code>Def{x, e}</code> defines a new variable where it is written. Defining the same name again also makes a new variable, and functions made earlier keep the earlier one. <code>Set{x, e}</code> assigns to the existing variable, so functions made earlier see the new value.</p>
+<div class="example">
+<p class="file">r_scope_redefine.pk</p>
+<pre class="pk"><span class="tok-name">Def</span><span class="tok-op">{</span><span class="tok-name">f</span><span class="tok-op">,</span> <span class="tok-name">Lambda</span><span class="tok-op">{</span><span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">x</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-num">1</span><span class="tok-op">}</span><span class="tok-op">}</span>
+<span class="tok-name">Def</span><span class="tok-op">{</span><span class="tok-name">g</span><span class="tok-op">,</span> <span class="tok-name">Lambda</span><span class="tok-op">{</span><span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">f</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-num">0</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span>
+<span class="tok-name">Def</span><span class="tok-op">{</span><span class="tok-name">f</span><span class="tok-op">,</span> <span class="tok-name">Lambda</span><span class="tok-op">{</span><span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">x</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-num">2</span><span class="tok-op">}</span><span class="tok-op">}</span>
+<span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">println</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">g</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span>
+
+<span class="tok-name">Def</span><span class="tok-op">{</span><span class="tok-name">h</span><span class="tok-op">,</span> <span class="tok-name">Lambda</span><span class="tok-op">{</span><span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">x</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-num">1</span><span class="tok-op">}</span><span class="tok-op">}</span>
+<span class="tok-name">Def</span><span class="tok-op">{</span><span class="tok-name">k</span><span class="tok-op">,</span> <span class="tok-name">Lambda</span><span class="tok-op">{</span><span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">h</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-num">0</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span>
+<span class="tok-name">Set</span><span class="tok-op">{</span><span class="tok-name">h</span><span class="tok-op">,</span> <span class="tok-name">Lambda</span><span class="tok-op">{</span><span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">x</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-num">2</span><span class="tok-op">}</span><span class="tok-op">}</span>
+<span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">println</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">k</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span></pre>
+<p class="label">Output</p>
+<pre class="out">1
+2</pre>
+</div>
+<p>The right side sees the earlier <code>x</code>; if there is none, it is undefined. A function that calls itself first creates the name with <code>Declare{f}</code>, and then adds the function with <code>Set{f, Fusion{f, Lambda{...}}}</code> (<a href="#add-case">Adding a case</a>).</p>
+<div class="example">
+<p class="file">bd_recursion.pk</p>
+<pre class="pk"><span class="tok-name">Declare</span><span class="tok-op">{</span><span class="tok-name">fact</span><span class="tok-op">}</span>
+<span class="tok-name">Set</span><span class="tok-op">{</span><span class="tok-name">fact</span><span class="tok-op">,</span> <span class="tok-name">Fusion</span><span class="tok-op">{</span><span class="tok-name">fact</span><span class="tok-op">,</span> <span class="tok-name">Lambda</span><span class="tok-op">{</span><span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">n</span><span class="tok-op">}</span><span class="tok-op">,</span>
+    <span class="tok-name">If</span><span class="tok-op">{</span><span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">_eq</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">n</span><span class="tok-op">,</span> <span class="tok-num">0</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-num">1</span><span class="tok-op">,</span>
+        <span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">_mul</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">n</span><span class="tok-op">,</span> <span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">fact</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">_sub</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">n</span><span class="tok-op">,</span> <span class="tok-num">1</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span>
+<span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">println</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">fact</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-num">5</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span></pre>
+<p class="label">Output</p>
+<pre class="out">120</pre>
+</div>
+<div class="example">
+<p class="file">e_bd_define_self.pk</p>
+<pre class="pk"><span class="tok-name">Def</span><span class="tok-op">{</span><span class="tok-name">x</span><span class="tok-op">,</span> <span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">_add</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">x</span><span class="tok-op">,</span> <span class="tok-num">1</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span></pre>
+<p class="label">Output</p>
+<pre class="out">undefined variable: x</pre>
+</div>
+
+<h3>UnQuote on the left of a definition or an assignment</h3>
+<p>Inside a <code>QuasiQuote</code>, the left side of <code>Def</code> and <code>Set</code> may be written <code>UnQuote{x}</code>, which is replaced by the symbol that <code>x</code> holds. When <code>x</code> holds <code>Quote{true}</code>, it stops the program, as <code>Def{true, e}</code> does.</p>
+<div class="example">
+<p class="file">bd_quasi.pk</p>
+<pre class="pk"><span class="tok-name">Def</span><span class="tok-op">{</span><span class="tok-name">x</span><span class="tok-op">,</span> <span class="tok-name">Quote</span><span class="tok-op">{</span><span class="tok-name">i</span><span class="tok-op">}</span><span class="tok-op">}</span>
+<span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">println</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">QuasiQuote</span><span class="tok-op">{</span><span class="tok-name">Do</span><span class="tok-op">{</span><span class="tok-name">Def</span><span class="tok-op">{</span><span class="tok-name">UnQuote</span><span class="tok-op">{</span><span class="tok-name">x</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-num">0</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">Set</span><span class="tok-op">{</span><span class="tok-name">UnQuote</span><span class="tok-op">{</span><span class="tok-name">x</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">_add</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">UnQuote</span><span class="tok-op">{</span><span class="tok-name">x</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-num">1</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span></pre>
+<p class="label">Output</p>
+<pre class="out">Do{Def{i, 0}, Set{i, Apply{_add, Tuple{i, 1}}}}</pre>
+</div>
 
 <h2 id="partial">Partial functions and fusion</h2>
 <p>A function takes its arguments by patterns, so it is a partial function: some arguments may not match. <code>Fusion{f, g}</code> tries <code>f</code>, and tries <code>g</code> if none of its patterns match.</p>
@@ -238,7 +471,33 @@ Def{r, Handle{Apply{h, Tuple{5}}, Lambda{Tuple{MatchingFailed{f, _, _}, k}, "fai
 Apply{println, Tuple{r}}</pre>
 <pre class="out">"failed in g"</pre>
 
-<nav class="pager"><a class="prev" href="datamodel.html"><small>Previous</small>Data model</a><a class="next" href="binding.html"><small>Next</small>Variable binding</a></nav>
+<h2 id="effects">Algebraic effects</h2>
+<p><code>Perform{Ask{}}</code> calls the handler <code>Lambda{Tuple{Ask{}, k}, ...}</code> of the nearest <code>Handle{body, h}</code> that has a matching pattern. <code>k</code> is an ordinary function for the continuation, and the value passed to <code>k</code> becomes the value of the <code>Perform</code>.</p>
+<div class="example">
+<p class="file">t5_resume.pk</p>
+<pre class="pk"><span class="tok-name">Def</span><span class="tok-op">{</span><span class="tok-name">ask</span><span class="tok-op">,</span> <span class="tok-name">Lambda</span><span class="tok-op">{</span><span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">Perform</span><span class="tok-op">{</span><span class="tok-name">Ask</span><span class="tok-op">{</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span>
+<span class="tok-name">Def</span><span class="tok-op">{</span><span class="tok-name">with_answer</span><span class="tok-op">,</span> <span class="tok-name">Lambda</span><span class="tok-op">{</span><span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">v</span><span class="tok-op">,</span> <span class="tok-name">f</span><span class="tok-op">}</span><span class="tok-op">,</span>
+    <span class="tok-name">Handle</span><span class="tok-op">{</span><span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">f</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">Lambda</span><span class="tok-op">{</span><span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">Ask</span><span class="tok-op">{</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">k</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">k</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">v</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span>
+<span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">println</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">with_answer</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-num">21</span><span class="tok-op">,</span>
+    <span class="tok-name">Lambda</span><span class="tok-op">{</span><span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">_mul</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">ask</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-num">2</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span>
+<span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">println</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">with_answer</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-num">5</span><span class="tok-op">,</span>
+    <span class="tok-name">Lambda</span><span class="tok-op">{</span><span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">_add</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">ask</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-name">ask</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span><span class="tok-op">}</span></pre>
+<p class="label">Output</p>
+<pre class="out">42
+10</pre>
+</div>
+<ul>
+<li><code>k</code> can be called any number of times, even after <code>Handle</code> has returned.</li>
+<li>The handler is also active inside the resumed continuation.</li>
+<li>Variables defined when the continuation is captured are shared between the resumed copies. Variables defined after the resumption are separate.</li>
+</ul>
+<p><code>MatchingFailed</code> (<a href="#matching-failed">Partial functions and fusion</a>), which a function call with no matching arm performs, can also be resumed with <code>k</code>. The value passed to <code>k</code> becomes the value of the failed call.</p>
+<pre>Def{f, Lambda{Tuple{0}, "zero"}}
+Def{b, Handle{Cons{Apply{f, Tuple{7}}, Cons{1, Nil{}}}, Lambda{Tuple{MatchingFailed{_, _, _}, k}, Apply{k, Tuple{"other"}}}}}
+Apply{println, Tuple{b}}</pre>
+<pre class="out">Cons{"other", Cons{1, Nil{}}}</pre>
+
+<nav class="pager"><a class="prev" href="index.html"><small>Previous</small>Contents</a><a class="next" href="syntax.html"><small>Next</small>Grammar</a></nav>
 </main>
 </div>
 <footer><div class="inner"><a href="https://github.com/nineties/hex-to-compiler">github.com/nineties/hex-to-compiler</a></div></footer>
