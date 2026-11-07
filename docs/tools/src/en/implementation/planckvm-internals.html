@@ -1,128 +1,51 @@
 <!--title planckvm internals-->
 <h1>planckvm internals</h1>
-<p class="lead">The design inside an implementation of planckvm. The state of planck calls lives only on the register stack and the frame stack. A continuation is a copy of it, the collector belongs to the evaluator, and all of this is kept in a form that partial evaluation can handle. The external specification is <a href="planckvm.html">planckvm: execution model and values</a> and <a href="planckvm-isa.html">planckvm instructions</a>.</p>
+<p class="lead">The design inside an implementation. The state of a call is kept only in the register stack and the frame stack, a continuation is a copy of them, and the evaluator owns its GC. The goal is to partially evaluate an evaluator written in planck to get the vasm implementation of planck. The external specification is in <a href="planckvm.html">execution model and values</a> and <a href="planckvm-isa.html">instructions</a>.</p>
 
 <h2>Policy</h2>
 <ul>
-<li>The evaluator is a bytecode interpreter: an expression is translated into instructions, and an instruction loop runs them.</li>
-<li>The evaluator has its own garbage collector, a generational copying collector. The evaluator also manages the heap of values and the roots.</li>
-<li>The evaluator does not use the effects, the continuations or the M-expression reader of the host. They are written in planck as parts of the evaluator.</li>
-<li>The instruction loop does not call itself.</li>
+<li>The evaluator is a bytecode interpreter that translates an expression into instructions and runs them in an instruction loop. The loop never calls itself, and host effects and continuations are not used.</li>
+<li>The instructions never change after they are made, and pattern matching lies in the code of the callee. When the code is static, the reading of instructions and the matching can be unrolled.</li>
+<li>The only dynamic indirect call is the target of <code>CALL</code>. Global variables can be written, so they are not treated as static.</li>
 </ul>
 
 <h2>Stacks</h2>
-<p>The evaluator owns two contiguous regions, the register stack and the frame stack. Both are roots of the collector, and when one is full the program stops with <code>stack overflow</code>. The register stack is filled with <code>none</code> at startup.</p>
+<p>The register stack and the frame stack are contiguous areas and both are GC roots. A full stack stops the program with <code>stack overflow</code>.</p>
 
 <h3>Frames</h3>
-<p>A frame is 7 words.</p>
-<table>
-<tr><th>Word</th><th>Field</th><th>Meaning</th></tr>
-<tr><td>0</td><td><code>fn</code></td><td>The running lambda. The code and the constant table are reached from it</td></tr>
-<tr><td>1</td><td><code>env</code></td><td>The current environment, or none</td></tr>
-<tr><td>2</td><td><code>alts</code></td><td>The fusion that was called, or none</td></tr>
-<tr><td>3</td><td><code>next</code></td><td>The number of the next alternative of <code>alts</code> to try (an untagged integer)</td></tr>
-<tr><td>4</td><td><code>base</code></td><td>The index in the register stack of the start of the window (an untagged integer)</td></tr>
-<tr><td>5</td><td><code>pc</code></td><td>The index of the next instruction while this frame is calling another frame (an untagged integer)</td></tr>
-<tr><td>6</td><td><code>ret</code></td><td>See the figure below</td></tr>
-</table>
+<p>A frame is 7 words: <code>fn</code> (the running lambda), <code>env</code> (the current environment), <code>alts</code> (the called Fusion, or none), <code>next</code> (the index of the next alternative to try), <code>base</code> (the index in the register stack of the start of the window), <code>pc</code> (the index of the next instruction while this frame calls another) and <code>ret</code>. <code>next</code>, <code>base</code> and <code>pc</code> are untagged integers.</p>
 <!--bits
 ret | 0 (12)/12 | kind/2 | mode/2 | reg (16)/16
 -->
-<table>
-<tr><th>Field</th><th>Value</th><th>Meaning</th></tr>
-<tr><td rowspan="3"><code>kind</code></td><td>0</td><td>An ordinary frame</td></tr>
-<tr><td>1</td><td>A boundary. The handler is <code>R[-1]</code> (at <code>base-1</code>) and the lambda of the body is <code>R[-2]</code></td></tr>
-<tr><td>2</td><td>A forwarding frame: a frame where <code>PERFORM</code> called a handler. <code>R[0]</code> is the value sent and <code>R[1]</code> the continuation</td></tr>
-<tr><td rowspan="4"><code>mode</code></td><td>0</td><td>The value goes to <code>R[reg]</code> of the caller</td></tr>
-<tr><td>1</td><td>The call was made by a test instruction with <code>k = 0</code></td></tr>
-<tr><td>2</td><td>The call was made by a test instruction with <code>k = 1</code></td></tr>
-<tr><td>3</td><td>The value is discarded</td></tr>
-</table>
-<h3>Calls and returns</h3>
 <ul>
-<li>When <code>CALL A B C</code> chooses a lambda, it saves <code>pc</code> of the current frame and pushes a new frame with <code>base = the current base + B + 1</code>, <code>env = the environment of fn</code> and <code>ret = A</code>. It checks that the window fits up to <code>base + nregs</code>. The arguments do not move.</li>
-<li><code>HANDLE A B</code> likewise pushes a frame with <code>base = the current base + B + 2</code>, <code>kind = 1</code> and <code>reg = A</code> in <code>ret</code>, and runs the lambda <code>R[B]</code> with no arguments.</li>
-<li><code>RET A</code> reads the value, drops the frame and gives the value to the caller according to <code>ret</code> of the dropped frame.</li>
-<li><code>TCALL B C</code> moves <code>R[B]</code> to <code>R[B+C]</code> to <code>R[-1]</code> to <code>R[C-1]</code> and replaces the current frame. <code>mode</code> and <code>reg</code> of <code>ret</code> are kept, and <code>kind</code> becomes 0. When it calls a builtin, the result is given as by <code>RET</code>.</li>
-<li>The contents of <code>alts</code> have the form of Fusion below. <code>NEXT</code> chooses, from <code>next</code> in order, an alternative that takes the number of arguments. For a lambda it replaces <code>fn</code> and <code>env</code> of the frame and sets <code>pc</code> to 0. The window does not change. For a builtin the result is given as by <code>RET</code>, and a continuation resumes as by <code>TCALL</code>.</li>
-<li>When the alternatives run out, it goes to forwarding when <code>kind</code> is 2, and otherwise stops with <code>matching failed</code>.</li>
-<li>A call for an overwritten cell of a builtin puts the function in <code>R[nregs]</code> and the arguments above it, and goes as <code>CALL</code> does. <code>ret</code> depends on the kind of the instruction: <code>mode</code> is <code>k + 1</code> for a test instruction, 3 for <code>ASET</code> and <code>PLAINSET</code>, and otherwise 0 with <code>reg = A</code>. The window check uses <code>nregs</code> plus the size of the call.</li>
+<li><code>kind</code>: 0 is an ordinary frame. 1 is a boundary (the handler is in <code>R[-1]</code> and the body lambda in <code>R[-2]</code>). 2 is a transfer, the frame where <code>PERFORM</code> called the handler (<code>R[0]</code> is the sent value and <code>R[1]</code> the continuation).</li>
+<li><code>mode</code>: 0 puts the return value in <code>R[reg]</code> of the caller. 1 and 2 mean that the caller was a test instruction with <code>k = 0</code> and <code>k = 1</code>. 3 discards the value.</li>
 </ul>
 
-<h3>Checking for an overwritten builtin</h3>
-<p>The evaluator has one word <code>guard</code>, with one bit for each name of the Builtin column of the instruction table. An instruction with that column first looks whether <code>guard</code> is 0, and looks at its own bit otherwise. The cells of these names are marked, and <code>SETGLOBAL</code> updates the bit when it writes a marked cell (0 when the value is the original builtin, otherwise 1).</p>
+<h3>Calls and returns</h3>
+<ul>
+<li>When <code>CALL A B C</code> chooses a lambda, it saves <code>pc</code> and pushes a frame with <code>base</code> = the current base + B + 1 and <code>reg</code> of <code>ret</code> = A. The arguments are not moved. <code>HANDLE A B</code> pushes a frame with <code>base + B + 2</code> and <code>kind = 1</code>.</li>
+<li><code>RET</code> drops the frame and passes the value as its <code>ret</code> says. <code>TCALL</code> moves the arguments to <code>R[-1]</code> and on and replaces the current frame. It keeps <code>ret</code> and sets only <code>kind</code> to 0.</li>
+<li><code>NEXT</code> picks, from <code>next</code> on, the first alternative whose arity fits. For a lambda it replaces <code>fn</code> and <code>env</code> and sets <code>pc</code> to 0. When none is left, a frame with <code>kind</code> 2 goes on to the transfer and any other stops with <code>matching failed</code>.</li>
+<li>An overwritten builtin is detected with the word <code>guard</code>, whose bits correspond one by one to the names in the Builtin column. <code>SETGLOBAL</code> updates the bit when it writes the cell of such a name, and an instruction first checks whether <code>guard</code> is 0. When the builtin is overwritten, the function goes to <code>R[nregs]</code> with the arguments above it, and it is called like <code>CALL</code>.</li>
+</ul>
 
 <h3>Continuations</h3>
 <p>A continuation is an object on the heap: a copy of a slice of the frame stack and a slice of the register stack.</p>
 <ol>
-<li><code>PERFORM A B</code>: it goes down from the current frame to a frame F with <code>kind</code> 1. With no such frame it stops with <code>unhandled effect</code>.</li>
-<li>It saves <code>pc</code> of the current frame and makes a continuation by copying the frames from F to the current frame, and the registers from <code>F.base - 2</code> to <code>R[nregs-1]</code> of the current frame. <code>base</code> in the copy becomes the difference from the start of the slice of registers, and <code>A</code> goes to the field <code>reg</code> of the continuation. This allocation is the S of the instruction.</li>
-<li>It drops what is above F and makes a frame at the place of F with <code>kind = 2</code>, the <code>mode</code> and <code>reg</code> of F, and <code>base = F.base</code>. The value sent goes to <code>R[0]</code> and the continuation to <code>R[1]</code>, and the handler is chosen with 2 arguments.</li>
-<li>Forwarding: it goes down from below this frame to the next frame G with <code>kind</code> 1. With no such frame it stops with <code>unhandled effect</code>. It makes a new continuation of the slice from G to the frame below this one, followed by the slice of the old continuation, and does step 3 for G. The slice of registers of the old continuation continues at <code>F.base - 2</code>, so there is no gap. <code>F.base - G.base</code> is added to <code>base</code> of the frames of the old slice.</li>
-<li>Resumption: when the function of <code>CALL A B 1</code> is a continuation, the argument is read first, the slice is copied to <code>the current base + B + 1</code> and that position is added to <code>base</code> of each frame. <code>mode</code> and <code>reg</code> of <code>ret</code> of the first frame of the slice (the boundary) come from <code>A</code> of the <code>CALL</code>. The last frame of the slice becomes the current frame, the argument goes to its <code>R[reg]</code>, and the run goes on from its saved <code>pc</code>.</li>
-<li>When the function of <code>TCALL</code> is a continuation, the argument is read first, the slice is copied to <code>base - 1</code> of the current frame, and <code>mode</code> and <code>reg</code> of the first frame come from the current frame.</li>
+<li><code>PERFORM A B</code> looks down from the current frame for a frame F with <code>kind = 1</code>. With none, it stops with <code>unhandled effect</code>.</li>
+<li>It copies the frames from F to the current frame and the registers from <code>F.base - 2</code> to <code>R[nregs-1]</code> of the current frame into a continuation. The <code>base</code> of a copy is the offset from the start of the slice.</li>
+<li>It drops what is above F, makes a frame with <code>kind = 2</code> at the position of F, puts the sent value and the continuation in <code>R[0]</code> and <code>R[1]</code>, and chooses a handler. When none matches, it makes a new continuation from the slice up to the next boundary G with the original slice appended, and repeats this for G.</li>
+<li>Resuming copies the slices above the window of the caller, adds that position to the <code>base</code> of each frame, makes the last frame current and goes on from the saved <code>pc</code>. The <code>ret</code> of the first frame (the boundary) is decided as for a frame that <code>CALL</code> pushes.</li>
 </ol>
 
 <h2>Heap and garbage collection</h2>
-<p>The words of values, the headers of objects and the contents of each kind are defined in <a href="planckvm-repr.html">planckvm internal representation</a>. The heap is an array of 32-bit words, and the regions of the generations are taken on it.</p>
-
-<h3>Generations</h3>
+<p>The words of values and the contents of objects are in <a href="planckvm-repr.html">planckvm internal representation</a>. The GC is a copying collector of two generations, young and old, written in planck as a part of the evaluator. Allocation is from the young generation, and only an object that does not fit goes directly to the old one.</p>
 <ul>
-<li>The collector is a copying collector with a young and an old generation, written in planck as a part of the evaluator. It is not a runtime added to vasm.</li>
-<li>Allocation is from the young generation. An object that does not fit the young generation is allocated directly in the old one.</li>
-<li>When the young generation is full, every young object reachable from the roots and the remembered set is copied to the old generation, and the young generation becomes empty.</li>
-<li>When the old generation is full, it is copied between its two semispaces.</li>
+<li>When the young generation is full, the young objects reachable from the roots and the remembered set are copied to the old generation. When the old generation is full, it is copied between two semispaces.</li>
+<li>An instruction marked S in the instruction table may allocate and so may run the GC. The GC runs before the side effects of the instruction, and the inputs are read again from the registers, which the GC updates. There is no safe point in the middle of a loop.</li>
+<li>Every live value is reachable from the register stack, the frame stack, the cells, the state of the evaluator (the symbol table and the temporary slots of builtins) or the remembered set. No value lives only in a local variable of the evaluator.</li>
 </ul>
-
-<h3>Allocation and safe points</h3>
-<ul>
-<li>An instruction marked S in the instruction table may allocate, and the collector may run when it allocates.</li>
-<li>The collector runs before the side effects of the instruction. The inputs of the instruction remain in registers during the collection and are updated by it. The instruction reads its inputs again after the collection.</li>
-<li>Every running value can be reached from the register stack, the frame stack, the environments, the cells or the state of the evaluator. No value lives only in a local of the evaluator. A value that a builtin holds across an allocation is in a temporary slot of the state of the evaluator.</li>
-<li>The collector does not run in an instruction that allocates nothing (<code>JMP</code>, <code>MOVE</code>, <code>ENVGET</code> and so on). No safe point is placed in the middle of a loop.</li>
-</ul>
-
-<h3>Roots</h3>
-<table>
-<tr><th>Root</th><th>Contents</th></tr>
-<tr><td>The register stack</td><td>Every element from the bottom to <code>R[nregs-1]</code> of the current frame, and up to the arguments while a builtin runs for an overwritten cell</td></tr>
-<tr><td>The frame stack</td><td><code>fn</code>, <code>env</code> and <code>alts</code> of every frame</td></tr>
-<tr><td>Cells</td><td>The global variables</td></tr>
-<tr><td>The state of the evaluator</td><td>The symbol table, the state during compilation, the temporary slots of builtins</td></tr>
-<tr><td>The remembered set</td><td>A list of old objects (only for a collection of the young generation)</td></tr>
-</table>
-<p>There is no table of live registers. An element of the register stack is always a valid value or <code>none</code>. Two rules keep this true.</p>
-<ul>
-<li>At startup every element is filled with <code>none</code>.</li>
-<li>The collector fills with <code>none</code> the range above the roots that has been used since the last collection. The top of the range is recorded in a word <code>high</code>, which a new window updates.</li>
-</ul>
-<p>What is above <code>R[B]</code> of a caller overlaps the window of the callee, and what is below it is a live value or a past value. A past value stays alive until it is overwritten, but it is never a wrong reference.</p>
-
-<h3>The write barrier</h3>
-<p>The method is a remembered set: a list of old objects. When a reference to a young object is written into an old object whose <code>r</code> is 0, the old object is recorded and <code>r</code> becomes 1.</p>
-<ul>
-<li>The instructions that apply it are <code>ENVSET</code>, <code>SETGLOBAL</code> and <code>ASET</code>.</li>
-<li>An object allocated directly in the old generation is recorded when its initialization writes a young reference.</li>
-<li>These writes are not recorded: a write to a plain array (it has no references), the initialization of an object allocated in the young generation, and a write to the register stack or the frame stack (both are traced as roots every time).</li>
-</ul>
-
-<h3>Identity</h3>
-<p>Arrays, plain arrays and functions have identity (<code>EQ</code> and <code>HASH</code>). Identity is not held as an address. The first <code>HASH</code> assigns a number to the number word of the object (0 means not assigned yet). A symbol has a number that comes from its name, an M-expression and a string have one from their contents, and a number has one from its value.</p>
-
-<h3>Representation of numbers and plain arrays</h3>
-<ul>
-<li>When the result of two integers fits a small integer, the instruction need not allocate. An allocation happens when digits are added, and when the result is a float or a complex number. A result that fits 31 bits is always an immediate.</li>
-<li>Floats and complex numbers are immutable boxes on the heap. vasm holds a complex number as a pair of floats.</li>
-<li>The elements of a plain array carry no tag. A complex element is two numbers.</li>
-</ul>
-
-<h2>Partial evaluation</h2>
-<p>The purpose of planckvm is to partially evaluate an evaluator written in planck and to get an implementation of planck in vasm. The following properties of the design are meant to serve this.</p>
-<ul>
-<li>The instructions do not change after a code is made, and the register numbers and the differences of jumps are immediate. For a static code the reading of instructions and the choice of the next one can be unrolled, and the indices of registers are static.</li>
-<li>Pattern matching is in the code that is called. A match can be specialized for each function, and no matcher that walks a data tree is needed.</li>
-<li>Continuations are copies of frames and use no effects of the host, so the evaluator does not use <code>Perform</code> and does not meet the limit on continuations in <code>planck/lib/partial_eval.pk</code>.</li>
-<li>A dynamic indirect call goes only to a function reached by <code>CALL</code>. If the set of codes that can be called is closed, each code can become one function.</li>
-<li>The check for an overwritten builtin only reads the word <code>guard</code>, and it can be folded when <code>guard</code> is static. A global variable is a mutable cell, so a global that is assigned cannot be treated as static.</li>
-<li>With <code>PLAINGET</code> and <code>PLAINSET</code>, the elements are read and written as numbers without boxes.</li>
-</ul>
+<p>There is no table of live registers, and every element of the register stack is a valid value or none. It is filled with none at start, and the GC fills with none the used range above the roots. The top of that range is recorded in the word <code>high</code>, which is updated when a window is made.</p>
+<p>When a reference to a young object is written into an old object (<code>ENVSET</code>, <code>SETGLOBAL</code>, <code>ASET</code>), the object is recorded in the remembered set if its header bit <code>r</code> is 0, and <code>r</code> becomes 1.</p>
+<p>The identity of an array, a plain array or a function (<code>EQ</code> and <code>HASH</code>) is not its address. It is a number assigned at the first <code>HASH</code>.</p>

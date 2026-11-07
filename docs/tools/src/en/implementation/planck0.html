@@ -1,58 +1,40 @@
 <!--title planck0-->
 <h1>planck0</h1>
-<p class="lead">planck0 reads only M-expressions. It compiles each top-level M-expression to bytecode as it reads it, and runs the bytecode on a virtual machine that keeps its frames on a frame stack of its own. It looks up <code>parse</code> and <code>eval</code> in the global variables again for every expression. The source is the single file <a href="@REPO@/blob/main/bootstrap/planck0.sv">planck0.sv</a>.</p>
+<p class="lead"><a href="@REPO@/blob/main/bootstrap/planck0.sv">planck0.sv</a> is an implementation that reads only M-expressions, in one sasm file. It compiles each expression to bytecode as it reads it and runs it on a virtual machine with its own frame stack. Variables are resolved before the run, and a continuation is a copy of a chain of frames.</p>
 
 <h2>Top level</h2>
-<p><code>main</code> prepares the state, reads <code>planck/init.pk</code>, and then reads the program file given as the first argument.</p>
-<!--file bootstrap/planck0.sv fun main-->
-<p><code>interpret_file</code> reads a file ([[bootstrap/planck0.sv fun interpret_file]]). For each expression, <code>call_global</code> builds <code>Apply{name, Tuple{arg}}</code>, compiles it and runs it ([[bootstrap/planck0.sv fun call_global]]). A program that replaces <code>parse</code> has the next expression read by the new <code>parse</code>.</p>
+<p><code>main</code> reads <code>planck/init.pk</code> and the program file with <code>interpret_file</code>. For each expression, <code>call_global</code> looks up the global variables <code>parse</code> and <code>eval</code> again, so when a program replaces them the next expression is read with the new definitions.</p>
 <!--file bootstrap/planck0.sv ; The loop looks up the global variables .. fun call_global-->
 
-<h2>Value representation</h2>
-<p>A value is one 32-bit word. When the least significant bit is 1, the value is an integer shifted left by one bit. When it is 0, the value is a pointer to an object on the heap. An object has a header word that holds its kind and length.</p>
+<h2>Values and memory</h2>
+<p>A value is one 32-bit word. If the lowest bit is 1 it is an integer, and if 0 it is a pointer to an object on the heap. An object has a header that holds its kind and length.</p>
 <!--file bootstrap/planck0.sv ; === data layout (planck0) .. ; === Hash table-->
-<p>Symbols and M-expressions are interned. M-expressions with the same structure are one object in memory, so equality is pointer comparison ([[bootstrap/planck0.sv ; intern a temporary m-expr object]]).</p>
-<p>The heap is a fixed region allocated by <code>mmap2</code> at startup. It is a sequence of chunks with a header word each, and a bitmap records where the chunks of objects begin ([[bootstrap/planck0.sv ; The heap is a fixed area .. ; === data layout (planck0)]]).</p>
-<p>The GC is a stop-the-world mark and sweep collector that frees the unreachable objects and never moves an object ([[bootstrap/planck0.sv ; === Garbage Collection .. fun main]]).</p>
-<p>The GC is conservative: a word of the roots (the global variables of planck0 itself, the frame stack and the machine stack) or of a marked object that points into an object, at its beginning or not, keeps the object. The sweep merges adjacent free chunks, and <code>allocate</code> takes a chunk from them by first fit. The next GC starts when the memory allocated since the last GC reaches the memory live at the last GC.</p>
+<p>Symbols and M-expressions are interned, so equality is a comparison of pointers. The heap is a fixed area allocated at start. The GC is a conservative mark-sweep that does not move objects, and an object is kept when any word points into it ([[bootstrap/planck0.sv ; === Garbage Collection .. fun main]]).</p>
 
 <h2>The M-expression reader</h2>
-<p>The builtin <code>parse</code> reads four kinds of text: symbols, integers, strings, and <code>Head{...}</code>, a symbol followed by <code>{</code> ([[bootstrap/planck0.sv fun parse_mexpr .. ; === Bytecode VM]]). An M-expression has at most 64 arguments.</p>
-<!--file bootstrap/planck0.sv fun parse_-->
-<p>After the syntax of planck is installed, this reader remains as <code>parse_mexpr</code>.</p>
+<p>The builtin <code>parse</code> reads four kinds: a symbol, an integer, a string and <code>Head{...}</code>. It stays as <code>parse_mexpr</code> after the syntax is introduced.</p>
 <!--ex i_parse-->
 
 <h2>The compiler</h2>
-<p><code>compile</code> turns an integer or a string into a constant and a symbol into a variable reference, and passes an M-expression to <code>compile_mexpr</code> ([[bootstrap/planck0.sv fun compile]]).</p>
-<p><code>compile_mexpr</code> dispatches on the head ([[bootstrap/planck0.sv fun compile_mexpr]]). The special forms are <code>Apply</code>, <code>Def</code>, <code>Declare</code>, <code>Set</code>, <code>Do</code>, <code>If</code>, <code>While</code>, <code>Lambda</code>, <code>Fusion</code>, <code>Quote</code>, <code>QuasiQuote</code>, <code>Handle</code> and <code>Perform</code>. Any other head is a constructor: it evaluates the arguments and builds an M-expression with the same head.</p>
+<p><code>compile_mexpr</code> branches on the head of the M-expression ([[bootstrap/planck0.sv fun compile_mexpr]]). A head other than the special forms is a constructor that evaluates its arguments and makes an M-expression with the same head.</p>
+
 <h3>Resolving variables</h3>
-<p>The compiler resolves a local variable to a pair (environment depth, position) and a global variable to a cell (three words: the value, the name and the file that defines it). A table <code>global_table</code> gives the latest cell of a name.</p>
-<p>A top-level <code>Def</code> makes a new cell and replaces the entry of the table ([[bootstrap/planck0.sv fun define_global]]), and the instructions <code>GLOAD</code>, <code>GDEF</code> and <code>GSET</code> carry the cell instead of the name ([[bootstrap/planck0.sv fun global_cell .. ; allocate slots for variables in a pattern]]). The variable a name refers to is decided before the expression runs, and a function compiled earlier keeps referring to the old cell. <code>Set</code> writes to the current cell. A name that is neither local nor global stops the program with a message before the run.</p>
+<p>A local variable resolves to (depth of the environment, position), and a global variable to a cell. A top-level <code>Def</code> makes a new cell, and the instructions <code>GLOAD</code>, <code>GDEF</code> and <code>GSET</code> embed the cell ([[bootstrap/planck0.sv fun define_global]]). So a function compiled before keeps pointing to the old cell, and only <code>Set</code> writes the current cell.</p>
 
 <h3>Def and Declare</h3>
-<p><code>Def</code> makes the cell after it compiles the right-hand side, so the right-hand side sees the previous variable. A function can refer to itself because the syntax reads a function definition as a <code>Declare{f}</code> that makes the cell first and a <code>Set</code> that fills it. Calling it before the <code>Set</code> calls <code>none</code> and stops the program.</p>
-<p><code>Declare{f}</code> compiles as <code>Def{f, none}</code> only when <code>f</code> is not yet a variable of the place.</p>
-<ul>
-<li>At the top level, it looks up <code>global_table</code> and compares the file of the cell with <code>cur_file</code>, the file being loaded, which <code>interpret_file</code> and <code>_set_file</code> (called by <code>load</code>) set.</li>
-<li>In a function, it looks for an entry of the compile-time environment at the level of the function ([[bootstrap/planck0.sv fun defined_here]], [[bootstrap/planck0.sv if (== head DeclareS)]]).</li>
-</ul>
+<p><code>Def</code> compiles the right-hand side before it makes the cell, so the right-hand side sees the previous variable. A function can refer to itself because the syntax reads a function definition as <code>Declare{f}</code>, which makes the cell first, and then <code>Set</code>, which puts the function in it.</p>
+<p><code>Declare{f}</code> becomes <code>Def{f, none}</code> only when <code>f</code> is not yet a variable of that place. At top level this checks whether the file that defined the cell is the file being loaded, <code>cur_file</code>. In a function it checks whether an item of that depth exists ([[bootstrap/planck0.sv fun defined_here]]).</p>
 
 <h2>The virtual machine</h2>
-<p>The design of the machine is described in the comments of the source.</p>
 <!--file bootstrap/planck0.sv ; === Bytecode VM .. def C_ARITY-->
-<p>Frames live on a frame stack of its own, not on the machine stack. A frame is placed just above its caller and dropped when it returns. The virtual machine does not call itself recursively. The state of a computation is the chain of frames from the current frame to the top level, so a continuation is a copy of this chain.</p>
+<p>The virtual machine never calls itself recursively. The state of a computation is only the chain of frames, so a continuation is a copy of it.</p>
 
 <h2>Calls and pattern matching</h2>
-<p>At a call, <code>select</code> chooses the function that matches the arguments ([[bootstrap/planck0.sv fun select]]). A <code>Fusion</code> tries the left function and, on failure, the right one. A <code>Lambda</code> compares the number of arguments and then matches the patterns in order.</p>
+<p><code>select</code> chooses the function that fits the arguments. A <code>Fusion</code> tries the left function and then the right, and the program stops with <code>matching failed</code> when none fits.</p>
 <!--file bootstrap/planck0.sv fun match_pat-->
-<p><code>match_pat</code> writes the value to the next position of the new environment for a variable, compares equality for a <code>Quote</code>, and checks the kind for a <code>_TypeOf</code> before it matches the inner pattern. An M-expression pattern compares the head and the number of arguments, and recurses on each argument. When no function matches, the program stops with <code>matching failed</code> ([[bootstrap/planck0.sv fun match_error]]).</p>
-<p>The builtin <code>eval</code> compiles an M-expression as a top-level expression and runs it in a new frame ([[bootstrap/planck0.sv if (== (get callee 3) PRIM_EVAL)]]).</p>
-
-<h2>Builtin functions</h2>
-<p><code>init_prims</code> registers the builtin functions in the global table, making their cells, with <code>defprim</code>. <code>defprim</code> takes the name, the number of arguments, the implementing function and the kind ([[bootstrap/planck0.sv fun defprim]]). The operators and the string concatenation are registered under the names that the sugar calls. These names start with <code>_</code>: <code>_add</code>, <code>_sub</code>, <code>_mul</code>, <code>_div</code>, <code>_quo</code>, <code>_mod</code>, <code>_lt</code>, <code>_le</code>, <code>_gt</code>, <code>_ge</code>, <code>_eq</code>, <code>_ne</code> and <code>_strcat</code> ([[bootstrap/planck0.sv fun init_prims]]). Names without <code>_</code>, such as <code>add</code> and <code>strcat</code>, are not registered. A variable of the same name in a program does not change the meaning of an operator.</p>
+<p>The names of builtins start with <code>_</code>, as in <code>_add</code>, <code>_eq</code> and <code>_strcat</code> ([[bootstrap/planck0.sv fun init_prims]]). <code>add</code> without the <code>_</code> is not registered, so a program that defines a variable of that name does not change the meaning of an operator.</p>
 
 <h2 id="effects">Effects</h2>
-<p><code>Handle</code> runs its body in a new frame and records the handler in that frame ([[bootstrap/planck0.sv fun op_handle]]). <code>Perform</code> follows the chain from the current frame to the callers and looks for a frame that has a handler.</p>
+<p><code>Handle</code> runs its body in a new frame and records the handler in that frame. <code>Perform</code> follows the chain to the callers to find a frame with a handler, makes a continuation <code>k</code> (a copy on the heap of the chain up to there) and matches the handler with <code>(v, k)</code>. When nothing matches, it looks further outside.</p>
 <!--file bootstrap/planck0.sv fun op_perform-->
-<p>When it finds one, it makes a continuation <code>k</code>, a copy on the heap of the chain of frames from the current frame to the boundary frame, and matches the handler against <code>(v, k)</code>. When the handler does not match, the search continues outward. The value of the handler returns to the caller of the boundary frame and becomes the value of the <code>Handle</code> expression.</p>
-<p>Calling <code>k</code> copies the chain of <code>k</code> onto the frame stack and runs the copy (<code>resume</code>, [[bootstrap/planck0.sv fun resume]]). The original frames never run, so the same <code>k</code> can be called any number of times (multi-shot continuations).</p>
+<p>Calling <code>k</code> copies the chain onto the frame stack and runs it (<code>resume</code>). The original frames never run, so the same <code>k</code> can be called any number of times.</p>
