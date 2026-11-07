@@ -39,20 +39,20 @@
 <p class="lead">M-expressions and atoms, the types of atoms, equality and identity.</p>
 
 <h2 id="kinds">M-expressions and atoms</h2>
-<p>A value is an M-expression or an atom. An atom is a value that is not an M-expression: an integer, a float, a string, a symbol, a function, an array, a plain array or user data.</p>
+<p>A value is an M-expression or an atom. An atom is a value that is not an M-expression: an integer, a float, a complex number, a string, a symbol, a function, an array, a plain array, a type value or user data.</p>
 <ul>
-<li>The <code>head</code> of an M-expression is a symbol. Two libraries can use the same head. A head is not registered, and values with the same head are treated as values of the same form.</li>
-<li>The <code>head</code> of an atom is its type itself, which is a value (a type value). The pattern <code>x @ Int</code> matches an atom whose type is <code>Int</code>.</li>
-<li><code>head(x)</code> is a symbol if <code>x</code> is an M-expression, and a type value if <code>x</code> is an atom.</li>
-<li><code>x @ T</code> compares the head symbol if <code>x</code> is an M-expression, and the type value if <code>x</code> is an atom.</li>
-<li>A type value can be a table key. A table that dispatches on <code>head</code> can hold both symbols and type values as keys.</li>
-<li>A type value is shown by the name of its type. Two types with the same name look the same when shown.</li>
+<li>The <code>head</code> of an M-expression is a symbol. Two libraries can use the same head. A head is not registered, and values with the same head are treated as values of the same form. A head is read with the pattern <code>Set{...}</code>.</li>
+<li>Every value has a type, which is itself a value (a type value). <code>type(x)</code> returns it: <code>Expr</code> for an M-expression, <code>Int</code> for <code>1</code>, <code>Symbol</code> for a symbol, <code>Type</code> for <code>Int</code>. <code>Expr</code> is also a builtin type value, and <code>type(Expr)</code> is <code>Type</code>.</li>
+<li><code>head(x)</code> is for M-expressions only. It returns the head symbol, and is an error if <code>x</code> is an atom.</li>
+<li><code>Int</code>, <code>String</code>, <code>Expr</code> and the other names of the builtin types are variables that hold type values. <code>x @ T</code> reads the variable <code>T</code> and compares it with <code>type(x)</code>, so <code>x @ Expr</code> matches every M-expression and <code>x @ Int</code> matches an integer.</li>
+<li>A type value can be a table key.</li>
+<li>A type value is shown by the name of its type. Two types with the same name are shown the same. To tell them apart, use <code>is</code> or <code>x @ T</code>.</li>
 </ul>
 <p>The M-expression <code>Set{1}</code> and a type whose name is <code>Set</code> are different things, so a name never collides with the head of an M-expression.</p>
 
 <h2 id="mexpr">M-expressions</h2>
 <ul>
-<li>A head symbol and any number of arguments.</li>
+<li>A head symbol and any number of arguments. The type is <code>Expr</code>.</li>
 <li>Immutable. Literals: <code>Head{a, b}</code>, <code>(a, b)</code>, <code>[a, b]</code> and <code>[]</code>.</li>
 <li>Sugar: <code>(a, b)</code> (<code>Tuple</code>), <code>[a, b]</code> and <code>::</code> (<code>Cons</code>), <code>[]</code> (<code>Nil</code>).</li>
 <li>A mutable value cannot be an argument. Neither can immutable user data that holds a mutable value. Neither can a NaN. Making such an M-expression is a runtime error.</li>
@@ -61,16 +61,18 @@
 </ul>
 
 <h2 id="atoms">Types of atoms</h2>
-<p>There are seven builtin types of atoms. A user can make new types (user data). In the table, a type value is written with the name of its type.</p>
+<p>There are nine builtin types of atoms. A user can make new types (user data). In the table, a type value is written with the name of its type.</p>
 <table>
-<tr><th>Type</th><th><code>head</code> (type value)</th><th>Literal</th><th>Mutable?</th><th><code>==</code></th><th><code>is</code></th><th>Table key</th></tr>
+<tr><th>Type</th><th><code>type</code></th><th>Literal</th><th>Mutable?</th><th><code>==</code></th><th><code>is</code></th><th>Table key</th></tr>
 <tr><td>integer</td><td><code>Int</code></td><td><code>42</code> <code>0x1f</code> <code>0b101</code></td><td>immutable</td><td>value</td><td>value</td><td>yes</td></tr>
 <tr><td>float</td><td><code>Float</code></td><td><code>1.5</code> <code>2.5e-3</code></td><td>immutable</td><td>value</td><td>object</td><td>yes, except NaN</td></tr>
+<tr><td>complex number</td><td><code>Complex</code></td><td><code>2i</code></td><td>immutable</td><td>value</td><td>—</td><td>yes</td></tr>
 <tr><td>string</td><td><code>String</code></td><td><code>"abc"</code></td><td>immutable</td><td>identity</td><td>intern</td><td>yes</td></tr>
 <tr><td>symbol</td><td><code>Symbol</code></td><td><code>x</code></td><td>immutable</td><td>identity</td><td>intern</td><td>yes</td></tr>
 <tr><td>function</td><td><code>Function</code></td><td><code>(p) -&gt; e</code> <code>f | g</code></td><td>immutable</td><td>identity</td><td>object</td><td>yes</td></tr>
 <tr><td>array</td><td><code>Array</code></td><td>—</td><td>mutable</td><td>true if identical, otherwise element by element</td><td>object</td><td>no</td></tr>
 <tr><td>plain array</td><td><code>Plain</code></td><td>—</td><td>mutable</td><td>true if identical, otherwise element by element</td><td>object</td><td>no</td></tr>
+<tr><td>type value</td><td><code>Type</code></td><td>—</td><td>immutable</td><td>identity</td><td>—</td><td>yes</td></tr>
 <tr><td>user data</td><td>the type value of its type</td><td>—</td><td>specified when made</td><td>identity. The given function if <code>==</code> is given</td><td>immutable: intern. mutable: object. object if <code>==</code> is given</td><td>yes</td></tr>
 </table>
 
@@ -89,6 +91,11 @@
 <li>NaN cannot be a table key. Using a NaN as a key is an error.</li>
 <li>A different object with the same value is not identical.</li>
 <li>The hash of a float equal to an integer is the same as the integer. Otherwise it is decided by the contents.</li>
+</ul>
+
+<h3>complex number</h3>
+<ul>
+<li>Equal to an integer or a float with the same value. See Equality across number types below.</li>
 </ul>
 
 <h3>string</h3>
@@ -125,6 +132,12 @@
 <li>A different plain array with the same contents is equal but not identical.</li>
 <li><code>==</code> first returns true if the two are identical. Otherwise it compares element by element, as for an array.</li>
 <li><code>a[i] = e</code> works. An error when out of range or when the value cannot be converted.</li>
+</ul>
+
+<h3>type value</h3>
+<ul>
+<li>The type of every value. Held by variables such as <code>Int</code> and <code>String</code>.</li>
+<li>Shown by the name of the type. Different types with the same name are shown the same and are told apart by <code>is</code>.</li>
 </ul>
 
 <h3>user data</h3>
