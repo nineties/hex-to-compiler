@@ -1013,46 +1013,6 @@ Def{
     }}
 
 Def{
-    peg_for,
-    Lambda{
-        Tuple{xs, f},
-        Do{
-            If{
-                Apply{peg_is_head, Tuple{xs, Quote{Vector}}},
-                Do{
-                    Def{i, 0},
-                    Def{v, Apply{arg, Tuple{xs, 0}}},
-                    While{
-                        Apply{_lt, Tuple{i, Apply{array_get, Tuple{v, 1}}}},
-                        Do{
-                            Apply{f, Tuple{Apply{array_get, Tuple{Apply{array_get, Tuple{v, 0}}, i}}}},
-                            Set{i, Apply{_add, Tuple{i, 1}}}
-                        }
-                    }
-                },
-                If{
-                    Apply{peg_is_head, Tuple{xs, Quote{Range}}},
-                    Do{
-                        Def{j, Apply{arg, Tuple{xs, 0}}},
-                        Def{n, Apply{arg, Tuple{xs, 1}}},
-                        While{
-                            Apply{_le, Tuple{j, n}},
-                            Do{Apply{f, Tuple{j}}, Set{j, Apply{_add, Tuple{j, 1}}}}
-                        }
-                    },
-                    Do{
-                        While{
-                            Apply{_eq, Tuple{Apply{head, Tuple{xs}}, Quote{Cons}}},
-                            Do{Apply{f, Tuple{Apply{arg, Tuple{xs, 0}}}}, Set{xs, Apply{arg, Tuple{xs, 1}}}}
-                        }
-                    }
-                }
-            },
-            none
-        }
-    }}
-
-Def{
     peg_return,
     Lambda{
         Tuple{v},
@@ -2334,3 +2294,78 @@ peg_def_run(a, rest) := {
 def_arm ::= &(postfix (":=" | 'if)) f:ident nospace("(") ps:delimited(pattern, ",") ")" g:('if or_expr)? ":=" e:expr { peg_def_arm(f, ps, g, e) }
 
 def_run ::= a:special_arm rest:(";"? def_arm)* { peg_def_run(a, rest) }
+
+" === for === "
+" for (p in xs) a is peg_for(xs, p -> a). It calls no function of a type but _iter: the elements of xs "
+" are the ones that the iterator _iter(xs) gives. An iterator is a function next. next(end) is the next "
+" element, or end itself when there is no more. peg_for makes a new end for each run, so no element is it. "
+" A type is added by putting its arm in front of _iter (like _index_get): "
+"     _iter = (Matrix{w, h, d}) -> { i := 0; (end) -> if (i < w * h) { i += 1; d[i - 1] } else end } | _iter "
+" _iter has no arm for another value, and iterating over it is a call that no arm matches. "
+" a list, from the first element to the end "
+_iter(Cons{x, xs}) := {
+    cur := Cons{x, xs}
+    (end) -> if (head(cur) == 'Cons) {
+        h := arg(cur, 0)
+        cur = arg(cur, 1)
+        h
+    } else end
+}
+_iter(Nil{}) := (end) -> end
+
+" a..b: the integers from a to b including b "
+_iter(Range{a, b}) := {
+    i := a
+    (end) -> if (i <= b) {
+        i += 1
+        i - 1
+    } else end
+}
+
+" an array and a plain array: the elements from 0 "
+_iter(a @ array) := {
+    i := 0
+    n := array_len(a)
+    (end) -> if (i < n) {
+        i += 1
+        array_get(a, i - 1)
+    } else end
+}
+_iter(a @ plain) := {
+    i := 0
+    n := plain_len(a)
+    (end) -> if (i < n) {
+        i += 1
+        plain_get(a, i - 1)
+    } else end
+}
+
+" a table: Tuple{key, value} of each entry, in the order of table.items. The table must not change while it is walked. "
+_iter(Table{t}) := {
+    b := array_get(t, 0)
+    n := array_len(b)
+    i := 0
+    e := none
+    (end) -> {
+        while (e == none and i < n) {
+            e = array_get(b, i)
+            i += 1
+        }
+        if (e == none) end else {
+            r := Tuple{array_get(e, 0), array_get(e, 1)}
+            e = array_get(e, 2)
+            r
+        }
+    }
+}
+
+peg_for(xs, f) := {
+    end := () -> none
+    next := _iter(xs)
+    x := next(end)
+    while (x != end) {
+        f(x)
+        x = next(end)
+    }
+    none
+}
