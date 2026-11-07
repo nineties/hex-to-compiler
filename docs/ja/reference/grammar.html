@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>文法の宣言 | hex-to-compiler project</title>
+<title>文法の拡張 | hex-to-compiler project</title>
 <link rel="alternate" hreflang="en" href="../../en/reference/grammar.html">
 <link rel="stylesheet" href="../../assets/style.css">
 </head>
@@ -14,6 +14,7 @@
 <a href="../index.html">概要</a>
 <a href="../tutorial/index.html">チュートリアル</a>
 <a class="here" href="../reference/index.html">リファレンス</a>
+<a href="../library/index.html">ライブラリと低級言語</a>
 <a href="../implementation/index.html">処理系の実装</a>
 <a href="https://github.com/nineties/hex-to-compiler">GitHub</a>
 <a class="lang-switch" lang="en" hreflang="en" href="../../en/reference/grammar.html">English</a>
@@ -24,18 +25,17 @@
 <h2>リファレンス</h2>
 <ol>
 <li><a href="index.html">目次</a></li>
+<li><a href="datamodel.html">データモデル</a></li>
+<li><a href="functions.html">部分関数と融合</a></li>
+<li><a href="closures.html">クロージャー</a></li>
+<li><a href="binding.html">変数束縛</a></li>
+<li><a href="control.html">制御構造</a></li>
 <li><a href="syntax.html">構文</a></li>
-<li><a href="values.html">値・パターン・M式</a></li>
-<li><a href="datatypes.html">データ型</a></li>
-<li><a class="here" href="grammar.html">文法の宣言</a></li>
+<li><a class="here" href="grammar.html">文法の拡張</a></li>
 <li><a href="builtins.html">組み込み関数</a></li>
-<li><a href="library.html">ライブラリ</a></li>
-<li><a href="vasm.html">vasm</a></li>
-<li><a href="native.html">native</a></li>
-<li><a href="vasmc.html">vasmc</a></li>
 </ol></details></nav>
 <main>
-<h1>文法の宣言</h1>
+<h1>文法の拡張</h1>
 <p class="lead"><code>::=</code> は PEG の規則を定義するか置き換えます。planck の構文も同じ規則で定義されているので、宣言すると後続の式の構文を拡張できます。選択肢は順に試し、規則の結果は位置ごとにメモ化します（packrat）。</p>
 
 <h2>::=</h2>
@@ -176,7 +176,71 @@ num <span class="tok-op">::=</span> <span class="tok-name">integer</span>
 }</pre>
 </div>
 
-<nav class="pager"><a class="prev" href="datatypes.html"><small>前のページ</small>データ型</a><a class="next" href="builtins.html"><small>次のページ</small>組み込み関数</a></nav>
+<h2 id="macro">macro</h2>
+<p><code>macro p := e</code> は、評価の前に木を書き換える規則を足します。<code>p</code> は引数のパターンと同じ書き方で木の形を表し、<code>e</code> は <code>p</code> の変数を使って評価されて新しい木になります。文字列を M式にする構文には触れません。</p>
+<div class="example">
+<p class="file">r_macro.pk</p>
+<pre class="pk"><span class="tok-kw">macro</span> <span class="tok-name">Twice</span><span class="tok-op">{</span><span class="tok-name">x</span><span class="tok-op">}</span> <span class="tok-op">:=</span> <span class="tok-op">`</span><span class="tok-op">(</span><span class="tok-op">!</span><span class="tok-name">x</span> <span class="tok-op">+</span> <span class="tok-op">!</span><span class="tok-name">x</span><span class="tok-op">)</span>
+<span class="tok-kw">macro</span> <span class="tok-name">unless</span><span class="tok-op">(</span><span class="tok-name">c</span><span class="tok-op">,</span> <span class="tok-name">e</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-op">`</span><span class="tok-kw">if</span> <span class="tok-op">(</span><span class="tok-kw">not</span> <span class="tok-op">!</span><span class="tok-name">c</span><span class="tok-op">)</span> <span class="tok-op">!</span><span class="tok-name">e</span>
+
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">Twice</span><span class="tok-op">{</span><span class="tok-num">21</span><span class="tok-op">}</span><span class="tok-op">)</span>
+<span class="tok-name">unless</span><span class="tok-op">(</span><span class="tok-num">1</span> <span class="tok-op">&gt;</span> <span class="tok-num">2</span><span class="tok-op">,</span> <span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-str">"shown"</span><span class="tok-op">)</span><span class="tok-op">)</span>
+<span class="tok-name">unless</span><span class="tok-op">(</span><span class="tok-num">1</span> <span class="tok-op">&lt;</span> <span class="tok-num">2</span><span class="tok-op">,</span> <span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-str">"not shown"</span><span class="tok-op">)</span><span class="tok-op">)</span>
+
+<span class="tok-com"># a quote is not rewritten</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-op">'</span><span class="tok-op">(</span><span class="tok-name">Twice</span><span class="tok-op">{</span><span class="tok-num">1</span><span class="tok-op">}</span><span class="tok-op">)</span><span class="tok-op">)</span></pre>
+<p class="label">出力</p>
+<pre class="out">42
+&quot;shown&quot;
+Twice{1}</pre>
+</div>
+<ul>
+<li>読み終わった式を評価する前（<code>eval</code> に渡した木も同じ）に、根から順に各部分を書き換えます。規則は後に足したものから試し、合わなければそのままです。書き換えた部分は、変わらなくなるまで規則を当ててから、その中を書き換えます。</li>
+<li>クオート <code>'e</code> の中は書き換えません。準クオート <code>`e</code> の中は <code>!e</code> の中だけを書き換えます。関数の引数のパターンと、<code>Def</code>・<code>Set</code>・<code>Declare</code> が定義する名前も書き換えません。</li>
+<li>1つの式の書き換えで規則を 1000 回より多く当てるとエラーで止まります（終わらない規則も止まります）。</li>
+<li>規則が有効なのは、<code>macro</code> の位置から、それを囲む一番内側の関数か module の本体の終わりまでです。何も囲んでいなければ以降のすべての式です。module の中の <code>export macro</code> は、その module の定義のあとから module の外でも有効です。</li>
+</ul>
+<div class="example">
+<p class="file">r_macro_module.pk</p>
+<pre class="pk"><span class="tok-kw">module</span> <span class="tok-name">shapes</span> <span class="tok-op">{</span>
+    <span class="tok-kw">macro</span> <span class="tok-name">Inside</span><span class="tok-op">{</span><span class="tok-name">x</span><span class="tok-op">}</span> <span class="tok-op">:=</span> <span class="tok-op">`</span><span class="tok-op">(</span><span class="tok-op">!</span><span class="tok-name">x</span> <span class="tok-op">+</span> <span class="tok-num">100</span><span class="tok-op">)</span>
+    <span class="tok-kw">export</span> <span class="tok-kw">macro</span> <span class="tok-name">Double</span><span class="tok-op">{</span><span class="tok-name">x</span><span class="tok-op">}</span> <span class="tok-op">:=</span> <span class="tok-op">`</span><span class="tok-op">(</span><span class="tok-op">!</span><span class="tok-name">x</span> <span class="tok-op">*</span> <span class="tok-num">2</span><span class="tok-op">)</span>
+    <span class="tok-kw">export</span> <span class="tok-name">f</span><span class="tok-op">(</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-name">Inside</span><span class="tok-op">{</span><span class="tok-num">1</span><span class="tok-op">}</span>
+<span class="tok-op">}</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">shapes</span><span class="tok-op">.</span><span class="tok-name">f</span><span class="tok-op">(</span><span class="tok-op">)</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">Double</span><span class="tok-op">{</span><span class="tok-num">21</span><span class="tok-op">}</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-op">'</span><span class="tok-op">(</span><span class="tok-name">Inside</span><span class="tok-op">{</span><span class="tok-num">1</span><span class="tok-op">}</span><span class="tok-op">)</span><span class="tok-op">)</span></pre>
+<p class="label">出力</p>
+<pre class="out">101
+42
+Inside{1}</pre>
+</div>
+
+<h2 id="toplevel">トップレベル</h2>
+<p>式を読むたびに大域変数 <code>parse</code> と <code>eval</code> を引き直すので、差し替えると次の式から新しい定義で処理されます。<code>Apply{eval, ...}</code> も差し替えた <code>eval</code> を呼びます。</p>
+<ul>
+<li><code>parse</code>：<code>文字列 -> Tuple{M式, 文字列の残り}</code>。空白しか残っていなければ <code>Tuple{Eof{}, ""}</code> を返し、差し替える <code>parse</code> は <code>Eof{}</code> をそのまま通します。</li>
+<li><code>eval</code>：<code>M式 -> 値</code>。</li>
+</ul>
+<div class="example">
+<p class="file">t6_eval.pk</p>
+<pre class="pk"><span class="tok-name">old_eval</span> <span class="tok-op">:=</span> <span class="tok-name">eval</span>
+<span class="tok-name">eval</span> <span class="tok-op">=</span> <span class="tok-name">e</span> <span class="tok-op">-&gt;</span> <span class="tok-op">{</span>
+    <span class="tok-name">v</span> <span class="tok-op">:=</span> <span class="tok-name">old_eval</span><span class="tok-op">(</span><span class="tok-name">e</span><span class="tok-op">)</span>
+    <span class="tok-name">put</span><span class="tok-op">(</span><span class="tok-str">"=&gt; "</span><span class="tok-op">)</span>
+    <span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">v</span><span class="tok-op">)</span>
+    <span class="tok-name">v</span>
+<span class="tok-op">}</span>
+<span class="tok-num">1</span> <span class="tok-op">+</span> <span class="tok-num">2</span>
+<span class="tok-op">'</span><span class="tok-op">(</span><span class="tok-name">a</span> <span class="tok-op">+</span> <span class="tok-name">b</span><span class="tok-op">)</span>
+<span class="tok-name">Point</span><span class="tok-op">{</span><span class="tok-num">1</span><span class="tok-op">,</span> <span class="tok-num">2</span><span class="tok-op">}</span></pre>
+<p class="label">出力</p>
+<pre class="out">=&gt; 3
+=&gt; Apply{_add, Tuple{a, b}}
+=&gt; Point{1, 2}</pre>
+</div>
+
+<nav class="pager"><a class="prev" href="syntax.html"><small>前のページ</small>構文</a><a class="next" href="builtins.html"><small>次のページ</small>組み込み関数</a></nav>
 </main>
 </div>
 <footer><div class="inner"><a href="https://github.com/nineties/hex-to-compiler">github.com/nineties/hex-to-compiler</a></div></footer>

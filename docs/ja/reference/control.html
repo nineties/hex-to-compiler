@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>制御構造 | hex-to-compiler project</title>
+<link rel="alternate" hreflang="en" href="../../en/reference/control.html">
+<link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+<header class="site-header"><div class="inner">
+<a class="logo" href="../index.html"><span class="brand"><b>hex-to-compiler <i>project</i></b><small>自分自身をブートストラップする処理系</small></span></a>
+<nav class="site-nav">
+<a href="../index.html">概要</a>
+<a href="../tutorial/index.html">チュートリアル</a>
+<a class="here" href="../reference/index.html">リファレンス</a>
+<a href="../library/index.html">ライブラリと低級言語</a>
+<a href="../implementation/index.html">処理系の実装</a>
+<a href="https://github.com/nineties/hex-to-compiler">GitHub</a>
+<a class="lang-switch" lang="en" hreflang="en" href="../../en/reference/control.html">English</a>
+</nav>
+</div></header>
+<div class="layout">
+<nav class="toc" aria-label="リファレンスの目次"><details open><summary>リファレンスの目次</summary>
+<h2>リファレンス</h2>
+<ol>
+<li><a href="index.html">目次</a></li>
+<li><a href="datamodel.html">データモデル</a></li>
+<li><a href="functions.html">部分関数と融合</a></li>
+<li><a href="closures.html">クロージャー</a></li>
+<li><a href="binding.html">変数束縛</a></li>
+<li><a class="here" href="control.html">制御構造</a></li>
+<li><a href="syntax.html">構文</a></li>
+<li><a href="grammar.html">文法の拡張</a></li>
+<li><a href="builtins.html">組み込み関数</a></li>
+</ol></details></nav>
+<main>
+<h1>制御構造</h1>
+<p class="lead">制御構造は <code>If</code>・<code>While</code>・<code>for</code>・<code>match</code> と、代数的エフェクト（<code>Handle</code> と <code>Perform</code>）です。</p>
+
+<h2>for と return・break・continue</h2>
+<p><code>for (p in e) a</code> は、リスト・ベクタ・範囲 <code>e</code> の要素ごとに、要素をパターン <code>p</code> と照合して <code>a</code> を評価します。値は <code>none</code> で、<code>a</code> から見えるループの外の変数は共有されます。</p>
+<p><code>return e</code> はそれを含む関数の呼び出しを値 <code>e</code> で終え（<code>e</code> がなければ <code>none</code>）、<code>break</code> と <code>continue</code> は最も内側の <code>while</code> か <code>for</code> を終えるか次の回に進めます。<code>e</code> は <code>return</code> と同じ行で始めます。これらはエフェクトに読み替えられます。</p>
+<ul>
+<li>本体に <code>return</code> がある関数は <code>Handle{body, (Return{v}, k) -&gt; v}</code>、<code>break</code> があるループは <code>Handle{loop, (Break{}, k) -&gt; none}</code>、<code>continue</code> があるループは本体が <code>Handle{body, (Continue{}, k) -&gt; none}</code> になります。</li>
+<li><code>for</code> の本体や <code>match</code> の腕の中の <code>return</code> は、それらを囲む関数を終えます。中に書いた関数の中の <code>return</code> は、その関数を終えます。ループの外の <code>continue</code> は <code>unhandled effect: Continue{}</code> で止まります。</li>
+</ul>
+
+<h2>match</h2>
+<p><code>match e { f }</code> は <code>e</code> を1回だけ評価し、その値を引数に関数 <code>f</code> を呼びます。<code>f</code> はふつう1引数の関数を <code>|</code> でつないだもので、つないだ各関数を腕と呼び、<code>e</code> に合うパターンを持つ最初の腕が選ばれます。どの腕にも合わなければ、関数呼び出しと同じく <code>MatchingFailed</code> を <code>perform</code> します（<a href="functions.html#partial">部分関数と融合</a>）。腕の引数は1つで、組を取るのは <code>((a, b)) -&gt; x</code> です。<code>|</code> は行頭に書けます。</p>
+<pre>match e {
+    p -&gt; a
+  | q -&gt; b
+}</pre>
+<p>ガード <code>(p, ...) if c -&gt; e | g</code> の <code>c</code> は、引数が合ったあとにその変数を使って評価されます。偽のとき、または引数が合わないときは、同じ引数で <code>g</code> を呼びます。<code>g</code> は、ソース上で <code>|</code> によってその関数の後ろにつないだ式です（括弧の中にあっても同じ）。<code>h := p if c -&gt; a</code> のあとの <code>h | g</code> のように変数で渡したガード付きの関数は <code>g</code> を呼びません。</p>
+<p><code>match</code> のガードと <code>e</code> は <code>or</code> の階層までの式なので、無名関数は括弧で囲みます。</p>
+
+<h2 id="effects">代数的エフェクト</h2>
+<p><code>Perform{v}</code> は、合うパターンを持つ一番近い <code>handler(v, k)</code> を呼びます。ハンドラは継続の中でも有効です。<code>k</code> は通常の関数で、<code>Handle</code> が値を返したあとでも何度でも呼べます。</p>
+<p>継続を捕捉した時点で定義済みの変数は、再開した計算のあいだで共有されます。再開のあとに定義した変数は別です。</p>
+<div class="example">
+<p class="file">t5_resume.pk</p>
+<pre class="pk"><span class="tok-name">ask</span><span class="tok-op">(</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-kw">perform</span> <span class="tok-name">Ask</span><span class="tok-op">{</span><span class="tok-op">}</span>
+
+<span class="tok-name">with_answer</span><span class="tok-op">(</span><span class="tok-name">v</span><span class="tok-op">,</span> <span class="tok-name">f</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-kw">handle</span> <span class="tok-name">f</span><span class="tok-op">(</span><span class="tok-op">)</span> <span class="tok-kw">with</span> <span class="tok-op">(</span><span class="tok-name">Ask</span><span class="tok-op">{</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">k</span><span class="tok-op">)</span> <span class="tok-op">-&gt;</span> <span class="tok-name">k</span><span class="tok-op">(</span><span class="tok-name">v</span><span class="tok-op">)</span>
+
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">with_answer</span><span class="tok-op">(</span><span class="tok-num">21</span><span class="tok-op">,</span> <span class="tok-op">(</span><span class="tok-op">)</span> <span class="tok-op">-&gt;</span> <span class="tok-name">ask</span><span class="tok-op">(</span><span class="tok-op">)</span> <span class="tok-op">*</span> <span class="tok-num">2</span><span class="tok-op">)</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">with_answer</span><span class="tok-op">(</span><span class="tok-num">5</span><span class="tok-op">,</span> <span class="tok-op">(</span><span class="tok-op">)</span> <span class="tok-op">-&gt;</span> <span class="tok-name">ask</span><span class="tok-op">(</span><span class="tok-op">)</span> <span class="tok-op">+</span> <span class="tok-name">ask</span><span class="tok-op">(</span><span class="tok-op">)</span><span class="tok-op">)</span><span class="tok-op">)</span></pre>
+<p class="label">出力</p>
+<pre class="out">42
+10</pre>
+</div>
+<p><code>MatchingFailed</code> のハンドラも <code>k</code> で再開できます。<code>k(x)</code> の <code>x</code> が、失敗した関数呼び出しや <code>match</code> の値になります。</p>
+<pre>b := handle [f(7), 1] with (MatchingFailed{_, _, _}, k) -&gt; k("other")
+println(b)</pre>
+<pre class="out">Cons{"other", Cons{1, Nil{}}}</pre>
+<p>ハンドラは再開した続きの中でも有効なので、再開後に2回目の失敗が起きても同じハンドラが受けます。</p>
+<pre>c := handle [f(8), f(9)] with (MatchingFailed{_, Tuple{n}, _}, k) -&gt; k(n)
+println(c)</pre>
+<pre class="out">Cons{8, Cons{9, Nil{}}}</pre>
+
+<nav class="pager"><a class="prev" href="binding.html"><small>前のページ</small>変数束縛</a><a class="next" href="syntax.html"><small>次のページ</small>構文</a></nav>
+</main>
+</div>
+<footer><div class="inner"><a href="https://github.com/nineties/hex-to-compiler">github.com/nineties/hex-to-compiler</a></div></footer>
+<script src="../../assets/page.js"></script>
+</body>
+</html>

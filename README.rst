@@ -86,7 +86,7 @@ Stage3 starts with ``planck0``, an implementation of the Planck language written
 The language is defined in the `reference <https://nineties.github.io/hex-to-compiler/en/reference/index.html>`_.
 `planck/examples <https://github.com/nineties/hex-to-compiler/tree/main/planck/examples>`_ has sample programs.
 
-``planck/vasmc.pk`` runs on ``planck0`` and compiles vasm, and native, its higher-level notation, to Linux executables, with no assembler or linker of another system (see `vasmc <https://nineties.github.io/hex-to-compiler/en/reference/vasmc.html>`_). Its libraries are in ``planck/lib/backend``, ``planck/lib/vasm`` and ``planck/lib/native``.
+``planck/vasmc.pk`` runs on ``planck0`` and compiles vasm, and native, its higher-level notation, to Linux executables, with no assembler or linker of another system (see `vasmc <https://nineties.github.io/hex-to-compiler/en/library/vasmc.html>`_). Its libraries are in ``planck/lib/backend``, ``planck/lib/vasm`` and ``planck/lib/native``.
 
 Hot to Run
 ----------

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Grammar declarations | hex-to-compiler project</title>
+<title>Extending the grammar | hex-to-compiler project</title>
 <link rel="alternate" hreflang="ja" href="../../ja/reference/grammar.html">
 <link rel="stylesheet" href="../../assets/style.css">
 </head>
@@ -14,6 +14,7 @@
 <a href="../index.html">Overview</a>
 <a href="../tutorial/index.html">Tutorial</a>
 <a class="here" href="../reference/index.html">Reference</a>
+<a href="../library/index.html">Libraries and low-level languages</a>
 <a href="../implementation/index.html">Implementation</a>
 <a href="https://github.com/nineties/hex-to-compiler">GitHub</a>
 <a class="lang-switch" lang="ja" hreflang="ja" href="../../ja/reference/grammar.html">日本語</a>
@@ -24,18 +25,17 @@
 <h2>Reference</h2>
 <ol>
 <li><a href="index.html">Contents</a></li>
+<li><a href="datamodel.html">Data model</a></li>
+<li><a href="functions.html">Partial functions and fusion</a></li>
+<li><a href="closures.html">Closures</a></li>
+<li><a href="binding.html">Variable binding</a></li>
+<li><a href="control.html">Control structures</a></li>
 <li><a href="syntax.html">Syntax</a></li>
-<li><a href="values.html">Values, patterns, M-expressions</a></li>
-<li><a href="datatypes.html">Data types</a></li>
-<li><a class="here" href="grammar.html">Grammar declarations</a></li>
+<li><a class="here" href="grammar.html">Extending the grammar</a></li>
 <li><a href="builtins.html">Builtin functions</a></li>
-<li><a href="library.html">Libraries</a></li>
-<li><a href="vasm.html">vasm</a></li>
-<li><a href="native.html">native</a></li>
-<li><a href="vasmc.html">vasmc</a></li>
 </ol></details></nav>
 <main>
-<h1>Grammar declarations</h1>
+<h1>Extending the grammar</h1>
 <p class="lead"><code>::=</code> defines or replaces a PEG rule. The syntax of planck is made of the same rules, so a declaration extends the syntax of the following expressions. Alternatives are tried in order, and the result of a rule is memoized for each position (packrat).</p>
 
 <h2>::=</h2>
@@ -176,7 +176,71 @@ num <span class="tok-op">::=</span> <span class="tok-name">integer</span>
 }</pre>
 </div>
 
-<nav class="pager"><a class="prev" href="datatypes.html"><small>Previous</small>Data types</a><a class="next" href="builtins.html"><small>Next</small>Builtin functions</a></nav>
+<h2 id="macro">macro</h2>
+<p><code>macro p := e</code> adds a rule that rewrites trees before evaluation. <code>p</code> is written like a parameter pattern and describes the shape of a tree, and <code>e</code> is evaluated with the variables of <code>p</code> to give the new tree. It does not touch the syntax that turns strings into M-expressions.</p>
+<div class="example">
+<p class="file">r_macro.pk</p>
+<pre class="pk"><span class="tok-kw">macro</span> <span class="tok-name">Twice</span><span class="tok-op">{</span><span class="tok-name">x</span><span class="tok-op">}</span> <span class="tok-op">:=</span> <span class="tok-op">`</span><span class="tok-op">(</span><span class="tok-op">!</span><span class="tok-name">x</span> <span class="tok-op">+</span> <span class="tok-op">!</span><span class="tok-name">x</span><span class="tok-op">)</span>
+<span class="tok-kw">macro</span> <span class="tok-name">unless</span><span class="tok-op">(</span><span class="tok-name">c</span><span class="tok-op">,</span> <span class="tok-name">e</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-op">`</span><span class="tok-kw">if</span> <span class="tok-op">(</span><span class="tok-kw">not</span> <span class="tok-op">!</span><span class="tok-name">c</span><span class="tok-op">)</span> <span class="tok-op">!</span><span class="tok-name">e</span>
+
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">Twice</span><span class="tok-op">{</span><span class="tok-num">21</span><span class="tok-op">}</span><span class="tok-op">)</span>
+<span class="tok-name">unless</span><span class="tok-op">(</span><span class="tok-num">1</span> <span class="tok-op">&gt;</span> <span class="tok-num">2</span><span class="tok-op">,</span> <span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-str">"shown"</span><span class="tok-op">)</span><span class="tok-op">)</span>
+<span class="tok-name">unless</span><span class="tok-op">(</span><span class="tok-num">1</span> <span class="tok-op">&lt;</span> <span class="tok-num">2</span><span class="tok-op">,</span> <span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-str">"not shown"</span><span class="tok-op">)</span><span class="tok-op">)</span>
+
+<span class="tok-com"># a quote is not rewritten</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-op">'</span><span class="tok-op">(</span><span class="tok-name">Twice</span><span class="tok-op">{</span><span class="tok-num">1</span><span class="tok-op">}</span><span class="tok-op">)</span><span class="tok-op">)</span></pre>
+<p class="label">Output</p>
+<pre class="out">42
+&quot;shown&quot;
+Twice{1}</pre>
+</div>
+<ul>
+<li>Before a parsed expression is evaluated (also a tree given to <code>eval</code>), each part is rewritten from the root. Rules are tried from the last added, and a part that matches none stays. A rewritten part gets the rules again until it no longer changes, and then its inside is rewritten.</li>
+<li>The inside of a quote <code>'e</code> is not rewritten. In a quasi-quote <code>`e</code> only the inside of <code>!e</code> is. The parameter patterns of functions and the names defined by <code>Def</code>, <code>Set</code> and <code>Declare</code> are not rewritten either.</li>
+<li>Applying more than 1000 rules while rewriting one expression stops with an error (a rule that never ends stops too).</li>
+<li>A rule is in effect from the position of the <code>macro</code> to the end of the innermost function or module body around it, or to all the following expressions if nothing surrounds it. An <code>export macro</code> in a module is in effect also outside it, after the definition of that module.</li>
+</ul>
+<div class="example">
+<p class="file">r_macro_module.pk</p>
+<pre class="pk"><span class="tok-kw">module</span> <span class="tok-name">shapes</span> <span class="tok-op">{</span>
+    <span class="tok-kw">macro</span> <span class="tok-name">Inside</span><span class="tok-op">{</span><span class="tok-name">x</span><span class="tok-op">}</span> <span class="tok-op">:=</span> <span class="tok-op">`</span><span class="tok-op">(</span><span class="tok-op">!</span><span class="tok-name">x</span> <span class="tok-op">+</span> <span class="tok-num">100</span><span class="tok-op">)</span>
+    <span class="tok-kw">export</span> <span class="tok-kw">macro</span> <span class="tok-name">Double</span><span class="tok-op">{</span><span class="tok-name">x</span><span class="tok-op">}</span> <span class="tok-op">:=</span> <span class="tok-op">`</span><span class="tok-op">(</span><span class="tok-op">!</span><span class="tok-name">x</span> <span class="tok-op">*</span> <span class="tok-num">2</span><span class="tok-op">)</span>
+    <span class="tok-kw">export</span> <span class="tok-name">f</span><span class="tok-op">(</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-name">Inside</span><span class="tok-op">{</span><span class="tok-num">1</span><span class="tok-op">}</span>
+<span class="tok-op">}</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">shapes</span><span class="tok-op">.</span><span class="tok-name">f</span><span class="tok-op">(</span><span class="tok-op">)</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">Double</span><span class="tok-op">{</span><span class="tok-num">21</span><span class="tok-op">}</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-op">'</span><span class="tok-op">(</span><span class="tok-name">Inside</span><span class="tok-op">{</span><span class="tok-num">1</span><span class="tok-op">}</span><span class="tok-op">)</span><span class="tok-op">)</span></pre>
+<p class="label">Output</p>
+<pre class="out">101
+42
+Inside{1}</pre>
+</div>
+
+<h2 id="toplevel">Top level</h2>
+<p>The loop looks up the global variables <code>parse</code> and <code>eval</code> for every expression, so replacing them takes effect from the next expression. <code>Apply{eval, ...}</code> also calls the replaced <code>eval</code>.</p>
+<ul>
+<li><code>parse</code>: <code>String -&gt; Tuple{M-expression, rest String}</code>. It returns <code>Tuple{Eof{}, ""}</code> when only blanks are left, and a replacement <code>parse</code> passes <code>Eof{}</code> through.</li>
+<li><code>eval</code>: <code>M-expression -&gt; value</code>.</li>
+</ul>
+<div class="example">
+<p class="file">t6_eval.pk</p>
+<pre class="pk"><span class="tok-name">old_eval</span> <span class="tok-op">:=</span> <span class="tok-name">eval</span>
+<span class="tok-name">eval</span> <span class="tok-op">=</span> <span class="tok-name">e</span> <span class="tok-op">-&gt;</span> <span class="tok-op">{</span>
+    <span class="tok-name">v</span> <span class="tok-op">:=</span> <span class="tok-name">old_eval</span><span class="tok-op">(</span><span class="tok-name">e</span><span class="tok-op">)</span>
+    <span class="tok-name">put</span><span class="tok-op">(</span><span class="tok-str">"=&gt; "</span><span class="tok-op">)</span>
+    <span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">v</span><span class="tok-op">)</span>
+    <span class="tok-name">v</span>
+<span class="tok-op">}</span>
+<span class="tok-num">1</span> <span class="tok-op">+</span> <span class="tok-num">2</span>
+<span class="tok-op">'</span><span class="tok-op">(</span><span class="tok-name">a</span> <span class="tok-op">+</span> <span class="tok-name">b</span><span class="tok-op">)</span>
+<span class="tok-name">Point</span><span class="tok-op">{</span><span class="tok-num">1</span><span class="tok-op">,</span> <span class="tok-num">2</span><span class="tok-op">}</span></pre>
+<p class="label">Output</p>
+<pre class="out">=&gt; 3
+=&gt; Apply{_add, Tuple{a, b}}
+=&gt; Point{1, 2}</pre>
+</div>
+
+<nav class="pager"><a class="prev" href="syntax.html"><small>Previous</small>Syntax</a><a class="next" href="builtins.html"><small>Next</small>Builtin functions</a></nav>
 </main>
 </div>
 <footer><div class="inner"><a href="https://github.com/nineties/hex-to-compiler">github.com/nineties/hex-to-compiler</a></div></footer>

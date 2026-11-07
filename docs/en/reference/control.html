@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Control structures | hex-to-compiler project</title>
+<link rel="alternate" hreflang="ja" href="../../ja/reference/control.html">
+<link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+<header class="site-header"><div class="inner">
+<a class="logo" href="../index.html"><span class="brand"><b>hex-to-compiler <i>project</i></b><small>A compiler that pulls itself up by its bootstraps.</small></span></a>
+<nav class="site-nav">
+<a href="../index.html">Overview</a>
+<a href="../tutorial/index.html">Tutorial</a>
+<a class="here" href="../reference/index.html">Reference</a>
+<a href="../library/index.html">Libraries and low-level languages</a>
+<a href="../implementation/index.html">Implementation</a>
+<a href="https://github.com/nineties/hex-to-compiler">GitHub</a>
+<a class="lang-switch" lang="ja" hreflang="ja" href="../../ja/reference/control.html">日本語</a>
+</nav>
+</div></header>
+<div class="layout">
+<nav class="toc" aria-label="Reference contents"><details open><summary>Reference contents</summary>
+<h2>Reference</h2>
+<ol>
+<li><a href="index.html">Contents</a></li>
+<li><a href="datamodel.html">Data model</a></li>
+<li><a href="functions.html">Partial functions and fusion</a></li>
+<li><a href="closures.html">Closures</a></li>
+<li><a href="binding.html">Variable binding</a></li>
+<li><a class="here" href="control.html">Control structures</a></li>
+<li><a href="syntax.html">Syntax</a></li>
+<li><a href="grammar.html">Extending the grammar</a></li>
+<li><a href="builtins.html">Builtin functions</a></li>
+</ol></details></nav>
+<main>
+<h1>Control structures</h1>
+<p class="lead">The control structures are <code>If</code>, <code>While</code>, <code>for</code>, <code>match</code> and the algebraic effects (<code>Handle</code> and <code>Perform</code>).</p>
+
+<h2>for, and return, break and continue</h2>
+<p><code>for (p in e) a</code> matches each element of the list, vector or range <code>e</code> against the pattern <code>p</code> and evaluates <code>a</code>. The value is <code>none</code>, and the variables outside the loop that <code>a</code> sees are shared.</p>
+<p><code>return e</code> ends the call of the function that contains it with the value <code>e</code> (<code>none</code> without <code>e</code>), and <code>break</code> and <code>continue</code> end the innermost <code>while</code> or <code>for</code>, or go to its next round. <code>e</code> starts on the same line as <code>return</code>. They are read as effects.</p>
+<ul>
+<li>A function whose body has <code>return</code> becomes <code>Handle{body, (Return{v}, k) -&gt; v}</code>, a loop with <code>break</code> becomes <code>Handle{loop, (Break{}, k) -&gt; none}</code>, and a loop with <code>continue</code> has the body <code>Handle{body, (Continue{}, k) -&gt; none}</code>.</li>
+<li>A <code>return</code> in the body of a <code>for</code> or in an arm of a <code>match</code> ends the function around them. A <code>return</code> in a function written inside ends that function. A <code>continue</code> outside a loop stops the program with <code>unhandled effect: Continue{}</code>.</li>
+</ul>
+
+<h2>match</h2>
+<p><code>match e { f }</code> evaluates <code>e</code> once and calls the function <code>f</code> with the value. <code>f</code> is usually one-argument functions joined by <code>|</code>. Each is an arm, and the first arm with a pattern that matches <code>e</code> is chosen. If no arm matches, <code>MatchingFailed</code> is performed, as for a function call (<a href="functions.html#partial">Partial functions and fusion</a>). An arm has one argument; to take a tuple, write <code>((a, b)) -&gt; x</code>. A <code>|</code> can start a line.</p>
+<pre>match e {
+    p -&gt; a
+  | q -&gt; b
+}</pre>
+<p>The guard <code>c</code> of <code>(p, ...) if c -&gt; e | g</code> is evaluated after the arguments match, with their variables. When it is false, or the arguments do not match, <code>g</code> is called with the same arguments. <code>g</code> is the expression joined after the function by <code>|</code> in the source, even inside parentheses. A guarded function passed through a variable, as in <code>h | g</code> after <code>h := p if c -&gt; a</code>, does not call <code>g</code>.</p>
+<p>The guard and <code>e</code> of a <code>match</code> are expressions up to the level of <code>or</code>, so put an anonymous function in parentheses.</p>
+
+<h2 id="effects">Algebraic effects</h2>
+<p><code>Perform{v}</code> calls the nearest <code>handler(v, k)</code> that has a matching pattern. Handlers stay installed in the continuation. <code>k</code> is an ordinary function and can be called any number of times, even after <code>Handle</code> has returned.</p>
+<p>Variables defined when the continuation is captured are shared between the resumed copies. Variables defined after the resumption are separate.</p>
+<div class="example">
+<p class="file">t5_resume.pk</p>
+<pre class="pk"><span class="tok-name">ask</span><span class="tok-op">(</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-kw">perform</span> <span class="tok-name">Ask</span><span class="tok-op">{</span><span class="tok-op">}</span>
+
+<span class="tok-name">with_answer</span><span class="tok-op">(</span><span class="tok-name">v</span><span class="tok-op">,</span> <span class="tok-name">f</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-kw">handle</span> <span class="tok-name">f</span><span class="tok-op">(</span><span class="tok-op">)</span> <span class="tok-kw">with</span> <span class="tok-op">(</span><span class="tok-name">Ask</span><span class="tok-op">{</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">k</span><span class="tok-op">)</span> <span class="tok-op">-&gt;</span> <span class="tok-name">k</span><span class="tok-op">(</span><span class="tok-name">v</span><span class="tok-op">)</span>
+
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">with_answer</span><span class="tok-op">(</span><span class="tok-num">21</span><span class="tok-op">,</span> <span class="tok-op">(</span><span class="tok-op">)</span> <span class="tok-op">-&gt;</span> <span class="tok-name">ask</span><span class="tok-op">(</span><span class="tok-op">)</span> <span class="tok-op">*</span> <span class="tok-num">2</span><span class="tok-op">)</span><span class="tok-op">)</span>
+<span class="tok-name">println</span><span class="tok-op">(</span><span class="tok-name">with_answer</span><span class="tok-op">(</span><span class="tok-num">5</span><span class="tok-op">,</span> <span class="tok-op">(</span><span class="tok-op">)</span> <span class="tok-op">-&gt;</span> <span class="tok-name">ask</span><span class="tok-op">(</span><span class="tok-op">)</span> <span class="tok-op">+</span> <span class="tok-name">ask</span><span class="tok-op">(</span><span class="tok-op">)</span><span class="tok-op">)</span><span class="tok-op">)</span></pre>
+<p class="label">Output</p>
+<pre class="out">42
+10</pre>
+</div>
+<p>The handler of a <code>MatchingFailed</code> can also resume with <code>k</code>. The <code>x</code> of <code>k(x)</code> becomes the value of the failed function call or <code>match</code>.</p>
+<pre>b := handle [f(7), 1] with (MatchingFailed{_, _, _}, k) -&gt; k("other")
+println(b)</pre>
+<pre class="out">Cons{"other", Cons{1, Nil{}}}</pre>
+<p>The handler stays installed in the resumed continuation, so a second failure after the resumption is received by the same handler.</p>
+<pre>c := handle [f(8), f(9)] with (MatchingFailed{_, Tuple{n}, _}, k) -&gt; k(n)
+println(c)</pre>
+<pre class="out">Cons{8, Cons{9, Nil{}}}</pre>
+
+<nav class="pager"><a class="prev" href="binding.html"><small>Previous</small>Variable binding</a><a class="next" href="syntax.html"><small>Next</small>Syntax</a></nav>
+</main>
+</div>
+<footer><div class="inner"><a href="https://github.com/nineties/hex-to-compiler">github.com/nineties/hex-to-compiler</a></div></footer>
+<script src="../../assets/page.js"></script>
+</body>
+</html>

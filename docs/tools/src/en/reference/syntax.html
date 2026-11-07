@@ -1,6 +1,6 @@
 <!--title Syntax-->
 <h1>Syntax</h1>
-<p class="lead">The syntax is sugar. Each expression is read into the M-expression in the table below and then evaluated, and the M-expression decides its meaning. An M-expression is also an expression of this syntax. What follows covers what the table cannot: the scope of variables, how function definitions add up, modules and the writing of patterns.</p>
+<p class="lead">The syntax is sugar. Each expression is read into the M-expression in the table below and then evaluated, and the M-expression decides its meaning. An M-expression is also an expression of this syntax. What follows supplements the table.</p>
 
 <h2>Expressions and M-expressions</h2>
 <p>A row binds more weakly than the rows below it.</p>
@@ -59,106 +59,6 @@
 <li>The condition of <code>if</code> and <code>while</code> is in parentheses. The branches of <code>if</code> are expressions without <code>|</code> outside brackets, so <code>if (c) a else b | g</code> is <code>(if (c) a else b) | g</code>. Write several expressions as a block <code>{ ... }</code>. <code>else</code> belongs to the nearest <code>if</code> that has no <code>else</code>.</li>
 </ul>
 
-<h2>!x on the left of a definition or an assignment</h2>
-<p>The <code>x</code> of <code>x := e</code> and <code>x = e</code> may be written <code>!x</code>, which are <code>Def{!x, e}</code> and <code>Set{!x, e}</code>. Inside a quasi-quote, <code>!x</code> is replaced by the symbol that <code>x</code> holds. When <code>x</code> holds <code>'i</code>, <code>`{ !x := 0; !x = !x + 1 }</code> is <code>Do{Def{i, 0}, Set{i, Apply{_add, Tuple{i, 1}}}}</code>. When <code>x</code> holds <code>'true</code>, it stops the program, as <code>Def{true, e}</code> does.</p>
-
-<h2 id="record">record</h2>
-<p><code>record T(f, g, ...)</code> names the arguments of the values <code>T{a, b, ...}</code>. Values are built as before. <code>t.f</code> is the argument of <code>t</code> at the position of <code>f</code> in the declaration for the head of <code>t</code>, and the <code>.</code> follows its left operand with no space.</p>
-<ul>
-<li>Values with different heads can have fields of the same name. Declaring the same <code>T</code> again replaces the names.</li>
-<li>Using <code>.f</code> on a value whose head is not declared, or that has no field <code>f</code>, stops the program with a message.</li>
-<li><code>t with { f = e, g = e2 }</code> is a new value with those fields replaced (<code>t</code> does not change). The fields are replaced from the left, so <code>e</code> can refer to the fields of the original <code>t</code>. <code>with { ... }</code> can follow another one.</li>
-</ul>
-<!--ex t1_with-->
-
-<h2 id="compound">Compound assignment and splitting a tuple</h2>
-<p><code>x += e</code> is the same as <code>x = x + e</code>, and <code>-=</code>, <code>*=</code>, <code>/=</code> and <code>%=</code> have the same form. <code>a[i] += e</code> is the same as <code>a[i] = a[i] + e</code>, except that <code>a</code> and <code>i</code> are evaluated once. The left side is a variable or <code>a[i]</code>; <code>t.f += e</code> is not allowed.</p>
-<!--ex t1_compound-->
-<h3 id="destructure">Splitting a tuple</h3>
-<p><code>(a, b) := e</code> defines variables from the elements of the tuple <code>e</code>, and <code>(a, b) = e</code> assigns to defined variables. The right side is evaluated completely first, so <code>(a, b) = (b, a)</code> swaps. A tuple whose number of elements differs from the number of names, and a value that is not a tuple, stop the program with a message.</p>
-<!--ex t1_destructure-->
-
-<h2 id="scope">Scope of variables</h2>
-<p>The scope is static (lexical): which variable a name refers to is decided before the expression runs. A function refers to the variables of the place where it was made. Variables are shared, so an assignment made after the function was made is also seen by it. Variables of the caller are not visible. A name that refers to no variable stops the program with a message before the expression runs.</p>
-<ul>
-<li>The function body sees the parameters of that function and of the outer functions, the variables defined earlier in those functions, and the variables defined earlier at the top level (global variables).</li>
-<li><code>true</code>, <code>false</code> and <code>none</code> are literals and cannot be variable names. <code>true := e</code>, <code>fun true</code> and <code>true(p) := e</code> are syntax errors. A <code>true</code> in a parameter is a pattern that matches the value <code>true</code> and binds nothing.</li>
-</ul>
-<!--ex t1_scope-->
-<!--ex e_undefined-->
-
-<h3>Definition and assignment</h3>
-<p>Defining the same name again by <code>x := e</code> or <code>fun f</code> makes a new variable. Functions made earlier keep the earlier variable. To overwrite an existing variable, write <code>x = e</code>: it assigns to the same variable, so functions made earlier see the new value.</p>
-<!--ex r_scope_redefine-->
-<p><code>x := e</code> defines the variable where it is written. The right side sees the earlier <code>x</code>, and if there is none, the <code>x</code> on the right side is undefined. Write a function that calls itself as <code>f(p, ...) := e</code>. This is the same at the top level and in a block.</p>
-
-<h3>A function definition that adds a case</h3>
-<p>How <code>f(p, ...) := e</code> is read depends on whether the variables at the place where it is written have <code>f</code>. If they do, it is the same as <code>f(p, ...) = e</code>. If not, it defines a new <code>f</code> there (<code>fun f</code> followed by <code>f(p, ...) = e</code>). Definitions of <code>f</code> written one after another in the same place form one function, <a href="values.html#partial">tried</a> in the order written.</p>
-<p>The variables at the place are: at the top level, the global variables defined in the same file; in a function, its parameters and the variables defined earlier in it; in the branch of a top-level <code>if</code> or the body of a <code>while</code>, the variables defined earlier in it. Variables of an outer function, global variables seen from inside a function, and global variables or builtin functions of another file (a library loaded by <code>use</code>, or <code>planck/init.pk</code>) are not variables at the place. <code>f(p, ...) := e</code> with such a name defines a new <code>f</code> that hides the outer one and does not change it. To add a definition to an <code>f</code> of another file, write <code>f(p, ...) = e</code>.</p>
-<!--ex r_scope_same-->
-<!--ex t8_place-->
-<!--ex t8_library-->
-<p>A definition can have a guard. <code>f(p, ...) if c := e</code> adds an arm that returns <code>e</code> when the arguments match and <code>c</code> is true. When <code>c</code> is false or the arguments do not match, the next definition written right after it is tried (a different expression in between breaks the chain). After <code>f(x) if x &gt; 0 := "positive"</code>, writing <code>f(_) := "other"</code> makes <code>f(-1)</code> be <code>"other"</code>. A definition with <code>export</code> and <code>f(p, ...) = e</code> cannot have a guard.</p>
-
-<h3>Functions that call each other</h3>
-<p>Declare the name first with <code>fun f</code> (its value is <code>none</code>) and fill it in later with <code>f(p, ...) = e</code>. That is <code>f = f | (p, ...) -&gt; e</code>, which adds after the function of <code>f</code>. Since <code>none | g</code> is <code>g</code>, the first <code>f(p, ...) = e</code> assigns the function itself. Calling <code>f</code> before it is filled calls <code>none</code> and stops the program.</p>
-<!--ex r_scope_fun-->
-<!--ex e_call_before_fill-->
-<p>When the value of <code>f</code> is a function with a guard (after <code>f = (n) if n &gt; 0 -&gt; 1</code>), a function added by <code>f(p, ...) = e</code> is not called even if the guard is false, just as a guarded function passed through a variable does not call a following <code>| g</code>.</p>
-
-<h2>for, and return, break and continue</h2>
-<p><code>for (p in e) a</code> matches each element of the list, vector or range <code>e</code> against the pattern <code>p</code> and evaluates <code>a</code>. The value is <code>none</code>, and the variables outside the loop that <code>a</code> sees are shared.</p>
-<p><code>return e</code> ends the call of the function that contains it with the value <code>e</code> (<code>none</code> without <code>e</code>), and <code>break</code> and <code>continue</code> end the innermost <code>while</code> or <code>for</code>, or go to its next round. <code>e</code> starts on the same line as <code>return</code>. They are read as effects.</p>
-<ul>
-<li>A function whose body has <code>return</code> becomes <code>Handle{body, (Return{v}, k) -&gt; v}</code>, a loop with <code>break</code> becomes <code>Handle{loop, (Break{}, k) -&gt; none}</code>, and a loop with <code>continue</code> has the body <code>Handle{body, (Continue{}, k) -&gt; none}</code>.</li>
-<li>A <code>return</code> in the body of a <code>for</code> or in an arm of a <code>match</code> ends the function around them. A <code>return</code> in a function written inside ends that function. A <code>continue</code> outside a loop stops the program with <code>unhandled effect: Continue{}</code>.</li>
-</ul>
-
-<h2>match</h2>
-<p><code>match e { f }</code> evaluates <code>e</code> once and calls the function <code>f</code> with the value. <code>f</code> is usually one-argument functions joined by <code>|</code>. Each is an arm, and the first arm with a pattern that matches <code>e</code> is chosen. If no arm matches, <code>MatchingFailed</code> is performed, as for a function call (<a href="values.html#partial">Partial functions and fusion</a>). An arm has one argument; to take a tuple, write <code>((a, b)) -&gt; x</code>. A <code>|</code> can start a line.</p>
-<!--text match_arms-->
-<p>The guard <code>c</code> of <code>(p, ...) if c -&gt; e | g</code> is evaluated after the arguments match, with their variables. When it is false, or the arguments do not match, <code>g</code> is called with the same arguments. <code>g</code> is the expression joined after the function by <code>|</code> in the source, even inside parentheses. A guarded function passed through a variable, as in <code>h | g</code> after <code>h := p if c -&gt; a</code>, does not call <code>g</code>.</p>
-<p>The guard and <code>e</code> of a <code>match</code> are expressions up to the level of <code>or</code>, so put an anonymous function in parentheses.</p>
-
-<h2 id="module">module</h2>
-<p><code>module m { ... }</code> puts definitions together under the name <code>m</code>. The value the body returns is the module value, with the definitions marked <code>export</code> as fields. Reading a name that is not a field (a <code>helper</code> without <code>export</code>) with <code>.</code> stops the program with a message.</p>
-<!--text module_bitset-->
-<p>The fields of this <code>bitset</code> are <code>new</code> and <code>add</code>.</p>
-<ul>
-<li>The scope of the body is that of the body of a function with no parameters. To call something defined later from earlier code, use <code>fun f</code> and <code>f(p, ...) = e</code>.</li>
-<li>The definitions of the body are variables of the body, not global variables. They do not hide a same name outside, and cannot be assigned from outside. To let outside code add cases, <code>export</code> the function to add to (<code>m.f(p, ...) = e</code> is not allowed).</li>
-<li><code>m</code> is defined after the body is evaluated, so the body cannot see <code>m</code>. Functions in the body call each other by name.</li>
-<li>The body is read as a whole, so replacing <code>parse</code> inside it does not affect the rest of the body. Replace a grammar outside the <code>module</code>.</li>
-</ul>
-
-<h3>export</h3>
-<p><code>export</code> can be written only before <code>f(p, ...) := e</code>, <code>x := e</code> and <code>module n { ... }</code> directly in the body of a module; anywhere else is a syntax error. The field of <code>export x := e</code> is the value of <code>x</code> when the body returns, and later assignments do not change it. To show the current value, <code>export</code> a function that reads <code>x</code>.</p>
-<!--text module_export_value-->
-<p>An inner <code>module n { ... }</code> defines the variable <code>n</code> of the body and is invisible from outside. To show it, write <code>export module n { ... }</code>. The inner body sees the variables the outer body defined earlier.</p>
-<!--text module_nested-->
-
-<h3 id="test">test</h3>
-<p><code>test { ... }</code> can be written directly in the body of a module. It is sugar for <code>if (_testing) { ... }</code>, and <code>_testing</code> is <code>false</code> at first, so nothing runs normally. <code>planck0 tools/test.pk &lt;library&gt; ...</code> sets <code>_testing</code> to <code>true</code>, loads the libraries, and runs the <code>test</code> of those and of the libraries they use.</p>
-<p>The scope is that of the body of the module, so functions without <code>export</code> can be called. A <code>test</code> runs while the body is being evaluated, so it sees the variables defined before it, and <code>m</code> is not defined yet. <code>assert(c, msg)</code> writes <code>msg</code> and stops with status 1 unless <code>c</code> is true. A block holds at most 64 expressions, so split a long <code>test</code>.</p>
-<!--text module_test-->
-
-<h2 id="import">import</h2>
-<p><code>import a::b</code> loads the same way as <code>use("a/b")</code>, and the same file is loaded once. The last name is the name of the <a href="#module">module</a> the file defines. It can be written wherever an expression can. How to take names follows the path.</p>
-<table>
-<tr><th>Form</th><th>Meaning</th></tr>
-<tr><td><code>import m</code></td><td>Only loads. Fields are read as <code>m.f</code>.</td></tr>
-<tr><td><code>import m as n</code></td><td>Adds <code>n := m</code>.</td></tr>
-<tr><td><code>import m (x, y)</code></td><td>Defines <code>x := m.x</code> and <code>y := m.y</code>.</td></tr>
-<tr><td><code>import m (*)</code></td><td>Defines every field under the same name.</td></tr>
-<tr><td><code>import m hiding (x, y)</code></td><td>Defines every field except <code>x</code> and <code>y</code> under the same name.</td></tr>
-</table>
-<ul>
-<li><code>as n</code> can come before <code>(x, y)</code>, <code>(*)</code> and <code>hiding (...)</code>. <code>as</code>, <code>(...)</code> and <code>hiding</code> are on the same line as <code>m</code>.</li>
-<li>Naming a field that <code>m</code> lacks in <code>(x, y)</code> stops with the same message as reading it with <code>.</code>.</li>
-<li>The names defined by <code>(*)</code> and <code>hiding</code> are global variables even when <code>import</code> is written in a function. The names defined by <code>(x, y)</code> and <code>as</code> are local variables in a function.</li>
-</ul>
-<!--ex i_import-->
-
 <h2 id="names">Names the sugar calls</h2>
 <p>The functions the sugar is read into have names that start with <code>_</code>, and no function of the same name without <code>_</code> exists. Defining <code>add</code> or <code>index_get</code> in a program does not change the meaning of <code>a + b</code> or <code>a[i]</code>. To a function that takes an operator, pass an anonymous function (<code>sort((a, b) -&gt; a &lt; b, xs)</code>).</p>
 <table>
@@ -192,33 +92,6 @@
 <p><code>subst(t, f)</code> rewrites the tree <code>t</code> with the function <code>f</code>. It tries each part of <code>t</code> from the root: if a pattern of <code>f</code> matches, the part is replaced by the value of <code>f</code> and its inside is not tried. Otherwise the head is kept and the arguments are tried in order. A part that is not an M-expression is not taken apart.</p>
 <p><code>t[p -&gt; a | q -&gt; b]</code> tries the arms in order. Guards work as in <code>match</code>: <code>t[p if c -&gt; a | q -&gt; b]</code> uses the arm when <code>p</code> matches and <code>c</code> holds. For a part that no arm matches, its inside is tried. The body of an arm is an expression up to the level of <code>-&gt;</code>, so put a <code>|</code> inside it in parentheses. <code>'t[f]</code> is the quote of <code>t[f]</code>, so to rewrite a quoted tree write <code>('e)[f]</code>.</p>
 <!--ex r_rewrite-->
-
-<h2 id="rest">Rest arguments</h2>
-<p>The last parameter of a function can be written <code>x...</code>. <code>x</code> is bound to the <code>Tuple</code> of the remaining arguments (<code>Tuple{}</code> if none). It can be written only as the last parameter of a function <code>f(p, x...) := e</code> or <code>(p, x...) -> e</code> and of a pattern <code>Head{p, x...}</code>, and a call with fewer arguments than the preceding parameters does not match. Writing it anywhere else, as an argument of a call, or in a guarded function stops the program with a message before the expression runs.</p>
-<!--ex r_rest-->
-
-<h2>Parameter patterns</h2>
-<p>A parameter <code>p</code> and the pattern of <code>for</code> are written as expressions up to the level of <code>or</code>. They are turned into the M-expression of the table and matched as <a href="values.html#patterns">patterns</a>. The principle is that they are written like expressions, with identifiers as variables. The exceptions are:</p>
-<ul>
-<li>The names of operators and called functions are symbols. <code>x + 1</code> matches the tree <code>Apply{Quote{_add}, Tuple{x, 1}}</code> and <code>f(p, ...)</code> matches <code>Apply{Quote{f}, Tuple{p, ...}}</code>. To make the called function a variable, write <code>(f)(p, ...)</code> (<code>Apply{f, Tuple{p, ...}}</code>).</li>
-<li><code>'e</code> is <code>Quote{e}</code>, <code>p @ type</code> checks a type, and <code>x...</code> is the rest of the last parameter.</li>
-<li>Writing the same name twice, as in <code>f(a, a)</code>, matches only when the two values are equal by <code>==</code>.</li>
-<li><code>p or q</code> matches either. Variables are allowed only when every branch binds the same variables (<code>f((x, 0) or (0, x)) := x</code>). To match the M-expression <code>If{a, true, b}</code> of an expression <code>or</code>, write <code>If{a, 'true, b}</code>.</li>
-<li>The forms allowed are operators (<code>or and not == != &lt;= &gt;= &lt; &gt; :: + - * / %</code>, unary <code>-</code> and <code>'</code>), <code>f(p, ...)</code>, <code>Head{p, ...}</code>, identifiers, <code>true</code> <code>false</code> <code>none</code>, integers, strings, tuples and lists. Grouping is as in expressions.</li>
-</ul>
-<!--ex r_pattern-->
-<!--ex r_pattern_or-->
-
-<h2 id="macro">macro</h2>
-<p><code>macro p := e</code> adds a rule that rewrites trees before evaluation. <code>p</code> is written like a parameter pattern and describes the shape of a tree, and <code>e</code> is evaluated with the variables of <code>p</code> to give the new tree. It does not touch the syntax that turns strings into M-expressions.</p>
-<!--ex r_macro-->
-<ul>
-<li>Before a parsed expression is evaluated (also a tree given to <code>eval</code>), each part is rewritten from the root. Rules are tried from the last added, and a part that matches none stays. A rewritten part gets the rules again until it no longer changes, and then its inside is rewritten.</li>
-<li>The inside of a quote <code>'e</code> is not rewritten. In a quasi-quote <code>`e</code> only the inside of <code>!e</code> is. The parameter patterns of functions and the names defined by <code>Def</code>, <code>Set</code> and <code>Declare</code> are not rewritten either.</li>
-<li>Applying more than 1000 rules while rewriting one expression stops with an error (a rule that never ends stops too).</li>
-<li>A rule is in effect from the position of the <code>macro</code> to the end of the innermost function or module body around it, or to all the following expressions if nothing surrounds it. An <code>export macro</code> in a module is in effect also outside it, after the definition of that module.</li>
-</ul>
-<!--ex r_macro_module-->
 
 <h2 id="lexical">Lexical rules</h2>
 <ul>

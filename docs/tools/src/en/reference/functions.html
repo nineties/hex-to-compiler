@@ -1,0 +1,67 @@
+<!--title Partial functions and fusion-->
+<h1>Partial functions and fusion</h1>
+<p class="lead">A function takes its arguments by patterns. A pattern is written like a constructor and binds variables when it matches. Cases are written with <code>f | g</code> (fusion).</p>
+
+<h2 id="partial">Partial functions and fusion</h2>
+<p>A function takes its arguments by patterns, so it is a partial function: some arguments may not match. <code>Fusion{f, g}</code> (written <code>f | g</code>) tries <code>f</code> first, and tries <code>g</code> if none of its patterns match (also when a guard is false). Functions are tried in the order they are joined, so definitions written one after another in the same place, such as <code>f(0) := ...</code>, form one function tried in the order written.</p>
+<pre>f := (0) -&gt; "zero" | (1) -&gt; "one"
+f(1)   // "one"
+f(7)   // matches no arm, and the program stops</pre>
+<p>When a function call, a <code>match</code> or the last function of a fusion has no arm that matches, it performs <code>MatchingFailed{f, args, loc}</code> instead of stopping. <code>match e { f }</code> is the same call as <code>f(e)</code>. With no handler for it, the program prints an error message (<code>matching failed</code>) and stops. It does not become <code>unhandled effect</code>.</p>
+<table>
+<tr><th>Field</th><th>Contents</th></tr>
+<tr><td><code>f</code></td><td>the function that was called (the whole fusion for a fusion)</td></tr>
+<tr><td><code>args</code></td><td>a <code>Tuple{...}</code> of the arguments that did not match</td></tr>
+<tr><td><code>loc</code></td><td>the position in the source of the failed call or <code>match</code>: <code>Loc{file, line, column}</code></td></tr>
+</table>
+<pre>a := handle f(7) with (MatchingFailed{_, Tuple{n}, _}, k) -&gt; n
+println(a)</pre>
+<pre class="out">7</pre>
+<p>The value of the handler is the value of the <code>Handle</code>, not the value of the expression that called <code>f(7)</code>.</p>
+<p>The next function of a fusion is chosen only by the entry patterns and guards. When the entry of an arm matches, a <code>MatchingFailed</code> raised deep in the body of that arm does not move on to the next function: it propagates outward.</p>
+<pre>g(0) := "zero"
+h := (x) -&gt; g(x) | (x) -&gt; "second arm"
+
+r := handle h(5) with (MatchingFailed{f, _, _}, k) -&gt; "failed in g"
+println(r)</pre>
+<pre class="out">"failed in g"</pre>
+<p><code>h(5)</code> enters the first arm, and <code>g(5)</code> inside it fails with <code>MatchingFailed</code>. The second arm is not tried.</p>
+<p>When no pattern of a handler of <code>Handle</code> matches a <code>Perform</code>, the next outer handler is searched. A handler that accepts only <code>Return{v}</code> or <code>Break{}</code> is passed through, and a handler <code>(e, k) -&gt; ...</code> whose pattern matches anything also receives <code>MatchingFailed</code>. A <code>Perform</code> other than <code>MatchingFailed</code> with no handler stops with <code>unhandled effect</code>.</p>
+
+<h2 id="patterns">Patterns</h2>
+<ul>
+<li><code>_</code>: matches anything and binds nothing.</li>
+<li><code>Head{p, ..., _Rest{x}}</code>: matches an M-expression with at least as many arguments as the patterns before <code>_Rest</code>, and binds <code>x</code> to a <code>Tuple</code> of the rest.</li>
+<li><code>_TypeOf{p, type}</code>: matches a value whose <code>type</code> is <code>type</code> and which <code>p</code> matches.</li>
+</ul>
+<!--ex t3_type-->
+
+<h2>Parameter patterns</h2>
+<p>A parameter <code>p</code> and the pattern of <code>for</code> are written as expressions up to the level of <code>or</code>. They are turned into the M-expression of the table and matched as <a href="#patterns">patterns</a>. The principle is that they are written like expressions, with identifiers as variables. The exceptions are:</p>
+<ul>
+<li>The names of operators and called functions are symbols. <code>x + 1</code> matches the tree <code>Apply{Quote{_add}, Tuple{x, 1}}</code> and <code>f(p, ...)</code> matches <code>Apply{Quote{f}, Tuple{p, ...}}</code>. To make the called function a variable, write <code>(f)(p, ...)</code> (<code>Apply{f, Tuple{p, ...}}</code>).</li>
+<li><code>'e</code> is <code>Quote{e}</code>, <code>p @ type</code> checks a type, and <code>x...</code> is the rest of the last parameter.</li>
+<li>Writing the same name twice, as in <code>f(a, a)</code>, matches only when the two values are equal by <code>==</code>.</li>
+<li><code>p or q</code> matches either. Variables are allowed only when every branch binds the same variables (<code>f((x, 0) or (0, x)) := x</code>). To match the M-expression <code>If{a, true, b}</code> of an expression <code>or</code>, write <code>If{a, 'true, b}</code>.</li>
+<li>The forms allowed are operators (<code>or and not == != &lt;= &gt;= &lt; &gt; :: + - * / %</code>, unary <code>-</code> and <code>'</code>), <code>f(p, ...)</code>, <code>Head{p, ...}</code>, identifiers, <code>true</code> <code>false</code> <code>none</code>, integers, strings, tuples and lists. Grouping is as in expressions.</li>
+</ul>
+<!--ex r_pattern-->
+<!--ex r_pattern_or-->
+
+<h2 id="rest">Rest arguments</h2>
+<p>The last parameter of a function can be written <code>x...</code>. <code>x</code> is bound to the <code>Tuple</code> of the remaining arguments (<code>Tuple{}</code> if none). It can be written only as the last parameter of a function <code>f(p, x...) := e</code> or <code>(p, x...) -> e</code> and of a pattern <code>Head{p, x...}</code>, and a call with fewer arguments than the preceding parameters does not match. Writing it anywhere else, as an argument of a call, or in a guarded function stops the program with a message before the expression runs.</p>
+<!--ex r_rest-->
+
+<h2>A function definition that adds a case</h2>
+<p>How <code>f(p, ...) := e</code> is read depends on whether the variables at the place where it is written have <code>f</code>. If they do, it is the same as <code>f(p, ...) = e</code>. If not, it defines a new <code>f</code> there (<code>fun f</code> followed by <code>f(p, ...) = e</code>). Definitions of <code>f</code> written one after another in the same place form one function, <a href="#partial">tried</a> in the order written.</p>
+<p>The variables at the place are: at the top level, the global variables defined in the same file; in a function, its parameters and the variables defined earlier in it; in the branch of a top-level <code>if</code> or the body of a <code>while</code>, the variables defined earlier in it. Variables of an outer function, global variables seen from inside a function, and global variables or builtin functions of another file (a library loaded by <code>use</code>, or <code>planck/init.pk</code>) are not variables at the place. <code>f(p, ...) := e</code> with such a name defines a new <code>f</code> that hides the outer one and does not change it. To add a definition to an <code>f</code> of another file, write <code>f(p, ...) = e</code>.</p>
+<!--ex r_scope_same-->
+<!--ex t8_place-->
+<!--ex t8_library-->
+<p>A definition can have a guard. <code>f(p, ...) if c := e</code> adds an arm that returns <code>e</code> when the arguments match and <code>c</code> is true. When <code>c</code> is false or the arguments do not match, the next definition written right after it is tried (a different expression in between breaks the chain). After <code>f(x) if x &gt; 0 := "positive"</code>, writing <code>f(_) := "other"</code> makes <code>f(-1)</code> be <code>"other"</code>. A definition with <code>export</code> and <code>f(p, ...) = e</code> cannot have a guard.</p>
+
+<h2>Functions that call each other</h2>
+<p>Declare the name first with <code>fun f</code> (its value is <code>none</code>) and fill it in later with <code>f(p, ...) = e</code>. That is <code>f = f | (p, ...) -&gt; e</code>, which adds after the function of <code>f</code>. Since <code>none | g</code> is <code>g</code>, the first <code>f(p, ...) = e</code> assigns the function itself. Calling <code>f</code> before it is filled calls <code>none</code> and stops the program.</p>
+<!--ex r_scope_fun-->
+<!--ex e_call_before_fill-->
+<p>When the value of <code>f</code> is a function with a guard (after <code>f = (n) if n &gt; 0 -&gt; 1</code>), a function added by <code>f(p, ...) = e</code> is not called even if the guard is false, just as a guarded function passed through a variable does not call a following <code>| g</code>.</p>

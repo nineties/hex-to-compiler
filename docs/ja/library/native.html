@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>native | hex-to-compiler project</title>
+<link rel="alternate" hreflang="en" href="../../en/library/native.html">
+<link rel="stylesheet" href="../../assets/style.css">
+</head>
+<body>
+<header class="site-header"><div class="inner">
+<a class="logo" href="../index.html"><span class="brand"><b>hex-to-compiler <i>project</i></b><small>自分自身をブートストラップする処理系</small></span></a>
+<nav class="site-nav">
+<a href="../index.html">概要</a>
+<a href="../tutorial/index.html">チュートリアル</a>
+<a href="../reference/index.html">リファレンス</a>
+<a class="here" href="../library/index.html">ライブラリと低級言語</a>
+<a href="../implementation/index.html">処理系の実装</a>
+<a href="https://github.com/nineties/hex-to-compiler">GitHub</a>
+<a class="lang-switch" lang="en" hreflang="en" href="../../en/library/native.html">English</a>
+</nav>
+</div></header>
+<div class="layout">
+<nav class="toc" aria-label="ライブラリと低級言語の目次"><details open><summary>ライブラリと低級言語の目次</summary>
+<h2>ライブラリと低級言語</h2>
+<ol>
+<li><a href="index.html">ライブラリ</a></li>
+<li><a href="vasm.html">vasm</a></li>
+<li><a class="here" href="native.html">native</a></li>
+<li><a href="vasmc.html">vasmc</a></li>
+</ol></details></nav>
+<main>
+<h1>native</h1>
+<p class="lead"><code>use("native/compile")</code> が定義するシステム言語です。意味は <a href="vasm.html">vasm</a> と同じで、書き方が高級です。<code>native{| ... |}</code> に書いた関数と構造体を <code>native_compile.compile</code> が vasm のモジュールに展開し、所有と借用は展開した vasm に対して検査します。型は変数と関数の宣言から決まり、書くのは宣言の所だけです。</p>
+
+<h2>プログラム</h2>
+<p>プログラムは構造体と関数の並びで、型・構造体・関数の宣言は vasm と同じ書き方です。関数の本体は文の並びで、文は改行か <code>;</code> で区切ります。値を返す関数は、最後の文が式ならその値を返します。</p>
+<p>ほかの単位を使うには、ファイルの先頭に <code>import lib</code> を1行に1つ書きます（<a href="vasmc.html">vasmc</a>）。<code>native{| ... |}</code> の値は <code>PModule{[...]}</code> で、先頭に import ごとの <code>PImport{at, name}</code> が並びます。</p>
+<table>
+<tr><th>関数</th><th>返す値</th></tr>
+<tr><td><code>native_compile.compile(m)</code></td><td>vasm の <code>Module{[...]}</code>。<code>vasm_check</code> と <code>vasm_build</code> がそのまま受け取る</td></tr>
+<tr><td><code>native_compile.compile_all(m)</code></td><td><code>Tuple{モジュール, 誤りのリスト}</code>。誤りは <code>VasmErr{kind, loc, msg}</code> で、関数ごとに最初の1件</td></tr>
+<tr><td><code>native_compile.errors(file, 誤り)</code></td><td>位置をファイルの <code>Loc</code> にした誤り</td></tr>
+</table>
+
+<h2>式と文</h2>
+<p>式の優先順位は、表の上から下へ強くなります。引数は左から順に計算します。</p>
+<table>
+<tr><th>形</th><th>意味</th></tr>
+<tr><td><code>a or b</code> <code>a and b</code></td><td>左で決まれば右を計算しない</td></tr>
+<tr><td><code>==</code> <code>!=</code> <code>&lt;</code> <code>&lt;=</code> <code>&gt;</code> <code>&gt;=</code></td><td>比較。結果は <code>bool</code></td></tr>
+<tr><td><code>|</code> <code>^</code> <code>&amp;</code></td><td>ビットの or・xor・and。この順に強く、and は比較より強い</td></tr>
+<tr><td><code>&lt;&lt;</code> <code>&gt;&gt;</code> <code>+</code> <code>-</code> <code>*</code> <code>/</code> <code>%</code></td><td>シフト・加減算・乗除算の順に強い。<code>*</code> は左の項と同じ行に書く</td></tr>
+<tr><td><code>e as T</code></td><td>整数の型を変える</td></tr>
+<tr><td><code>-e</code> <code>not e</code> <code>*p</code> <code>&amp;r y</code> <code>&amp;mut r y</code></td><td>符号の反転・否定・箱の中身・借用</td></tr>
+<tr><td><code>a[i]</code> <code>s.f</code> <code>f(a, ...)</code> <code>S{f: a, ...}</code></td><td>要素・フィールド・呼び出し・構造体の値</td></tr>
+</table>
+<p>構造体の値は先頭にフィールドを書くので、<code>if</code> や <code>for</code> の本体の <code>{</code> と区別できます。<code>'name</code>・<code>"text"</code>・<code>val H(a, ...)</code>・<code>fn f(a, ...)</code>・<code>true</code>・<code>false</code> は vasm と同じ値です。</p>
+<ul>
+<li><code>let x = e</code>・<code>let x: T = e</code>・<code>var x: T</code>（未初期化）。同じ名前を宣言し直すと、前の変数は見えなくなります。</li>
+<li>代入 <code>x = e</code>・<code>*p = e</code>・<code>a[i] = e</code>・<code>s.f = e</code> は右辺を先に計算します。<code>+=</code> などの複合代入は左辺の場所を1回だけ読みます。</li>
+<li><code>if c {...} else if c {...} else {...}</code>・<code>while c {...}</code>。条件に括弧は要りません。</li>
+<li><code>for i in a..b {...}</code>：<code>i</code> は <code>a</code> から <code>b</code> の手前までで、本体の中だけで見えます。<code>b</code> は始めに1回だけ計算します。</li>
+<li><code>region r {...}</code>・<code>return</code>・<code>return e</code> は vasm と同じです。</li>
+</ul>
+<div class="example">
+<p class="file">native_compile.pk</p>
+<pre class="pk"><span class="tok-name">use</span><span class="tok-op">(</span><span class="tok-str">"native/compile"</span><span class="tok-op">)</span>
+<span class="tok-name">use</span><span class="tok-op">(</span><span class="tok-str">"vasm/text"</span><span class="tok-op">)</span>
+
+<span class="tok-name">m</span> <span class="tok-op">:=</span> <span class="tok-name">native</span><span class="tok-op">{</span>|
+    <span class="tok-name">fn</span> <span class="tok-name">gcd</span><span class="tok-op">(</span><span class="tok-name">a</span>: i64, b: i64) -&gt; i64 {
+        <span class="tok-kw">while</span> b != 0 {
+            <span class="tok-name">let</span> <span class="tok-name">t</span> <span class="tok-op">=</span> <span class="tok-name">a</span> <span class="tok-op">%</span> <span class="tok-name">b</span>
+            <span class="tok-name">a</span> <span class="tok-op">=</span> <span class="tok-name">b</span>
+            <span class="tok-name">b</span> <span class="tok-op">=</span> <span class="tok-name">t</span>
+        }
+        <span class="tok-name">a</span>
+    }
+
+    <span class="tok-name">fn</span> <span class="tok-name">bump</span><span class="tok-op">[</span><span class="tok-name">r</span><span class="tok-op">]</span><span class="tok-op">(</span><span class="tok-name">m</span>: &amp;mut r [i32], n: i32) {
+        <span class="tok-kw">for</span> i in 0 as i32..n {
+            <span class="tok-name">m</span><span class="tok-op">[</span><span class="tok-name">i</span><span class="tok-op">]</span> <span class="tok-op">+=</span> <span class="tok-num">1</span>
+        }
+    }
+|}
+<span class="tok-name">put</span><span class="tok-op">(</span><span class="tok-name">vasm_text</span><span class="tok-op">.</span><span class="tok-name">text</span><span class="tok-op">(</span><span class="tok-name">native_compile</span><span class="tok-op">.</span><span class="tok-name">compile</span><span class="tok-op">(</span><span class="tok-name">m</span><span class="tok-op">)</span><span class="tok-op">)</span><span class="tok-op">)</span></pre>
+<p class="label">出力</p>
+<pre class="out">fn gcd(a: i64, b: i64) -&gt; i64 {
+    while (b != 0) {
+        var t: i64
+        t = a % b
+        a = b
+        b = t
+    }
+    return a
+}
+
+fn bump[r](m: &amp;mut r [i32], n: i32) {
+    var t0: i32
+    t0 = n
+    var i: i32
+    i = 0
+    while (i &lt; t0) {
+        var t1: i64
+        t1 = i as i64
+        var t2: i32
+        t2 = m[t1]
+        t2 = t2 + 1
+        m[t1] = t2
+        i = i + 1
+    }
+}</pre>
+</div>
+
+<h2>型の決まり方</h2>
+<ul>
+<li>型を書くのは <code>let</code>・<code>var</code>・パラメータ・関数の結果・<code>as</code> だけです。</li>
+<li>整数のリテラルはそれだけでは型がなく、代入先・引数・相手の項・関数の結果の型になります。手がかりのない <code>let x = 5</code> は誤りで、<code>let x: i64 = 5</code> か <code>5 as i64</code> と書きます。</li>
+<li><code>for i in a..b</code> の <code>i</code> は、リテラルでない方の型です。両方リテラルなら誤りで、<code>0 as i64..10</code> のように一方に型を付けます。</li>
+<li>配列の添字は <code>i64</code> で、ほかの整数型には <code>as i64</code> が必要です。</li>
+<li>借用を結果に持つ関数の呼び出しは、結果の領域が引数から1つに決まるときだけ型を推論します。決まらないときは <code>let x: T = f(...)</code> と書きます。</li>
+</ul>
+
+<h2>大きなリテラル</h2>
+<p>vasm のリテラルは -32768 から 32767 までですが、native はそれを超える整数のリテラルを書けます。型の範囲に入らなければ誤りです。</p>
+<div class="example">
+<p class="file">native_logic.pk</p>
+<pre class="pk"><span class="tok-name">use</span><span class="tok-op">(</span><span class="tok-str">"native/compile"</span><span class="tok-op">)</span>
+<span class="tok-name">use</span><span class="tok-op">(</span><span class="tok-str">"vasm/text"</span><span class="tok-op">)</span>
+
+<span class="tok-name">m</span> <span class="tok-op">:=</span> <span class="tok-name">native</span><span class="tok-op">{</span>|
+    <span class="tok-name">fn</span> <span class="tok-name">both</span><span class="tok-op">(</span><span class="tok-name">a</span>: i64, b: i64) -&gt; bool {
+        <span class="tok-name">a</span> <span class="tok-op">&gt;</span> <span class="tok-num">0</span> <span class="tok-kw">and</span> <span class="tok-name">b</span> <span class="tok-op">&gt;</span> <span class="tok-num">0</span>
+    }
+
+    <span class="tok-name">fn</span> <span class="tok-name">mask</span><span class="tok-op">(</span><span class="tok-name">x</span>: i32) -&gt; i32 {
+        <span class="tok-name">x</span> &amp; 0x3FFFFFF
+    }
+|}
+<span class="tok-name">put</span><span class="tok-op">(</span><span class="tok-name">vasm_text</span><span class="tok-op">.</span><span class="tok-name">text</span><span class="tok-op">(</span><span class="tok-name">native_compile</span><span class="tok-op">.</span><span class="tok-name">compile</span><span class="tok-op">(</span><span class="tok-name">m</span><span class="tok-op">)</span><span class="tok-op">)</span><span class="tok-op">)</span></pre>
+<p class="label">出力</p>
+<pre class="out">fn both(a: i64, b: i64) -&gt; bool {
+    var t0: bool
+    t0 = a &gt; 0
+    var t1: bool
+    t1 = t0
+    if (t1) {
+        var t2: bool
+        t2 = b &gt; 0
+        t1 = t2
+    }
+    return t1
+}
+
+fn mask(x: i32) -&gt; i32 {
+    var t0: i32
+    t0 = 2047
+    t0 = t0 &lt;&lt; 15
+    t0 = t0 | 32767
+    var t1: i32
+    t1 = x &amp; t0
+    return t1
+}</pre>
+</div>
+
+<h2>誤り</h2>
+<p>展開の誤りの <code>kind</code> は <code>'type</code>（型が決まらない・リテラルが型の範囲にない・式の文が呼び出しでない）と <code>'undefined</code>（宣言のない変数・関数・構造体）です。所有・借用・初期化の誤りは、展開した vasm を <code>vasm_check.check</code> が調べます。誤りの位置は native のソースの位置です。</p>
+<div class="example">
+<p class="file">native_errors.pk</p>
+<pre class="pk"><span class="tok-name">use</span><span class="tok-op">(</span><span class="tok-str">"native/compile"</span><span class="tok-op">)</span>
+
+<span class="tok-name">m</span> <span class="tok-op">:=</span> <span class="tok-name">native</span><span class="tok-op">{</span>|
+    <span class="tok-name">fn</span> <span class="tok-name">f</span><span class="tok-op">(</span><span class="tok-name">n</span>: i64) {
+        <span class="tok-name">let</span> <span class="tok-name">x</span> <span class="tok-op">=</span> <span class="tok-num">5</span>
+    }
+    <span class="tok-name">fn</span> <span class="tok-name">g</span><span class="tok-op">(</span><span class="tok-name">n</span>: i64) {
+        <span class="tok-kw">for</span> i in 0..10 {
+            <span class="tok-name">n</span> <span class="tok-op">+=</span> <span class="tok-num">1</span>
+        }
+    }
+    <span class="tok-name">fn</span> <span class="tok-name">h</span><span class="tok-op">(</span><span class="tok-name">n</span>: i64) -&gt; i64 {
+        <span class="tok-name">n</span> <span class="tok-op">+</span> <span class="tok-name">k</span>
+    }
+|}
+<span class="tok-name">file</span> <span class="tok-op">:=</span> <span class="tok-name">argv</span><span class="tok-op">(</span><span class="tok-op">)</span><span class="tok-op">[</span><span class="tok-num">0</span><span class="tok-op">]</span>
+<span class="tok-name">each</span><span class="tok-op">(</span><span class="tok-op">(</span><span class="tok-name">VasmErr</span><span class="tok-op">{</span><span class="tok-name">_</span><span class="tok-op">,</span> <span class="tok-name">Loc</span><span class="tok-op">{</span><span class="tok-name">_</span><span class="tok-op">,</span> <span class="tok-name">l</span><span class="tok-op">,</span> <span class="tok-name">c</span><span class="tok-op">}</span><span class="tok-op">,</span> <span class="tok-name">msg</span><span class="tok-op">}</span><span class="tok-op">)</span> <span class="tok-op">-&gt;</span> <span class="tok-name">put</span><span class="tok-op">(</span><span class="tok-str">f"</span><span class="tok-str">line </span><span class="tok-op">{</span><span class="tok-name">l</span><span class="tok-op">}</span><span class="tok-str">: </span><span class="tok-op">{</span><span class="tok-name">msg</span><span class="tok-op">}</span><span class="tok-str">\n</span><span class="tok-str">"</span><span class="tok-op">)</span><span class="tok-op">,</span> <span class="tok-name">native_compile</span><span class="tok-op">.</span><span class="tok-name">errors</span><span class="tok-op">(</span><span class="tok-name">file</span><span class="tok-op">,</span> <span class="tok-name">arg</span><span class="tok-op">(</span><span class="tok-name">native_compile</span><span class="tok-op">.</span><span class="tok-name">compile_all</span><span class="tok-op">(</span><span class="tok-name">m</span><span class="tok-op">)</span><span class="tok-op">,</span> <span class="tok-num">1</span><span class="tok-op">)</span><span class="tok-op">)</span><span class="tok-op">)</span></pre>
+<p class="label">出力</p>
+<pre class="out">line 5: the type of this value is not known; write the type, as in let x: i32 = ... or e as i32
+line 8: the type of the loop variable is not known; write one bound with its type, as in 0 as i64..n
+line 13: k is not declared</pre>
+</div>
+
+<nav class="pager"><a class="prev" href="vasm.html"><small>前のページ</small>vasm</a><a class="next" href="vasmc.html"><small>次のページ</small>vasmc</a></nav>
+</main>
+</div>
+<footer><div class="inner"><a href="https://github.com/nineties/hex-to-compiler">github.com/nineties/hex-to-compiler</a></div></footer>
+<script src="../../assets/page.js"></script>
+</body>
+</html>
