@@ -21,7 +21,7 @@ use("pretty")
 module unparse {
 
 bad := Bad{}
-is_mx(x) := typeof(x) == 'mexpr
+is_mx(x) := type(x) == Expr
 
 is_bad(x) := is_mx(x) and head(x) == 'Bad
 is_hole(p) := is_mx(p) and head(p) == 'Hole
@@ -102,7 +102,7 @@ un_match(p, t, env) =
 
 # === Reading the actions of the grammar ===
 
-label_ok(x, labels) := typeof(x) == 'symbol and x != '_ and member(x, labels)
+label_ok(x, labels) := type(x) == Symbol and x != '_ and member(x, labels)
 
 # Head{labels...} as a template
 vars_tmpl(h, tup, labels) := {
@@ -160,7 +160,7 @@ mexpr_tmpl(h, args, labels) :=
     else bad
 
 body_tmpl(b, labels) :=
-    if (typeof(b) == 'symbol) (if (label_ok(b, labels)) hole(b) else bad)
+    if (type(b) == Symbol) (if (label_ok(b, labels)) hole(b) else bad)
     else if (not is_mx(b)) bad
     else if (head(b) == 'QuasiQuote) quasi(arg(b, 0), labels)
     else if (head(b) == 'Quote) arg(b, 0)
@@ -183,7 +183,7 @@ action_of(f, elems, is_seq) := {
     if (is_mx(f) and head(f) == 'Lambda) {
         pat := arg(arg(f, 0), 0)
         labels := if (is_mx(pat) and head(pat) == 'Tuple and is_seq) pretty.args_of(pat)
-                  else if (typeof(pat) == 'symbol and not is_seq) [pat]
+                  else if (type(pat) == Symbol and not is_seq) [pat]
                   else bad
         if (is_bad(labels) or length(labels) != n) bad else {
             tm := body_tmpl(arg(f, 1), labels)
@@ -196,8 +196,8 @@ action_of(f, elems, is_seq) := {
 # the text that an element always matches, such as "+", Tight{"("} or a rule like minus ::= same "-"
 
 const_text(e, depth) :=
-    if (typeof(e) == 'string) e
-    else if (typeof(e) == 'symbol) {
+    if (type(e) == String) e
+    else if (type(e) == Symbol) {
         src := table.get(peg_sources, e, none)
         if (depth > 3 or not is_mx(src)) bad else const_text(src, depth + 1)
     } else if (not is_mx(e)) bad
@@ -241,13 +241,13 @@ make_items(elems, labels, holes) := {
     else bad
 }
 
-token_rule(r) := typeof(table.get(peg_sources, r, none)) == 'function
+token_rule(r) := type(table.get(peg_sources, r, none)) == Function
 
 # the rule of the last element when it is a rule of its own, or none. The alternative
 # runs on to the right as far as that rule does.
 tail_of(items) :=
     if (items == []) none
-    else if (head(list.last(items)) == 'ValItem and typeof(arg(list.last(items), 1)) == 'symbol and not token_rule(arg(list.last(items), 1))) arg(list.last(items), 1)
+    else if (head(list.last(items)) == 'ValItem and type(arg(list.last(items), 1)) == Symbol and not token_rule(arg(list.last(items), 1))) arg(list.last(items), 1)
     else none
 
 # Alt{owner, order, template, items, tail}
@@ -268,10 +268,10 @@ find_paren(owner, a) := {
     if (is_mx(a) and head(a) == 'Act and is_mx(arg(a, 0)) and head(arg(a, 0)) == 'Seq and arity(arg(a, 0)) == 3) {
         s := arg(a, 0)
         x := arg(s, 1)
-        inner := if (typeof(x) == 'symbol) x
-                 else if (is_mx(x) and head(x) == 'Delimited1 and typeof(arg(x, 0)) == 'symbol) arg(x, 0)
+        inner := if (type(x) == Symbol) x
+                 else if (is_mx(x) and head(x) == 'Delimited1 and type(arg(x, 0)) == Symbol) arg(x, 0)
                  else none
-        if (typeof(arg(s, 0)) == 'string and typeof(arg(s, 2)) == 'string and inner != none)
+        if (type(arg(s, 0)) == String and type(arg(s, 2)) == String and inner != none)
             Paren{owner, inner, arg(s, 0), arg(s, 2)}
         else none
     } else none
@@ -281,10 +281,10 @@ flat(src) := if (is_mx(src) and head(src) == 'Choice) concat_map(flat, pretty.ar
 
 tok_types := {
     t := table.new()
-    table.set(t, 'ident, 'symbol)
-    table.set(t, 'integer, 'int)
-    table.set(t, 'float, 'string)
-    table.set(t, 'string, 'string)
+    table.set(t, 'ident, Symbol)
+    table.set(t, 'integer, Int)
+    table.set(t, 'float, String)
+    table.set(t, 'string, String)
     t
 }
 
@@ -305,7 +305,7 @@ un_build() := {
     names := map(kv -> arg(kv, 0), list.sort((a, b) -> arg(a, 1) < arg(b, 1), table.items(peg_ids)))
     each(r -> {
         src := table.get(peg_sources, r, none)
-        if (is_mx(src) or typeof(src) == 'symbol) {
+        if (is_mx(src) or type(src) == Symbol) {
             id := table.get(peg_ids, r, 0)
             i := 0
             each(a -> {
@@ -313,9 +313,9 @@ un_build() := {
                 i = i + 1
                 p := find_paren(r, a)
                 if (p != none and not list.any(x -> arg(x, 0) == r, parens)) parens = p :: parens
-                if (typeof(a) == 'symbol) {
+                if (type(a) == Symbol) {
                     target := table.get(peg_sources, a, none)
-                    if (typeof(target) == 'function) {
+                    if (type(target) == Function) {
                         ty := table.get(tok_types, a, none)
                         if (ty != none) alts = Alt{r, order, Tok{a, ty}, [], none} :: alts
                     } else if (target != none) table.set(links, r, a :: table.get(links, r, []))
@@ -469,18 +469,18 @@ is_list_rule(r) := {
 }
 
 val_pieces(elem, v) :=
-    if (typeof(elem) == 'symbol and is_list_rule(elem)) val_pieces(table.get(peg_sources, elem, none), v)
-    else if (typeof(elem) == 'symbol) {
+    if (type(elem) == Symbol and is_list_rule(elem)) val_pieces(table.get(peg_sources, elem, none), v)
+    else if (type(elem) == Symbol) {
         s := pp(elem, v)
         if (s == none) none else [s]
     } else if (not is_mx(elem)) none
     else if (head(elem) == 'Delimited or head(elem) == 'Delimited1 or head(elem) == 'Many) {
         inner := arg(elem, 0)
         sep := if (head(elem) == 'Many) "" else const_text(arg(elem, 1), 0)
-        if (typeof(inner) != 'symbol or is_bad(sep) or not (is_mx(v) and head(v) == 'Tuple)) none
+        if (type(inner) != Symbol or is_bad(sep) or not (is_mx(v) and head(v) == 'Tuple)) none
         else if (head(elem) == 'Delimited1 and arity(v) == 0) none
         else list_pieces(inner, sep, v)
-    } else if (head(elem) == 'Option and typeof(arg(elem, 0)) == 'symbol and is_mx(v) and head(v) == 'Tuple) {
+    } else if (head(elem) == 'Option and type(arg(elem, 0)) == Symbol and is_mx(v) and head(v) == 'Tuple) {
         if (arity(v) == 0) []
         else if (arity(v) == 1) val_pieces(arg(elem, 0), arg(v, 0))
         else none
@@ -523,7 +523,7 @@ try_fit(a, wrapped, t) := {
     env := table.new()
     tm := alt_tmpl(a)
     if (is_tok(tm)) {
-        if (typeof(t) == arg(tm, 1)) print_tok(arg(tm, 0), t) else none
+        if (type(t) == arg(tm, 1)) print_tok(arg(tm, 0), t) else none
     } else if (is_custom(tm)) {
         txt := arg(tm, 1)(t)
         if (txt == none) none
@@ -549,9 +549,9 @@ try_cands = (Nil{}, t) -> none
 
 # pp(rule, t) is the text of t as the rule, or none
 pp(r, t) =
-    if (typeof(table.get(peg_sources, r, none)) == 'function) {
+    if (type(table.get(peg_sources, r, none)) == Function) {
         ty := table.get(tok_types, r, none)
-        if (ty != none and typeof(t) == ty) print_tok(r, t) else none
+        if (ty != none and type(t) == ty) print_tok(r, t) else none
     } else if (list.any(e -> arg(e, 0) == r and arg(e, 1) == t, ug_stack)) none
     else {
         # a rule that passes its tree on to itself (identity actions) would go round forever
@@ -652,7 +652,7 @@ custom('primary, 3, 'arrow, print_if)
 # f"...{e}...": _strcat("a", _to_text(e)) and so on, in the shape that peg_interp makes
 is_call2(t, f) := is_mx(t) and head(t) == 'Apply and arity(t) == 2 and arg(t, 0) == f and is_mx(arg(t, 1)) and head(arg(t, 1)) == 'Tuple
 is_text_hole(x) := is_call2(x, '_to_text) and arity(arg(x, 1)) == 1
-is_text_lit(x) := typeof(x) == 'string and strlen(x) > 0
+is_text_lit(x) := type(x) == String and strlen(x) > 0
 
 # the pieces of an f-string as a list of S{text} and E{tree}, or none
 fstr_segs(t) :=
@@ -709,7 +709,7 @@ print_return0(t) := if (t == 'Perform{Return{none}}) "return" else none
 # Guard{params, guard, body, rest} of a function with a guard, or none
 guard_parts := (Apply{Lambda{Tuple{k}, Fusion{Lambda{vs, Apply{Fusion{Lambda{ps, b}, k2}, vs2}}, k3}}, Tuple{g}}) -> {
                    b2 := strip('UnwrapReturn, b)
-                   ok := typeof(k) == 'symbol and symname(k) == "%g" and k2 == k and k3 == k and vs2 == vs
+                   ok := type(k) == Symbol and symname(k) == "%g" and k2 == k and k3 == k and vs2 == vs
                          and is_mx(b2) and head(b2) == 'If and arity(b2) == 3 and arg(b2, 2) == mexpr('Apply, Tuple{k, vs})
                    if (ok) Guard{ps, arg(b2, 0), arg(b2, 1), g} else none
                }
@@ -732,7 +732,7 @@ arm_text(ps, c, e) := {
     else _strcat(p, _strcat(if (g == "") "" else _strcat(" if ", g), _strcat(" -> ", b)))
 }
 
-plain_arm := (Lambda{ps @ mexpr, e}) -> if (head(ps) == 'Tuple and strip('UnwrapReturn, e) == e) arm_text(ps, NoGuard{}, e) else none
+plain_arm := (Lambda{ps @ Expr, e}) -> if (head(ps) == 'Tuple and strip('UnwrapReturn, e) == e) arm_text(ps, NoGuard{}, e) else none
            | (_) -> none
 
 # the texts of the arms of f in match, or none. A function with a guard is the last of a Fusion.
@@ -806,7 +806,7 @@ print_index(f) :=
 
 # an integer literal that is too long for the integer of the reader is _bigint("digits"); it is written as the digits
 print_bigint(t) :=
-    if (is_mx(t) and head(t) == 'Apply and arity(t) == 2 and arg(t, 0) == '_bigint and typeof(arg(t, 1)) == 'mexpr and arity(arg(t, 1)) == 1 and typeof(arg(arg(t, 1), 0)) == 'string) arg(arg(t, 1), 0)
+    if (is_mx(t) and head(t) == 'Apply and arity(t) == 2 and arg(t, 0) == '_bigint and type(arg(t, 1)) == Expr and arity(arg(t, 1)) == 1 and type(arg(arg(t, 1), 0)) == String) arg(arg(t, 1), 0)
     else none
 
 custom('primary, 8, none, print_bigint)
