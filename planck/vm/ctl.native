@@ -5,6 +5,8 @@
 # call was made by a condition instruction with k = mode - 1, 3 drop the value) and the kind (the bits from 18: 0 normal, 1 boundary, 2 transfer).
 # The control state of the loop is the top frame fp only: after an instruction of this unit the loop reads the code, the pc and the base again.
 #
+# A continuation keeps a ret word in place of the register: the register of PERFORM, or the ret word of the call that did not match (see match_failed).
+#
 # Objects: Fusion (kind 9: the number, then the alternatives), environment (kind 12: the parent, then the slots),
 # continuation (kind 11: the number, the register of PERFORM, the number of frames, the frames, the registers).
 # The result of enter and next_alt: 0 a frame was made at the index st[3]; 1 a builtin gave the value st[2] (st[3] is the frame it was called for);
@@ -55,10 +57,8 @@ fn alt_takes[r](h: &r [u32], f: i64, c: i64) -> bool {
     false
 }
 
-# do_return drops the frame fp and gives the value v to the frame below as the ret of the dropped frame says; the result is the frame below
-fn do_return[r](h: &r [u32], st: &r [u32], rs: &mut r [u32], fs: &mut r [u32], fp: i64, v: i64) -> i64 {
-    let rt = g(fs, fp + 6)
-    let q = fp - 7
+# deliver gives the value v to the frame q as the ret word rt says: into a register, or as the truth of the condition instruction
+fn deliver[r](h: &r [u32], rs: &mut r [u32], fs: &mut r [u32], q: i64, rt: i64, v: i64) {
     let mode = (rt >> 16) & 3
     if mode == 0 {
         p(rs, g(fs, q + 4) + (rt & 65535), v)
@@ -69,6 +69,12 @@ fn do_return[r](h: &r [u32], st: &r [u32], rs: &mut r [u32], fs: &mut r [u32], f
         if v != g(h, 1) { cond = 1 }
         if cond != mode - 1 { p(fs, q + 5, g(fs, q + 5) + 1) }
     }
+}
+
+# do_return drops the frame fp and gives the value v to the frame below as the ret of the dropped frame says; the result is the frame below
+fn do_return[r](h: &r [u32], st: &r [u32], rs: &mut r [u32], fs: &mut r [u32], fp: i64, v: i64) -> i64 {
+    let q = fp - 7
+    deliver(h, rs, fs, q, g(fs, fp + 6), v)
     q
 }
 
@@ -91,7 +97,7 @@ fn resume[r](h: &r [u32], st: &mut r [u32], rs: &mut r [u32], fs: &mut r [u32], 
     }
     p(fs, fp + 6, (rt & 262143) + 262144)
     let last = fp + 7 * (nf - 1)
-    p(rs, g(fs, last + 4) + g(h, kb + 2), v)
+    deliver(h, rs, fs, last, g(h, kb + 2), v)
     p(st, 3, last)
     0
 }
@@ -217,13 +223,81 @@ fn prepare[r](rs: &mut r [u32], fs: &mut r [u32], q: i64, v: i64, k: i64) {
     p(rs, fb + 1, k)
 }
 
+# whether the string s is "MatchingFailed" (14 bytes, packed from the low end of the words)
+fn is_mf_name[r](h: &r [u32], s: i64) -> bool {
+    if str_len(h, s) != 14 { return false }
+    let b = (s >> 1) + 2
+    g(h, b) == 1668571469 and g(h, b + 1) == 1735289192 and g(h, b + 2) == 1818845510 and g(h, b + 3) == 25701
+}
+
+fn is_mf[r](h: &r [u32], v: i64) -> bool {
+    if not is_mexpr(h, v) { return false }
+    is_mf_name(h, g(h, (mexpr_head(h, v) >> 1) + 1))
+}
+
+# no boundary takes the effect v: a MatchingFailed stops with matching failed, any other effect with unhandled effect
+fn no_handler[r](h: &r [u32], v: i64) {
+    if is_mf(h, v) { die("matching failed") }
+    die("unhandled effect")
+}
+
+fn mf_symbol[r](h: &mut r [u32], st: &mut r [u32]) -> i64 {
+    let s = new_string(h, st, 14)
+    let b = (s >> 1) + 2
+    p(h, b, 1668571469)
+    p(h, b + 1, 1735289192)
+    p(h, b + 2, 1818845510)
+    p(h, b + 3, 25701)
+    intern_sym(h, st, s)
+}
+
+# MatchingFailed{f, Tuple{the c arguments at rs[nb]}, none}: the position of the call is none
+fn mf_value[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], f: i64, nb: i64, c: i64) -> i64 {
+    let t = new_mexpr(h, st, g(h, 4), c)
+    for i in 0 as i64..c {
+        set_arg(h, t, i, g(rs, nb + i))
+    }
+    let sym = mf_symbol(h, st)
+    let m = new_mexpr(h, st, sym, 3)
+    set_arg(h, m, 0, f)
+    set_arg(h, m, 1, t)
+    set_arg(h, m, 2, g(h, 3))
+    m
+}
+
+# the end of the registers of the frame q
+fn frame_end[r](h: &r [u32], fs: &r [u32], q: i64) -> i64 {
+    g(fs, q + 4) + code_nregs(h, code_of(h, g(fs, q)))
+}
+
+# fail_boundary performs the effect v for a call that did not match, made by the frame last; the value that the continuation gets is given to
+# last as the ret word rw says. The result is the boundary frame, made into the transfer frame; with no boundary the program stops.
+fn fail_boundary[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], fs: &mut r [u32], last: i64, rw: i64, v: i64) -> i64 {
+    let q = find_boundary(fs, last)
+    if q < 0 { die("matching failed") }
+    let fb = g(fs, q + 4)
+    let k = capture(h, st, rs, fs, q, last, fb - 2, frame_end(h, fs, last), rw, 0)
+    prepare(rs, fs, q, v, k)
+    q
+}
+
+# match_failed: the frame cur ran out of alternatives. f is the function that was called. The call returns to the frame below cur with the value of the resumption.
+fn match_failed[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], fs: &mut r [u32], cur: i64, f: i64) -> i64 {
+    let rt = g(fs, cur + 6)
+    if cur < 7 { die("matching failed") }
+    if (rt >> 18) != 0 { die("matching failed") }
+    let c = code_arity(h, code_of(h, g(fs, cur)))
+    let v = mf_value(h, st, rs, f, g(fs, cur + 4), c)
+    fail_boundary(h, st, rs, fs, cur - 7, rt & 262143, v)
+}
+
 # transfer: no alternative of the handler in the transfer frame t took the effect; the next boundary below gets it with a longer continuation
 fn transfer[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], fs: &mut r [u32], t: i64) -> i64 {
     let tb = g(fs, t + 4)
     let v = g(rs, tb)
     let k0 = g(rs, tb + 1)
     let q = find_boundary(fs, t - 7)
-    if q < 0 { die("unhandled effect") }
+    if q < 0 { no_handler(h, v) }
     let gb = g(fs, q + 4)
     let k = capture(h, st, rs, fs, q, t - 7, gb - 2, tb - 2, g(h, (k0 >> 1) + 2), k0)
     prepare(rs, fs, q, v, k)
@@ -239,15 +313,21 @@ fn next_alt[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], fs: &mut r [
     while status == 2 {
         let alts = g(fs, cur + 2)
         let rt = g(fs, cur + 6)
-        if alts == g(h, 3) { die("matching failed") }
-        var c: i64
-        c = 2
-        if (rt >> 18) != 2 { c = code_arity(h, code_of(h, g(fs, cur))) }
-        let nb = g(fs, cur + 4)
-        status = enter(h, st, rs, fs, cur, alts, c, nb, rt, nb - 1, g(fs, cur + 3))
-        if status == 2 {
-            if (rt >> 18) != 2 { die("matching failed") }
-            cur = transfer(h, st, rs, fs, cur)
+        if alts == g(h, 3) {
+            cur = match_failed(h, st, rs, fs, cur, g(fs, cur))
+        } else {
+            var c: i64
+            c = 2
+            if (rt >> 18) != 2 { c = code_arity(h, code_of(h, g(fs, cur))) }
+            let nb = g(fs, cur + 4)
+            status = enter(h, st, rs, fs, cur, alts, c, nb, rt, nb - 1, g(fs, cur + 3))
+            if status == 2 {
+                if (rt >> 18) != 2 {
+                    cur = match_failed(h, st, rs, fs, cur, alts)
+                } else {
+                    cur = transfer(h, st, rs, fs, cur)
+                }
+            }
         }
     }
     status
@@ -257,12 +337,21 @@ fn do_perform[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], fs: &mut r
     let base = g(fs, fp + 4)
     let v = g(rs, base + b)
     let q = find_boundary(fs, fp)
-    if q < 0 { die("unhandled effect") }
+    if q < 0 { no_handler(h, v) }
     let fb = g(fs, q + 4)
     let nregs = code_nregs(h, code_of(h, g(fs, fp)))
     let k = capture(h, st, rs, fs, q, fp, fb - 2, base + nregs, a, 0)
     prepare(rs, fs, q, v, k)
     next_alt(h, st, rs, fs, q)
+}
+
+# call_failed: the call f of c arguments at rs[nb], made by the frame fp, was taken by no alternative; the call gets the value of the resumption as the ret word rw says
+fn call_failed[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], fs: &mut r [u32], fp: i64, f: i64, nb: i64, c: i64, rw: i64) -> i64 {
+    let v = mf_value(h, st, rs, f, nb, c)
+    let q = fail_boundary(h, st, rs, fs, fp, rw, v)
+    let status = next_alt(h, st, rs, fs, q)
+    if status == 1 { return do_return(h, st, rs, fs, g(st, 3), g(st, 2)) }
+    g(st, 3)
 }
 
 # the instructions CALL TCALL RET NEXT HANDLE PERFORM; pc is the saved pc of the top frame fp. The result is the top frame after the instruction.
@@ -280,7 +369,7 @@ fn exec_ctl[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], fs: &mut r [
             p(rs, base + a, g(st, 2))
             return fp
         }
-        die("matching failed")
+        return call_failed(h, st, rs, fs, fp, g(rs, base + b), base + b + 1, c, ret_word(a, 0, 0))
     } else if op == 21 {
         let f = g(rs, base + b)
         for i in 0 as i64..c + 1 {
@@ -289,7 +378,10 @@ fn exec_ctl[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], fs: &mut r [
         status = enter(h, st, rs, fs, fp, f, c, base, g(fs, fp + 6) & 262143, base - 1, 0)
         if status == 0 { return g(st, 3) }
         if status == 1 { return do_return(h, st, rs, fs, fp, g(st, 2)) }
-        die("matching failed")
+        # the frame is dropped by the tail call: the call returns to its caller
+        let rt = g(fs, fp + 6)
+        if fp < 7 or (rt >> 18) != 0 { die("matching failed") }
+        return call_failed(h, st, rs, fs, fp - 7, f, base, c, rt & 262143)
     } else if op == 22 {
         return do_return(h, st, rs, fs, fp, g(rs, base + a))
     } else if op == 23 {
@@ -305,7 +397,7 @@ fn exec_ctl[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], fs: &mut r [
             p(rs, base + a, g(st, 2))
             return fp
         }
-        die("matching failed")
+        return call_failed(h, st, rs, fs, fp, g(rs, base + b), base + b + 2, 0, ret_word(a, 0, 0))
     } else if op == 35 {
         status = do_perform(h, st, rs, fs, fp, a, b)
         if status == 1 { return do_return(h, st, rs, fs, g(st, 3), g(st, 2)) }

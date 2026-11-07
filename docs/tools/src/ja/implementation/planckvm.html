@@ -28,13 +28,13 @@
 <h3>呼び出し</h3>
 <p><code>CALL A B C</code> は <code>f = R[B]</code> を C 個の引数で呼びます。Lambda は arity が C に等しければ新しいフレームで実行します。Fusion <code>a | b</code> は a を先に試し、尽きたら b を試します。組み込みは引数の個数が合えばフレームを作らず結果をその場で受け取ります（<code>eval</code> だけは arity 0 のコードをフレームで実行します）。継続は C が 1 のとき再開し、それ以外の値は <code>not a function</code> で止まります。</p>
 <ul>
-<li>コードの入口の命令列がパターンを照合します。一致しなければ <code>NEXT</code> が同じ引数で次の選択肢を試し、尽きると <code>matching failed</code> で止まります。入口の命令列は引数のレジスタを書き換えません。</li>
+<li>コードの入口の命令列がパターンを照合します。一致しなければ <code>NEXT</code> が同じ引数で次の選択肢を試し、尽きると <code>MatchingFailed{f, args, loc}</code> を <code>Perform</code> します（<code>f</code> は呼ばれた関数、<code>args</code> は引数の <code>Tuple</code>、<code>loc</code> は <code>none</code> です）。引数の個数に合う選択肢がない呼び出しも同じです。受け手がなければ <code>matching failed</code> で止まります。入口の命令列は引数のレジスタを書き換えません。</li>
 <li>呼ばれた側の <code>RET</code> の値は、条件の命令（<code>TEST</code> から <code>TGEI</code> まで）なら <code>false</code> 以外を真として扱い、<code>ASET</code> <code>PLAINSET</code> なら捨て、それ以外は <code>R[A]</code> に入れます。</li>
 <li>命令の表の「組み込み」の欄に名前のある命令は、そのセルの値が元の組み込みのときだけ表の動作をします。別の値が代入されていれば、同じ引数でその値を呼び、結果を上のとおりに受け取ります。</li>
 </ul>
 
 <h3>継続とハンドラ</h3>
-<p><code>HANDLE</code> は本体を境界フレームで実行し、本体の値が <code>Handle</code> の値になります。<code>PERFORM A B</code> は、最も内側の境界までのフレームとレジスタを複製して継続 <code>k</code> を作り、境界より上を捨てて、境界のハンドラを <code>(R[B], k)</code> で呼びます。ハンドラの結果が <code>Handle</code> の値です。どの選択肢にも一致しなければ外側の境界へ進み、見つからなければ <code>unhandled effect: v</code> で止まります。</p>
+<p><code>HANDLE</code> は本体を境界フレームで実行し、本体の値が <code>Handle</code> の値になります。<code>PERFORM A B</code> は、最も内側の境界までのフレームとレジスタを複製して継続 <code>k</code> を作り、境界より上を捨てて、境界のハンドラを <code>(R[B], k)</code> で呼びます。ハンドラの結果が <code>Handle</code> の値です。どの選択肢にも一致しなければ外側の境界へ進み、見つからなければ <code>unhandled effect: v</code> で止まります（<code>MatchingFailed</code> は <code>matching failed</code> で止まります）。ハンドラが返した値は、失敗した呼び出しの値ではなく <code>Handle</code> の値で、失敗した呼び出しの値は <code>k</code> に渡した値です。</p>
 <p><code>k</code> は通常の関数で、何度でも呼べます。呼ぶと複製を呼び出した窓の上に再び複製し、境界のハンドラを残したまま（deep）続けます。<code>PERFORM</code> の <code>R[A]</code> には <code>k</code> の引数が入ります。</p>
 <p>再開しても環境とセルは複製しないので、その変数は複数のコピーで共有されます。レジスタの変数は値を複製するので、再開のあとの <code>x := e</code> はコピーごとに別の変数です。</p>
 
