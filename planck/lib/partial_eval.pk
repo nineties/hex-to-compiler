@@ -141,12 +141,12 @@ loop_limit := 64
 # A dynamic value is Dy{name, type}, a variable of the function that is made. A constructed value may have dynamic values in it.
 # A location of a variable holds a value, or Mt{register, type} for a register that is assigned, or Ce{array} for an array of one element.
 
-pe_dyn(v) := typeof(v) == 'mexpr and head(v) == 'Dy
-marker(v) := typeof(v) == 'mexpr and head(v) == 'Dyn
-pe_fun(v) := typeof(v) == 'mexpr and member(head(v), ['Cl, 'Fv, 'Pr, 'Kn, 'Ki])
-is_mexpr(v) := typeof(v) == 'mexpr and not pe_dyn(v) and not pe_fun(v)
+pe_dyn(v) := type(v) == Expr and head(v) == 'Dy
+marker(v) := type(v) == Expr and head(v) == 'Dyn
+pe_fun(v) := type(v) == Expr and member(head(v), ['Cl, 'Fv, 'Pr, 'Kn, 'Ki])
+is_mexpr(v) := type(v) == Expr and not pe_dyn(v) and not pe_fun(v)
 # v has a dynamic value or a function in it, so it is not a value of planck that a function of planck takes
-opaque(v) := pe_dyn(v) or pe_fun(v) or (typeof(v) == 'mexpr and list.any(opaque, vasm_tlist(v)))
+opaque(v) := pe_dyn(v) or pe_fun(v) or (type(v) == Expr and list.any(opaque, vasm_tlist(v)))
 is_bool(v) := v == true or v == false
 int_type(t) := vasm_check.int(t)
 static_ref := Ref{'shr, 'static, Arr{U8{}}}
@@ -163,9 +163,9 @@ fits_i32(v) := {
 
 # the type that holds v when it is a value of the kind that a register of a scalar holds, and else val
 kind_type(v) := if (pe_dyn(v)) arg(v, 1)
-    else if (typeof(v) == 'int) (if (fits_i32(v)) I32{} else I64{})
+    else if (type(v) == Int) (if (fits_i32(v)) I32{} else I64{})
     else if (is_bool(v)) Bool{}
-    else if (typeof(v) == 'string) static_ref
+    else if (type(v) == String) static_ref
     else Val{}
 
 pe_join(a, b) := if (a == b) a
@@ -249,14 +249,14 @@ big(v, t) := {
 
 # the operand of the value v: a dynamic value, a bool, an integer or a string
 operand(v) := if (pe_dyn(v)) Reg{pe_at, arg(v, 0)}
-    else if (typeof(v) == 'int) (if (in_range(v)) Imm{pe_at, v} else Reg{pe_at, arg(big(v, I64{}), 0)})
+    else if (type(v) == Int) (if (in_range(v)) Imm{pe_at, v} else Reg{pe_at, arg(big(v, I64{}), 0)})
     else if (is_bool(v)) Imm{pe_at, v}
-    else if (typeof(v) == 'string) Str{pe_at, v}
+    else if (type(v) == String) Str{pe_at, v}
     else Reg{pe_at, arg(box(v), 0)}
 
 # the dynamic value v with the type t, converted if it has another integer type
 to(v, t) := if (pe_dyn(v) and arg(v, 1) != t and vasm_check.int(arg(v, 1)) and vasm_check.int(t)) assign(t, Conv{pe_at, Reg{pe_at, arg(v, 0)}, t})
-    else if (typeof(v) == 'int and vasm_check.int(t) and not in_range(v)) big(v, t)
+    else if (type(v) == Int and vasm_check.int(t) and not in_range(v)) big(v, t)
     else v
 
 # the value that a register of type t holds on a path that does not go on
@@ -285,30 +285,30 @@ stop(msg) := {
 
 # === Values of val ===
 # the value v as a val, in a register or as a symbol
-box_op(v) := if (typeof(v) == 'symbol) Sym{pe_at, v} else Reg{pe_at, arg(box(v), 0)}
+box_op(v) := if (type(v) == Symbol) Sym{pe_at, v} else Reg{pe_at, arg(box(v), 0)}
 
 box(v) := if (val_dy(v)) v
     else if (pe_dyn(v)) assign(Val{}, Conv{pe_at, Reg{pe_at, arg(v, 0)}, Val{}})
-    else if (typeof(v) == 'int) (if (in_range(v)) assign(Val{}, Conv{pe_at, Imm{pe_at, v}, Val{}}) else box(big(v, I64{})))
-    else if (typeof(v) == 'string) assign(Val{}, Conv{pe_at, Str{pe_at, v}, Val{}})
-    else if (typeof(v) == 'symbol) assign(Val{}, Mov{Sym{pe_at, v}})
+    else if (type(v) == Int) (if (in_range(v)) assign(Val{}, Conv{pe_at, Imm{pe_at, v}, Val{}}) else box(big(v, I64{})))
+    else if (type(v) == String) assign(Val{}, Conv{pe_at, Str{pe_at, v}, Val{}})
+    else if (type(v) == Symbol) assign(Val{}, Mov{Sym{pe_at, v}})
     else if (pe_fun(v)) box_fun(v)
-    else if (typeof(v) == 'mexpr) {
+    else if (type(v) == Expr) {
         ops := map(box_op, vasm_tlist(v))
         assign(Val{}, Con{pe_at, head(v), ops})
-    } else if (typeof(v) == 'array or typeof(v) == 'plain) box(lift(v))
+    } else if (type(v) == Array or type(v) == Plain) box(lift(v))
     else {
         stop("a function of planck that has no name is a value that is not left in vasm")
         assign(Val{}, Mov{Sym{pe_at, 'none}})
     }
 
 # an array in the value v is made when the result runs: the value is the same with these arrays dynamic
-lift(v) := if (typeof(v) == 'array or typeof(v) == 'plain) {
-    n := if (typeof(v) == 'array) array_len(v) else plain_len(v)
-    x := impl_call(if (typeof(v) == 'array) 'v_array else 'v_plain_array, [box_op(n)], Val{})
+lift(v) := if (type(v) == Array or type(v) == Plain) {
+    n := if (type(v) == Array) array_len(v) else plain_len(v)
+    x := impl_call(if (type(v) == Array) 'v_array else 'v_plain_array, [box_op(n)], Val{})
     i := 0
     while (i < n) {
-        e := lift(if (typeof(v) == 'array) array_get(v, i) else plain_get(v, i))
+        e := lift(if (type(v) == Array) array_get(v, i) else plain_get(v, i))
         if (e != none and e != 0) impl_call('v_index_set, [Reg{pe_at, arg(x, 0)}, box_op(i), box_op(e)], Val{})
         i = i + 1
     }
@@ -316,7 +316,7 @@ lift(v) := if (typeof(v) == 'array or typeof(v) == 'plain) {
 } else if (is_mexpr(v) and has_array(v)) foldl((t, x) -> push(t, x), mexpr(head(v), Tuple{}), map(lift, vasm_tlist(v)))
 else v
 
-has_array(v) := typeof(v) == 'array or typeof(v) == 'plain or (is_mexpr(v) and list.any(has_array, vasm_tlist(v)))
+has_array(v) := type(v) == Array or type(v) == Plain or (is_mexpr(v) and list.any(has_array, vasm_tlist(v)))
 
 # the value v in a place of type t. A val that is to be another type is checked when the program runs.
 coerce(v, t) := if (t == Val{}) box(v)
@@ -344,9 +344,9 @@ forced(key) := table.get(force, key, false)
 
 # === The trees of functions ===
 # a clause is Do{Declare{f}, Set{f, Fusion{f, Lambda{...}}}}
-is_clause(t) := typeof(t) == 'mexpr and head(t) == 'Do and arity(t) == 2 and typeof(arg(t, 0)) == 'mexpr and head(arg(t, 0)) == 'Declare
-is_def_tree(t) := is_clause(t) or (typeof(t) == 'mexpr and head(t) == 'Do and arity(t) > 0 and list.all(is_def_tree, vasm_tlist(t)))
-is_fun_tree(t) := typeof(t) == 'mexpr and (head(t) == 'Lambda or is_def_tree(t))
+is_clause(t) := type(t) == Expr and head(t) == 'Do and arity(t) == 2 and type(arg(t, 0)) == Expr and head(arg(t, 0)) == 'Declare
+is_def_tree(t) := is_clause(t) or (type(t) == Expr and head(t) == 'Do and arity(t) > 0 and list.all(is_def_tree, vasm_tlist(t)))
+is_fun_tree(t) := type(t) == Expr and (head(t) == 'Lambda or is_def_tree(t))
 
 # add the clauses of the tree t to pe_defs and give the name of the function of the last clause
 load_tree(t) := if (is_clause(t)) match t {
@@ -372,7 +372,7 @@ fun_value(t) := if (head(t) == 'Lambda) Cl{[Tuple{t, root}], new_id()} else Fv{l
 # name -> the clauses, read from the source when a call needs them
 lib_defs := none
 
-lib_add(f, t) := if (typeof(t) == 'mexpr) match t {
+lib_add(f, t) := if (type(t) == Expr) match t {
     Lambda{_, _} -> table.set(lib_defs, f, append(table.get(lib_defs, f, []), [t]))
   | Fusion{a, b} -> {
         lib_add(f, a)
@@ -382,7 +382,7 @@ lib_add(f, t) := if (typeof(t) == 'mexpr) match t {
 }
 
 fun note_module
-note_top(e) := if (typeof(e) == 'mexpr) match e {
+note_top(e) := if (type(e) == Expr) match e {
     Do{Declare{f}, Set{_, t}} -> lib_add(f, t)
   | Set{f, t} -> lib_add(f, t)
   | Def{_, Apply{Lambda{Tuple{}, body}, Tuple{}}} -> note_module(body)
@@ -391,10 +391,10 @@ note_top(e) := if (typeof(e) == 'mexpr) match e {
 }
 
 # the functions defined in the body of a module are noted by the names they have in the body
-note_module(body) := if (typeof(body) == 'mexpr and head(body) == 'Do) {
+note_module(body) := if (type(body) == Expr and head(body) == 'Do) {
     for (s in vasm_tlist(body)) {
         if (is_clause(s)) note_top(s)
-        else if (typeof(s) == 'mexpr and head(s) == 'Do) note_module(s)
+        else if (type(s) == Expr and head(s) == 'Do) note_module(s)
         else note_top(s)
     }
 }
@@ -405,7 +405,7 @@ read_lib(path, parser) := {
     while (go) {
         r := parser(s)
         e := arg(r, 0)
-        if (e == Eof{} or (typeof(e) == 'mexpr and head(e) == 'SyntaxError)) go = false
+        if (e == Eof{} or (type(e) == Expr and head(e) == 'SyntaxError)) go = false
         else {
             note_top(e)
             s = arg(r, 1)
@@ -423,10 +423,10 @@ lib_clauses(f) := {
 }
 
 # list.f, string.f and base.f call the function f of the library
-lib_callee(env, f) := if (typeof(f) == 'mexpr and head(f) == 'Apply and arg(f, 0) == '_record_get) {
+lib_callee(env, f) := if (type(f) == Expr and head(f) == 'Apply and arg(f, 0) == '_record_get) {
     m := arg(arg(f, 1), 0)
     n := arg(arg(f, 1), 1)
-    if (member(m, ['list, 'string, 'base]) and pe_loc(env, m) == none and typeof(n) == 'mexpr and head(n) == 'Quote) arg(n, 0) else f
+    if (member(m, ['list, 'string, 'base]) and pe_loc(env, m) == none and type(n) == Expr and head(n) == 'Quote) arg(n, 0) else f
 } else f
 
 # === Operations on dynamic values ===
@@ -440,7 +440,7 @@ fun floor_op
 # the integer of v for an operation: a val is read as i64
 num(v) := if (val_dy(v)) assign(I64{}, Conv{pe_at, Reg{pe_at, arg(v, 0)}, I64{}}) else v
 
-is_num(v) := typeof(v) == 'int or int_dy(v)
+is_num(v) := type(v) == Int or int_dy(v)
 
 # the operation f on the values a and b, one of which is dynamic
 dyn_op(f, a0, b0) := if (f == '_eq or f == '_ne) eq_op(f, a0, b0)
@@ -505,7 +505,7 @@ eq_op(f, a, b) := {
             r
         }
         if (f == '_eq) same else if (pe_dyn(same)) primitive('_not, [same]) else not same
-    } else if ((is_num(a) and (typeof(b) == 'string or is_mexpr(b) or bool_dy(b) or is_bool(b) or pe_fun(b))) or (is_num(b) and (typeof(a) == 'string or is_mexpr(a) or bool_dy(a) or is_bool(a) or pe_fun(a)))) f != '_eq
+    } else if ((is_num(a) and (type(b) == String or is_mexpr(b) or bool_dy(b) or is_bool(b) or pe_fun(b))) or (is_num(b) and (type(a) == String or is_mexpr(a) or bool_dy(a) or is_bool(a) or pe_fun(a)))) f != '_eq
     else {
         x := box_op(a)
         y := box_op(b)
@@ -544,7 +544,7 @@ arity_of(f) := if (member(f, ['_add, '_sub, '_mul, '_div, '_quo, '_mod, '_lt, '_
     else if (f == 'argv) 0
     else 1
 
-pe_println(v) := if (typeof(v) == 'string) impl_call('println_str, [Str{pe_at, v}], Unit{})
+pe_println(v) := if (type(v) == String) impl_call('println_str, [Str{pe_at, v}], Unit{})
     else if (ref_dy(v)) impl_call('println_str, [operand(v)], Unit{})
     else if (is_num(v)) impl_call('println_int, [operand(to(v, I64{}))], Unit{})
     else {
@@ -561,7 +561,7 @@ argv_get(i) := if (is_num(i) or val_dy(i)) assign(static_ref, Call{pe_at, 'argv,
 
 pe_argc() := assign(I64{}, Call{pe_at, 'argc, []})
 
-argv_call(e) := typeof(e) == 'mexpr and head(e) == 'Apply and arg(e, 0) == 'argv and arity(arg(e, 1)) == 0
+argv_call(e) := type(e) == Expr and head(e) == 'Apply and arg(e, 0) == 'argv and arity(arg(e, 1)) == 0
 
 # the function f of the host called with the static values vs; an array in the result is made when the result runs
 host(f, vs) := {
@@ -616,7 +616,7 @@ primitive(f, vs) := {
         none
     } else if (not dyn and not member(f, always)) host(f, vs)
     else if (f == 'peg_for and length(vs) == 2) pe_for(vs[0], vs[1])
-    else if (f == 'arg and is_mexpr(vs[0]) and typeof(vs[1]) == 'int) arg(vs[0], vs[1])
+    else if (f == 'arg and is_mexpr(vs[0]) and type(vs[1]) == Int) arg(vs[0], vs[1])
     else if (f == 'head and is_mexpr(vs[0])) head(vs[0])
     else if (f == 'arity and is_mexpr(vs[0])) arity(vs[0])
     else if (f == 'typeof and not val_dy(vs[0])) (if (pe_fun(vs[0])) 'function else if (is_mexpr(vs[0])) 'mexpr else if (int_dy(vs[0])) 'int else if (bool_dy(vs[0])) 'symbol else 'string)
@@ -654,12 +654,22 @@ primitive(f, vs) := {
 
 # === Patterns ===
 
-# v is of the type shown by typeof: true, false or a dynamic bool
-type_test(v, ty) := if (val_dy(v)) assign(Bool{}, Bin{'eq, Reg{pe_at, arg(assign(Val{}, Call{pe_at, 'typeof, [operand(v)]}), 0)}, Sym{pe_at, ty}})
-    else if (pe_dyn(v)) (if (vasm_check.int(arg(v, 1))) ty == 'int else if (arg(v, 1) == Bool{}) ty == 'symbol else ty == 'string)
-    else if (pe_fun(v)) ty == 'function
-    else if (typeof(v) == 'mexpr) ty == 'mexpr
-    else typeof(v) == ty
+# the symbol that typeof of the vasm runtime gives for the type name ty (a symbol such as 'Int)
+runtime_type(ty) := if (ty == 'Int) 'int
+    else if (ty == 'String) 'string
+    else if (ty == 'Symbol) 'symbol
+    else if (ty == 'Expr) 'mexpr
+    else if (ty == 'Function) 'function
+    else if (ty == 'Array) 'array
+    else if (ty == 'Plain) 'plain
+    else ty
+
+# v is of the type named ty (a symbol such as 'Int): true, false or a dynamic bool
+type_test(v, ty) := if (val_dy(v)) assign(Bool{}, Bin{'eq, Reg{pe_at, arg(assign(Val{}, Call{pe_at, 'typeof, [operand(v)]}), 0)}, Sym{pe_at, runtime_type(ty)}})
+    else if (pe_dyn(v)) (if (vasm_check.int(arg(v, 1))) ty == 'Int else if (arg(v, 1) == Bool{}) ty == 'Symbol else ty == 'String)
+    else if (pe_fun(v)) ty == 'Function
+    else if (type(v) == Expr) ty == 'Expr
+    else type(v) == eval(ty)
 
 # the static a and then the value of fn(), which is emitted only when a holds
 pe_and(a, fn) := if (a == false) false
@@ -681,14 +691,14 @@ test_args(p, v, i) := if (i >= arity(p)) true else {
 }
 
 pe_test(p, v) := {
-    t := typeof(p)
-    if (t == 'symbol) (if (p == true or p == false or p == none) eq_test(p, v) else true)
-    else if (t == 'int or t == 'string) eq_test(p, v)
+    t := type(p)
+    if (t == Symbol) (if (p == true or p == false or p == none) eq_test(p, v) else true)
+    else if (t == Int or t == String) eq_test(p, v)
     else if (head(p) == 'Quote) eq_test(arg(p, 0), v)
     else if (head(p) == '_TypeOf) pe_and(type_test(v, arg(p, 1)), () -> pe_test(arg(p, 0), v))
     else if (val_dy(v)) {
         c := assign(Bool{}, Call{pe_at, 'is, [operand(v), Sym{pe_at, head(p)}, Imm{pe_at, arity(p)}]})
-        if (list.all(q -> typeof(q) == 'symbol and not (q == true or q == false or q == none), vasm_tlist(p))) c
+        if (list.all(q -> type(q) == Symbol and not (q == true or q == false or q == none), vasm_tlist(p))) c
         else pe_and(c, () -> test_args(p, v, 0))
     } else if (not is_mexpr(v) or head(p) != head(v) or arity(p) != arity(v)) false
     else test_args(p, v, 0)
@@ -699,19 +709,19 @@ eq_test(c, v) := if (opaque(v)) eq_op('_eq, c, v) else c == v
 
 # bind the variables of the pattern p, which has matched v, in env
 bind(env, p, v) := {
-    t := typeof(p)
-    if (t == 'symbol) {
+    t := type(p)
+    if (t == Symbol) {
         if (p != '_ and p != true and p != false and p != none) {
             table.set(env_vals(env), p, v)
             table.set(env_depths(env), p, depth)
         }
-    } else if (t == 'int or t == 'string or head(p) == 'Quote) none
+    } else if (t == Int or t == String or head(p) == 'Quote) none
     else if (head(p) == '_TypeOf) bind(env, arg(p, 0), v)
     else {
         i := 0
         while (i < arity(p)) {
             q := arg(p, i)
-            if (not (typeof(q) == 'symbol and (q == '_ or q == true or q == false or q == none)) and not (typeof(q) == 'int or typeof(q) == 'string)) {
+            if (not (type(q) == Symbol and (q == '_ or q == true or q == false or q == none)) and not (type(q) == Int or type(q) == String)) {
                 a := if (val_dy(v)) assign(Val{}, Index{pe_at, arg(v, 0), Imm{pe_at, i}}) else arg(v, i)
                 bind(env, q, a)
             }
@@ -824,7 +834,7 @@ var_value(Mt{x, t}) := assign(t, Mov{Reg{pe_at, x}})
 var_value(Ce{c}) := assign(Val{}, Index{pe_at, arg(c, 0), Imm{pe_at, 0}})
 var_value(v) := v
 
-apply(env, f, vs) := if (typeof(f) == 'symbol) {
+apply(env, f, vs) := if (type(f) == Symbol) {
     loc := pe_loc(env, f)
     if (loc != none) call_value(var_value(table.get(env_vals(loc), f, none)), vs)
     else if (table.get(pe_defs, f, none) != none) call_named(f, vs)
@@ -971,7 +981,7 @@ check_escapes(hs) := {
 }
 
 # keys for comparing static values: a function made here is its lambdas
-pe_key(v) := if (typeof(v) == 'mexpr) {
+pe_key(v) := if (type(v) == Expr) {
     if (head(v) == 'Cl) ClK{map(c -> arg(c, 0), arg(v, 0)), arg(v, 1)}
     else if (head(v) == 'Kn) KnK{}
     else foldl((t, x) -> push(t, x), mexpr(head(v), Tuple{}), map(pe_key, vasm_tlist(v)))
@@ -1115,17 +1125,17 @@ assign_var(env, x, v) := {
 
 # === Loops ===
 # the names assigned in the tree t
-pe_assigned(t) := if (typeof(t) != 'mexpr) []
+pe_assigned(t) := if (type(t) != Expr) []
     else if (head(t) == 'Quote) []
     else {
         inner := concat_map(pe_assigned, vasm_tlist(t))
-        if (head(t) == 'Set and typeof(arg(t, 0)) == 'symbol and not (typeof(arg(t, 1)) == 'mexpr and head(arg(t, 1)) == 'Fusion)) arg(t, 0) :: inner
+        if (head(t) == 'Set and type(arg(t, 0)) == Symbol and not (type(arg(t, 1)) == Expr and head(arg(t, 1)) == 'Fusion)) arg(t, 0) :: inner
         else inner
     }
 
 # the symbols in the tree t
-syms_into(t, out) := if (typeof(t) == 'symbol) table.set(out, t, true)
-    else if (typeof(t) == 'mexpr and head(t) != 'Quote) each(x -> syms_into(x, out), vasm_tlist(t))
+syms_into(t, out) := if (type(t) == Symbol) table.set(out, t, true)
+    else if (type(t) == Expr and head(t) != 'Quote) each(x -> syms_into(x, out), vasm_tlist(t))
 
 syms(t) := {
     out := table.new()
@@ -1141,7 +1151,7 @@ loop_regs(env, tree) := {
         loc := pe_loc(env, x)
         if (loc != none) {
             cur := table.get(env_vals(loc), x, none)
-            if (not (typeof(cur) == 'mexpr and (head(cur) == 'Mt or head(cur) == 'Ce))) make_mut(loc, x, cur)
+            if (not (type(cur) == Expr and (head(cur) == 'Mt or head(cur) == 'Ce))) make_mut(loc, x, cur)
         }
     }
 }
@@ -1204,9 +1214,9 @@ handler_clause(_, ev) := none
 
 # the pattern p matches v as far as it is known: true, false or 'dyn
 static_match(p, v) := {
-    t := typeof(p)
-    if (t == 'symbol) (if (p == true or p == false or p == none) (if (opaque(v)) 'dyn else p == v) else true)
-    else if (t == 'int or t == 'string) (if (opaque(v)) 'dyn else p == v)
+    t := type(p)
+    if (t == Symbol) (if (p == true or p == false or p == none) (if (opaque(v)) 'dyn else p == v) else true)
+    else if (t == Int or t == String) (if (opaque(v)) 'dyn else p == v)
     else if (head(p) == 'Quote) (if (opaque(v)) 'dyn else arg(p, 0) == v)
     else if (head(p) == '_TypeOf) 'dyn
     else if (val_dy(v)) 'dyn
@@ -1268,11 +1278,11 @@ pe_perform(ev) := {
             handlers = sh
             stop("a handler whose pattern depends on a value known only when the program runs is not left in vasm")
             none
-        } else if (typeof(kp) == 'symbol and not member(kp, syms(arg(l, 1)))) {
+        } else if (type(kp) == Symbol and not member(kp, syms(arg(l, 1)))) {
             v := unfold(l, [c], [ev, none])
             handlers = sh
             abort(found, v)
-        } else if (typeof(kp) == 'symbol and k_tail(arg(l, 1), kp)) {
+        } else if (type(kp) == Symbol and k_tail(arg(l, 1), kp)) {
             v := unfold(l, [c], [ev, Ki{}])
             handlers = sh
             v
@@ -1342,7 +1352,7 @@ pe_handle(env, e, hexpr) := {
 }
 
 # === Quasi-quotes ===
-quasi(env, t) := if (typeof(t) != 'mexpr) t
+quasi(env, t) := if (type(t) != Expr) t
     else if (head(t) == 'UnQuote) pe_eval(env, arg(t, 0))
     else foldl((a, x) -> push(a, x), mexpr(head(t), Tuple{}), map(x -> quasi(env, x), vasm_tlist(t)))
 
@@ -1361,18 +1371,18 @@ fusion(a, b) := if (a == none) b else {
 }
 
 pe_eval(env, e) := {
-    t := typeof(e)
-    if (t == 'int or t == 'string) e
-    else if (t == 'symbol) {
+    t := type(e)
+    if (t == Int or t == String) e
+    else if (t == Symbol) {
         loc := pe_loc(env, e)
         if (loc != none) var_value(table.get(env_vals(loc), e, none))
         else if (e == true or e == false or e == none) e
         else if (table.get(pe_defs, e, none) != none) Fv{e}
         else {
             g := eval(e)
-            if (typeof(g) == 'function) Pr{e} else lift(g)
+            if (type(g) == Function) Pr{e} else lift(g)
         }
-    } else if (t != 'mexpr) e
+    } else if (t != Expr) e
     else if (head(e) == 'Quote) arg(e, 0)
     else if (head(e) == 'QuasiQuote) quasi(env, arg(e, 0))
     else if (head(e) == 'Apply) {
@@ -1380,7 +1390,7 @@ pe_eval(env, e) := {
         args := arg(e, 1)
         if (f == '_index_get and arity(args) == 2 and argv_call(arg(args, 0))) argv_get(pe_eval(env, arg(args, 1)))
         else if (f == 'array_len and arity(args) == 1 and argv_call(arg(args, 0))) pe_argc()
-        else if (typeof(f) == 'mexpr and head(f) == 'Quote) apply(env, arg(f, 0), values(env, args))
+        else if (type(f) == Expr and head(f) == 'Quote) apply(env, arg(f, 0), values(env, args))
         else apply(env, f, values(env, args))
     } else if (head(e) == 'If) pe_if(env, arg(e, 0), arg(e, 1), arg(e, 2))
     else if (head(e) == 'While) pe_while(env, arg(e, 0), arg(e, 1))
@@ -1411,7 +1421,7 @@ pe_eval(env, e) := {
 # function was made, so it is an array of one element in both.
 
 has_dy_deep(v, seen) := if (pe_dyn(v)) true
-    else if (typeof(v) != 'mexpr) false
+    else if (type(v) != Expr) false
     else if (head(v) == 'Cl) {
         if (member(arg(v, 1), seen)) false
         else list.any(c -> list.any(x -> {
@@ -1421,23 +1431,23 @@ has_dy_deep(v, seen) := if (pe_dyn(v)) true
     } else if (pe_fun(v)) head(v) == 'Kn or head(v) == 'Ki
     else list.any(x -> has_dy_deep(x, seen), vasm_tlist(v))
 
-loc_dy(v, seen) := typeof(v) == 'mexpr and (head(v) == 'Mt or head(v) == 'Ce or has_dy_deep(v, seen))
+loc_dy(v, seen) := type(v) == Expr and (head(v) == 'Mt or head(v) == 'Ce or has_dy_deep(v, seen))
 
 # the location of x becomes an array of one element
 make_cell(loc, x) := {
     cur := table.get(env_vals(loc), x, none)
-    if (typeof(cur) == 'mexpr and head(cur) == 'Ce) cur
+    if (type(cur) == Expr and head(cur) == 'Ce) cur
     else {
         d := table.get(env_depths(loc), x, 0)
         c := fresh(Val{})
         mk := () -> {
             emit(Assign{pe_at, c, Call{pe_at, 'array, [Imm{pe_at, 1}, Sym{pe_at, 'none}]}})
-            emit(IStore{pe_at, c, Imm{pe_at, 0}, box_op(if (typeof(cur) == 'mexpr and head(cur) == 'Mt) Dy{arg(cur, 0), arg(cur, 1)} else cur)})
+            emit(IStore{pe_at, c, Imm{pe_at, 0}, box_op(if (type(cur) == Expr and head(cur) == 'Mt) Dy{arg(cur, 0), arg(cur, 1)} else cur)})
         }
         fr := frame_at(d + 1)
         if (d < depth and fr != none) add_pre(fr, arg(capture(mk), 0))
         else mk()
-        if (d < depth and fr != none and typeof(cur) == 'mexpr and head(cur) == 'Mt) emit(IStore{pe_at, c, Imm{pe_at, 0}, box_op(Dy{arg(cur, 0), arg(cur, 1)})})
+        if (d < depth and fr != none and type(cur) == Expr and head(cur) == 'Mt) emit(IStore{pe_at, c, Imm{pe_at, 0}, box_op(Dy{arg(cur, 0), arg(cur, 1)})})
         cell := Ce{Dy{c, Val{}}}
         table.set(env_vals(loc), x, cell)
         cell
@@ -1496,15 +1506,15 @@ box_closure(fv) := {
             loc := pe_loc(env0, x)
             if (loc != none) {
                 cur := table.get(env_vals(loc), x, none)
-                isself := typeof(cur) == 'mexpr and head(cur) == 'Cl and map(c -> arg(c, 0), arg(cur, 0)) == lams
+                isself := type(cur) == Expr and head(cur) == 'Cl and map(c -> arg(c, 0), arg(cur, 0)) == lams
                 if (isself) table.set(env_vals(env2), x, SelfRef{})
-                else if (member(x, assigned) or (typeof(cur) == 'mexpr and head(cur) == 'Ce)) {
+                else if (member(x, assigned) or (type(cur) == Expr and head(cur) == 'Ce)) {
                     cell := make_cell(loc, x)
                     caps = arg(cell, 0) :: caps
                     table.set(env_vals(env2), x, Ce{Dy{intern(f"a{k}"), Val{}}})
                     keys = CellOf{x} :: keys
                     k = k + 1
-                } else if (typeof(cur) == 'mexpr and head(cur) == 'Mt) {
+                } else if (type(cur) == Expr and head(cur) == 'Mt) {
                     caps = var_value(cur) :: caps
                     table.set(env_vals(env2), x, Dy{intern(f"a{k}"), Val{}})
                     keys = CapOf{x} :: keys
@@ -1603,8 +1613,8 @@ residual_call(f, vs) := {
 }
 
 # the variables that the statements read
-reads_into(s, out) := if (typeof(s) == 'symbol) table.set(out, s, true)
-    else if (typeof(s) == 'mexpr) match s {
+reads_into(s, out) := if (type(s) == Symbol) table.set(out, s, true)
+    else if (type(s) == Expr) match s {
         Decl{_, _, _} -> none
       | Assign{_, _, r} -> reads_into(r, out)
       | Cons{a, b} -> {
@@ -1734,7 +1744,7 @@ make_fn(name, fv, tmpl, skip, ret, key) := {
 
 
 # the functions of vasm/builtins.pk that the functions fs call, with the functions that these call
-calls_into(s, out) := if (typeof(s) == 'mexpr) match s {
+calls_into(s, out) := if (type(s) == Expr) match s {
     Call{_, f, a} -> {
         table.set(out, f, true)
         calls_into(a, out)

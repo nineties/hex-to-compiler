@@ -97,7 +97,7 @@ check(tree("() -> 1"), 'Lambda{Tuple{}, 1})
 check(tree("x -> y -> x"), 'Lambda{Tuple{x}, Lambda{Tuple{y}, x}})
 check(tree("(0) -> 1 | (n) -> n"), 'Fusion{Lambda{Tuple{0}, 1}, Lambda{Tuple{n}, n}})
 check(tree("(F{a}, 'none) -> a"), 'Lambda{Tuple{F{a}, Quote{none}}, a})
-check(tree("(x @ int) -> x"), 'Lambda{Tuple{_TypeOf{x, int}}, x})
+check(tree("(x @ Int) -> x"), 'Lambda{Tuple{_TypeOf{x, Int}}, x})
 check(tree("x := 1"), 'Def{x, 1})
 check(tree("f(x) := x"), 'Do{Declare{f}, Set{f, Fusion{f, Lambda{Tuple{x}, x}}}})
 check(tree("x = y"), 'Set{x, y})
@@ -335,7 +335,7 @@ check(match (1, 2) { (a, b) -> a + b | _ -> 0 }, 0)
 # patterns written as expressions with guards
 check(match '(x * x) { a * b if a == b -> a | _ -> 0 }, 'x)
 check(match '(x * y) { a * b if a == b -> a | a * b -> b | _ -> 0 }, 'y)
-check(match '(1 + 2) { a @ int + b @ int if a < b -> b - a | _ -> 0 }, 1)
+check(match '(1 + 2) { a @ Int + b @ Int if a < b -> b - a | _ -> 0 }, 1)
 # a guard in a function outside of match: the functions after its | are tried when it is false
 sgn := n if n > 0 -> 1 | n if n < 0 -> -1 | _ -> 0
 check(sgn(5), 1)
@@ -1144,7 +1144,7 @@ check(expr{| f(`!a) |}, 'Apply{f, Tuple{QuasiQuote{UnQuote{a}}}})
 check(expr{| 'a |}, 'Quote{a})
 
 # === Patterns written as expressions ===
-check(tree("a@int + b@int -> a + b"), 'Lambda{Tuple{Apply{Quote{_add}, Tuple{_TypeOf{a, int}, _TypeOf{b, int}}}}, Apply{_add, Tuple{a, b}}})
+check(tree("a@Int + b@Int -> a + b"), 'Lambda{Tuple{Apply{Quote{_add}, Tuple{_TypeOf{a, Int}, _TypeOf{b, Int}}}}, Apply{_add, Tuple{a, b}}})
 check(tree("a * b + c -> a"), 'Lambda{Tuple{Apply{Quote{_add}, Tuple{Apply{Quote{_mul}, Tuple{a, b}}, c}}}, a})
 check(tree("(a + b) * c -> a"), 'Lambda{Tuple{Apply{Quote{_mul}, Tuple{Apply{Quote{_add}, Tuple{a, b}}, c}}}, a})
 check(tree("a - b - c -> a"), 'Lambda{Tuple{Apply{Quote{_sub}, Tuple{Apply{Quote{_sub}, Tuple{a, b}}, c}}}, a})
@@ -1167,14 +1167,14 @@ check(tree("f(a + b) := a"), 'Do{Declare{f}, Set{f, Fusion{f, Lambda{Tuple{Apply
 check(tree("match e { a + 0 -> a | _ -> e }"), 'Apply{Fusion{Lambda{Tuple{Apply{Quote{_add}, Tuple{a, 0}}}, a}, Lambda{Tuple{_}, e}}, Tuple{e}})
 # M-expressions are patterns as before: a variable in the place of the function binds it
 check(tree("Apply{f, Tuple{x}} -> f"), 'Lambda{Tuple{Apply{f, Tuple{x}}}, f})
-check(tree("Apply{'_add, Tuple{a @ int, b}} -> a"), 'Lambda{Tuple{Apply{Quote{_add}, Tuple{_TypeOf{a, int}, b}}}, a})
+check(tree("Apply{'_add, Tuple{a @ Int, b}} -> a"), 'Lambda{Tuple{Apply{Quote{_add}, Tuple{_TypeOf{a, Int}, b}}}, a})
 # a pattern ends before -> and the guard
 check(tree("x - 1 -> x"), 'Lambda{Tuple{Apply{Quote{_sub}, Tuple{x, 1}}}, x})
 check(tree("x->x - 1"), 'Lambda{Tuple{x}, Apply{_sub, Tuple{x, 1}}})
 
 # matching
 simp(e) := match e {
-    a@int + b@int -> a + b
+    a@Int + b@Int -> a + b
   | a + 0 -> a
   | 0 + a -> a
   | x * y if x == y -> `sq(!x)
@@ -1198,8 +1198,8 @@ check(match '(a < b) { x > y -> 1 | x < y -> 2 | _ -> 0 }, 2)
 check(match '(a :: b) { x :: y -> y | _ -> 0 }, 'b)
 check(match '[1, 2] { [x] -> 1 | [x, y] -> y | _ -> 0 }, 2)
 check(match [1, 2] { [x, y] -> x + y | _ -> 0 }, 3)
-check(match '(x + 1) { a@int + b@int -> 0 | _ -> 1 }, 1)
-check(match 'F{1 + x} { F{a + b @ symbol} -> b | _ -> 0 }, 'x)
+check(match '(x + 1) { a@Int + b@Int -> 0 | _ -> 1 }, 1)
+check(match 'F{1 + x} { F{a + b @ Symbol} -> b | _ -> 0 }, 'x)
 check(match '(f(1)) { Apply{g, Tuple{x}} -> g | _ -> 0 }, 'f)
 check(match 'f(1, 2) { f(a) -> 1 | f(a, b) -> b | _ -> 0 }, 2)
 swap(a + b) := `(!b + !a)
@@ -1331,15 +1331,15 @@ check(('F{G{G{1}}})[G{a} -> K{a}], 'F{K{G{1}}})
 check(('F{1, G{2}, K{G{3}, G}})[G{a} -> a], 'F{1, 2, K{3, G}})
 check(('G{1})[G{a} -> a], 1)
 check(('F{1})[G{a} -> a], 'F{1})
-check([1, 2, 3][x @ int -> x * 10], [10, 20, 30])
+check([1, 2, 3][x @ Int -> x * 10], [10, 20, 30])
 check(('(x * 1 + y))[Apply{_mul, Tuple{a, 1}} -> a], '(x + y))
 # patterns written as expressions in the arms
 check(('(x * 1 + y))[a * 1 -> a], '(x + y))
-check(('(1 + 2 * (3 + 4)))[a @ int + b @ int -> a + b], '(1 + 2 * 7))
+check(('(1 + 2 * (3 + 4)))[a @ Int + b @ Int -> a + b], '(1 + 2 * 7))
 check(('(a + a + b))[a + b if a == b -> `(2 * !a)], '(2 * a + b))
 check(('(f(1) + g(2)))[f(x) -> x | g(x) -> x * 10], '(1 + 20))
 check(('(x + 0 * y))[a + 0 -> a | 0 * a -> 0], '(x + 0))
-check(tree("t[a @ int + b @ int -> a + b | -x -> x]"), 'Apply{_index_get, Tuple{t, Fusion{Lambda{Tuple{Apply{Quote{_add}, Tuple{_TypeOf{a, int}, _TypeOf{b, int}}}}, Apply{_add, Tuple{a, b}}}, Lambda{Tuple{Apply{Quote{_sub}, Tuple{0, x}}}, x}}}})
+check(tree("t[a @ Int + b @ Int -> a + b | -x -> x]"), 'Apply{_index_get, Tuple{t, Fusion{Lambda{Tuple{Apply{Quote{_add}, Tuple{_TypeOf{a, Int}, _TypeOf{b, Int}}}}, Apply{_add, Tuple{a, b}}}, Lambda{Tuple{Apply{Quote{_sub}, Tuple{0, x}}}, x}}}})
 # guards: when the guard is false the next arm is tried, and then the arguments
 rt2 := 'F{P{1, 1}, P{1, 2}}
 check(rt2[P{a, b} if a == b -> a], 'F{1, P{1, 2}})
