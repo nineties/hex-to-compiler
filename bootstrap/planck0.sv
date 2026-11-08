@@ -744,13 +744,30 @@
     (fputs chan "}")
     )
 
+;  the pattern p with each _TypeSlot{slot} replaced by the type in the slot of env, the environment where the function was made
+(fun restore_types (p env)
+    (var i 0)
+    (var n 0)
+    (var vals 0)
+    (if (!= (gettag p) MexprT) (return p))
+    (if (== (get p 1) QuoteS) (return p))
+    (if (== (get p 1) TypeSlotS) (return (get env (+ (fixnum_to_int (get p 2)) 1))))
+    (= n (get_header_arg p))
+    (= vals (allocate (* 4 (+ n 1))))
+    (while (< i n) (do
+        (set vals i (restore_types (get p (+ i 2)) env))
+        (+= i 1)
+        ))
+    (return (mexprn (get p 1) n vals))
+    )
+
 (fun fprint_lambda (chan e)
     (var pats (get (get e 1) 2)) ; patterns of the code object
     (var i 0)
     (var arity (get_header_arg e))
     (fputs chan "<lambda:(")
     (while (< i arity) (do
-        (fprint chan (get pats (+ 2 i)))
+        (fprint chan (restore_types (get pats (+ 2 i)) (get e 2)))
         (+= i 1)
         (if (< i arity) (fputs chan ", "))
         ))
