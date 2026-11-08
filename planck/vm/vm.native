@@ -125,10 +125,18 @@ fn run[r](h: &mut r [u32], t: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], 
             if g(rs, base + a) != vfalse { cond = 1 }
         } else if op == 13 {
             cond = 0
-            if num_lt(h, g(rs, base + a), g(rs, base + b)) { cond = 1 }
+            if arith_ok(h, st, 43, g(rs, base + a), g(rs, base + b)) {
+                if num_lt(h, g(rs, base + a), g(rs, base + b)) { cond = 1 }
+            } else {
+                cond = -2
+            }
         } else if op == 14 {
             cond = 0
-            if num_ge(h, g(rs, base + a), g(rs, base + b)) { cond = 1 }
+            if arith_ok(h, st, 44, g(rs, base + a), g(rs, base + b)) {
+                if num_ge(h, g(rs, base + a), g(rs, base + b)) { cond = 1 }
+            } else {
+                cond = -2
+            }
         } else if op == 17 {
             # TEQI: the immediate b is signed 8 bits
             var sb: i64
@@ -141,17 +149,25 @@ fn run[r](h: &mut r [u32], t: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], 
             sb = b
             if sb > 127 { sb = sb - 256 }
             cond = 0
-            if num_lt(h, g(rs, base + a), small(sb)) { cond = 1 }
+            if arith_ok(h, st, 43, g(rs, base + a), small(sb)) {
+                if num_lt(h, g(rs, base + a), small(sb)) { cond = 1 }
+            } else {
+                cond = -2
+            }
         } else if op == 19 {
             var sb: i64
             sb = b
             if sb > 127 { sb = sb - 256 }
             cond = 0
-            if num_ge(h, g(rs, base + a), small(sb)) { cond = 1 }
+            if arith_ok(h, st, 44, g(rs, base + a), small(sb)) {
+                if num_ge(h, g(rs, base + a), small(sb)) { cond = 1 }
+            } else {
+                cond = -2
+            }
         } else if op == 6 or op == 7 or op == 8 {
             exec_env(h, st, rs, fs, fp, op, w, base)
         } else if op == 26 {
-            exec_fusion(h, st, rs, w, base)
+            cond = exec_fusion(h, st, rs, w, base)
         } else if op == 20 or op == 21 or op == 22 or op == 23 or op == 34 or op == 35 {
             # the control: the frames change, so the code, the pc and the base are read again from the top frame
             fp = exec_ctl(h, st, rs, fs, fp, op, w, ip - (code + 5))
@@ -171,6 +187,20 @@ fn run[r](h: &mut r [u32], t: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], 
             p(rs, base + a, lam)
         } else {
             cond = exec_op(h, st, rs, op, w, base, kb)
+        }
+        if cond == -2 {
+            # a runtime error: the top frame performs the effect Error{none, message}; with no handler the program stops with the message
+            p(fs, fp + 5, ip - (code + 5))
+            var rw: i64
+            rw = ret_word(a, 0, 0)
+            if op >= 13 and op <= 19 { rw = ret_word(0, 3, 0) }
+            fp = raise_pending(h, st, rs, fs, fp, rw)
+            base = g(fs, fp + 4)
+            code = g(h, (g(fs, fp) >> 1) + 2) >> 1
+            ip = code + 5 + g(fs, fp + 5)
+            kb = code + 5 + g(h, code + 2)
+            if base > g(st, 10) { p(st, 10, base) }
+            cond = -1
         }
         if cond >= 0 {
             if cond >= 2 {

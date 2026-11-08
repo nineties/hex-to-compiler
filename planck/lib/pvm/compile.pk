@@ -1,0 +1,832 @@
+# pvm/compile: compiles the m-expressions that parse returns into the codes of planckvm
+# Copyright (C) 2026 nineties
+#
+# pvm_compile.compile(exprs) is the list of Code{name, arity, nregs, instrs, consts} of pvm/image.pk for the list exprs of the top-level
+# expressions. The code "main" runs the expressions in order. pvm_compile.image(exprs) is the bytes of the image that runs them.
+#
+# The code follows "Language features and instructions" of planckvm instructions.
+# - A variable is resolved at compile time to a global cell, a register or a slot of an environment (planckvm: execution model and values).
+#   Def at the top level makes a new cell, and the code compiled before it keeps the old one.
+# - The body of a Handle is a code of its own that never makes a tail call: the frame of the body is the boundary.
+# - A pattern is matched by the instructions at the entry of the code, and a Fusion tries the alternatives in order.
+
+use("base")
+use("list")
+use("table")
+use("vector")
+use("pvm/image")
+
+module pvm_compile {
+    # === Contexts and variables ===
+    # A context is the code being made: an array of the fields below. A variable is an array of the fields V_*; both are
+    # kept in vectors, and an instruction refers to a variable by its index.
+
+    X_ID := 0
+    X_PARENT := 1
+    X_TOP := 2
+    X_BLOCK := 3
+    X_SCOPE := 4
+    X_PRO := 5
+    X_BODY := 6
+    X_CONSTS := 7
+    X_CIDX := 8
+    X_NTMP := 9
+    X_CALL := 10
+    X_ARITY := 11
+    X_NAME := 12
+    X_NOTAIL := 13
+    X_OWNED := 14
+    X_HASENV := 15
+    X_NSLOTS := 16
+    X_TBASE := 17
+    X_SIZE := 18
+
+    V_NAME := 0
+    V_CTX := 1
+    V_CAP := 2
+    V_SET := 3
+    V_PAT := 4
+    V_FIX := 5
+    V_ENV := 6
+    V_REG := 7
+    V_SLOT := 8
+    V_SIZE := 9
+
+    ctxs := vector.new()
+    vars := vector.new()
+    gl := table.new()
+    nlabel := 0
+
+    err(msg, e) := {
+        put("pvm_compile: ")
+        put(msg)
+        put(": ")
+        println(e)
+        exit(1)
+    }
+
+    new_ctx(parent, top, arity, notail) := {
+        c := array(X_SIZE)
+        id := vector.len(ctxs)
+        c[X_ID] = id
+        c[X_PARENT] = parent
+        c[X_TOP] = top
+        c[X_BLOCK] = 0
+        c[X_SCOPE] = if (parent == none) [] else parent[X_SCOPE]
+        c[X_PRO] = vector.new()
+        c[X_BODY] = vector.new()
+        c[X_CONSTS] = vector.new()
+        c[X_CIDX] = table.new()
+        c[X_NTMP] = 0
+        c[X_CALL] = false
+        c[X_ARITY] = arity
+        c[X_NAME] = if (id == 0) "main" else f"c{id}"
+        c[X_NOTAIL] = notail
+        c[X_OWNED] = []
+        c[X_HASENV] = false
+        c[X_NSLOTS] = 0
+        c[X_TBASE] = 0
+        vector.push(ctxs, c)
+        c
+    }
+
+    # kidx(c, k) is the index of the constant k in the table of c
+    kidx(c, k) := {
+        i := table.get(c[X_CIDX], k, none)
+        if (i == none) {
+            i = vector.len(c[X_CONSTS])
+            vector.push(c[X_CONSTS], k)
+            table.set(c[X_CIDX], k, i)
+        }
+        i
+    }
+
+    # t(c, k) is the operand of the temporary register k
+    t(c, k) := {
+        if (k >= c[X_NTMP]) {
+            c[X_NTMP] = k + 1
+        }
+        T{k}
+    }
+
+    emit(c, i) := vector.push(c[X_BODY], i)
+    emit_pro(c, i) := vector.push(c[X_PRO], i)
+
+    new_var(c, name, pat, fix) := {
+        v := array(V_SIZE)
+        id := vector.len(vars)
+        v[V_NAME] = name
+        v[V_CTX] = c[X_ID]
+        v[V_CAP] = false
+        v[V_SET] = false
+        v[V_PAT] = pat
+        v[V_FIX] = fix
+        v[V_ENV] = false
+        v[V_REG] = -1
+        v[V_SLOT] = -1
+        vector.push(vars, v)
+        c[X_OWNED] = id :: c[X_OWNED]
+        id
+    }
+
+    bind(c, name, vid) := {
+        c[X_SCOPE] = Tuple{name, vid} :: c[X_SCOPE]
+        vid
+    }
+
+    lookup(c, name) := {
+        r := list.find(e -> arg(e, 0) == name, c[X_SCOPE])
+        if (r == none) none else arg(r, 1)
+    }
+
+    # touch(c, vid) notes that the variable is used from c
+    touch(c, vid) := {
+        v := vector.get(vars, vid)
+        if (v[V_CTX] != c[X_ID]) {
+            v[V_CAP] = true
+        }
+    }
+
+    fresh_label() := {
+        nlabel = nlabel + 1
+        intern(f"L{nlabel}")
+    }
+
+    is_literal(x) := x == 'true or x == 'false or x == 'none
+
+    # the global variables: the generation of the cell that is current. A builtin has the generation 0.
+    builtin_names := map(b -> b[0], pvm_image.builtins)
+
+    gen_of(x) := {
+        name := symname(x)
+        g := table.get(gl, name, none)
+        if (g != none) g
+        else if (list.member(name, builtin_names)) 0
+        else err("undefined variable", x)
+    }
+
+    is_global(c) := c[X_TOP] and c[X_BLOCK] == 0
+
+    block(c, f) := {
+        saved := c[X_SCOPE]
+        c[X_BLOCK] = c[X_BLOCK] + 1
+        f()
+        c[X_BLOCK] = c[X_BLOCK] - 1
+        c[X_SCOPE] = saved
+    }
+
+    # === Constants ===
+
+    list_of_args(m) := {
+        r := []
+        k := arity(m) - 1
+        while (k >= 0) {
+            r = arg(m, k) :: r
+            k = k - 1
+        }
+        r
+    }
+
+    constval(v) := {
+        ty := type(v)
+        if (ty == Int) {
+            if (v >= 536870912 or v <= -536870912) err("an integer beyond 29 bits is not supported", v)
+            I{v}
+        } else if (ty == String) S{v}
+        else if (ty == Symbol) {
+            if (v == 'true) T{}
+            else if (v == 'false) F{}
+            else if (v == 'none) N{}
+            else Y{symname(v)}
+        } else if (ty == Expr) M{symname(head(v)), map(constval, list_of_args(v))}
+        else err("cannot be a constant", v)
+    }
+
+    # mk(h, xs) is the m-expression with the head h and the arguments of the list xs
+    mk(h, xs) := {
+        m := mexpr(h, Tuple{})
+        each(x -> { m = push(m, x) }, xs)
+        m
+    }
+
+    # === Patterns ===
+    # The instructions go to the entry of the code (X_PRO). r is the register that holds the value: P{i} is the parameter i, and V{vid} a variable.
+
+    fun pat
+
+    # bind_to(c, q, r): q is matched against the value in r. A variable takes the register of the parameter, or copies r.
+    bind_to(c, q, r) := {
+        if (q == '_) none
+        else if (type(q) == Symbol and not is_literal(q)) {
+            if (head(r) == 'P) {
+                vid := new_var(c, q, true, arg(r, 0))
+                bind(c, q, vid)
+            } else {
+                vid := new_var(c, q, true, -1)
+                bind(c, q, vid)
+                emit_pro(c, MOVE{V{vid}, r})
+            }
+        } else pat(c, q, r)
+    }
+
+    pat_arg(c, q, r, j) := {
+        if (q == '_) none
+        else if (type(q) == Symbol and not is_literal(q)) {
+            vid := new_var(c, q, true, -1)
+            bind(c, q, vid)
+            emit_pro(c, FIELD{V{vid}, r, j})
+        } else {
+            s := new_var(c, none, true, -1)
+            emit_pro(c, FIELD{V{s}, r, j})
+            pat(c, q, V{s})
+        }
+    }
+
+    pat(c, p, r) = {
+        ty := type(p)
+        if (ty == Int or ty == String or ty == Symbol) {
+            emit_pro(c, MATCHEQ{r, kidx(c, constval(p))})
+            emit_pro(c, NEXT{})
+        } else if (ty == Expr) {
+            h := head(p)
+            if (h == 'Quote) {
+                emit_pro(c, MATCHEQ{r, kidx(c, constval(arg(p, 0)))})
+                emit_pro(c, NEXT{})
+            } else if (h == '_TypeOf) {
+                emit_pro(c, MATCHTYPE{r, kidx(c, Y{symname(arg(p, 1))})})
+                emit_pro(c, NEXT{})
+                bind_to(c, arg(p, 0), r)
+            } else if (h == '_Rest) err("a rest pattern is not supported by planckvm", p)
+            else {
+                n := arity(p)
+                emit_pro(c, MATCHHEAD{r, kidx(c, Y{symname(h)}), n})
+                emit_pro(c, NEXT{})
+                j := 0
+                while (j < n) {
+                    pat_arg(c, arg(p, j), r, j)
+                    j = j + 1
+                }
+            }
+        } else err("invalid pattern", p)
+    }
+
+    # === Expressions ===
+    # cx(c, e, d) puts the value of e in the temporary d and uses the temporaries d and above. cxt(c, e, d) does the same in a tail position:
+    # it returns the value, or makes a tail call.
+
+    fun cx
+    fun cxt
+    fun cond
+    fun qq
+
+    # the instructions that Apply{f, Tuple{...}} becomes: name -> [instruction, number of arguments]
+    ops := [
+        ['_add, 'ADD, 2], ['_sub, 'SUB, 2], ['_mul, 'MUL, 2], ['_div, 'DIV, 2], ['_mod, 'MOD, 2],
+        ['_lt, 'LT, 2], ['_ge, 'GE, 2], ['_eq, 'EQ, 2], ['_ne, 'NE, 2],
+        ['head, 'HEAD, 1], ['arity, 'ARITY, 1], ['arg, 'ARG, 2], ['push, 'PUSH, 2], ['typeof, 'TYPEOF, 1],
+        ['strlen, 'STRLEN, 1], ['ord, 'ORD, 2], ['array_get, 'AGET, 2], ['array_len, 'ALEN, 1], ['hash, 'HASH, 1],
+        ['plain_get, 'PLAINGET, 2]
+    ]
+
+    # op_of(c, e) is the entry of ops when e is the call of an instruction, or none
+    op_of(c, e) := {
+        f := arg(e, 0)
+        args := arg(e, 1)
+        if (type(f) != Symbol or lookup(c, f) != none or head(args) != 'Tuple) none
+        else {
+            o := list.find(x -> x[0] == f, ops)
+            if (o != none and arity(args) == o[2]) o else none
+        }
+    }
+
+    cx_int(c, n, d) := {
+        if (n >= -32768 and n < 32768) emit(c, LOADI{t(c, d), n})
+        else emit(c, LOADK{t(c, d), kidx(c, constval(n))})
+    }
+
+    cx_var(c, x, d) := {
+        if (x == 'true) emit(c, LOADK{t(c, d), kidx(c, T{})})
+        else if (x == 'false) emit(c, LOADK{t(c, d), kidx(c, F{})})
+        else if (x == 'none) emit(c, LOADNONE{t(c, d), 1})
+        else {
+            vid := lookup(c, x)
+            if (vid != none) {
+                touch(c, vid)
+                emit(c, GetVar{t(c, d), vid})
+            } else emit(c, GETGLOBAL{t(c, d), kidx(c, Cg{symname(x), gen_of(x)})})
+        }
+    }
+
+    cx_args(c, args, d) := {
+        n := arity(args)
+        i := 0
+        while (i < n) {
+            cx(c, arg(args, i), d + 1 + i)
+            i = i + 1
+        }
+        n
+    }
+
+    # call(c, e, d, tail) emits the call. It is true when the code ends there (a tail call), and false when the value is in the temporary d.
+    call(c, e, d, tail) := {
+        o := op_of(c, e)
+        args := arg(e, 1)
+        if (o != none) {
+            a := arg(args, 0)
+            cx(c, a, d)
+            if (o[2] == 1) emit(c, mk(o[1], [t(c, d), t(c, d)]))
+            else {
+                b := arg(args, 1)
+                if (o[1] == 'ADD and type(b) == Int and b >= -128 and b < 128) emit(c, ADDI{t(c, d), t(c, d), b})
+                else if (o[1] == 'ARG and type(b) == Int and b >= 0 and b < 256) emit(c, ARGI{t(c, d), t(c, d), b})
+                else if (o[1] == 'AGET and type(b) == Int and b >= 0 and b < 256) emit(c, AGETI{t(c, d), t(c, d), b})
+                else {
+                    cx(c, b, d + 1)
+                    emit(c, mk(o[1], [t(c, d), t(c, d), t(c, d + 1)]))
+                }
+            }
+            false
+        } else {
+            if (head(args) != 'Tuple) err("malformed Apply", e)
+            cx(c, arg(e, 0), d)
+            n := cx_args(c, args, d)
+            c[X_CALL] = true
+            if (tail and not c[X_NOTAIL]) {
+                emit(c, TCALL{t(c, d), n})
+                true
+            } else {
+                emit(c, CALL{t(c, d), t(c, d), n})
+                false
+            }
+        }
+    }
+
+    cx_def(c, e, d) := {
+        x := arg(e, 0)
+        if (type(x) != Symbol or is_literal(x)) err("malformed Def", e)
+        cx(c, arg(e, 1), d)
+        if (is_global(c)) {
+            g := table.get(gl, symname(x), 0) + 1
+            table.set(gl, symname(x), g)
+            emit(c, SETGLOBAL{t(c, d), kidx(c, Cg{symname(x), g})})
+        } else {
+            vid := new_var(c, x, false, -1)
+            bind(c, x, vid)
+            emit(c, SetVar{vid, t(c, d)})
+        }
+    }
+
+    cx_declare(c, e, d) := {
+        x := arg(e, 0)
+        if (type(x) != Symbol or is_literal(x)) err("malformed Declare", e)
+        emit(c, LOADNONE{t(c, d), 1})
+        if (is_global(c)) {
+            if (not table.has(gl, symname(x))) {
+                table.set(gl, symname(x), 1)
+                emit(c, SETGLOBAL{t(c, d), kidx(c, Cg{symname(x), 1})})
+            }
+        } else {
+            vid := lookup(c, x)
+            if (vid == none or vector.get(vars, vid)[V_CTX] != c[X_ID]) {
+                nv := new_var(c, x, false, -1)
+                bind(c, x, nv)
+                emit(c, SetVar{nv, t(c, d)})
+            }
+        }
+    }
+
+    cx_set(c, e, d) := {
+        x := arg(e, 0)
+        if (type(x) != Symbol or is_literal(x)) err("malformed Set", e)
+        cx(c, arg(e, 1), d)
+        vid := lookup(c, x)
+        if (vid != none) {
+            touch(c, vid)
+            vector.get(vars, vid)[V_SET] = true
+            emit(c, SetVar{vid, t(c, d)})
+        } else emit(c, SETGLOBAL{t(c, d), kidx(c, Cg{symname(x), gen_of(x)})})
+    }
+
+    cx_if(c, e, d) := {
+        lelse := fresh_label()
+        lend := fresh_label()
+        cond(c, arg(e, 0), lelse, 0, d)
+        block(c, () -> cx(c, arg(e, 1), d))
+        emit(c, JMP{lend})
+        emit(c, Label{lelse})
+        block(c, () -> cx(c, arg(e, 2), d))
+        emit(c, Label{lend})
+    }
+
+    cx_while(c, e, d) := {
+        lstart := fresh_label()
+        lend := fresh_label()
+        emit(c, Label{lstart})
+        cond(c, arg(e, 0), lend, 0, d)
+        block(c, () -> cx(c, arg(e, 1), d))
+        emit(c, JMP{lstart})
+        emit(c, Label{lend})
+        emit(c, LOADNONE{t(c, d), 1})
+    }
+
+    cx_do(c, e, d) := {
+        n := arity(e)
+        if (n == 0) emit(c, LOADNONE{t(c, d), 1})
+        else {
+            i := 0
+            while (i < n) {
+                cx(c, arg(e, i), d)
+                i = i + 1
+            }
+        }
+    }
+
+    # the code of a function: params is Tuple{patterns}
+    compile_fn(c, params, body, notail) := {
+        if (head(params) != 'Tuple) err("malformed Lambda", params)
+        n := arity(params)
+        ch := new_ctx(c, false, n, notail)
+        i := 0
+        while (i < n) {
+            bind_to(ch, arg(params, i), P{i})
+            i = i + 1
+        }
+        cxt(ch, body, 0)
+        ch[X_NAME]
+    }
+
+    cx_lambda(c, e, d) := {
+        if (arity(e) != 2) err("malformed Lambda", e)
+        name := compile_fn(c, arg(e, 0), arg(e, 1), false)
+        emit(c, CLOSURE{t(c, d), kidx(c, K{name})})
+    }
+
+    cx_handle(c, e, d) := {
+        name := compile_fn(c, Tuple{}, arg(e, 0), true)
+        emit(c, CLOSURE{t(c, d), kidx(c, K{name})})
+        cx(c, arg(e, 1), d + 1)
+        c[X_CALL] = true
+        emit(c, HANDLE{t(c, d), t(c, d)})
+    }
+
+    build(c, h, n, d) := {
+        if (h == 'Tuple) emit(c, TUPLE{t(c, d), t(c, d + 1), n})
+        else if (h == 'Cons and n == 2) emit(c, CONS{t(c, d), t(c, d + 1), t(c, d + 2)})
+        else {
+            emit(c, LOADK{t(c, d), kidx(c, Y{symname(h)})})
+            emit(c, BUILD{t(c, d), t(c, d), n})
+        }
+    }
+
+    cx_construct(c, e, d) := {
+        n := cx_args(c, e, d)
+        build(c, head(e), n, d)
+    }
+
+    has_uq(e, nest) := {
+        if (type(e) != Expr) false
+        else {
+            nest2 := nest
+            found := false
+            if (head(e) == 'UnQuote) {
+                if (nest == 0) found = true else nest2 = nest - 1
+            } else if (head(e) == 'QuasiQuote) nest2 = nest + 1
+            if (found) true
+            else {
+                r := false
+                i := 0
+                while (not r and i < arity(e)) {
+                    r = has_uq(arg(e, i), nest2)
+                    i = i + 1
+                }
+                r
+            }
+        }
+    }
+
+    qq(c, e, nest, d) = {
+        if (not has_uq(e, nest)) emit(c, LOADK{t(c, d), kidx(c, constval(e))})
+        else if (head(e) == 'UnQuote and nest == 0) cx(c, arg(e, 0), d)
+        else {
+            nest2 := nest
+            if (head(e) == 'UnQuote) nest2 = nest - 1
+            else if (head(e) == 'QuasiQuote) nest2 = nest + 1
+            n := arity(e)
+            i := 0
+            while (i < n) {
+                qq(c, arg(e, i), nest2, d + 1 + i)
+                i = i + 1
+            }
+            build(c, head(e), n, d)
+        }
+    }
+
+    cx_mexpr(c, e, d) := {
+        h := head(e)
+        n := arity(e)
+        if (h == 'Apply) {
+            if (n != 2) err("malformed Apply", e)
+            call(c, e, d, false)
+            none
+        } else if (h == 'Def) {
+            if (n != 2) err("malformed Def", e)
+            cx_def(c, e, d)
+        } else if (h == 'Declare) {
+            if (n != 1) err("malformed Declare", e)
+            cx_declare(c, e, d)
+        } else if (h == 'Set) {
+            if (n != 2) err("malformed Set", e)
+            cx_set(c, e, d)
+        } else if (h == 'Do) cx_do(c, e, d)
+        else if (h == 'If) {
+            if (n != 3) err("malformed If", e)
+            cx_if(c, e, d)
+        } else if (h == 'While) {
+            if (n != 2) err("malformed While", e)
+            cx_while(c, e, d)
+        } else if (h == 'Lambda) cx_lambda(c, e, d)
+        else if (h == 'Fusion) {
+            if (n != 2) err("malformed Fusion", e)
+            cx(c, arg(e, 0), d)
+            cx(c, arg(e, 1), d + 1)
+            emit(c, FUSION{t(c, d), t(c, d), t(c, d + 1)})
+        } else if (h == 'Quote) {
+            if (n != 1) err("malformed Quote", e)
+            emit(c, LOADK{t(c, d), kidx(c, constval(arg(e, 0)))})
+        } else if (h == 'QuasiQuote) {
+            if (n != 1) err("malformed QuasiQuote", e)
+            qq(c, arg(e, 0), 0, d)
+        } else if (h == 'UnQuote) err("UnQuote outside of QuasiQuote", e)
+        else if (h == '_Rest) err("a rest pattern is not supported by planckvm", e)
+        else if (h == 'Handle) {
+            if (n != 2) err("malformed Handle", e)
+            cx_handle(c, e, d)
+        } else if (h == 'Perform) {
+            if (n != 1) err("malformed Perform", e)
+            cx(c, arg(e, 0), d)
+            c[X_CALL] = true
+            emit(c, PERFORM{t(c, d), t(c, d)})
+        } else cx_construct(c, e, d)
+    }
+
+    cx(c, e, d) = {
+        ty := type(e)
+        if (ty == Int) cx_int(c, e, d)
+        else if (ty == String) emit(c, LOADK{t(c, d), kidx(c, S{e})})
+        else if (ty == Symbol) cx_var(c, e, d)
+        else if (ty == Expr) cx_mexpr(c, e, d)
+        else err("cannot compile", e)
+    }
+
+    cxt(c, e, d) = {
+        done := false
+        if (type(e) == Expr) {
+            h := head(e)
+            if (h == 'Apply and arity(e) == 2) {
+                done = call(c, e, d, true)
+                if (not done) {
+                    emit(c, RET{t(c, d)})
+                    done = true
+                }
+            } else if (h == 'If and arity(e) == 3) {
+                lelse := fresh_label()
+                cond(c, arg(e, 0), lelse, 0, d)
+                block(c, () -> cxt(c, arg(e, 1), d))
+                emit(c, Label{lelse})
+                block(c, () -> cxt(c, arg(e, 2), d))
+                done = true
+            } else if (h == 'Do and arity(e) > 0) {
+                n := arity(e)
+                i := 0
+                while (i < n - 1) {
+                    cx(c, arg(e, i), d)
+                    i = i + 1
+                }
+                cxt(c, arg(e, n - 1), d)
+                done = true
+            }
+        }
+        if (not done) {
+            cx(c, e, d)
+            emit(c, RET{t(c, d)})
+        }
+    }
+
+    # === Conditions ===
+    # cond(c, e, l, k, d) jumps to the label l when the truth of e equals k (0 or 1), and goes on otherwise.
+
+    cmp_ops := [['_eq, 'TEQ, 'TEQI], ['_ne, 'TNE, 'TEQI], ['_lt, 'TLT, 'TLTI], ['_ge, 'TGE, 'TGEI]]
+
+    const_operand(b) := {
+        if (type(b) == String) S{b}
+        else if (type(b) == Expr and head(b) == 'Quote and arity(b) == 1) constval(arg(b, 0))
+        else none
+    }
+
+    cond(c, e, l, k, d) = {
+        done := false
+        if (type(e) == Expr and head(e) == 'If and arity(e) == 3 and (arg(e, 2) == 'false or arg(e, 1) == 'true)) {
+            a := arg(e, 0)
+            if (arg(e, 2) == 'false) {
+                # a and b
+                b := arg(e, 1)
+                if (k == 0) {
+                    cond(c, a, l, 0, d)
+                    cond(c, b, l, 0, d)
+                } else {
+                    l1 := fresh_label()
+                    cond(c, a, l1, 0, d)
+                    cond(c, b, l, 1, d)
+                    emit(c, Label{l1})
+                }
+            } else {
+                # a or b
+                b := arg(e, 2)
+                if (k == 1) {
+                    cond(c, a, l, 1, d)
+                    cond(c, b, l, 1, d)
+                } else {
+                    l1 := fresh_label()
+                    cond(c, a, l1, 1, d)
+                    cond(c, b, l, 0, d)
+                    emit(c, Label{l1})
+                }
+            }
+            done = true
+        } else if (type(e) == Expr and head(e) == 'Apply and arity(e) == 2) {
+            o := op_of(c, e)
+            cm := if (o == none) none else list.find(x -> x[0] == o[0], cmp_ops)
+            if (cm != none) {
+                args := arg(e, 1)
+                b := arg(args, 1)
+                cx(c, arg(args, 0), d)
+                kb := const_operand(b)
+                if (type(b) == Int and b >= -128 and b < 128) {
+                    kk := if (cm[0] == '_ne) 1 - k else k
+                    emit(c, mk(cm[2], [t(c, d), b, kk]))
+                } else if (kb != none and (cm[0] == '_eq or cm[0] == '_ne) and kidx(c, kb) < 256) {
+                    emit(c, mk(if (cm[0] == '_eq) 'TEQK else 'TNEK, [t(c, d), kidx(c, kb), k]))
+                } else {
+                    cx(c, b, d + 1)
+                    emit(c, mk(cm[1], [t(c, d), t(c, d + 1), k]))
+                }
+                emit(c, JMP{l})
+                done = true
+            }
+        }
+        if (not done) {
+            cx(c, e, d)
+            emit(c, TEST{t(c, d), k})
+            emit(c, JMP{l})
+        }
+    }
+
+    # === Resolving the variables and writing the instructions ===
+
+    # decides where the variables of c live: the registers, then the slots of the environment
+    place(c) := {
+        next := c[X_ARITY]
+        slots := 0
+        each(vid -> {
+            v := vector.get(vars, vid)
+            v[V_ENV] = v[V_CAP] or (v[V_SET] and c[X_CALL])
+            if (v[V_FIX] >= 0) {
+                v[V_REG] = v[V_FIX]
+            } else if (not v[V_ENV] or v[V_PAT]) {
+                v[V_REG] = next
+                next = next + 1
+            }
+            if (v[V_ENV]) {
+                v[V_SLOT] = slots
+                slots = slots + 1
+            }
+        }, reverse(c[X_OWNED]))
+        c[X_NSLOTS] = slots
+        c[X_HASENV] = slots > 0
+        c[X_TBASE] = next
+    }
+
+    # the number of environments to go up from c to the owner of v
+    hops(c, v) := {
+        x := c
+        n := 0
+        while (x[X_ID] != v[V_CTX]) {
+            if (x[X_HASENV]) n = n + 1
+            x = x[X_PARENT]
+        }
+        n
+    }
+
+    reg_of(c, o) := {
+        if (type(o) != Expr) o
+        else {
+            h := head(o)
+            if (h == 'T) c[X_TBASE] + arg(o, 0)
+            else if (h == 'V) vector.get(vars, arg(o, 0))[V_REG]
+            else if (h == 'P) arg(o, 0)
+            else o
+        }
+    }
+
+    # an instruction with an operand beyond its field is preceded by EXT
+    widen(h, ops) := {
+        e := pvm_image.find_op(symname(h))
+        form := e[2]
+        fs := e[3]
+        ahi := 0
+        bhi := 0
+        chi := 0
+        dhi := 0
+        each(p -> {
+            f := p[0]
+            v := p[1]
+            if (type(v) == Int and v > 255 and f == 'a) ahi = bit_sar(v, 8)
+            else if (type(v) == Int and v > 255 and f == 'b) bhi = bit_sar(v, 8)
+            else if (type(v) == Int and v > 255 and f == 'c) chi = bit_sar(v, 8)
+            else if (type(v) == Int and v > 65535 and f == 'd) dhi = bit_sar(v, 16)
+        }, list.zip(fs, ops))
+        if (form == 'abc and ahi + bhi + chi > 0) [EXT{ahi + bhi * 256 + chi * 65536}]
+        else if (form == 'ad and ahi + dhi > 0) [EXT{ahi + dhi * 256}]
+        else []
+    }
+
+    fun finish_plain
+
+    finish(c, out, i) := {
+        h := head(i)
+        if (h == 'Label) vector.push(out, i)
+        else if (h == 'GetVar) {
+            v := vector.get(vars, arg(i, 1))
+            dst := reg_of(c, arg(i, 0))
+            if (v[V_ENV]) finish_plain(c, out, ENVGET{dst, hops(c, v), v[V_SLOT]})
+            else if (v[V_REG] != dst) finish_plain(c, out, MOVE{dst, v[V_REG]})
+        } else if (h == 'SetVar) {
+            v := vector.get(vars, arg(i, 0))
+            src := reg_of(c, arg(i, 1))
+            if (v[V_ENV]) finish_plain(c, out, ENVSET{src, hops(c, v), v[V_SLOT]})
+            else if (v[V_REG] != src) finish_plain(c, out, MOVE{v[V_REG], src})
+        } else finish_plain(c, out, mk(h, map(o -> reg_of(c, o), list_of_args(i))))
+    }
+
+    finish_plain(c, out, i) := {
+        ops := list_of_args(i)
+        each(w -> vector.push(out, w), widen(head(i), ops))
+        vector.push(out, i)
+    }
+
+    code_of(c) := {
+        out := vector.new()
+        each(i -> finish(c, out, i), vector.to_list(c[X_PRO]))
+        if (c[X_HASENV]) {
+            finish_plain(c, out, NEWENV{c[X_NSLOTS]})
+            each(vid -> {
+                v := vector.get(vars, vid)
+                if (v[V_ENV] and v[V_PAT]) finish_plain(c, out, ENVSET{v[V_REG], 0, v[V_SLOT]})
+            }, reverse(c[X_OWNED]))
+        }
+        each(i -> finish(c, out, i), vector.to_list(c[X_BODY]))
+        Code{c[X_NAME], c[X_ARITY], c[X_TBASE] + c[X_NTMP], vector.to_list(out), vector.to_list(c[X_CONSTS])}
+    }
+
+    export compile(exprs) := {
+        ctxs = vector.new()
+        vars = vector.new()
+        gl = table.new()
+        nlabel = 0
+        main := new_ctx(none, true, 0, false)
+        names := map(e -> {
+            c := new_ctx(none, true, 0, false)
+            cxt(c, e, 0)
+            c[X_NAME]
+        }, exprs)
+        each(name -> {
+            emit(main, CLOSURE{t(main, 0), kidx(main, K{name})})
+            main[X_CALL] = true
+            emit(main, CALL{t(main, 0), t(main, 0), 0})
+        }, names)
+        if (length(names) == 0) emit(main, LOADNONE{t(main, 0), 1})
+        emit(main, RET{t(main, 0)})
+        cs := vector.to_list(ctxs)
+        each(place, cs)
+        map(code_of, cs)
+    }
+
+    export image(exprs) := pvm_image.build(compile(exprs), "main")
+
+    # parse_file(path) is the list of the top-level expressions of the file, parsed by the planck that runs the compiler
+    export parse_file(path) := {
+        s := read_file(path)
+        r := []
+        go := true
+        while (go) {
+            t := parse(s)
+            e := arg(t, 0)
+            if (type(e) == Expr and head(e) == 'Eof) go = false
+            else {
+                r = e :: r
+                s = arg(t, 1)
+            }
+        }
+        reverse(r)
+    }
+}

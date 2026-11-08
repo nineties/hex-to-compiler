@@ -10,7 +10,9 @@
 # Objects: Fusion (kind 9: the number, then the alternatives), environment (kind 12: the parent, then the slots),
 # continuation (kind 11: the number, the register of PERFORM, the number of frames, the frames, the registers).
 # The result of enter and next_alt: 0 a frame was made at the index st[3]; 1 a builtin gave the value st[2] (st[3] is the frame it was called for);
-# 2 no alternative takes the arguments.
+# 2 no alternative takes the arguments, 3 the call is a runtime error (the message is in st[22], see fail in builtin.native).
+# A runtime error is the effect Error{none, message} performed by the frame that made it (raise_pending); with no boundary the message is written
+# to the standard error and the program stops.
 import mem
 import obj
 import builtin
@@ -105,10 +107,16 @@ fn resume[r](h: &r [u32], st: &mut r [u32], rs: &mut r [u32], fs: &mut r [u32], 
 # enter calls f with c arguments that are at rs[nb]. The new frame is at fp and its ret is rt. sl is the place where a continuation is copied.
 # The alternatives are tried from start.
 fn enter[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], fs: &mut r [u32], fp: i64, f: i64, c: i64, nb: i64, rt: i64, sl: i64, start: i64) -> i64 {
-    if not is_func(h, f) { die("not a function") }
+    if not is_func(h, f) {
+        fail(h, st, "not a function")
+        return 3
+    }
     let fk = kind_of(h, f)
     if fk == 10 {
-        if (g(h, (f >> 1) + 3) >> 1) != c { die("not a function") }
+        if (g(h, (f >> 1) + 3) >> 1) != c {
+            fail(h, st, "not a function")
+            return 3
+        }
     }
     var keep: i64
     keep = 0
@@ -131,11 +139,14 @@ fn enter[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], fs: &mut r [u32
     let alt = alt_at(h, f, sel)
     let kd = kind_of(h, alt)
     if kd == 10 {
+        var res: i64
         if (g(h, (alt >> 1) + 2) >> 1) == 44 {
-            p(st, 2, new_data(h, st, rs, alt, nb, c))
+            res = new_data(h, st, rs, alt, nb, c)
         } else {
-            p(st, 2, call_builtin(h, st, rs, g(h, (alt >> 1) + 2) >> 1, nb))
+            res = call_builtin(h, st, rs, g(h, (alt >> 1) + 2) >> 1, nb)
         }
+        if res == 0 { return 3 }
+        p(st, 2, res)
         return 1
     }
     if kd == 11 { return resume(h, st, rs, fs, fp, alt, nb, rt, sl) }
@@ -337,6 +348,41 @@ fn next_alt[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], fs: &mut r [
     status
 }
 
+# die_pending writes the pending message to the standard error and stops the program
+fn die_pending[r](h: &r [u32], st: &r [u32]) {
+    let s = g(st, 22)
+    let n = str_len(h, s)
+    let buf = alloc(n + 1, 0 as u8)
+    for i in 0 as i64..n {
+        buf[i] = str_byte(h, s, i) as u8
+    }
+    buf[n] = 10 as u8
+    region q {
+        var x: &q [u8]
+        x = &q buf
+        write(2, x)
+    }
+    free(buf)
+    exit(1)
+}
+
+# raise_pending performs the effect Error{none, message} for the pending runtime error, in the frame fp that is the top frame. The result of the
+# resumption is given to the frame as the ret word rw says. The result is the top frame after the effect.
+fn raise_pending[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], fs: &mut r [u32], fp: i64, rw: i64) -> i64 {
+    if find_boundary(fs, fp) < 0 { die_pending(h, st) }
+    let msg = g(st, 22)
+    p(st, 22, 0)
+    let sym = intern_sym(h, st, lit_string(h, st, "Error"))
+    let m = new_mexpr(h, st, sym, 2)
+    set_arg(h, m, 0, g(h, 3))
+    set_arg(h, m, 1, msg)
+    let q = fail_boundary(h, st, rs, fs, fp, rw, m)
+    let status = next_alt(h, st, rs, fs, q)
+    if status == 1 { return do_return(h, st, rs, fs, g(st, 3), g(st, 2)) }
+    if status == 3 { return raise_pending(h, st, rs, fs, g(st, 3) - 7, ret_word(0, 3, 0)) }
+    g(st, 3)
+}
+
 fn do_perform[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], fs: &mut r [u32], fp: i64, a: i64, b: i64) -> i64 {
     let base = g(fs, fp + 4)
     let v = g(rs, base + b)
@@ -355,6 +401,7 @@ fn call_failed[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], fs: &mut 
     let q = fail_boundary(h, st, rs, fs, fp, rw, v)
     let status = next_alt(h, st, rs, fs, q)
     if status == 1 { return do_return(h, st, rs, fs, g(st, 3), g(st, 2)) }
+    if status == 3 { return raise_pending(h, st, rs, fs, g(st, 3) - 7, ret_word(0, 3, 0)) }
     g(st, 3)
 }
 
@@ -373,6 +420,7 @@ fn exec_ctl[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], fs: &mut r [
             p(rs, base + a, g(st, 2))
             return fp
         }
+        if status == 3 { return raise_pending(h, st, rs, fs, fp, ret_word(a, 0, 0)) }
         return call_failed(h, st, rs, fs, fp, g(rs, base + b), base + b + 1, c, ret_word(a, 0, 0))
     } else if op == 21 {
         let f = g(rs, base + b)
@@ -382,6 +430,7 @@ fn exec_ctl[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], fs: &mut r [
         status = enter(h, st, rs, fs, fp, f, c, base, g(fs, fp + 6) & 262143, base - 1, 0)
         if status == 0 { return g(st, 3) }
         if status == 1 { return do_return(h, st, rs, fs, fp, g(st, 2)) }
+        if status == 3 { return raise_pending(h, st, rs, fs, fp, ret_word(0, 3, 0)) }
         # the frame is dropped by the tail call: the call returns to its caller
         let rt = g(fs, fp + 6)
         if fp < 7 or (rt >> 18) != 0 { die("matching failed") }
@@ -391,20 +440,26 @@ fn exec_ctl[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], fs: &mut r [
     } else if op == 23 {
         status = next_alt(h, st, rs, fs, fp)
         if status == 1 { return do_return(h, st, rs, fs, g(st, 3), g(st, 2)) }
+        if status == 3 { return raise_pending(h, st, rs, fs, g(st, 3) - 7, ret_word(0, 3, 0)) }
         return g(st, 3)
     } else if op == 34 {
         let hd = g(rs, base + b + 1)
-        if not is_func(h, hd) { die("not a function") }
+        if not is_func(h, hd) {
+            fail(h, st, "not a function")
+            return raise_pending(h, st, rs, fs, fp, ret_word(a, 0, 0))
+        }
         status = enter(h, st, rs, fs, fp + 7, g(rs, base + b), 0, base + b + 2, ret_word(a, 0, 1), base + b + 1, 0)
         if status == 0 { return g(st, 3) }
         if status == 1 {
             p(rs, base + a, g(st, 2))
             return fp
         }
+        if status == 3 { return raise_pending(h, st, rs, fs, fp, ret_word(a, 0, 0)) }
         return call_failed(h, st, rs, fs, fp, g(rs, base + b), base + b + 2, 0, ret_word(a, 0, 0))
     } else if op == 35 {
         status = do_perform(h, st, rs, fs, fp, a, b)
         if status == 1 { return do_return(h, st, rs, fs, g(st, 3), g(st, 2)) }
+        if status == 3 { return raise_pending(h, st, rs, fs, g(st, 3) - 7, ret_word(0, 3, 0)) }
         return g(st, 3)
     }
     die("unknown instruction")
@@ -440,16 +495,23 @@ fn exec_env[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], fs: &mut r [
 }
 
 # FUSION: R[A] := R[B] | R[C]
-fn exec_fusion[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], w: i64, base: i64) {
+# the result is -1, or -2 for a runtime error (the message is in st[22])
+fn exec_fusion[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], w: i64, base: i64) -> i64 {
     let a = (w >> 8) & 255
     let x = g(rs, base + ((w >> 16) & 255))
     let y = g(rs, base + (w >> 24))
     if x == g(h, 3) {
         p(rs, base + a, y)
-        return
+        return -1
     }
-    if not is_func(h, x) { die("FUSION: not a function") }
-    if not is_func(h, y) { die("FUSION: not a function") }
+    if not is_func(h, x) {
+        fail(h, st, "FUSION: not a function")
+        return -2
+    }
+    if not is_func(h, y) {
+        fail(h, st, "FUSION: not a function")
+        return -2
+    }
     let nx = alt_count(h, x)
     let ny = alt_count(h, y)
     let f = alloc_obj(h, st, 9, 1 + nx + ny)
@@ -460,4 +522,5 @@ fn exec_fusion[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], w: i64, b
         p(h, (f >> 1) + 2 + nx + i, alt_at(h, y, i))
     }
     p(rs, base + a, f)
+    return -1
 }
