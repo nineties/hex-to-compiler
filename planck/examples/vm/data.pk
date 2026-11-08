@@ -1,0 +1,40 @@
+# types and data made by _record_new on planckvm: the program is written with the instructions and run by planck/vm; the image path is the first argument
+use("pvm/image")
+
+# println of R[x]
+show(x) := [GETGLOBAL{8, 1}, MOVE{9, x}, CALL{8, 8, 1}]
+
+# R[r] := _record_new(name K[n], Tuple{read, write}); R[r + 1] is the type and R[r + 2] is the function that makes the data
+mk_type(r, n) := [GETGLOBAL{30, 0}, LOADK{31, n}, LOADK{32, 3}, LOADK{33, 4}, TUPLE{32, 32, 2}, CALL{r, 30, 2}, ARGI{r + 1, r, 0}, ARGI{r + 2, r, 1}]
+
+# R[r] := make(1, 2)
+mk_data(r, make) := [MOVE{20, make}, LOADI{21, 1}, LOADI{22, 2}, CALL{r, 20, 2}]
+
+body := concat_map(x -> x, [
+    mk_type(10, 2), mk_type(13, 5),
+    mk_data(16, 12), mk_data(17, 12), mk_data(18, 15),
+    # the data, the type and the function that makes the data are printed
+    show(16), show(11), show(12),
+    # typeof gives the type, which is equal only to the type of the data
+    [TYPEOF{24, 16}, EQ{25, 24, 11}], show(25),
+    [EQ{25, 24, 14}], show(25),
+    [TYPEOF{24, 18}, EQ{25, 24, 14}], show(25),
+    # a type is the type of nothing but its own data: typeof of a type is the symbol type
+    [TYPEOF{24, 11}], show(24),
+    [LOADI{26, 3}, TYPEOF{24, 26}], show(24),
+    # a data is equal to itself and to no other data, and has the hash of its own
+    [EQ{25, 16, 16}], show(25),
+    [EQ{25, 16, 17}], show(25),
+    [HASH{27, 16}, HASH{28, 16}, EQ{25, 27, 28}], show(25),
+    # arity and arg
+    [ARITY{25, 16}], show(25),
+    [ARGI{25, 16, 1}], show(25),
+    [LOADI{26, 0}, ARG{25, 16, 26}], show(25),
+    [LOADNONE{0, 1}, RET{0}]
+])
+
+main := Code{"main", 0, 40, body, [
+    C{"_record_new"}, C{"println"}, Y{"File"}, Y{"read"}, Y{"write"}, Y{"Box"}
+]}
+
+write_file(array_get(argv(), 1), bytes.to_u8(pvm_image.build([main], "main")))

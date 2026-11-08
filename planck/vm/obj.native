@@ -1,6 +1,7 @@
 # obj: strings, symbols and m-exprs on the heap of planckvm
 #
-# Object kinds: 0 big integer (big.native), 3 string, 4 symbol, 5 m-expr, 8 Lambda, 9 Fusion, 10 builtin, 11 continuation.
+# Object kinds: 0 big integer (big.native), 3 string, 4 symbol, 5 m-expr, 8 Lambda, 9 Fusion, 10 builtin, 11 continuation, 13 type, 15 data.
+# A type is the number (the identity), its name (a symbol), the Tuple of its field names and the symbol type. A data is the number, its type and the fields.
 # A string is its number of bytes and the bytes packed from the low end of the words.
 # A symbol is its name (a string) and a number. A m-expr is its head (a symbol) and the arguments.
 # The roots of the image are the words 0 to 15 of the heap: 0 the Lambda that is run first, 1 false, 2 true, 3 none,
@@ -147,6 +148,8 @@ fn set_arg[r](h: &mut r [u32], m: i64, i: i64, v: i64) {
 fn type_symbol[r](h: &r [u32], v: i64) -> i64 {
     if (v & 1) == 1 { return g(h, 7) }
     let k = kind_of(h, v)
+    if k == 15 { return g(h, (v >> 1) + 2) }
+    if k == 13 { return g(h, (v >> 1) + 4) }
     if k == 3 { return g(h, 8) }
     if k == 4 { return g(h, 9) }
     if k == 5 { return g(h, 10) }
@@ -161,6 +164,19 @@ fn type_symbol[r](h: &r [u32], v: i64) -> i64 {
 fn is_mexpr[r](h: &r [u32], v: i64) -> bool {
     if (v & 1) == 1 { return false }
     kind_of(h, v) == 5
+}
+
+fn is_data[r](h: &r [u32], v: i64) -> bool {
+    if (v & 1) == 1 { return false }
+    kind_of(h, v) == 15
+}
+
+fn data_arity[r](h: &r [u32], d: i64) -> i64 {
+    size_of(h, d) - 2
+}
+
+fn data_arg[r](h: &r [u32], d: i64, i: i64) -> i64 {
+    g(h, (d >> 1) + 3 + i)
 }
 
 fn is_string[r](h: &r [u32], v: i64) -> bool {

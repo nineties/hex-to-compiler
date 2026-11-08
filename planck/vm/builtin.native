@@ -223,8 +223,23 @@ fn print_value[r](h: &r [u32], v: i64) {
         out_lit("}")
     } else if k == 10 {
         out_lit("<prim:")
-        out_symbol(h, g(h, (v >> 1) + 4))
+        if (g(h, (v >> 1) + 2) >> 1) == 44 {
+            out_symbol(h, g(h, (g(h, (v >> 1) + 4) >> 1) + 2))
+        } else {
+            out_symbol(h, g(h, (v >> 1) + 4))
+        }
         out_lit(">")
+    } else if k == 13 {
+        out_symbol(h, g(h, (v >> 1) + 2))
+    } else if k == 15 {
+        let n = data_arity(h, v)
+        out_symbol(h, g(h, (g(h, (v >> 1) + 2) >> 1) + 2))
+        out_lit("{")
+        for i in 0 as i64..n {
+            if i > 0 { out_lit(", ") }
+            print_value(h, data_arg(h, v, i))
+        }
+        out_lit("}")
     } else if k == 9 {
         let n = size_of(h, v) - 1
         for i in 0 as i64..n {
@@ -300,6 +315,48 @@ fn do_mexpr[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], a: i64) -> i64 {
     m
 }
 
+# _record_new(name, Tuple{field, ...}) is Tuple{type, make}. make is the builtin of the id 44: it takes the fields and gives a data of the type.
+fn do_record_new[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], a: i64) -> i64 {
+    let name = g(rs, a)
+    let fields = g(rs, a + 1)
+    if not is_symbol(h, name) { die("_record_new: the name is not a symbol") }
+    if not is_mexpr(h, fields) { die("_record_new: the fields are not a Tuple") }
+    if mexpr_head(h, fields) != g(h, 4) { die("_record_new: the fields are not a Tuple") }
+    let n = mexpr_arity(h, fields)
+    for i in 0 as i64..n {
+        if not is_symbol(h, mexpr_arg(h, fields, i)) { die("_record_new: a field is not a symbol") }
+    }
+    let s = new_string(h, st, 4)
+    set_byte(h, s, 0, 116)
+    set_byte(h, s, 1, 121)
+    set_byte(h, s, 2, 112)
+    set_byte(h, s, 3, 101)
+    let tsym = intern_sym(h, st, s)
+    let t = alloc_obj(h, st, 13, 4)
+    p(h, (t >> 1) + 2, name)
+    p(h, (t >> 1) + 3, fields)
+    p(h, (t >> 1) + 4, tsym)
+    let mk = alloc_obj(h, st, 10, 4)
+    p(h, (mk >> 1) + 2, 44 * 2 + 1)
+    p(h, (mk >> 1) + 3, n * 2 + 1)
+    p(h, (mk >> 1) + 4, t)
+    let r = new_mexpr(h, st, g(h, 4), 2)
+    set_arg(h, r, 0, t)
+    set_arg(h, r, 1, mk)
+    r
+}
+
+# new_data makes a data of the type of the builtin mk from the c fields in the registers from a
+fn new_data[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], mk: i64, a: i64, c: i64) -> i64 {
+    let t = g(h, (mk >> 1) + 4)
+    let d = alloc_obj(h, st, 15, 2 + c)
+    p(h, (d >> 1) + 2, t)
+    for i in 0 as i64..c {
+        p(h, (d >> 1) + 3 + i, g(rs, a + i))
+    }
+    d
+}
+
 # call_builtin runs the builtin id with the arguments in the registers from a; the result is a value
 fn call_builtin[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], id: i64, a: i64) -> i64 {
     let nv = g(h, 3)
@@ -329,6 +386,7 @@ fn call_builtin[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], id: i64, a: 
     if id == 8 {
         exit(arg_int(rs, a, 0, "exit: not an integer"))
     }
+    if id == 43 { return do_record_new(h, st, rs, a) }
     if id >= 30 { return call_abuiltin(h, st, rs, id, a) }
     if id >= 9 { return call_nbuiltin(h, st, rs, id, a) }
     die("unknown builtin")
