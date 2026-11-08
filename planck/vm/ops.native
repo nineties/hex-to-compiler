@@ -49,7 +49,7 @@ fn exec_match[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], op: i64, w: i6
             }
         }
     } else {
-        ok = type_symbol(h, v) == g(h, kb + ((w >> 16) & 65535))
+        ok = type_of(h, v) == g(rs, base + b)
     }
     if ok { return 2 }
     3
@@ -142,7 +142,7 @@ fn exec_read[r](h: &r [u32], rs: &mut r [u32], op: i64, w: i64, base: i64) {
     let c = w >> 24
     let v = g(rs, base + b)
     if op == 52 {
-        p(rs, base + a, type_symbol(h, v))
+        p(rs, base + a, type_of(h, v))
     } else if op == 53 {
         if not is_string(h, v) { die("STRLEN: not a string") }
         p(rs, base + a, mk_int(str_chars(h, v)))
@@ -158,6 +158,18 @@ fn exec_read[r](h: &r [u32], rs: &mut r [u32], op: i64, w: i64, base: i64) {
             p(rs, base + a, mk_int(-1))
         } else {
             p(rs, base + a, mk_int(char_at(h, v, b)))
+        }
+    } else if is_data(h, v) {
+        if op == 48 {
+            p(rs, base + a, mk_int(data_arity(h, v)))
+        } else if op == 49 {
+            let i = g(rs, base + c)
+            if not is_int(i) { die("ARG: not an integer") }
+            exec_data_arg(h, rs, base + a, v, int_of(i))
+        } else if op == 50 {
+            exec_data_arg(h, rs, base + a, v, c)
+        } else {
+            die("not a m-expr")
         }
     } else {
         if not is_mexpr(h, v) { die("not a m-expr") }
@@ -175,6 +187,11 @@ fn exec_read[r](h: &r [u32], rs: &mut r [u32], op: i64, w: i64, base: i64) {
             die("unknown instruction")
         }
     }
+}
+
+fn exec_data_arg[r](h: &r [u32], rs: &mut r [u32], dst: i64, d: i64, i: i64) {
+    if i < 0 or i >= data_arity(h, d) { die("ARG: out of range") }
+    p(rs, dst, data_arg(h, d, i))
 }
 
 fn exec_arg[r](h: &r [u32], rs: &mut r [u32], dst: i64, m: i64, i: i64) {

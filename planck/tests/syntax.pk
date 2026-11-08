@@ -427,8 +427,9 @@ check(f"list {[1, 2]}", "list [1, 2]")
 check(f"sym {'a} tree {F{1, "s"}}", "sym a tree F{1, \"s\"}")
 
 # === Records ===
-check(tree("record Tok(kind, value, pos)"), 'Apply{_record_declare, Tuple{Quote{Tok}, Quote{Tuple{kind, value, pos}}}})
-check(tree("record R()"), 'Apply{_record_declare, Tuple{Quote{R}, Quote{Tuple{}}}})
+check(head(tree("record Tok(kind, value, pos) = tok")), 'Do)
+check(arity(tree("record Tok(kind, value, pos) = tok")), 5)
+check(head(tree("record R() = r")), 'Do)
 check(tree("t.kind"), 'Apply{_record_get, Tuple{t, Quote{kind}}})
 check(tree("t.a.b"), 'Apply{_record_get, Tuple{Apply{_record_get, Tuple{t, Quote{a}}}, Quote{b}}})
 check(tree("f(x).y"), 'Apply{_record_get, Tuple{Apply{f, Tuple{x}}, Quote{y}}})
@@ -440,51 +441,63 @@ check(tree("F{a.b}"), 'F{Apply{_record_get, Tuple{a, Quote{b}}}})
 check(head(tree("t.")), 'SyntaxError)
 check(head(tree("t.1")), 'SyntaxError)
 check(head(tree("record Tok")), 'SyntaxError)
-check(head(tree("record Tok(1)")), 'SyntaxError)
+check(head(tree("record Tok(1) = tok")), 'SyntaxError)
+check(head(tree("record Tok(kind)")), 'SyntaxError)
+check(head(tree("record Tok(kind) = 1")), 'SyntaxError)
+check(tree("x @ a.B"), '_TypeOf{x, Apply{_record_get, Tuple{a, Quote{B}}}})
 
-record Tok(kind, value, pos)
-record Node(op, left, right)
-record Rev(c, b, a)
-record Fwd(a, b, c)
-tk := Tok{'id, "abc", 3}
+record Tok(kind, value, pos) = tok
+record Node(op, left, right) = node
+record Rev(c, b, a) = rev
+record Fwd(a, b, c) = fwd
+tk := tok('id, "abc", 3)
 check(tk.kind, 'id)
 check(tk.value, "abc")
 check(tk.pos + 1, 4)
-nd := Node{"+", Node{"*", 1, 2}, 3}
+nd := node("+", node("*", 1, 2), 3)
 check(nd.op, "+")
 check(nd.left.op, "*")
 check(nd.left.right, 2)
 check(nd.right, 3)
-# the field is found by the head of the value
-check(Rev{1, 2, 3}.a, 3)
-check(Fwd{1, 2, 3}.a, 1)
+check(type(tk) == Tok, true)
+check(type(nd) == Tok, false)
+# the field is found by the type
+check(rev(1, 2, 3).a, 3)
+check(fwd(1, 2, 3).a, 1)
 getv(t) := t.value
 check(getv(tk), "abc")
-check(getv(Tok{'num, 7, 0}), 7)
-check((match tk { Tok{k, v, p} -> k }), 'id)
-record Tok(value, kind)
-check(Tok{1, 2}.kind, 2)
-check(record_index('Tok, 'kind), 1)
-check(record_index('Tok, 'value), 0)
-# the old names of a redeclared head are gone
-check(record_index('Tok, 'pos), none)
-check(record_index('Nope, 'kind), none)
-# the same name under another head is another field
-check(record_index('Node, 'op), 0)
-check(record_index('Rev, 'a), 2)
-check(record_index('Fwd, 'a), 0)
-record Tok(kind, value, pos)
+check(getv(tok('num, 7, 0)), 7)
+check((match tk { t @ Tok -> t.kind }), 'id)
+# a type declared again with the same name is another type
+record Tok(value, kind) = tok2
+check(tok2(1, 2).kind, 2)
+check(type(tok2(1, 2)) == Tok, true)
+check(type(tk) == Tok, false)
+check(_record_index(tok2(1, 2), 'kind), 1)
+check(_record_index(tok2(1, 2), 'value), 0)
+check(_record_index(tk, 'pos), 2)
+check(_record_index(tk, 'x), none)
+check(_record_index(3, 'x), none)
+# the same name under another type is another field
+check(_record_index(nd, 'op), 0)
+check(_record_index(rev(1, 2, 3), 'a), 2)
+check(_record_index(fwd(1, 2, 3), 'a), 0)
 check(tk.kind, 'id)
-check(_record_get(Tok{1, 2, 3}, 'pos), 3)
-check(record_index('Tok, 'pos), 2)
-record Tok(pos)
-check(record_index('Tok, 'kind), none)
-check(record_index('Tok, 'value), none)
-check(_record_get(Tok{9}, 'pos), 9)
-record Tok(kind, value, pos)
-check(_record_get(Tok{1, 2, 3}, 'kind), 1)
-record R0()
-check(record_index('R0, 'x), none)
+check(_record_get(tk, 'pos), 3)
+record R0() = r0
+check(_record_index(r0(), 'x), none)
+check(arity(r0()), 0)
+# data are equal when they are the same value
+check(tk == tk, true)
+check(tok('id, "abc", 3) == tk, false)
+# with copies the data with a field replaced
+tk2 := tk with { kind = 'num, pos = 9 }
+check(tk2.kind, 'num)
+check(tk2.pos, 9)
+check(tk2.value, "abc")
+check(tk.pos, 3)
+check(type(tk2) == Tok, false)
+check((tk with { pos = tk.pos + 1 }).pos, 4)
 
 # === for, return and break ===
 rh := 'Lambda{Tuple{Return{v}, k}, v}
@@ -578,18 +591,18 @@ vector.push(grow, 1)
 for (x in grow) if (x < 4) vector.push(grow, x + 1)
 check(vector.to_list(grow), [1, 2, 3, 4])
 # a type of the program is added by _iter in front, and it works with break, continue and return
-record Countdown(n)
-_iter = (Countdown{n}) -> {
-    i := n
+record Countdown(n) = countdown
+_iter = (c @ Countdown) -> {
+    i := c.n
     (end) -> if (i > 0) {
         i -= 1
         i + 1
     } else end
 } | _iter
-check(collect(Countdown{3}), [3, 2, 1])
-check(collect(Countdown{0}), [])
+check(collect(countdown(3)), [3, 2, 1])
+check(collect(countdown(0)), [])
 cd_sum := 0
-for (x in Countdown{5}) {
+for (x in countdown(5)) {
     if (x == 4) continue
     if (x == 2) break
     cd_sum += x
@@ -599,10 +612,10 @@ cd_first(xs, k) := {
     for (x in xs) if (x < k) return x
     none
 }
-check(cd_first(Countdown{9}, 3), 2)
+check(cd_first(countdown(9), 3), 2)
 # a source that never ends, which only break stops
-record Nat()
-_iter = (Nat{}) -> {
+record Nat() = nat
+_iter = (_ @ Nat) -> {
     i := 0
     (end) -> {
         i += 1
@@ -610,14 +623,14 @@ _iter = (Nat{}) -> {
     }
 } | _iter
 nat_sum := 0
-for (x in Nat{}) {
+for (x in nat()) {
     if (x > 10) break
     nat_sum += x
 }
 check(nat_sum, 55)
 # the loops over the same value do not share their places, and a loop in a loop is fine
 pairs := []
-for (x in Countdown{2}) for (y in Countdown{2}) pairs = Tuple{x, y} :: pairs
+for (x in countdown(2)) for (y in countdown(2)) pairs = Tuple{x, y} :: pairs
 check(length(pairs), 4)
 find_first(p, xs) := {
     for (x in xs) {
@@ -1263,12 +1276,9 @@ check("abc"[2], "c")
 # lists: the element
 check([10, 20, 30][0], 10)
 check([10, 20, 30][2], 30)
-# M-expressions: the argument, and the field of a record by its name
+# M-expressions: the argument
 check(F{1, 2}[1], 2)
 check(('(f(x, y)))[1][0], 'x)
-record IP(x, y)
-check(IP{1, 2}['y], 2)
-check(IP{1, 2}[0], 1)
 # a kind of value of the program: _index_get and _index_set are extended in front
 _index_get = (Matrix{w, _, d}, (i, j)) -> d[i * w + j] | _index_get
 _index_set = (Matrix{w, _, d}, (i, j), v) -> { d[i * w + j] = v } | _index_set
@@ -1293,6 +1303,7 @@ index_var_test()
 index := 1
 check([5, 6][index], 6)
 # variables with the names a library function has do not hide what the sugar calls
+record IP(x, y) = ip
 shadow_test() := {
     add := 1
     sub := 1
@@ -1316,7 +1327,7 @@ shadow_test() := {
     check(1 < 2 and 1 <= 1 and 2 > 1 and 2 >= 2 and 1 == 1 and 1 != 2, true)
     check(not (1 == 2), true)
     check(f"a{add}b{sub + 1}", "a1b2")
-    check(IP{3, 4}.x, 3)
+    check(ip(3, 4).x, 3)
     check([7, 8][index_get], 8)
 }
 shadow_test()
@@ -1402,11 +1413,11 @@ check(match 'F{1, G{2, 3, 4}} { F{a, G{b, r...}} -> r }, 'Tuple{3, 4})
 check(match 'F{1, 2, 3} { F{a, _...} -> a }, 1)
 
 # === with ===
-check(tree("p with { x = 1 }"), 'Apply{_record_with, Tuple{p, Quote{x}, 1}})
-check(tree("p with { x = 1, y = a + 2 }"), 'Apply{_record_with, Tuple{Apply{_record_with, Tuple{p, Quote{x}, 1}}, Quote{y}, Apply{_add, Tuple{a, 2}}}})
-check(tree("p with { x = 1 } with { y = 2 }"), 'Apply{_record_with, Tuple{Apply{_record_with, Tuple{p, Quote{x}, 1}}, Quote{y}, 2}})
-check(tree("f(a).b with { x = 1 }"), 'Apply{_record_with, Tuple{Apply{_record_get, Tuple{Apply{f, Tuple{a}}, Quote{b}}}, Quote{x}, 1}})
-check(tree("r := p with { x = 1 }"), 'Def{r, Apply{_record_with, Tuple{p, Quote{x}, 1}}})
+check(tree("p with { x = 1 }"), 'Apply{_with, Tuple{p, Quote{x}, 1}})
+check(tree("p with { x = 1, y = a + 2 }"), 'Apply{_with, Tuple{Apply{_with, Tuple{p, Quote{x}, 1}}, Quote{y}, Apply{_add, Tuple{a, 2}}}})
+check(tree("p with { x = 1 } with { y = 2 }"), 'Apply{_with, Tuple{Apply{_with, Tuple{p, Quote{x}, 1}}, Quote{y}, 2}})
+check(tree("f(a).b with { x = 1 }"), 'Apply{_with, Tuple{Apply{_record_get, Tuple{Apply{f, Tuple{a}}, Quote{b}}}, Quote{x}, 1}})
+check(tree("r := p with { x = 1 }"), 'Def{r, Apply{_with, Tuple{p, Quote{x}, 1}}})
 check(tree("handle p with (E{}, k) -> 1"), 'Handle{p, Lambda{Tuple{E{}, k}, 1}})
 
 # === Destructuring ===

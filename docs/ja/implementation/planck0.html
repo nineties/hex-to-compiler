@@ -44,7 +44,7 @@
 <h2>トップレベル</h2>
 <p><code>main</code> は <code>planck/init.pk</code> とプログラムのファイルを <code>interpret_file</code> で読みます。式ごとに <code>call_global</code> が大域変数 <code>parse</code> と <code>eval</code> を引き直すので、プログラムが差し替えると次の式から新しい定義で読まれます。</p>
 <div class="example">
-<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/planck0.sv#L2993-L3003">bootstrap/planck0.sv: The loop looks up the global variables</a></p>
+<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/planck0.sv#L3123-L3133">bootstrap/planck0.sv: The loop looks up the global variables</a></p>
 <pre>; The loop looks up the global variables `parse` and `eval` every time, so
 ; a program can replace them (Def{parse, ...}, Def{eval, ...} or Set) and the next
 ; top-level expression is parsed/evaluated by the new definitions. Apply{eval, ...}
@@ -61,7 +61,7 @@
 <h2>値とメモリ</h2>
 <p>値は32ビットの1語です。最下位ビットが1なら整数、0ならヒープ上のオブジェクトへのポインタで、オブジェクトは先頭のヘッダに種類と長さを持ちます。</p>
 <div class="example">
-<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/planck0.sv#L166-L188">bootstrap/planck0.sv: data layout (planck0</a></p>
+<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/planck0.sv#L166-L192">bootstrap/planck0.sv: data layout (planck0</a></p>
 <pre>; === data layout (planck0)
 ; Small integers: tagged with LSB=1. Value is encoded as (val &lt;&lt; 1) | 1.
 ; Heap objects: Identified by LSB=0.
@@ -81,12 +81,16 @@
 ; cont    |      0 |    0 | 0111 | top frame | boundary frame |
 ; fusion  |      0 |    0 | 1000 | fun1 | fun2 |
 ; code    |      0 |    0 | 1010 | (see Bytecode VM)
+; type    | fields |    0 | 1011 | name | Tuple of the field names |
+; data    | fields |    0 | 1100 | type | field1 | .... |
+;
+; A type is made by _record_new, and a data is an instance of a type that the function made by it builds.
 ;
 ;
 ; Both symbols and mexpr undergo interning,
 ; enabling O(1) equality testing via pointer comparison.</pre>
 </div>
-<p>シンボルと M式は intern するので、等価性はポインタの比較です。ヒープは起動時に確保する固定の領域です。GC は、オブジェクトを動かさない保守的な mark-sweep で、内部を指す語があればそのオブジェクトを解放しません（<a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/planck0.sv#L3043-L3175"><code>bootstrap/planck0.sv: Garbage Collection</code></a>）。</p>
+<p>シンボルと M式は intern するので、等価性はポインタの比較です。ヒープは起動時に確保する固定の領域です。GC は、オブジェクトを動かさない保守的な mark-sweep で、内部を指す語があればそのオブジェクトを解放しません（<a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/planck0.sv#L3173-L3305"><code>bootstrap/planck0.sv: Garbage Collection</code></a>）。</p>
 
 <h2>M式のリーダ</h2>
 <p>組み込みの <code>parse</code> が読むのは、シンボル・整数・文字列と <code>Head{...}</code> の4種類です。構文を導入したあとも <code>parse_mexpr</code> として残ります。</p>
@@ -102,18 +106,18 @@ Tuple{Eof{}, &quot;&quot;}</pre>
 </div>
 
 <h2>コンパイラ</h2>
-<p><code>compile_mexpr</code> は M式の頭で分岐します（<a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/planck0.sv#L1536-L1703"><code>bootstrap/planck0.sv: fun compile_mexpr</code></a>）。特殊形式以外の頭は、引数を評価して同じ頭の M式を作る構築子です。</p>
+<p><code>compile_mexpr</code> は M式の頭で分岐します（<a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/planck0.sv#L1589-L1757"><code>bootstrap/planck0.sv: fun compile_mexpr</code></a>）。特殊形式以外の頭は、引数を評価して同じ頭の M式を作る構築子です。</p>
 
 <h3>変数の解決</h3>
-<p>局所変数は（環境の深さ, 位置）に、大域変数はセルに解決します。トップレベルの <code>Def</code> は新しいセルを作り、命令 <code>GLOAD</code>・<code>GDEF</code>・<code>GSET</code> にはセルを埋め込みます（<a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/planck0.sv#L576-L584"><code>bootstrap/planck0.sv: fun define_global</code></a>）。そのため、前にコンパイルした関数は前のセルを指したままで、<code>Set</code> だけが今のセルに書き込みます。見つからない名前は、実行前にメッセージを出して止まります。</p>
+<p>局所変数は（環境の深さ, 位置）に、大域変数はセルに解決します。トップレベルの <code>Def</code> は新しいセルを作り、命令 <code>GLOAD</code>・<code>GDEF</code>・<code>GSET</code> にはセルを埋め込みます（<a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/planck0.sv#L586-L594"><code>bootstrap/planck0.sv: fun define_global</code></a>）。そのため、前にコンパイルした関数は前のセルを指したままで、<code>Set</code> だけが今のセルに書き込みます。見つからない名前は、実行前にメッセージを出して止まります。</p>
 
 <h3>Def と Declare</h3>
 <p><code>Def</code> は右辺をコンパイルしてからセルを作るので、右辺からは前の変数が見えます。関数が自分自身を参照できるのは、構文が関数定義を <code>Declare{f}</code> で先にセルを作り <code>Set</code> で関数を入れる形に読み替えるからです。</p>
-<p><code>Declare{f}</code> が <code>Def{f, none}</code> になるのは、<code>f</code> がまだその場所の変数でないときだけです。トップレベルではセルを定義したファイルが読み込み中のファイル <code>cur_file</code> と同じかを、関数の中ではその関数の深さの項目があるかを見ます（<a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/planck0.sv#L1524-L1534"><code>bootstrap/planck0.sv: fun defined_here</code></a>）。</p>
+<p><code>Declare{f}</code> が <code>Def{f, none}</code> になるのは、<code>f</code> がまだその場所の変数でないときだけです。トップレベルではセルを定義したファイルが読み込み中のファイル <code>cur_file</code> と同じかを、関数の中ではその関数の深さの項目があるかを見ます（<a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/planck0.sv#L1533-L1543"><code>bootstrap/planck0.sv: fun defined_here</code></a>）。</p>
 
 <h2>仮想機械</h2>
 <div class="example">
-<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/planck0.sv#L1063-L1153">bootstrap/planck0.sv: Bytecode VM</a></p>
+<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/planck0.sv#L1071-L1161">bootstrap/planck0.sv: Bytecode VM</a></p>
 <pre>; === Bytecode VM
 ;
 ; planck0 compiles each top-level expression into a code object and runs it
@@ -211,12 +215,13 @@ Tuple{Eof{}, &quot;&quot;}</pre>
 <h2>呼び出しとパターン照合</h2>
 <p><code>select</code> が引数に合う関数を選びます。<code>Fusion</code> は左を試して失敗すれば右を試し、合う関数がなければ <code>matching failed</code> で止まります。</p>
 <div class="example">
-<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/planck0.sv#L1864-L1905">bootstrap/planck0.sv: fun match_pat</a></p>
+<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/planck0.sv#L1918-L1964">bootstrap/planck0.sv: fun match_pat</a></p>
 <pre>(fun match_pat (p v env idx)
     (var t (gettag p))
     (var i 0)
     (var n 0)
     (var h 0)
+    (var tp 0)
     (if (== p _S) (return 1)) ; wildcard
     (if (== t SymbolT) (do ; variable pattern
         (set env (+ 1 (get idx)) v)
@@ -228,7 +233,11 @@ Tuple{Eof{}, &quot;&quot;}</pre>
         (= h (get p 1))
         (if (== h QuoteS) (return (values_equal (get p 2) v)))
         (if (== h _TypeOfS) (do
-            (if (!= (typeof v) (get p 3)) (return 0))
+            (= tp (get p 3))
+            ; the type is in a slot of the environment where the function was made
+            (if (&amp;&amp; (== (gettag tp) MexprT) (== (get tp 1) TypeSlotS))
+                (= tp (get (get env 0) (+ (fixnum_to_int (get tp 2)) 1))))
+            (if (!= (typeof v) tp) (return 0))
             (return (match_pat (get p 2) v env idx))
             ))
         (if (!= (gettag v) MexprT) (return 0))
@@ -255,12 +264,12 @@ Tuple{Eof{}, &quot;&quot;}</pre>
     (return 0)
     )</pre>
 </div>
-<p>組み込みの名前は <code>_add</code>・<code>_eq</code>・<code>_strcat</code> のように <code>_</code> で始まります（<a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/planck0.sv#L2906-L2966"><code>bootstrap/planck0.sv: fun init_prims</code></a>）。<code>_</code> のない <code>add</code> は登録しないので、プログラムが同名の変数を定義しても演算子の意味は変わりません。</p>
+<p>組み込みの名前は <code>_add</code>・<code>_eq</code>・<code>_strcat</code> のように <code>_</code> で始まります（<a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/planck0.sv#L3027-L3096"><code>bootstrap/planck0.sv: fun init_prims</code></a>）。<code>_</code> のない <code>add</code> は登録しないので、プログラムが同名の変数を定義しても演算子の意味は変わりません。</p>
 
 <h2 id="effects">エフェクト</h2>
 <p><code>Handle</code> は本体を新しいフレームで実行し、ハンドラをそのフレームに記録します。<code>Perform</code> は呼び出し元へ鎖をたどってハンドラを持つフレームを探し、継続 <code>k</code>（そこまでの鎖のヒープ上の複製）を作って、ハンドラを <code>(v, k)</code> で照合します。合わなければさらに外側を探します。</p>
 <div class="example">
-<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/planck0.sv#L2186-L2208">bootstrap/planck0.sv: fun op_perform</a></p>
+<p class="file"><a href="https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/planck0.sv#L2263-L2285">bootstrap/planck0.sv: fun op_perform</a></p>
 <pre>(fun op_perform ()
     (char[] 8 hargs)
     (var v (vm_pop))

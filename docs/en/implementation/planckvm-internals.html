@@ -68,14 +68,14 @@
 <ul>
 <li>When <code>CALL A B C</code> chooses a lambda, it saves <code>pc</code> and pushes a frame with <code>base</code> = the current base + B + 1 and <code>reg</code> of <code>ret</code> = A. The arguments are not moved. <code>HANDLE A B</code> pushes a frame with <code>base + B + 2</code> and <code>kind = 1</code>.</li>
 <li><code>RET</code> drops the frame and passes the value as its <code>ret</code> says. <code>TCALL</code> moves the arguments to <code>R[-1]</code> and on and replaces the current frame. It keeps <code>ret</code> and sets only <code>kind</code> to 0.</li>
-<li><code>NEXT</code> picks, from <code>next</code> on, the first alternative whose arity fits. For a lambda it replaces <code>fn</code> and <code>env</code> and sets <code>pc</code> to 0. When none is left, a frame with <code>kind</code> 2 goes on to the transfer and any other stops with <code>matching failed</code>.</li>
+<li><code>NEXT</code> picks, from <code>next</code> on, the first alternative whose arity fits. For a lambda it replaces <code>fn</code> and <code>env</code> and sets <code>pc</code> to 0. When none is left, a frame with <code>kind</code> 2 goes on to the transfer and any other sends <code>MatchingFailed{f, args, loc}</code> from the calling frame by the steps of <code>PERFORM</code>. When the continuation is resumed, the value given becomes the result of the failed call. With no boundary it stops with <code>matching failed</code>.</li>
 <li>An overwritten builtin is detected with the word <code>guard</code>, whose bits correspond one by one to the names in the Builtin column. <code>SETGLOBAL</code> updates the bit when it writes the cell of such a name, and an instruction first checks whether <code>guard</code> is 0. When the builtin is overwritten, the function goes to <code>R[nregs]</code> with the arguments above it, and it is called like <code>CALL</code>.</li>
 </ul>
 
 <h3>Continuations</h3>
 <p>A continuation is an object on the heap: a copy of a slice of the frame stack and a slice of the register stack.</p>
 <ol>
-<li><code>PERFORM A B</code> looks down from the current frame for a frame F with <code>kind = 1</code>. With none, it stops with <code>unhandled effect</code>.</li>
+<li><code>PERFORM A B</code> looks down from the current frame for a frame F with <code>kind = 1</code>. With none, it stops with <code>unhandled effect</code> (<code>matching failed</code> for <code>MatchingFailed</code>).</li>
 <li>It copies the frames from F to the current frame and the registers from <code>F.base - 2</code> to <code>R[nregs-1]</code> of the current frame into a continuation. The <code>base</code> of a copy is the offset from the start of the slice.</li>
 <li>It drops what is above F, makes a frame with <code>kind = 2</code> at the position of F, puts the sent value and the continuation in <code>R[0]</code> and <code>R[1]</code>, and chooses a handler. When none matches, it makes a new continuation from the slice up to the next boundary G with the original slice appended, and repeats this for G.</li>
 <li>Resuming copies the slices above the window of the caller, adds that position to the <code>base</code> of each frame, makes the last frame current and goes on from the saved <code>pc</code>. The <code>ret</code> of the first frame (the boundary) is decided as for a frame that <code>CALL</code> pushes.</li>
@@ -90,7 +90,7 @@
 </ul>
 <p>There is no table of live registers, and every element of the register stack is a valid value or none. It is filled with none at start, and the GC fills with none the used range above the roots. The top of that range is recorded in the word <code>high</code>, which is updated when a window is made.</p>
 <p>When a reference to a young object is written into an old object (<code>ENVSET</code>, <code>SETGLOBAL</code>, <code>ASET</code>), the object is recorded in the remembered set if its header bit <code>r</code> is 0, and <code>r</code> becomes 1.</p>
-<p>The identity of an array, a plain array or a function (<code>EQ</code> and <code>HASH</code>) is not its address. It is a number assigned at the first <code>HASH</code>.</p>
+<p>The identity of a function (<code>EQ</code> and <code>HASH</code>) is not its address. It is a number assigned at the first <code>HASH</code>.</p>
 
 <nav class="pager"><a class="prev" href="planckvm-repr.html"><small>Previous</small>planckvm value representation</a></nav>
 </main>

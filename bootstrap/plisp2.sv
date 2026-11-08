@@ -13,7 +13,7 @@
 (long heap_end)
 (long heap_pos)
 (fun init_heap ()
-    (var heap_block_size 1024)  ; 1GB
+    (var heap_block_size 2048)  ; 2GB
     (*= heap_block_size 1024)
     (*= heap_block_size 1024)
     (var addr (mmap2 0 heap_block_size
@@ -32,7 +32,7 @@
 
 (fun allocate (size)
     (= size (align size))
-    (if (>= (+ heap_pos size) heap_end) (do
+    (if (u>= (+ heap_pos size) heap_end) (do
         (eputs "memory allocation error\n")
         (exit 1)
         ))

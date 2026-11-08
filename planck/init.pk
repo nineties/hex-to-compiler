@@ -10,60 +10,7 @@ Def{false, Quote{false}}
 Def{none, Quote{none}}
 
 " === Types === "
-" planck0 has no type values. type(x) gives the symbol that typeof(x) gives, and the type names Int, String, Symbol, "
-" Expr, Function, Array, Plain and Type are bound to those symbols. The programs are written with the type names of "
-" the specification: _TypeOf{p, Int}. eval makes the names in the patterns of the expressions the symbols that typeof gives. "
-Def{Int, Quote{int}}
-Def{String, Quote{string}}
-Def{Symbol, Quote{symbol}}
-Def{Expr, Quote{mexpr}}
-Def{Function, Quote{function}}
-Def{Array, Quote{array}}
-Def{Plain, Quote{plain}}
-Def{Type, Quote{type}}
-Def{type, Lambda{Tuple{x}, Apply{typeof, Tuple{x}}}}
-
-Def{_type_name, Fusion{Lambda{Tuple{Quote{Int}}, Quote{int}},
-    Fusion{Lambda{Tuple{Quote{String}}, Quote{string}},
-    Fusion{Lambda{Tuple{Quote{Symbol}}, Quote{symbol}},
-    Fusion{Lambda{Tuple{Quote{Expr}}, Quote{mexpr}},
-    Fusion{Lambda{Tuple{Quote{Function}}, Quote{function}},
-    Fusion{Lambda{Tuple{Quote{Array}}, Quote{array}},
-    Fusion{Lambda{Tuple{Quote{Plain}}, Quote{plain}},
-    Lambda{Tuple{n}, n}}}}}}}}}
-
-" _lower_types(e) is e with the type names of _TypeOf{p, T} replaced. Quote{...} is left as it is. "
-Def{_lower_types, none}
-Set{_lower_types, Lambda{Tuple{e}, Do{
-    Def{n, 0},
-    Def{r, none},
-    Def{i, 0},
-    Def{j, 0},
-    Def{a, none},
-    Def{c, none},
-    If{Apply{_ne, Tuple{Apply{typeof, Tuple{e}}, Quote{mexpr}}}, e,
-    If{Apply{_eq, Tuple{Apply{head, Tuple{e}}, Quote{Quote}}}, e,
-    If{If{Apply{_eq, Tuple{Apply{head, Tuple{e}}, Quote{_TypeOf}}}, Apply{_eq, Tuple{Apply{arity, Tuple{e}}, 2}}, false},
-        Apply{mexpr, Tuple{Quote{_TypeOf}, Tuple{Apply{_lower_types, Tuple{Apply{arg, Tuple{e, 0}}}}, Apply{_type_name, Tuple{Apply{arg, Tuple{e, 1}}}}}}},
-        Do{
-            Set{n, Apply{arity, Tuple{e}}},
-            While{Apply{_lt, Tuple{i, n}}, Do{
-                Set{a, Apply{arg, Tuple{e, i}}},
-                Set{c, Apply{_lower_types, Tuple{a}}},
-                If{Apply{_eq, Tuple{r, none}},
-                    If{Apply{_ne, Tuple{c, a}}, Do{
-                        Set{r, Apply{mexpr, Tuple{Apply{head, Tuple{e}}, Tuple{}}}},
-                        Set{j, 0},
-                        While{Apply{_lt, Tuple{j, i}}, Do{
-                            Set{r, Apply{push, Tuple{r, Apply{arg, Tuple{e, j}}}}},
-                            Set{j, Apply{_add, Tuple{j, 1}}}}},
-                        Set{r, Apply{push, Tuple{r, c}}}}, none},
-                    Set{r, Apply{push, Tuple{r, c}}}},
-                Set{i, Apply{_add, Tuple{i, 1}}}}},
-            If{Apply{_eq, Tuple{r, none}}, e, r}}}}}}}}
-
-Def{_eval0, eval}
-Set{eval, Lambda{Tuple{e}, Apply{_eval0, Tuple{Apply{_lower_types, Tuple{e}}}}}}
+" The types Int, String, Symbol, Expr, Function, Array, Plain and Type are values of planck0, and type(x) gives the type of x. "
 
 " === Basic Functions === "
 Def{_not, Fusion{
@@ -71,14 +18,20 @@ Def{_not, Fusion{
     Lambda{Tuple{_}, false}}}
 
 " === Tables === "
-" A table is Table{a}, where a is an array | buckets | number of entries |. Each bucket is a chain of entries "
+" A table is a Table, whose field is an array | buckets | number of entries |. Each bucket is a chain of entries "
 " | key | value | next entry or none | hash of the key |. Keys are compared by eq. "
 " The number of buckets doubles when there are more entries than buckets. "
+Def{_table_type, Apply{_record_new, Tuple{Quote{Table}, Quote{Tuple{a}}}}}
+
+Def{Table, Apply{arg, Tuple{_table_type, 0}}}
+
+Def{_make_table, Apply{arg, Tuple{_table_type, 1}}}
+
 Def{table_new, Lambda{Tuple{}, Do{
     Def{t, Apply{array, Tuple{2}}},
     Apply{array_set, Tuple{t, 0, Apply{array, Tuple{16}}}},
     Apply{array_set, Tuple{t, 1, 0}},
-    Table{t}}}}
+    Apply{_make_table, Tuple{t}}}}}
 
 Def{table_find, Lambda{Tuple{t, k, h}, Do{
     Def{b, Apply{array_get, Tuple{t, 0}}},
@@ -91,7 +44,8 @@ Def{table_find, Lambda{Tuple{t, k, h}, Do{
         Set{e, Apply{array_get, Tuple{e, 2}}}},
     e}}}
 
-Def{table_get, Lambda{Tuple{Table{t}, k, default}, Do{
+Def{table_get, Lambda{Tuple{_TypeOf{tb, Table}, k, default}, Do{
+    Def{t, Apply{arg, Tuple{tb, 0}}},
     Def{e, Apply{table_find, Tuple{t, k, Apply{hash, Tuple{k}}}}},
     If{Apply{_eq, Tuple{e, none}}, default, Apply{array_get, Tuple{e, 1}}}}}}
 
@@ -114,7 +68,8 @@ Def{table_grow, Lambda{Tuple{t}, Do{
         Set{i, Apply{_add, Tuple{i, 1}}}}},
     Apply{array_set, Tuple{t, 0, nb}}}}}
 
-Def{table_set, Lambda{Tuple{Table{t}, k, v}, Do{
+Def{table_set, Lambda{Tuple{_TypeOf{tb, Table}, k, v}, Do{
+    Def{t, Apply{arg, Tuple{tb, 0}}},
     Def{h, Apply{hash, Tuple{k}}},
     Def{e, Apply{table_find, Tuple{t, k, h}}},
     If{Apply{_eq, Tuple{e, none}}, Do{

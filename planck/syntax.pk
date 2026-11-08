@@ -259,7 +259,9 @@ Set{peg_itoa,
 
 " a function that matches no arguments: what follows p if c -> e when no | follows it "
 
-Def{_nomatch, Lambda{Tuple{_TypeOf{_, nomatch}}, none}}
+Def{peg_no_type, Quote{nomatch}}
+
+Def{_nomatch, Lambda{Tuple{_TypeOf{_, peg_no_type}}, none}}
 
 Def{peg_g, Apply{intern, Tuple{"%g"}}}
 
@@ -850,48 +852,51 @@ Apply{_define_rule, Tuple{Quote{istr_hole}, peg_tok_istr_hole}}
 
 Apply{_define_rule, Tuple{Quote{istr_close}, peg_tok_istr_close}}
 
+" the field names of each type that record declares: type -> Tuple of the names "
 Def{record_fields, Apply{table_new, Tuple{}}}
 
-Def{record_slots, Apply{table_new, Tuple{}}}
-
+" _record(name, fields) is Tuple{type, make} of a new type: _record_new, and the field names are kept for t.f "
 Def{
-    _record_declare,
+    _record,
     Lambda{
         Tuple{name, fields},
         Do{
-            Def{old, Apply{table_get, Tuple{record_fields, name, none}}},
+            Def{r, Apply{_record_new, Tuple{name, fields}}},
+            Apply{table_set, Tuple{record_fields, Apply{arg, Tuple{r, 0}}, fields}},
+            r
+        }
+    }}
+
+" the index of the field name of the data t of a type that record declares, or none "
+Def{
+    _record_index,
+    Lambda{
+        Tuple{t, name},
+        Do{
+            Def{fs, Apply{table_get, Tuple{record_fields, Apply{type, Tuple{t}}, none}}},
+            Def{i, 0},
+            Def{r, none},
             If{
-                Apply{_ne, Tuple{old, none}},
-                Do{
-                    Def{i, 0},
-                    While{
-                        Apply{_lt, Tuple{i, Apply{arity, Tuple{old}}}},
-                        Do{
-                            Apply{
-                                table_set,
-                                Tuple{record_slots, Tuple{name, Apply{arg, Tuple{old, i}}}, none}
-                            },
-                            Set{i, Apply{_add, Tuple{i, 1}}}
-                        }
+                Apply{_ne, Tuple{fs, none}},
+                While{
+                    Apply{_lt, Tuple{i, Apply{arity, Tuple{fs}}}},
+                    Do{
+                        If{Apply{_eq, Tuple{Apply{arg, Tuple{fs, i}}, name}}, Do{Set{r, i}, Set{i, Apply{arity, Tuple{fs}}}}, Set{i, Apply{_add, Tuple{i, 1}}}}
                     }
                 },
                 none
             },
-            Apply{table_set, Tuple{record_fields, name, fields}},
-            Def{i, 0},
-            While{
-                Apply{_lt, Tuple{i, Apply{arity, Tuple{fields}}}},
-                Do{
-                    Apply{table_set, Tuple{record_slots, Tuple{name, Apply{arg, Tuple{fields, i}}}, i}},
-                    Set{i, Apply{_add, Tuple{i, 1}}}
-                }
-            }
+            r
         }
     }}
 
-Def{record_index, Lambda{Tuple{name, field}, Apply{table_get, Tuple{record_slots, Tuple{name, field}, none}}}}
+" a module value is a Module, whose field is the table that holds the names and the values of the fields of this value "
+Def{_module_type, Apply{_record, Tuple{Quote{Module}, Quote{Tuple{table}}}}}
 
-" a module value is Module{Table{...}}: the table holds the names and the values of the fields of this value "
+Def{Module, Apply{arg, Tuple{_module_type, 0}}}
+
+Def{_make_module, Apply{arg, Tuple{_module_type, 1}}}
+
 Def{
     _module,
     Lambda{
@@ -906,7 +911,7 @@ Def{
                     Set{vals, Apply{arg, Tuple{vals, 1}}}
                 }
             },
-            Module{t}
+            Apply{_make_module, Tuple{t}}
         }
     }}
 
@@ -914,8 +919,9 @@ Def{
     _record_get,
     Fusion{
         Lambda{
-            Tuple{Module{Table{a}}, name},
+            Tuple{_TypeOf{m, Module}, name},
             Do{
+                Def{a, Apply{arg, Tuple{Apply{arg, Tuple{m, 0}}, 0}}},
                 Def{e, Apply{table_find, Tuple{a, name, Apply{hash, Tuple{name}}}}},
                 If{
                     Apply{_eq, Tuple{e, none}},
@@ -923,7 +929,7 @@ Def{
                         Apply{put, Tuple{"no field "}},
                         Apply{put, Tuple{Apply{symname, Tuple{name}}}},
                         Apply{put, Tuple{" in "}},
-                        Apply{println, Tuple{Module{}}},
+                        Apply{println, Tuple{Quote{Module{}}}},
                         Apply{exit, Tuple{1}}
                     },
                     none
@@ -934,7 +940,7 @@ Def{
         Lambda{
             Tuple{t, name},
             Do{
-                Def{i, Apply{table_get, Tuple{record_slots, Tuple{Apply{head, Tuple{t}}, name}, none}}},
+                Def{i, Apply{_record_index, Tuple{t, name}}},
                 If{
                     Apply{_eq, Tuple{i, none}},
                     Do{
@@ -969,9 +975,7 @@ Def{peg_fresh_count, 0}
 " _testing is true while the tests in the test blocks of modules run (tools/test.pk) "
 Def{_testing, false}
 
-Def{
-    peg_record,
-    Lambda{Tuple{n, fs}, QuasiQuote{Apply{_record_declare, Tuple{Quote{UnQuote{n}}, Quote{UnQuote{fs}}}}}}}
+Def{peg_record, none}
 
 
 Def{
@@ -1162,7 +1166,7 @@ Def{
                 }
             },
             Fusion{
-                Lambda{Tuple{Table{t}, k}, Apply{table_get, Tuple{Table{t}, k, none}}},
+                Lambda{Tuple{_TypeOf{t, Table}, k}, Apply{table_get, Tuple{t, k, none}}},
                 Fusion{
                     Lambda{Tuple{x, _TypeOf{f, Function}}, Apply{subst, Tuple{x, f}}},
                     Fusion{
@@ -1176,11 +1180,6 @@ Def{
                                 Apply{_index_error, Tuple{Nil{}, i}}
                             },
                             Fusion{
-                                Lambda{
-                                    Tuple{_TypeOf{t, Expr}, _TypeOf{f, Symbol}},
-                                    Apply{_record_get, Tuple{t, f}}
-                                },
-                                Fusion{
                                     Lambda{
                                         Tuple{_TypeOf{t, Expr}, _TypeOf{i, Int}},
                                         Do{
@@ -1198,7 +1197,6 @@ Def{
                                             Apply{exit, Tuple{1}}
                                         }
                                     }
-                                }
                             }
                         }
                     }
@@ -1239,7 +1237,7 @@ Def{
     Fusion{
         Lambda{Tuple{_TypeOf{a, Array}, _TypeOf{i, Int}, v}, Apply{array_set, Tuple{a, i, v}}},
         Fusion{
-            Lambda{Tuple{Table{t}, k, v}, Apply{table_set, Tuple{Table{t}, k, v}}},
+            Lambda{Tuple{_TypeOf{t, Table}, k, v}, Apply{table_set, Tuple{t, k, v}}},
             Fusion{
                 Lambda{
                     Tuple{_TypeOf{s, String}, i, v},
@@ -1513,8 +1511,12 @@ unary ::= postfix
         | "`" a:unary { mexpr('QuasiQuote, Tuple{a}) }
         | "!" a:unary { mexpr('UnQuote, Tuple{a}) }
 
+" the type after @: a name, or a field of a module (a.B) "
+type_ref ::= m:type_ref nospace(".") f:ident { `Apply{_record_get, Tuple{!m, Quote{!f}}} }
+           | ident
+
 postfix ::= f:postfix nospace("(") args:delimited(expr, ",") ")" { `Apply{!f, !args} }
-          | x:postfix "@" t:ident { `_TypeOf{!x, !t} }
+          | x:postfix "@" t:type_ref { `_TypeOf{!x, !t} }
           | t:postfix nospace(".") f:ident { `Apply{_record_get, Tuple{!t, Quote{!f}}} }
           | a:postfix nospace("[") i:index "]" !assign_op { `Apply{_index_get, Tuple{!a, !i}} }
           | x:ident "..." { `_Rest{!x} }
@@ -1573,7 +1575,7 @@ pat_primary ::= f:ident nospace("(") args:delimited(pattern, ",") ")" { `Apply{Q
               | "(" ps:delimited1(pattern, ",") ")" { peg_group(ps) }
               | "[" ps:delimited(pattern, ",") "]" { peg_to_list(ps) }
 
-pat_postfix ::= x:pat_postfix "@" t:ident { `_TypeOf{!x, !t} }
+pat_postfix ::= x:pat_postfix "@" t:type_ref { `_TypeOf{!x, !t} }
               | x:ident "..." { `_Rest{!x} }
               | pat_primary
 
@@ -1698,6 +1700,7 @@ module_def ::= &(postfix ":=") f:ident nospace("(") ps:delimited(pattern, ",") "
                }
              | x:ident ":=" e:expr { `Def{!x, !e} }
              | 'macro p:pattern ":=" e:expr { peg_macro(p, e) }
+             | 'record n:ident "(" fs:idents ")" "=" !nospace("=") m:ident { peg_record(n, fs, m) }
              | module_expr
 
 module_stmt ::= 'export d:module_def { `Export{!d} }
@@ -1740,7 +1743,7 @@ expr ::= syntax_decl
        | a:postfix nospace("[") i:expr "]" "=" !nospace("=") v:expr { `Apply{_index_set, Tuple{!a, !i, !v}} }
        | &(postfix 'with "{") w:with_expr { w }
        | union
-       | 'record n:ident "(" fs:idents ")" { peg_record(n, fs) }
+       | 'record n:ident "(" fs:idents ")" "=" !nospace("=") m:ident { peg_record(n, fs, m) }
        | module_expr
        | import_expr
 
@@ -1780,8 +1783,8 @@ peg_import(p, a, o) := {
     mexpr('Do, push(ds, none))
 }
 
-" the name that a definition marked export defines: x for Def{x, e}, f for Do{Declare{f}, ...} "
-peg_export_name(d) := if (head(d) == 'Def) arg(d, 0) else arg(arg(d, 0), 0)
+" the name that a definition marked export defines: x for Def{x, e}, f for Do{Declare{f}, ...}, the type for a record "
+peg_export_name(d) := if (head(d) == 'Def) arg(d, 0) else if (head(arg(d, 0)) == 'Def) arg(arg(d, 1), 0) else arg(arg(d, 0), 0)
 
 " module n { ... }: rev is the list of the statements of the body, the last one first. The module is "
 " n := (() -> { statements; _module(names, values) })(). An M-expression holds at most 64 arguments, so "
@@ -1924,12 +1927,12 @@ eval = e -> {
     } else _eval_expanded(e)
 }
 
-" e with { f = v, ... } is _record_with(_record_with(e, 'f, v), 'g, w) ... "
+" e with { f = v, ... } is _with(_with(e, 'f, v), 'g, w) ... _with is defined by record in the place of the record "
 peg_with(o, fs) := {
     r := o
     i := 0
     while (i < arity(fs)) {
-        r = `Apply{_record_with, Tuple{!r, Quote{!arg(arg(fs, i), 0)}, !arg(arg(fs, i), 1)}}
+        r = `Apply{_with, Tuple{!r, Quote{!arg(arg(fs, i), 0)}, !arg(arg(fs, i), 1)}}
         i = i + 1
     }
     r
@@ -1943,18 +1946,19 @@ _record_with_error(t, name) := {
     exit(1)
 }
 
-" a copy of the record t whose field name is v. The fields are declared by record "
-_record_with(t, name, v) := {
-    if (type(t) != Expr) _record_with_error(t, name)
-    i := table_get(record_slots, Tuple{head(t), name}, none)
-    if (i == none) _record_with_error(t, name)
-    args := Tuple{}
-    j := 0
-    while (j < arity(t)) {
-        args = push(args, if (j == i) v else arg(t, j))
-        j = j + 1
+" the function (d, name, v) -> a copy of the data d of the type t with the field name replaced by v. make makes the data of t. "
+_record_with(t, make) := {
+    fs := table_get(record_fields, t, none)
+    (d @ t, name, v) -> {
+        if (_record_index(d, name) == none) _record_with_error(d, name)
+        args := Tuple{}
+        i := 0
+        while (i < arity(fs)) {
+            args = push(args, mexpr('Quote, Tuple{if (arg(fs, i) == name) v else arg(d, i)}))
+            i = i + 1
+        }
+        eval(mexpr('Apply, Tuple{mexpr('Quote, Tuple{make}), args}))
     }
-    mexpr(head(t), args)
 }
 
 " the names of (a, b, ...): Tuple{a, b, ...} "
@@ -1972,6 +1976,20 @@ peg_names(a, bs) := {
 peg_fresh() := {
     peg_fresh_count = peg_fresh_count + 1
     intern(_strcat("%d", peg_itoa(peg_fresh_count)))
+}
+
+" record T(f, ...) = make defines T (the type) and make (the function that makes the data), and adds to _with the function "
+" that copies a data of T with a field replaced (_record_with). _with is a variable of the place of the record, so a data "
+" is copied only where the record is declared. %record is the variable that holds the type and make until they are named. "
+peg_record(n, fs, m) := {
+    r := intern("%record")
+    `Do{
+        Def{!r, Apply{_record, Tuple{Quote{!n}, Quote{!fs}}}},
+        Def{!n, Apply{arg, Tuple{!r, 0}}},
+        Def{!m, Apply{arg, Tuple{!r, 1}}},
+        Declare{_with},
+        Set{_with, Fusion{_with, Apply{_record_with, Tuple{!n, !m}}}}
+    }
 }
 
 " (a, b) := e is a block that defines a and b from the elements of the tuple e, and (a, b) = e "
@@ -2341,8 +2359,8 @@ _iter(a @ Plain) := {
 }
 
 " a table: Tuple{key, value} of each entry, in the order of table.items. The table must not change while it is walked. "
-_iter(Table{t}) := {
-    b := array_get(t, 0)
+_iter(tb @ Table) := {
+    b := array_get(arg(tb, 0), 0)
     n := array_len(b)
     i := 0
     e := none

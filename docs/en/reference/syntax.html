@@ -80,12 +80,12 @@
 <tr><td><code>(x, y, ...) := e</code>, <code>(x, y, ...) = e</code></td><td class="wrap"><code>Do{Def{t, e}, Def{x, Apply{_destructure, Tuple{t, 0, n}}}, ...}</code> (<code>t</code> is a fresh variable, <code>n</code> is the number of names, and <code>Def</code> becomes <code>Set</code> for <code>=</code>)</td></tr>
 <tr><td><code>f(p, ...) := body</code></td><td><code>Do{Declare{f}, Set{f, Fusion{f, Lambda{Tuple{p, ...}, body}}}}</code></td></tr>
 <tr><td><code>f(p, ...) if cond := body</code></td><td class="wrap">Adds the guarded function <code>(p, ...) if cond -&gt; body</code> to <code>f</code></td></tr>
-<tr><td><code>record T(f, ...)</code></td><td><code>Apply{_record_declare, Tuple{Quote{T}, Quote{Tuple{f, ...}}}}</code></td></tr>
+<tr><td><code>record T(f, ...) = make</code></td><td class="wrap"><code>Do{Def{%record, Apply{_record, Tuple{Quote{T}, Quote{Tuple{f, ...}}}}}, Def{T, Apply{arg, Tuple{%record, 0}}}, Def{make, Apply{arg, Tuple{%record, 1}}}, Declare{_with}, Set{_with, Fusion{_with, Apply{_record_with, Tuple{T, make}}}}}</code></td></tr>
 <tr><td><code>x = e</code></td><td><code>Set{x, e}</code></td></tr>
 <tr><td><code>x += e</code> <code>x -= e</code> <code>x *= e</code> <code>x /= e</code> <code>x %= e</code></td><td><code>Set{x, Apply{_add, Tuple{x, e}}}</code>. The others are <code>_sub</code> <code>_mul</code> <code>_div</code> <code>_mod</code></td></tr>
 <tr><td><code>a[i] = e</code></td><td><code>Apply{_index_set, Tuple{a, i, e}}</code></td></tr>
 <tr><td><code>a[i] += e</code> (and <code>-=</code> <code>*=</code> <code>/=</code> <code>%=</code>)</td><td class="wrap"><code>Do{Def{ta, a}, Def{ti, i}, Apply{_index_set, Tuple{ta, ti, Apply{_add, Tuple{Apply{_index_get, Tuple{ta, ti}}, e}}}}}</code> (<code>ta</code> and <code>ti</code> are fresh variables)</td></tr>
-<tr><td><code>t with { f = e, ... }</code></td><td class="wrap"><code>Apply{_record_with, Tuple{t, Quote{f}, e}}</code>. Several fields nest in order</td></tr>
+<tr><td><code>t with { f = e, ... }</code></td><td class="wrap"><code>Apply{_with, Tuple{t, Quote{f}, e}}</code>. Several fields nest in order</td></tr>
 <tr><td><code>f | g</code></td><td><code>Fusion{f, g}</code></td></tr>
 <tr><td><code>(p, ...) if cond -&gt; body | g</code>, <code>p if cond -&gt; body | g</code></td><td class="wrap">A function that calls <code>g</code> with the same arguments when they do not match the parameters or <code>cond</code> is false</td></tr>
 <tr><td><code>(p, ...) -&gt; body</code>, <code>p -&gt; body</code></td><td><code>Lambda{Tuple{p, ...}, body}</code></td></tr>
@@ -151,8 +151,8 @@
 <span class="res">Apply{_index_get, Tuple{a, i}}</span>
 <span class="prompt">&gt; </span><span class="tok-op">'</span><span class="tok-op">(</span><span class="tok-name">a</span><span class="tok-op">[</span><span class="tok-name">i</span><span class="tok-op">]</span> <span class="tok-op">=</span> <span class="tok-name">v</span><span class="tok-op">)</span>
 <span class="res">Apply{_index_set, Tuple{a, i, v}}</span>
-<span class="prompt">&gt; </span><span class="tok-op">'</span><span class="tok-op">(</span><span class="tok-name">p</span> <span class="tok-op">@</span> <span class="tok-name">int</span><span class="tok-op">)</span>
-<span class="res">_TypeOf{p, int}</span>
+<span class="prompt">&gt; </span><span class="tok-op">'</span><span class="tok-op">(</span><span class="tok-name">p</span> <span class="tok-op">@</span> <span class="tok-name">Int</span><span class="tok-op">)</span>
+<span class="res">_TypeOf{p, Int}</span>
 <span class="prompt">&gt; </span><span class="tok-op">'</span><span class="tok-op">(</span><span class="tok-kw">if</span> <span class="tok-op">(</span><span class="tok-name">c</span><span class="tok-op">)</span> <span class="tok-name">a</span><span class="tok-op">)</span>
 <span class="res">If{c, a, none}</span>
 <span class="prompt">&gt; </span><span class="tok-op">'</span><span class="tok-op">(</span><span class="tok-kw">while</span> <span class="tok-op">(</span><span class="tok-name">c</span><span class="tok-op">)</span> <span class="tok-name">e</span><span class="tok-op">)</span>
@@ -165,8 +165,8 @@
 <span class="res">Handle{e, h}</span>
 <span class="prompt">&gt; </span><span class="tok-op">'</span><span class="tok-op">(</span><span class="tok-kw">perform</span> <span class="tok-name">E</span><span class="tok-op">{</span><span class="tok-op">}</span><span class="tok-op">)</span>
 <span class="res">Perform{E{}}</span>
-<span class="prompt">&gt; </span><span class="tok-op">'</span><span class="tok-op">(</span><span class="tok-kw">record</span> <span class="tok-name">T</span><span class="tok-op">(</span><span class="tok-name">a</span><span class="tok-op">,</span> <span class="tok-name">b</span><span class="tok-op">)</span><span class="tok-op">)</span>
-<span class="res">Apply{_record_declare, Tuple{Quote{T}, Quote{Tuple{a, b}}}}</span>
+<span class="prompt">&gt; </span><span class="tok-op">'</span><span class="tok-op">(</span><span class="tok-kw">record</span> <span class="tok-name">T</span><span class="tok-op">(</span><span class="tok-name">a</span><span class="tok-op">,</span> <span class="tok-name">b</span><span class="tok-op">)</span> <span class="tok-op">=</span> <span class="tok-name">t</span><span class="tok-op">)</span>
+<span class="res">Do{Def{%record, Apply{_record, Tuple{Quote{T}, Quote{Tuple{a, b}}}}}, Def{T, Apply{arg, Tuple{%record, 0}}}, Def{t, Apply{arg, Tuple{%record, 1}}}, Declare{_with}, Set{_with, Fusion{_with, Apply{_record_with, Tuple{T, t}}}}}</span>
 <span class="prompt">&gt; </span><span class="tok-op">'</span><span class="tok-op">[</span><span class="tok-num">1</span><span class="tok-op">,</span> <span class="tok-num">2</span><span class="tok-op">]</span>
 <span class="res">Cons{1, Cons{2, Nil{}}}</span></pre>
 </div>
@@ -346,10 +346,15 @@
 </div>
 
 <h3 id="record">record and with</h3>
-<p>The <code>.</code> follows its left operand with no space. The fields of <code>with</code> are replaced from the left, and a right-hand side can refer to the fields of the original <code>t</code>. <code>with { ... }</code> can follow another one.</p>
+<p><code>record T(f, ...) = make</code> defines the type <code>T</code> and the function <code>make</code> that makes the data, as separate names. A data is made by <code>make(a, ...)</code> and its field is read by <code>x.f</code>. <code>x @ T</code> is a pattern that tests the type, and the type of a module is written <code>x @ m.T</code>.</p>
+<p>The <code>.</code> follows its left operand with no space. <code>t with { f = e, ... }</code> is a copy with fields replaced. The fields are replaced from the left, and a right-hand side can refer to the fields of the original <code>t</code>. <code>with { ... }</code> can follow another one.</p>
+<ul>
+<li><code>with</code> works only where the <code>record</code> is written (inside the module, for a record in a module). Outside, <code>_with</code> is undefined and it is an error.</li>
+<li><code>export record</code> in a module exports only the type <code>T</code>. <code>make</code> cannot be used from outside the module.</li>
+</ul>
 <div class="example">
-<pre class="repl"><span class="prompt">&gt; </span><span class="tok-kw">record</span> <span class="tok-name">Point</span><span class="tok-op">(</span><span class="tok-name">x</span><span class="tok-op">,</span> <span class="tok-name">y</span><span class="tok-op">)</span>
-<span class="prompt">&gt; </span><span class="tok-name">p</span> <span class="tok-op">:=</span> <span class="tok-name">Point</span><span class="tok-op">{</span><span class="tok-num">1</span><span class="tok-op">,</span> <span class="tok-num">2</span><span class="tok-op">}</span>
+<pre class="repl"><span class="prompt">&gt; </span><span class="tok-kw">record</span> <span class="tok-name">Point</span><span class="tok-op">(</span><span class="tok-name">x</span><span class="tok-op">,</span> <span class="tok-name">y</span><span class="tok-op">)</span> <span class="tok-op">=</span> <span class="tok-name">point</span>
+<span class="prompt">&gt; </span><span class="tok-name">p</span> <span class="tok-op">:=</span> <span class="tok-name">point</span><span class="tok-op">(</span><span class="tok-num">1</span><span class="tok-op">,</span> <span class="tok-num">2</span><span class="tok-op">)</span>
 <span class="prompt">&gt; </span><span class="tok-name">q</span> <span class="tok-op">:=</span> <span class="tok-name">p</span> <span class="tok-kw">with</span> <span class="tok-op">{</span> <span class="tok-name">y</span> <span class="tok-op">=</span> <span class="tok-num">5</span> <span class="tok-op">}</span>
 <span class="prompt">&gt; </span><span class="tok-name">p</span>
 <span class="res">Point{1, 2}</span>
@@ -560,7 +565,6 @@
 <tr><td>vector (added at the front by <code>use("vector")</code>)</td><td>integer</td><td><code>vector.get(a, i)</code></td><td><code>vector.set(a, i, e)</code></td></tr>
 <tr><td>any value</td><td>function</td><td><code>subst(a, i)</code></td><td></td></tr>
 <tr><td>list</td><td>integer</td><td>the element, counted from 0</td><td>stops</td></tr>
-<tr><td>M-expression</td><td>symbol</td><td><code>_record_get(a, i)</code> (a field)</td><td>stops</td></tr>
 <tr><td>M-expression</td><td>integer</td><td><code>arg(a, i)</code> (a position)</td><td>stops</td></tr>
 </table>
 <p>An assignment to an immutable value (string, list, tuple, M-expression), an index out of range, and an <code>a[i]</code> that fits no kind stop the program.</p>
@@ -597,7 +601,7 @@
 <span class="prompt">&gt; </span><span class="tok-name">unparse</span><span class="tok-op">.</span><span class="tok-name">text</span><span class="tok-op">(</span><span class="tok-name">t</span><span class="tok-op">[</span><span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-op">'</span><span class="tok-name">_mul</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">a</span><span class="tok-op">,</span> <span class="tok-num">1</span><span class="tok-op">}</span><span class="tok-op">}</span> <span class="tok-op">-&gt;</span> <span class="tok-name">a</span> <span class="tok-op">|</span> <span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-op">'</span><span class="tok-name">_mul</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-num">0</span><span class="tok-op">,</span> <span class="tok-name">_</span><span class="tok-op">}</span><span class="tok-op">}</span> <span class="tok-op">-&gt;</span> <span class="tok-num">0</span><span class="tok-op">]</span><span class="tok-op">)</span>
 <span class="res">&quot;x + 0&quot;</span>
 <span class="prompt">&gt; </span><span class="tok-name">u</span> <span class="tok-op">:=</span> <span class="tok-op">'</span><span class="tok-op">(</span><span class="tok-num">1</span> <span class="tok-op">*</span> <span class="tok-num">2</span> <span class="tok-op">+</span> <span class="tok-num">3</span> <span class="tok-op">*</span> <span class="tok-num">4</span><span class="tok-op">)</span>
-<span class="prompt">&gt; </span><span class="tok-name">unparse</span><span class="tok-op">.</span><span class="tok-name">text</span><span class="tok-op">(</span><span class="tok-name">u</span><span class="tok-op">[</span><span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-op">'</span><span class="tok-name">_mul</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">a</span> <span class="tok-op">@</span> <span class="tok-name">int</span><span class="tok-op">,</span> <span class="tok-name">b</span> <span class="tok-op">@</span> <span class="tok-name">int</span><span class="tok-op">}</span><span class="tok-op">}</span> <span class="tok-kw">if</span> <span class="tok-name">a</span> <span class="tok-op">&gt;</span> <span class="tok-num">1</span> <span class="tok-op">-&gt;</span> <span class="tok-name">a</span> <span class="tok-op">*</span> <span class="tok-name">b</span><span class="tok-op">]</span><span class="tok-op">)</span>
+<span class="prompt">&gt; </span><span class="tok-name">unparse</span><span class="tok-op">.</span><span class="tok-name">text</span><span class="tok-op">(</span><span class="tok-name">u</span><span class="tok-op">[</span><span class="tok-name">Apply</span><span class="tok-op">{</span><span class="tok-op">'</span><span class="tok-name">_mul</span><span class="tok-op">,</span> <span class="tok-name">Tuple</span><span class="tok-op">{</span><span class="tok-name">a</span> <span class="tok-op">@</span> <span class="tok-name">Int</span><span class="tok-op">,</span> <span class="tok-name">b</span> <span class="tok-op">@</span> <span class="tok-name">Int</span><span class="tok-op">}</span><span class="tok-op">}</span> <span class="tok-kw">if</span> <span class="tok-name">a</span> <span class="tok-op">&gt;</span> <span class="tok-num">1</span> <span class="tok-op">-&gt;</span> <span class="tok-name">a</span> <span class="tok-op">*</span> <span class="tok-name">b</span><span class="tok-op">]</span><span class="tok-op">)</span>
 <span class="res">&quot;1 * 2 + 12&quot;</span></pre>
 </div>
 

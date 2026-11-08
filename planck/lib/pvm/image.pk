@@ -3,7 +3,8 @@
 #
 # The image is the initial heap of planckvm as 32-bit little-endian words; the word index in the file is the heap index.
 # Words 0 to 15 are the roots: 0 is the Lambda that is run first, 1 false, 2 true, 3 none, 4 Tuple, 5 Cons, 6 Nil, and 7 to 15 the symbols
-# that type gives (Int String Symbol Expr Function Array Plain Float Complex). The objects follow.
+# the types of the values (Int String Symbol Expr Function Array Plain Float Complex). The objects follow.
+# The global variables of the cells Int, String, Symbol, Expr, Function, Array, Plain, Float, Complex and Type have the types as the values.
 #
 # pvm_image.build(codes, entry) is the buffer of bytes of the image (bytes.pk). codes is a list of
 # Code{name, arity, nregs, instrs, consts}. entry is the name of the code that is run first; its arity is 0.
@@ -34,7 +35,7 @@ module pvm_image {
         ["RET", 22, 'abc, ['a]], ["NEXT", 23, 'abc, []], ["HALT", 24, 'abc, ['a]], ["CLOSURE", 25, 'ad, ['a, 'd]],
         ["FUSION", 26, 'abc, ['a, 'b, 'c]], ["TUPLE", 27, 'abc, ['a, 'b, 'c]], ["CONS", 28, 'abc, ['a, 'b, 'c]],
         ["BUILD", 29, 'abc, ['a, 'b, 'c]], ["FIELD", 30, 'abc, ['a, 'b, 'c]], ["MATCHEQ", 31, 'ad, ['a, 'd]],
-        ["MATCHHEAD", 32, 'abc, ['a, 'b, 'c]], ["MATCHTYPE", 33, 'ad, ['a, 'd]], ["HANDLE", 34, 'abc, ['a, 'b]],
+        ["MATCHHEAD", 32, 'abc, ['a, 'b, 'c]], ["MATCHTYPE", 33, 'abc, ['a, 'b]], ["HANDLE", 34, 'abc, ['a, 'b]],
         ["PERFORM", 35, 'abc, ['a, 'b]], ["EXT", 36, 'j, ['j]],
         ["ADD", 37, 'abc, ['a, 'b, 'c]], ["SUB", 38, 'abc, ['a, 'b, 'c]], ["MUL", 39, 'abc, ['a, 'b, 'c]],
         ["DIV", 40, 'abc, ['a, 'b, 'c]], ["MOD", 41, 'abc, ['a, 'b, 'c]], ["ADDI", 42, 'abc, ['a, 'b, 'c]],
@@ -57,7 +58,8 @@ module pvm_image {
         ["bit_and", 25, 2], ["bit_or", 26, 2], ["bit_xor", 27, 2], ["bit_shl", 28, 2], ["bit_sar", 29, 2],
         ["array", 30, 1], ["plain_array", 31, 2], ["plain_len", 32, 1], ["plain_kind", 33, 1], ["array_get", 34, 2], ["array_set", 35, 3],
         ["array_len", 36, 1], ["plain_get", 37, 2], ["plain_set", 38, 3],
-        ["str_to_bytes", 39, 1], ["bytes_to_str", 40, 1], ["bit_not", 41, 1], ["bit_shr", 42, 2]
+        ["str_to_bytes", 39, 1], ["bytes_to_str", 40, 1], ["bit_not", 41, 1], ["bit_shr", 42, 2],
+        ["_record_new", 43, 2]
     ]
 
     type_names := ["Int", "String", "Symbol", "Expr", "Function", "Array", "Plain", "Float", "Complex"]
@@ -180,14 +182,24 @@ module pvm_image {
         tuple_ := symbol("Tuple")
         cons_ := symbol("Cons")
         nil_ := symbol("Nil")
-        types := map(symbol, type_names)
+        # the types: the type Type is the type of every type, so it is made first and refers to itself
+        empty_ := add(['mexpr, "Tuple", []], Obj{5, [R{tuple_}]})
+        type_obj := table.new()
+        make_type(n) := {
+            name := symbol(n)
+            id := vector.len(objs)
+            add(['type, n], Obj{13, [W{0}, R{name}, R{empty_}, R{table.get(type_obj, "Type", id)}]})
+        }
+        table.set(type_obj, "Type", make_type("Type"))
+        each(n -> table.set(type_obj, n, make_type(n)), type_names)
+        types := map(n -> table.get(type_obj, n, none), type_names)
         builtin_obj(e) := once(['builtin, e[0]], () -> {
             add(['builtin, e[0]], Obj{10, [W{0}, V{e[1]}, V{e[2]}, R{symbol(e[0])}]})
         })
         cell(s) := once(['cell, s], () -> {
             sym := symbol(s)
             b := list.find(e -> e[0] == s, builtins)
-            val := if (b == none) R{n_} else R{builtin_obj(b)}
+            val := if (table.has(type_obj, s)) R{table.get(type_obj, s, none)} else if (b == none) R{n_} else R{builtin_obj(b)}
             add(['cell, s], Obj{13, [val, R{sym}, V{-1}]})
         })
         # reserve the code objects so that they can refer to each other
