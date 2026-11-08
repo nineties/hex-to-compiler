@@ -1,0 +1,52 @@
+# Code that is made while the program runs: _code_new makes a code from the words of the instructions and the constants, _lambda a function of it,
+# and _cells, _cell_new, _cell_field and _cell_set give the global cells
+use("pvm/compile")
+use("bytes")
+
+prog := [
+    `(cells := _cells()),
+    `(find_cell(name, gen) := {
+        i := 0
+        r := none
+        while (i < array_len(cells)) {
+            c := array_get(cells, i)
+            if (_cell_field(c, 1) == name and _cell_field(c, 2) == gen) r = c
+            i = i + 1
+        }
+        r
+    }),
+    # GETGLOBAL R1 K0; LOADK R2 K1; CALL R1 R1 1; LOADI R0 42; RET R0
+    `(ins := plain_array('u32, 5)),
+    `(plain_set(ins, 0, 260)),
+    `(plain_set(ins, 1, 66050)),
+    `(plain_set(ins, 2, 16843028)),
+    `(plain_set(ins, 3, 2752513)),
+    `(plain_set(ins, 4, 22)),
+    `(ks := array(2)),
+    `(array_set(ks, 0, find_cell('println, 0))),
+    `(array_set(ks, 1, "hello from loaded code")),
+    `(f := _lambda(_code_new(0, 4, ins, ks))),
+    `(println(f())),
+    # a new cell: the value is set from the program, read by GETGLOBAL R0 K0; RET R0, and set by LOADI R0 123; SETGLOBAL R0 K0; RET R0
+    `(c2 := _cell_new('loaded_var, 1)),
+    `(_cell_set(c2, 77)),
+    `(println(_cell_field(c2, 0))),
+    `(println(_cell_field(c2, 1))),
+    `(println(_cell_field(c2, 2))),
+    `(ins2 := plain_array('u32, 2)),
+    `(plain_set(ins2, 0, 4)),
+    `(plain_set(ins2, 1, 22)),
+    `(ks2 := array(1)),
+    `(array_set(ks2, 0, c2)),
+    `(println(_lambda(_code_new(0, 2, ins2, ks2))())),
+    `(ins3 := plain_array('u32, 3)),
+    `(plain_set(ins3, 0, 8060929)),
+    `(plain_set(ins3, 1, 5)),
+    `(plain_set(ins3, 2, 22)),
+    `(_lambda(_code_new(0, 2, ins3, ks2))()),
+    `(println(_cell_field(c2, 0))),
+    # a wrong argument is a runtime error
+    `(println(handle _code_new(0, 4, 5, ks) with (Error{loc, msg}, k) -> msg))
+]
+
+write_file(array_get(argv(), 1), bytes.to_u8(pvm_compile.image(prog)))

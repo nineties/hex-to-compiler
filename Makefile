@@ -85,7 +85,7 @@ test-planck0: planck0
 		echo "$$f: stops"; \
 	done; rm -f tmp-error.out tmp-error.err
 
-# build planck/vm as units and run the programs of planck/examples/vm on it
+# build planck/vm as units and run the programs of planck/examples/vm on it; the standard input is the file of the same name with .in, or empty
 VM_UNITS := mem gc big flt dec num obj bit trans nb arr eq builtin hsh ctl ops vm
 test-vm: planck0
 	@done=; for u in $(VM_UNITS); do \
@@ -94,7 +94,8 @@ test-vm: planck0
 	done; ./planck0 planck/vasmc.pk link tmp-vm x86_64 $$done || exit 1
 	@for f in $(VM_EXAMPLES); do \
 		./planck0 $$f tmp-vm.img || exit 1; \
-		./tmp-vm tmp-vm.img > tmp-vm.out || exit 1; \
+		in=/dev/null; if [ -f $${f%.pk}.in ]; then in=$${f%.pk}.in; fi; \
+		./tmp-vm tmp-vm.img < $$in > tmp-vm.out || exit 1; \
 		diff -u $${f%.pk}.out tmp-vm.out || exit 1; \
 		echo "$$f: ok"; \
 	done; rm -f tmp-vm tmp-vm-*.unit tmp-vm.img tmp-vm.out
