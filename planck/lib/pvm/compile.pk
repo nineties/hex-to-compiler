@@ -57,12 +57,10 @@ module pvm_compile {
     gl := table.new()
     nlabel := 0
 
+    # a compile error is the effect Error{none, message}, which the program that compiles at run time can catch
     err(msg, e) := {
-        put("pvm_compile: ")
-        put(msg)
-        put(": ")
-        println(e)
-        exit(1)
+        m := _strcat("pvm_compile: ", msg)
+        perform Error{none, if (type(e) == Symbol) _strcat(m, _strcat(": ", symname(e))) else m}
     }
 
     new_ctx(parent, top, arity, notail) := {
@@ -161,7 +159,7 @@ module pvm_compile {
         name := symname(x)
         g := table.get(gl, name, none)
         if (g != none) g
-        else if (list.member(name, builtin_names)) 0
+        else if (list.member(name, builtin_names) or list.member(name, pvm_image.type_names)) 0
         else err("undefined variable", x)
     }
 
@@ -253,7 +251,15 @@ module pvm_compile {
                 emit_pro(c, MATCHEQ{r, kidx(c, constval(arg(p, 0)))})
                 emit_pro(c, NEXT{})
             } else if (h == '_TypeOf) {
-                emit_pro(c, MATCHTYPE{r, kidx(c, Y{symname(arg(p, 1))})})
+                ty2 := arg(p, 1)
+                if (type(ty2) != Symbol or is_literal(ty2)) err("the type of _TypeOf must be a variable", p)
+                tv := new_var(c, none, true, -1)
+                tvid := lookup(c, ty2)
+                if (tvid != none) {
+                    touch(c, tvid)
+                    emit_pro(c, GetVar{V{tv}, tvid})
+                } else emit_pro(c, GETGLOBAL{V{tv}, kidx(c, Cg{symname(ty2), gen_of(ty2)})})
+                emit_pro(c, MATCHTYPE{r, V{tv}})
                 emit_pro(c, NEXT{})
                 bind_to(c, arg(p, 0), r)
             } else if (h == '_Rest) err("a rest pattern is not supported by planckvm", p)
@@ -283,7 +289,7 @@ module pvm_compile {
     ops := [
         ['_add, 'ADD, 2], ['_sub, 'SUB, 2], ['_mul, 'MUL, 2], ['_div, 'DIV, 2], ['_mod, 'MOD, 2],
         ['_lt, 'LT, 2], ['_ge, 'GE, 2], ['_eq, 'EQ, 2], ['_ne, 'NE, 2],
-        ['head, 'HEAD, 1], ['arity, 'ARITY, 1], ['arg, 'ARG, 2], ['push, 'PUSH, 2], ['typeof, 'TYPEOF, 1],
+        ['head, 'HEAD, 1], ['arity, 'ARITY, 1], ['arg, 'ARG, 2], ['push, 'PUSH, 2], ['typeof, 'TYPEOF, 1], ['type, 'TYPEOF, 1],
         ['strlen, 'STRLEN, 1], ['ord, 'ORD, 2], ['array_get, 'AGET, 2], ['array_len, 'ALEN, 1], ['hash, 'HASH, 1],
         ['plain_get, 'PLAINGET, 2]
     ]
@@ -299,9 +305,33 @@ module pvm_compile {
         }
     }
 
+    # the planckvm has lt and ge only: Apply{_gt, Tuple{a, b}} is Apply{_lt, Tuple{b, a}} and _le is _ge of the swapped arguments.
+    # When neither operand is a variable, a number or a string, both are first bound to variables, so that they are evaluated in the order of the source.
+    simple(x) := type(x) != Expr or head(x) == 'Quote
+    rw(c, e) := {
+        f := arg(e, 0)
+        args := arg(e, 1)
+        if ((f == '_gt or f == '_le) and lookup(c, f) == none and head(args) == 'Tuple and arity(args) == 2) {
+            a := arg(args, 0)
+            b := arg(args, 1)
+            op := if (f == '_gt) '_lt else '_ge
+            if (simple(a) or simple(b)) mk('Apply, [op, mk('Tuple, [b, a])])
+            else {
+                nlabel = nlabel + 1
+                x := intern(f"%g{nlabel}")
+                y := intern(f"%h{nlabel}")
+                mk('Do, [mk('Def, [x, a]), mk('Def, [y, b]), mk('Apply, [op, mk('Tuple, [y, x])])])
+            }
+        } else e
+    }
+
     cx_int(c, n, d) := {
         if (n >= -32768 and n < 32768) emit(c, LOADI{t(c, d), n})
-        else emit(c, LOADK{t(c, d), kidx(c, constval(n))})
+        else if (n >= 536870912 or n <= -536870912) {
+            # beyond 29 bits: built with the multiplication, which gives a big integer at run time
+            q := n / 32768 - (if (n % 32768 < 0) 1 else 0)
+            cx(c, mk('Apply, ['_add, mk('Tuple, [mk('Apply, ['_mul, mk('Tuple, [q, 32768])]), n - q * 32768])]), d)
+        } else emit(c, LOADK{t(c, d), kidx(c, constval(n))})
     }
 
     cx_var(c, x, d) := {
@@ -328,7 +358,12 @@ module pvm_compile {
     }
 
     # call(c, e, d, tail) emits the call. It is true when the code ends there (a tail call), and false when the value is in the temporary d.
-    call(c, e, d, tail) := {
+    call(c, e0, d, tail) := {
+        e := rw(c, e0)
+        if (head(e) == 'Do) {
+            cx(c, e, d)
+            return false
+        }
         o := op_of(c, e)
         args := arg(e, 1)
         if (o != none) {
@@ -363,6 +398,8 @@ module pvm_compile {
 
     cx_def(c, e, d) := {
         x := arg(e, 0)
+        # true, false and none are values of the image; Def{true, Quote{true}} of init.pk only gives the value
+        if (type(x) == Symbol and is_literal(x) and arity(e) == 2 and type(arg(e, 1)) == Expr and head(arg(e, 1)) == 'Quote and arg(arg(e, 1), 0) == x) return cx(c, arg(e, 1), d)
         if (type(x) != Symbol or is_literal(x)) err("malformed Def", e)
         cx(c, arg(e, 1), d)
         if (is_global(c)) {
@@ -654,7 +691,8 @@ module pvm_compile {
             }
             done = true
         } else if (type(e) == Expr and head(e) == 'Apply and arity(e) == 2) {
-            o := op_of(c, e)
+            e = rw(c, e)
+            o := if (head(e) == 'Apply) op_of(c, e) else none
             cm := if (o == none) none else list.find(x -> x[0] == o[0], cmp_ops)
             if (cm != none) {
                 args := arg(e, 1)
@@ -707,6 +745,9 @@ module pvm_compile {
     }
 
     # the number of environments to go up from c to the owner of v
+    # true while the entry of a code is finished: its own environment is not made yet, so the hops to a variable of an outer code are one fewer
+    in_pro := false
+
     hops(c, v) := {
         x := c
         n := 0
@@ -714,7 +755,7 @@ module pvm_compile {
             if (x[X_HASENV]) n = n + 1
             x = x[X_PARENT]
         }
-        n
+        if (in_pro and c[X_HASENV] and v[V_CTX] != c[X_ID]) n - 1 else n
     }
 
     reg_of(c, o) := {
@@ -776,7 +817,9 @@ module pvm_compile {
 
     code_of(c) := {
         out := vector.new()
+        in_pro = true
         each(i -> finish(c, out, i), vector.to_list(c[X_PRO]))
+        in_pro = false
         if (c[X_HASENV]) {
             finish_plain(c, out, NEWENV{c[X_NSLOTS]})
             each(vid -> {
@@ -788,10 +831,22 @@ module pvm_compile {
         Code{c[X_NAME], c[X_ARITY], c[X_TBASE] + c[X_NTMP], vector.to_list(out), vector.to_list(c[X_CONSTS])}
     }
 
+    fun compile_in
+
+    # compile_with(globals, exprs) compiles with the generations of the global variables in the table globals, which a Def at the top level updates
+    export compile_with(globals, exprs) := {
+        gl = globals
+        compile_in(exprs)
+    }
+
     export compile(exprs) := {
+        gl = table.new()
+        compile_in(exprs)
+    }
+
+    compile_in(exprs) = {
         ctxs = vector.new()
         vars = vector.new()
-        gl = table.new()
         nlabel = 0
         main := new_ctx(none, true, 0, false)
         names := map(e -> {

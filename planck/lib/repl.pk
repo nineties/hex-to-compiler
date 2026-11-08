@@ -1,0 +1,49 @@
+# repl: a read-eval-print loop for planckvm
+# Copyright (C) 2026 nineties
+#
+# repl.run() reads the standard input line by line. Each line is parsed into expressions, which are evaluated one by one in the running image,
+# and the value of each expression is printed unless it is none or the expression is a definition. A syntax error or a runtime error (the effect Error) is printed and the loop goes on.
+# It needs the libraries of planck/lib/io.pk and planck/lib/pvm/link.pk, and the grammar of planck/syntax.pk, in the image.
+
+module repl {
+    export prompt := "> "
+
+    # the value of a definition or an assignment is not shown
+    is_def(e) := type(e) == Expr and (head(e) == 'Def or head(e) == 'Set or (head(e) == 'Do and arity(e) > 0 and is_def(arg(e, arity(e) - 1))))
+
+    # eval_line(s) evaluates every expression of the text s, and prints the values
+    eval_line(s) := {
+        go := true
+        while (go) {
+            r := parse(s)
+            e := arg(r, 0)
+            if (type(e) == Expr and head(e) == 'Eof) go = false
+            else if (type(e) == Expr and head(e) == 'SyntaxError) {
+                put("syntax error: ")
+                put(arg(e, 0))
+                put("\n")
+                go = false
+            } else {
+                s = arg(r, 1)
+                v := handle eval(e) with (Error{loc, msg}, k) -> {
+                    put("error: ")
+                    put(msg)
+                    put("\n")
+                    none
+                }
+                if (v != none and not is_def(e)) println(v)
+            }
+        }
+    }
+
+    export run() := {
+        put(prompt)
+        line := read_line()
+        while (line != none) {
+            eval_line(line)
+            put(prompt)
+            line = read_line()
+        }
+        put("\n")
+    }
+}
