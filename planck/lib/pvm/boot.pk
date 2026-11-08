@@ -1,0 +1,66 @@
+# pvm/boot: the definitions that an image of planck itself starts with
+# Copyright (C) 2026 nineties
+#
+# When the files of planck are compiled into an image of planckvm and run there, the files define the variables that planck0 has built in:
+# the first definitions below stand for them, and the files are loaded in the order of planck/examples/vm/repl.pk.
+#
+# The rules of planck/peg.pk and planck/syntax.pk are given actions that eval makes into functions, before the compiler of the image is loaded.
+# eval below therefore gives a function that calls the function _real_eval makes from the same expression, when it is called first.
+# _real_eval is set to the eval of planck/syntax.pk after the libraries are loaded.
+
+_set_file(p) := none
+parse := none
+_eval_expanded := e -> e
+use(name) := none
+load(path) := none
+u8_array(n) := plain_array('u8, n)
+read_file := none
+
+_real_eval := none
+
+# the value of the newest cell of the global variable named by the symbol
+_sym_value(s) := {
+    all := _cells()
+    i := 0
+    best := none
+    bg := -1
+    while (i < array_len(all)) {
+        c := array_get(all, i)
+        if (_cell_field(c, 1) == s) {
+            g := _cell_field(c, 2)
+            if (type(g) != Int) g = 0
+            if (g > bg) {
+                bg = g
+                best = c
+            }
+        }
+        i = i + 1
+    }
+    _cell_field(best, 0)
+}
+
+# eval(e) for a function with up to 8 parameters or a symbol
+eval := e -> {
+    if (type(e) == Symbol) _sym_value(e)
+    else {
+        n := if (type(e) == Expr and head(e) == 'Lambda and head(arg(e, 0)) == 'Tuple) arity(arg(e, 0)) else -1
+        cache := array(1)
+        get := () -> {
+            if (array_get(cache, 0) == none) array_set(cache, 0, _real_eval(e))
+            array_get(cache, 0)
+        }
+        if (n == 0) () -> get()()
+        else if (n == 1) (a) -> get()(a)
+        else if (n == 2) (a, b) -> get()(a, b)
+        else if (n == 3) (a, b, c) -> get()(a, b, c)
+        else if (n == 4) (a, b, c, d) -> get()(a, b, c, d)
+        else if (n == 5) (a, b, c, d, e2) -> get()(a, b, c, d, e2)
+        else if (n == 6) (a, b, c, d, e2, f) -> get()(a, b, c, d, e2, f)
+        else if (n == 7) (a, b, c, d, e2, f, g) -> get()(a, b, c, d, e2, f, g)
+        else if (n == 8) (a, b, c, d, e2, f, g, h) -> get()(a, b, c, d, e2, f, g, h)
+        else {
+            println("eval: cannot defer")
+            exit(1)
+        }
+    }
+}

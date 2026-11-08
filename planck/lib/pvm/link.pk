@@ -1,0 +1,136 @@
+# pvm/link: loads the codes that pvm/compile makes into the running planckvm
+# Copyright (C) 2026 nineties
+#
+# pvm_link.globals() is a table of the generation of the newest cell of each global variable name, to give to pvm_compile.compile_with.
+# pvm_link.eval_expanded(e) compiles an expression and runs it in the running planckvm.
+# pvm_link.load_codes(codes, entry) is the Lambda of the code of the name entry, made from the list of Code{name, arity, nregs, instrs, consts} of pvm/image.pk,
+# the way pvm_image.build lays them out in an image. The cells of the global variables are the ones of the running image, or new ones.
+
+use("base")
+use("list")
+use("table")
+use("pvm/image")
+use("pvm/compile")
+
+module pvm_link {
+    cells_by_key := table.new()
+    cells_seen := 0
+
+    # the generation of a cell; the cells of the types have no number, and are generation 0
+    gen_of(c) := {
+        g := _cell_field(c, 2)
+        if (type(g) == Int) g else 0
+    }
+
+    # the cells by name, then by generation
+    cells_of(name) := {
+        t := table.get(cells_by_key, name, none)
+        if (t == none) {
+            t = table.new()
+            table.set(cells_by_key, name, t)
+        }
+        t
+    }
+
+    # the cells that the image has and the ones made so far
+    scan_cells() := {
+        all := _cells()
+        n := array_len(all)
+        while (cells_seen < n) {
+            c := array_get(all, cells_seen)
+            table.set(cells_of(symname(_cell_field(c, 1))), gen_of(c), c)
+            cells_seen = cells_seen + 1
+        }
+    }
+
+    gens := none
+
+    export globals() := {
+        scan_cells()
+        if (gens != none) return gens
+        t := table.new()
+        all := _cells()
+        i := 0
+        while (i < array_len(all)) {
+            c := array_get(all, i)
+            name := symname(_cell_field(c, 1))
+            g := gen_of(c)
+            old := table.get(t, name, -1)
+            if (g > old) table.set(t, name, g)
+            i = i + 1
+        }
+        gens = t
+        t
+    }
+
+    cell(name, g) := {
+        ts := cells_of(name)
+        c := table.get(ts, g, none)
+        if (c == none) {
+            c = _cell_new(intern(name), g)
+            table.set(ts, g, c)
+        }
+        c
+    }
+
+    value_of(x, make) := match x {
+        K{n} -> make(n)
+      | I{n} -> n
+      | S{s} -> s
+      | Y{s} -> intern(s)
+      | C{s} -> cell(s, 0)
+      | Cg{s, g} -> cell(s, g)
+      | T{} -> true
+      | F{} -> false
+      | N{} -> none
+      | M{h, xs} -> {
+            m := mexpr(intern(h), Tuple{})
+            each(y -> { m = push(m, value_of(y, make)) }, xs)
+            m
+        }
+    }
+    export load_codes(codes, entry) := {
+        scan_cells()
+        by_name := table.new()
+        made := table.new()
+        each(c -> table.set(by_name, c[0], c), codes)
+        make(name) := {
+            m := table.get(made, name, none)
+            if (m != none) m
+            else {
+                c := table.get(by_name, name, none)
+                if (c == none) panic(_strcat("pvm_link: no code ", name))
+                labels := pvm_image.label_table(c[3])
+                words := []
+                pc := 0
+                each(i -> if (head(i) != 'Label) {
+                    b := pvm_image.encode(labels, pc + 1, i)
+                    words = (b[0] + b[1] * 256 + b[2] * 65536 + b[3] * 16777216) :: words
+                    pc = pc + 1
+                }, c[3])
+                ins := plain_array('u32, pc)
+                k := pc - 1
+                each(w -> {
+                    plain_set(ins, k, w)
+                    k = k - 1
+                }, words)
+                ks := array(length(c[4]))
+                j := 0
+                each(x -> {
+                    array_set(ks, j, value_of(x, make))
+                    j = j + 1
+                }, c[4])
+                code := _code_new(c[1], c[2], ins, ks)
+                table.set(made, name, code)
+                code
+            }
+        }
+        _lambda(make(entry))
+    }
+
+    # eval_expanded(e) compiles the expression e, whose macros are expanded, loads it and gives its value
+    export eval_expanded(e) := {
+        codes := pvm_compile.compile_with(globals(), [e])
+        load_codes(codes, "main")()
+    }
+}
