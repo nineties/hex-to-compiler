@@ -53,7 +53,7 @@ VASM_TARGETS := x86_64
 VM_EXAMPLES := $(filter-out planck/examples/vm/float.pk planck/examples/vm/plain_float.pk planck/examples/vm/trans.pk planck/examples/vm/bits.pk planck/examples/vm/equality.pk planck/examples/vm/plain_int.pk,$(wildcard planck/examples/vm/*.pk))
 BACKEND_EXAMPLES := $(wildcard planck/examples/backend/*.pk)
 
-.PHONY: clean test test-planck0 test-all test-vm test-udiv preprocess
+.PHONY: clean test test-planck0 test-all test-vm test-udiv test-fm preprocess
 clean:
 	rm -f planck/lib/*.pkm planck/lib/*/*.pkm
 	rm -f pforth
@@ -104,6 +104,21 @@ $(VM_BUILD):
 	mkdir -p $@
 tmp-vm: $(VM_UNIT_FILES) planck0
 	./planck0 planck/vasmc.pk link $@ x86_64 $(VM_UNIT_FILES)
+
+# the coefficients and the constants of the floating point of planck/vm are written by tools/gen_fm_vm0.pk, which runs on tmp-vm (the planckvm without floating point)
+$(VM_BUILD)/fmk.img: tools/gen_fm_vm0.pk planck/lib/pvm/cas.pk planck/lib/pvm/compile.pk planck0 | $(VM_BUILD)
+	./planck0 tools/gen_fm_vm0.pk $@
+$(VM_BUILD)/fmk.native: $(VM_BUILD)/fmk.img tmp-vm
+	./tmp-vm $< > $@
+$(VM_BUILD)/fmk.unit: $(VM_BUILD)/fmk.native $(VASMC_SOURCES) planck0
+	./planck0 planck/vasmc.pk unit $< $@ x86_64
+
+# check exp, log, pow, sin, cos and atan2 of planck/vm/fm.native; the status of the program is the number of results more than 1 ulp apart
+test-fm: $(VM_BUILD)/fmk.unit planck0
+	./planck0 planck/vasmc.pk unit planck/vm/fm.native $(VM_BUILD)/fm.unit x86_64 $(VM_BUILD)/fmk.unit
+	./planck0 planck/vasmc.pk unit planck/tests/fm/main.native $(VM_BUILD)/fmtest.unit x86_64 $(VM_BUILD)/fm.unit
+	./planck0 planck/vasmc.pk link $(VM_BUILD)/fmtest x86_64 $(VM_BUILD)/fmk.unit $(VM_BUILD)/fm.unit $(VM_BUILD)/fmtest.unit
+	$(VM_BUILD)/fmtest
 
 test-vm: tmp-vm
 	@for f in $(VM_EXAMPLES); do \
