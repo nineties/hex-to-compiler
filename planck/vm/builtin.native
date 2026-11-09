@@ -7,6 +7,7 @@
 import mem
 import obj
 import big
+import udiv
 import num
 import nb
 import arr
@@ -123,27 +124,49 @@ fn out_symbol[r](h: &r [u32], sym: i64) {
     out_bytes(h, name, 0, str_len(h, name))
 }
 
-# out_big writes the decimal digits of a big integer: the digits are divided by 10000 again and again
+# out_pad writes the decimal digits of n with zeros before them to the width w
+fn out_pad(n: i64, w: i64) {
+    let buf = alloc(w, 0 as u8)
+    var x: i64
+    var i: i64
+    x = n
+    i = w - 1
+    while i >= 0 {
+        buf[i] = ((x % 10) + 48) as u8
+        x = x / 10
+        i -= 1
+    }
+    region q {
+        var b: &q [u8]
+        b = &q buf
+        write(1, b)
+    }
+    free(buf)
+}
+
+# out_big writes the decimal digits of a big integer: the digits are divided by 10^19 again and again
 fn out_big[r](h: &r [u32], v: i64) {
     let nd = g(h, (v >> 1) + 2)
-    let t = alloc(nd, 0 as i64)
-    let chunks = alloc(2 * nd + 2, 0 as i64)
+    let dd: u64 = 10000000000000000000
+    let rv = recip(dd)
+    let t = alloc(nd, 0 as u64)
+    let chunks = alloc(2 * nd + 2, 0 as u64)
     for i in 0 as i64..nd {
-        t[i] = g(h, (v >> 1) + 3 + i)
+        t[i] = rd(h, (v >> 1) + 3 + 2 * i)
     }
     var n: i64
     var nc: i64
     n = nd
     nc = 0
     while n > 0 {
-        var rem: i64
+        var rem: u64
         rem = 0
         var i: i64
         i = n - 1
         while i >= 0 {
-            let cur = rem * 65536 + t[i]
-            t[i] = cur / 10000
-            rem = cur - t[i] * 10000
+            let a = div2by1(rem, t[i], dd, rv)
+            t[i] = a.q
+            rem = a.r
             i -= 1
         }
         chunks[nc] = rem
@@ -155,14 +178,18 @@ fn out_big[r](h: &r [u32], v: i64) {
     if g(h, (v >> 1) + 1) == 1 { out_lit("-") }
     var k: i64
     k = nc - 1
-    out_int(chunks[k])
+    let top = chunks[k]
+    if top >= 10000000000 {
+        out_int((top / 10000000000) as i64)
+        out_pad((top % 10000000000) as i64, 10)
+    } else {
+        out_int(top as i64)
+    }
     k -= 1
     while k >= 0 {
         let c = chunks[k]
-        out_int(c / 1000)
-        out_int((c / 100) % 10)
-        out_int((c / 10) % 10)
-        out_int(c % 10)
+        out_pad((c / 10000000000) as i64, 9)
+        out_pad((c % 10000000000) as i64, 10)
         k -= 1
     }
     free(t)
