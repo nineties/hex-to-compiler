@@ -87,7 +87,7 @@ test-planck0: planck0
 	done; rm -f tmp-error.out tmp-error.err
 
 # build planck/vm as units and run the programs of planck/examples/vm that use no float on it; the standard input is the file of the same name with .in, or empty
-VM_UNITS := mem gc big num obj bit nb arr eq builtin hsh ctl ops vm
+VM_UNITS := mem gc udiv big num obj bit nb arr eq builtin hsh ctl ops vm
 VM_BUILD := tmp-vm-build
 VM_UNIT_FILES := $(addprefix $(VM_BUILD)/,$(addsuffix .unit,$(VM_UNITS)))
 # everything that a unit depends on besides its source: the compiler, which is planck/vasmc.pk and the libraries that it uses

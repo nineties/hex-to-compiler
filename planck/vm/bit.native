@@ -2,17 +2,19 @@
 import mem
 import big
 
-# the digit i of 16 bits of the two's complement of v, over n digits; carry is the carry of the negation of the lower digits (1 at the start)
-fn tc_digit[r](h: &r [u32], v: i64, i: i64, carry: i64) -> i64 {
+# the digit i of 64 bits of the two's complement of v; carry is the carry of the negation of the lower digits (1 at the start)
+fn tc_digit[r](h: &r [u32], v: i64, i: i64, carry: u64) -> u64 {
     let d = i_dig(h, v, i)
     if i_sign(h, v) == 0 { return d }
-    ((65535 - d) + carry) & 65535
+    (d ^ 18446744073709551615) + carry
 }
 
 # the carry out of the digit i in the negation of v
-fn tc_carry[r](h: &r [u32], v: i64, i: i64, carry: i64) -> i64 {
+fn tc_carry[r](h: &r [u32], v: i64, i: i64, carry: u64) -> u64 {
     if i_sign(h, v) == 0 { return 0 }
-    ((65535 - i_dig(h, v, i)) + carry) >> 16
+    let t = (i_dig(h, v, i) ^ 18446744073709551615) + carry
+    if t < carry { return 1 }
+    0
 }
 
 # x and y (op 0), x or y (op 1), x xor y (op 2)
@@ -30,8 +32,8 @@ fn int_bitop[r](h: &mut r [u32], st: &mut r [u32], op: i64, x: i64, y: i64) -> i
     n += 1
     let v = alloc_big(h, st, 0, n)
     let rb = (v >> 1) + 3
-    var cx: i64
-    var cy: i64
+    var cx: u64
+    var cy: u64
     cx = 1
     cy = 1
     for i in 0 as i64..n {
@@ -39,7 +41,7 @@ fn int_bitop[r](h: &mut r [u32], st: &mut r [u32], op: i64, x: i64, y: i64) -> i
         let b = tc_digit(h, y, i, cy)
         cx = tc_carry(h, x, i, cx)
         cy = tc_carry(h, y, i, cy)
-        var r: i64
+        var r: u64
         if op == 0 {
             r = a & b
         } else if op == 1 {
@@ -47,16 +49,19 @@ fn int_bitop[r](h: &mut r [u32], st: &mut r [u32], op: i64, x: i64, y: i64) -> i
         } else {
             r = a ^ b
         }
-        p(h, rb + i, r)
+        wr(h, rb + 2 * i, r)
     }
-    if g(h, rb + n - 1) >= 32768 {
+    if (rd(h, rb + 2 * (n - 1)) >> 63) == 1 {
         p(h, (v >> 1) + 1, 1)
-        var carry: i64
+        var carry: u64
         carry = 1
         for i in 0 as i64..n {
-            let t = (65535 - g(h, rb + i)) + carry
-            p(h, rb + i, t & 65535)
-            carry = t >> 16
+            let t = (rd(h, rb + 2 * i) ^ 18446744073709551615) + carry
+            var c: u64
+            c = 0
+            if t < carry { c = 1 }
+            wr(h, rb + 2 * i, t)
+            carry = c
         }
     }
     fin(h, v)
@@ -67,14 +72,15 @@ fn int_shl[r](h: &mut r [u32], st: &mut r [u32], v: i64, k: i64) -> i64 {
     if k > 16777216 { die("bit_shl: the shift is too large") }
     let nd = i_nd(h, v)
     if nd == 0 { return 1 }
-    let ws = k / 16
-    let bs = k % 16
+    let ws = k / 64
+    let bs = (k % 64) as u64
     let w = alloc_big(h, st, i_sign(h, v), nd + ws + 2)
     let rb = (w >> 1) + 3
     for i in 0 as i64..nd {
-        let d = i_dig(h, v, i) << bs
-        p(h, rb + i + ws, g(h, rb + i + ws) | (d & 65535))
-        p(h, rb + i + ws + 1, g(h, rb + i + ws + 1) | (d >> 16))
+        let d = i_dig(h, v, i)
+        let at = rb + 2 * (i + ws)
+        wr(h, at, rd(h, at) | (d << bs))
+        if bs > 0 { wr(h, at + 2, rd(h, at + 2) | (d >> (64 - bs))) }
     }
     fin(h, w)
 }
@@ -82,15 +88,16 @@ fn int_shl[r](h: &mut r [u32], st: &mut r [u32], v: i64, k: i64) -> i64 {
 # the magnitude of v shifted right by k bits (v >= 0)
 fn shr_mag[r](h: &mut r [u32], st: &mut r [u32], v: i64, k: i64) -> i64 {
     let nd = i_nd(h, v)
-    let ws = k / 16
-    let bs = k % 16
+    let ws = k / 64
+    let bs = (k % 64) as u64
     if ws >= nd { return 1 }
     let w = alloc_big(h, st, 0, nd - ws)
     let rb = (w >> 1) + 3
     for i in 0 as i64..nd - ws {
-        let lo = i_dig(h, v, i + ws) >> bs
-        let hi = i_dig(h, v, i + ws + 1) << (16 - bs)
-        p(h, rb + i, (lo | hi) & 65535)
+        var d: u64
+        d = i_dig(h, v, i + ws) >> bs
+        if bs > 0 { d = d | (i_dig(h, v, i + ws + 1) << (64 - bs)) }
+        wr(h, rb + 2 * i, d)
     }
     fin(h, w)
 }
