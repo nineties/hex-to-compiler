@@ -3,10 +3,67 @@ name: run tests
 on:
     push:
         branches: ["**"]
-        paths-ignore: ["README.rst", "LICENSE", ".gitignore", "docs/**"]
     workflow_dispatch:
 jobs:
+    changes:
+        runs-on: ubuntu-latest
+        outputs:
+            heavy: ${{ steps.scope.outputs.heavy }}
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+            - name: check whether the change needs the tests
+              id: scope
+              env:
+                  EVENT: ${{ github.event_name }}
+                  BEFORE: ${{ github.event.before }}
+              run: |
+                  # The tests are skipped only when every changed file is one of the files below. For main, the changes are the ones
+                  # of this push. For the other branches, they are the ones from main, so that a later push of docs on a branch which
+                  # changes code runs the tests. Any failure to find the changes, and any other file, runs the tests.
+                  heavy=true
+                  if [ "$EVENT" = push ]; then
+                      if [ "$GITHUB_REF" = refs/heads/main ]; then
+                          base=$BEFORE
+                      else
+                          git fetch --no-tags origin main:refs/remotes/origin/main 2>/dev/null
+                          base=$(git merge-base refs/remotes/origin/main HEAD 2>/dev/null)
+                      fi
+                      if [ -n "$base" ] && ! echo "$base" | grep -q '^0*$' && changed=$(git diff --name-only "$base" HEAD) && [ -n "$changed" ]; then
+                          heavy=false
+                          for f in $changed; do
+                              case "$f" in
+                                  docs/*|README.rst|LICENSE|.gitignore) ;;
+                                  *) heavy=true ;;
+                              esac
+                          done
+                      fi
+                  fi
+                  echo "heavy=$heavy" >> "$GITHUB_OUTPUT"
+                  echo "tests run: $heavy"
+    # The required check. It reports whether the tests passed, or were not needed, as one result named runtests.
     runtests:
+        needs: [changes, test]
+        if: ${{ always() }}
+        runs-on: ubuntu-latest
+        steps:
+            - name: report
+              env:
+                  CHANGES: ${{ needs.changes.result }}
+                  HEAVY: ${{ needs.changes.outputs.heavy }}
+                  TEST: ${{ needs.test.result }}
+              run: |
+                  echo "changes: $CHANGES, heavy: $HEAVY, test: $TEST"
+                  [ "$CHANGES" = success ] || exit 1
+                  if [ "$HEAVY" = true ]; then
+                      [ "$TEST" = success ]
+                  else
+                      [ "$TEST" = skipped ]
+                  fi
+    test:
+        needs: changes
+        if: needs.changes.outputs.heavy == 'true'
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v1
