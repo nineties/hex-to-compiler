@@ -1,0 +1,195 @@
+# gen_fm_vm0: writes the unit fmk of planck/vm, the coefficients and the constants of exp, log, sin, cos, atan and pow
+# Copyright (C) 2026 nineties
+#
+# planck0 tools/gen_fm_vm0.pk gen.img && tmp-vm gen.img > planck/vm/fmk.native
+#
+# The program runs on VM0, the planckvm without floating point, whose integers have no limit on the digits. Nothing here is a number typed by
+# hand. The series come from planck/lib/pvm/cas.pk by differentiating exp, sin, cos, atanh and atan, the number of terms comes from the range
+# of the argument, and the constants (ln 2, pi, 2/pi) come from the series of atanh and atan.
+use("pvm/compile")
+use("pvm/cas")
+use("bytes")
+
+body := `({
+    # a function is defined before the functions that use it
+    is_nil(Nil{}) := true
+    is_nil(_) := false
+
+    # c0 + v (c1 + v (c2 + ...))
+    put_horner(v, Nil{}) := put("0.0")
+    put_horner(v, c :: cs) := {
+        put_flit(fl(c))
+        if (not is_nil(cs)) {
+            put(" + ")
+            put(v)
+            put(" * (")
+            put_horner(v, cs)
+            put(")")
+        }
+    }
+    def_const(name, f) := {
+        put("fn ")
+        put(name)
+        put("() -> f64 {\n    ")
+        put_flit(f)
+        put("\n}\n\n")
+    }
+
+    def_poly(name, v, cs) := {
+        put("fn ")
+        put(name)
+        put("(")
+        put(v)
+        put(": f64) -> f64 {\n    ")
+        put_horner(v, cs)
+        put("\n}\n\n")
+    }
+
+    # the item i of a list
+    nth(x :: xs, 0) := x
+    nth(x :: xs, i) := nth(xs, i - 1)
+    len(Nil{}) := 0
+    len(x :: xs) := 1 + len(xs)
+    range(a, b) := if (a >= b) [] else a :: range(a + 1, b)
+    arity_tail(x :: xs) := xs
+    drop(xs, n) := if (n == 0 or is_nil(xs)) xs else drop(arity_tail(xs), n - 1)
+    take(xs, n) := if (n == 0 or is_nil(xs)) [] else nth(xs, 0) :: take(drop(xs, 1), n - 1)
+    map_(f, Nil{}) := []
+    map_(f, x :: xs) := f(x) :: map_(f, xs)
+
+    # the expression of the item i for the table: the entries are floats (Fl) or integers
+    put_entry(ty, e) := if (ty == 'f64) put_flit(e) else print(e)
+
+    # A function of an index that gives the i-th of the entries. A function takes few statements, so the cases are cut into functions of 16.
+    def_table(name, ty, entries) := {
+        n := len(entries)
+        chunks := (n + 15) / 16
+        zero := if (ty == 'f64) "0.0" else "0"
+        k := 0
+        while (k < chunks) {
+            put("fn ")
+            put(name)
+            put("_")
+            print(k)
+            put("(i: i64) -> ")
+            put(if (ty == 'f64) "f64" else "i64")
+            put(" {\n")
+            part := take(drop(entries, k * 16), 16)
+            j := 0
+            while (j < len(part)) {
+                put("    if i == ")
+                print(k * 16 + j)
+                put(" { return ")
+                put_entry(ty, nth(part, j))
+                put(" }\n")
+                j = j + 1
+            }
+            put("    ")
+            put(zero)
+            put("\n}\n\n")
+            k = k + 1
+        }
+        put("fn ")
+        put(name)
+        put("(i: i64) -> ")
+        put(if (ty == 'f64) "f64" else "i64")
+        put(" {\n")
+        k = 0
+        while (k < chunks - 1) {
+            put("    if i < ")
+            print((k + 1) * 16)
+            put(" { return ")
+            put(name)
+            put("_")
+            print(k)
+            put("(i) }\n")
+            k = k + 1
+        }
+        put("    ")
+        put(name)
+        put("_")
+        print(chunks - 1)
+        put("(i)\n}\n\n")
+    }
+
+    def_fn_int(name, n) := {
+        put("fn ")
+        put(name)
+        put("() -> i64 {\n    ")
+        print(n)
+        put("\n}\n\n")
+    }
+
+    def_const_n(name, i, f) := {
+        put("fn ")
+        put(name)
+        put("_")
+        print(i)
+        put("() -> f64 {\n    ")
+        put_flit(f)
+        put("\n}\n\n")
+    }
+
+    parts(name, x, widths) := {
+        fs := split(x, widths)
+        k := 0
+        while (k < len(fs)) {
+            def_const_n(name, k + 1, nth(fs, k))
+            k = k + 1
+        }
+    }
+    # --- the series, to degree 64
+    exp_s := taylor('(exp(x)), 'x, 64)
+    sin_s := taylor('(sin(x)), 'x, 64)
+    cos_s := taylor('(cos(x)), 'x, 64)
+    atanh_s := taylor('(atanh(x)), 'x, 64)
+    atan_s := taylor('(atan(x)), 'x, 64)
+
+    put("# fmk: the coefficients and the constants of fm, made by tools/gen_fm_vm0.pk from the series of planck/lib/pvm/cas.pk. Do not edit.\n\n")
+
+    # exp(r) = 1 + r + r^2 Q(r) for |r| <= ln 2 / 2: Q is the series of exp from x^2 on
+    def_poly("exp_q", "r", terms(exp_s, 2, 1, qq(7, 20), 63))
+
+    # log(1 + f) = 2 atanh(s) = 2 s + 2 s z R(z), s = f / (2 + f), z = s^2, |s| <= 0.172: R is the series of atanh from x^3 on, in z
+    log_r := terms(atanh_s, 3, 2, qq(43, 250), 63)
+    def_poly("log_r", "z", log_r)
+
+    # sin(r) = r + r z S(z) and cos(r) = 1 - z/2 + z^2 C(z) for |r| <= 0.8, z = r^2
+    def_poly("sin_s", "z", terms(sin_s, 3, 2, qq(4, 5), 63))
+    def_poly("cos_c", "z", terms(cos_s, 4, 2, qq(4, 5), 63))
+
+    # atan(u) = u + u z A(z) for |u| <= 0.126
+    def_poly("atan_a", "z", terms(atan_s, 3, 2, qq(63, 500), 63))
+
+    # the same R of log in the pairs of floats (hi, lo), to 2^-110, for the logarithm of pow
+    log_dd := terms(atanh_s, 3, 2, qq(43, 250), 110)
+    log_dd_s := map_(c -> split(c, [53, 53]), log_dd)
+    def_table("logdd_hi", 'f64, map_(p -> nth(p, 0), log_dd_s))
+    def_table("logdd_lo", 'f64, map_(p -> nth(p, 1), log_dd_s))
+    def_fn_int("logdd_n", len(log_dd))
+
+    # --- the constants
+    ln2 := ln2_q(300)
+    pi := pi_q(300)
+    # ln 2 in 3 floats; the first two have 32 bits, so that k times them is exact for |k| < 2^21
+    parts("ln2", ln2, [32, 32, 53])
+    def_const("inv_ln2", fl(qdiv(rat(1), ln2)))
+    # pi / 2 in 4 floats, 32 bits each in the first three
+    pio2 := qdiv(pi, rat(2))
+    parts("pio2", pio2, [32, 32, 32, 53])
+    def_const("inv_pio2", fl(qdiv(rat(2), pi)))
+    # pi and pi / 2 in 2 floats, for atan2 and atan
+    parts("pi", pi, [53, 53])
+    parts("pio2d", pio2, [53, 53])
+    def_const("sqrt2", fl(sqrt_q(rat(2), 100)))
+
+    # atan(j / 4) in 2 floats, for j = 0 to 16: atan(x) = atan(j/4) + atan((x - j/4) / (1 + x j/4))
+    atan_tab := map_(j -> split(atan_q(qq(j, 4), 120), [53, 53]), range(0, 17))
+    def_table("atan_tab_hi", 'f64, map_(p -> nth(p, 0), atan_tab))
+    def_table("atan_tab_lo", 'f64, map_(p -> nth(p, 1), atan_tab))
+
+    # the digits of 2 / pi, 24 bits each: the large arguments of sin and cos are reduced with them (Payne and Hanek)
+    def_table("tpi_digit", 'i64, tpi_digits(56))
+})
+
+write_file(array_get(argv(), 1), bytes.to_u8(pvm_compile.image(cas_program(body))))
