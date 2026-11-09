@@ -52,7 +52,7 @@ VASM_TARGETS := x86_64
 VM_EXAMPLES := $(wildcard planck/examples/vm/*.pk)
 BACKEND_EXAMPLES := $(wildcard planck/examples/backend/*.pk)
 
-.PHONY: clean test test-planck0 test-all test-vm preprocess
+.PHONY: clean test test-planck0 test-all test-vm test-udiv preprocess
 clean:
 	rm -f planck/lib/*.pkm planck/lib/*/*.pkm
 	rm -f pforth
@@ -99,6 +99,13 @@ test-vm: planck0
 		echo "$$f: ok"; \
 	done; rm -f tmp-vm tmp-vm-*.unit tmp-vm.img tmp-vm.out
 
+# check the division by the reciprocal of planck/vm/udiv.native against its definition; the status of the program is the number of wrong results
+test-udiv: planck0
+	./planck0 planck/vasmc.pk unit planck/vm/udiv.native tmp-udiv-lib.unit x86_64
+	./planck0 planck/vasmc.pk unit planck/tests/udiv/main.native tmp-udiv-main.unit x86_64 tmp-udiv-lib.unit
+	./planck0 planck/vasmc.pk link tmp-udiv x86_64 tmp-udiv-lib.unit tmp-udiv-main.unit
+	./tmp-udiv; s=$$?; rm -f tmp-udiv tmp-udiv-*.unit; exit $$s
+
 # run everything: test-planck0 and then the libraries, the tools, the vasm, native and backend tests, and the examples
 test-all: test-planck0
 	./planck0 planck/tests/lib.pk
@@ -110,6 +117,7 @@ test-all: test-planck0
 	tools/test_preprocess.sh
 	./planck0 planck/tests/vasm.pk
 	./planck0 planck/tests/native.pk
+	$(MAKE) test-udiv
 	$(MAKE) test-vm
 	@for f in $(PLANCK_EXAMPLES); do \
 		./planck0 $$f > tmp-example.out || exit 1; \
