@@ -99,41 +99,152 @@ fn mexpr_arg[r](h: &r [u32], m: i64, i: i64) -> i64 {
     g(h, (m >> 1) + 2 + i)
 }
 
-# find_symbol walks the objects of the old generation from the first after the roots and then the nursery; it is the symbol of the name s, or 0
-fn find_symbol[r](h: &r [u32], st: &r [u32], s: i64) -> i64 {
-    var at: i64
-    var top: i64
-    at = 16
-    top = g(st, 8)
-    while at < top {
-        let hd = g(h, at)
-        if ((hd >> 2) & 15) == 4 {
-            if str_eq(h, g(h, at + 1), s) { return at * 2 }
-        }
-        at += 1 + (hd >> 6)
-    }
-    at = g(st, 6)
-    top = g(st, 0)
-    while at < top {
-        let hd = g(h, at)
-        if ((hd >> 2) & 15) == 4 {
-            if str_eq(h, g(h, at + 1), s) { return at * 2 }
-        }
-        at += 1 + (hd >> 6)
-    }
-    0
+# ---- the table of the interned objects
+#
+# A string, a symbol or a m-expr is interned: the equal ones are one object, so the equality of them is the identity of the references. A m-expr is
+# equal to another when the heads are the same and each pair of the arguments is the same object (an integer, a reference, or a big integer of the same value).
+# The table is in st (see mem.native). A slot is 0 (empty), 1 (deleted) or the reference to the object. The table does not keep the objects alive.
+# The hash of an object has the addresses of the objects that it refers to, so it changes when the collector moves them; the collector (gc.native)
+# puts the entries in order again.
+
+fn mixh(acc: i64, x: i64) -> i64 {
+    (acc * 1000003 + x + 12345) & 4294967295
 }
 
+# the part of the hash for the argument a of a m-expr: a big integer by the value, the others by the word
+fn arg_key[r](h: &r [u32], a: i64) -> i64 {
+    if (a & 1) == 1 { return a }
+    if kind_of(h, a) == 0 {
+        var acc: i64
+        acc = 17
+        let n = 2 + 2 * g(h, (a >> 1) + 2)
+        for i in 0 as i64..n {
+            acc = mixh(acc, g(h, (a >> 1) + 1 + i))
+        }
+        return acc
+    }
+    a
+}
+
+# the hash of the string, the symbol or the m-expr v
+fn key_hash[r](h: &r [u32], v: i64) -> i64 {
+    let k = kind_of(h, v)
+    var acc: i64
+    if k == 3 {
+        let n = str_len(h, v)
+        acc = n
+        for i in 0 as i64..(n + 3) / 4 {
+            acc = mixh(acc, g(h, (v >> 1) + 2 + i))
+        }
+        return acc
+    }
+    if k == 4 { return mixh(4, g(h, (v >> 1) + 1)) }
+    acc = mixh(5, mexpr_head(h, v))
+    let n = mexpr_arity(h, v)
+    for i in 0 as i64..n {
+        acc = mixh(acc, arg_key(h, mexpr_arg(h, v, i)))
+    }
+    acc
+}
+
+fn arg_same[r](h: &r [u32], a: i64, b: i64) -> bool {
+    if a == b { return true }
+    if (a & 1) == 1 or (b & 1) == 1 { return false }
+    if kind_of(h, a) == 0 and kind_of(h, b) == 0 { return big_eq(h, a, b) }
+    false
+}
+
+# whether the objects a and b are equal as the keys of the table
+fn key_eq[r](h: &r [u32], a: i64, b: i64) -> bool {
+    let k = kind_of(h, a)
+    if k != kind_of(h, b) { return false }
+    if k == 3 { return str_eq(h, a, b) }
+    if k == 4 { return g(h, (a >> 1) + 1) == g(h, (b >> 1) + 1) }
+    if mexpr_head(h, a) != mexpr_head(h, b) { return false }
+    let n = mexpr_arity(h, a)
+    if n != mexpr_arity(h, b) { return false }
+    for i in 0 as i64..n {
+        if not arg_same(h, mexpr_arg(h, a, i), mexpr_arg(h, b, i)) { return false }
+    }
+    true
+}
+
+fn it_slot[r](h: &r [u32], v: i64) -> i64 {
+    let hh = key_hash(h, v)
+    (hh ^ (hh >> 13)) & (it_cap() - 1)
+}
+
+# it_put puts the object v in the first slot that is not used from its slot, and gives the slot
+fn it_put[r](h: &r [u32], st: &mut r [u32], v: i64) -> i64 {
+    let mask = it_cap() - 1
+    var i: i64
+    i = it_slot(h, v)
+    while g(st, it_base() + i) > 1 {
+        i = (i + 1) & mask
+    }
+    if g(st, it_base() + i) == 0 { p(st, 24, g(st, 24) + 1) }
+    p(st, it_base() + i, v)
+    i
+}
+
+# it_find gives the object that is equal to the new object v in the table; when there is none, v is put in the table and is the result
+fn it_find[r](h: &mut r [u32], st: &mut r [u32], v: i64) -> i64 {
+    let mask = it_cap() - 1
+    var i: i64
+    var go: i64
+    i = it_slot(h, v)
+    go = 1
+    while go == 1 {
+        let e = g(st, it_base() + i)
+        if e == 0 {
+            go = 0
+        } else {
+            if e != 1 {
+                if key_eq(h, e, v) {
+                    # v is the last object of the nursery and is not the object e itself (an interned object can be passed again): its words are given back
+                    if e != v and (v >> 1) >= g(st, 6) and g(st, 0) == (v >> 1) + 1 + size_of(h, v) { p(st, 0, v >> 1) }
+                    return e
+                }
+            }
+            i = (i + 1) & mask
+        }
+    }
+    let sl = it_put(h, st, v)
+    let n = g(st, 25)
+    if n < it_rcap() {
+        p(st, it_rbase() + n, sl)
+        p(st, 25, n + 1)
+    } else {
+        p(st, 26, 1)
+    }
+    if g(st, 24) > it_cap() / 2 {
+        # the deleted slots are given back by a major collection
+        p(st, 12, 1)
+        p(st, 14, 0)
+    }
+    if g(st, 24) >= it_cap() / 8 * 7 { die("the table of the interned objects is full") }
+    v
+}
+
+# fin_string gives the string with the bytes of the new string s that are put; fin_mexpr is the same for a m-expr whose arguments are put
+fn fin_string[r](h: &mut r [u32], st: &mut r [u32], s: i64) -> i64 {
+    it_find(h, st, s)
+}
+
+fn fin_mexpr[r](h: &mut r [u32], st: &mut r [u32], m: i64) -> i64 {
+    it_find(h, st, m)
+}
+
+# the symbol of the name s (a string)
 fn intern_sym[r](h: &mut r [u32], st: &mut r [u32], s: i64) -> i64 {
-    let found = find_symbol(h, st, s)
-    if found != 0 { return found }
+    let name = it_find(h, st, s)
     let sym = alloc_obj(h, st, 4, 2)
-    p(h, (sym >> 1) + 1, s)
+    p(h, (sym >> 1) + 1, name)
     p(h, (sym >> 1) + 2, 1)
-    sym
+    it_find(h, st, sym)
 }
 
-# new_mexpr makes a m-expr of the head and n arguments that are 0
+# new_mexpr makes a m-expr of the head and n arguments that are 0; the arguments are put with set_arg and then fin_mexpr gives the m-expr
 fn new_mexpr[r](h: &mut r [u32], st: &mut r [u32], head: i64, n: i64) -> i64 {
     let m = alloc_obj(h, st, 5, 1 + n)
     p(h, (m >> 1) + 1, head)
