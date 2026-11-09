@@ -1,0 +1,445 @@
+# pvm/cas: a small computer algebra system for planckvm, written in the subset of planck that pvm/compile translates
+# Copyright (C) 2026 nineties
+#
+# cas_lib is a quoted block of definitions; cas_program(body) puts it in front of the statements of body.
+# The integers of planckvm have no limit on the number of digits, so a rational is Q{n, d} of two integers (d > 0, no common factor)
+# and the arithmetic is written with the plain operators and gcd, isqrt, pow and bit_len, which are defined below on the operators.
+#
+# An expression is quoted planck: `(exp(x) - 1), `(1 / (1 + x * x)). The functions exp, log, sin, cos, atan and atanh and the operators
+# + - * / and pow(a, k) can be differentiated and expanded in series. A series is an array of rationals: the coefficients of x^0, x^1, ... x^n.
+
+cas_lib := `({
+    fail(m) := {
+        println(m)
+        exit(1)
+    }
+    # --- integer functions on the operators of big integers
+    pow(x, k) := {
+        r := 1
+        b := x
+        e := k
+        while (e > 0) {
+            if (e % 2 == 1) r = r * b
+            e = e / 2
+            if (e > 0) b = b * b
+        }
+        r
+    }
+    # the number of bits of the magnitude of n; 0 for 0
+    bit_len(n) := {
+        m := if (n < 0) 0 - n else n
+        if (m == 0) 0 else {
+            hi := 1
+            while (pow(2, hi) <= m) hi = hi * 2
+            lo := hi / 2
+            while (hi - lo > 1) {
+                mid := (lo + hi) / 2
+                if (pow(2, mid) <= m) lo = mid else hi = mid
+            }
+            hi
+        }
+    }
+    gcd(x, y) := {
+        a := if (x < 0) 0 - x else x
+        b := if (y < 0) 0 - y else y
+        while (b != 0) {
+            t := a % b
+            a = b
+            b = t
+        }
+        a
+    }
+    # the floor of the square root of n >= 0 by Newton's method from a start that is not below the root
+    isqrt(n) := {
+        if (n < 2) n else {
+            x := pow(2, (bit_len(n) + 1) / 2)
+            go := true
+            while (go) {
+                y := (x + n / x) / 2
+                if (y >= x) go = false else x = y
+            }
+            x
+        }
+    }
+
+    # --- the parts of an expression: Apply{f, Tuple{a, b}}
+    is_app(e) := type(e) == Expr
+    app_f(e) := arg(e, 0)
+    app_a(e, k) := arg(arg(e, 1), k)
+    app_n(e) := arity(arg(e, 1))
+    mk1(f, a) := mexpr('Apply, X{f, mexpr('Tuple, X{a})})
+    mk2(f, a, b) := mexpr('Apply, X{f, mexpr('Tuple, X{a, b})})
+
+    # --- rationals
+    qq(n, d) := {
+        if (d < 0) qq(0 - n, 0 - d) else {
+            g := gcd(n, d)
+            if (g <= 1) Q{n, d} else Q{n / g, d / g}
+        }
+    }
+    rat(n) := Q{n, 1}
+    qadd(Q{a, b}, Q{c, d}) := qq(a * d + c * b, b * d)
+    qsub(Q{a, b}, Q{c, d}) := qq(a * d - c * b, b * d)
+    qmul(Q{a, b}, Q{c, d}) := qq(a * c, b * d)
+    qdiv(Q{a, b}, Q{c, d}) := qq(a * d, b * c)
+    qneg(Q{a, b}) := Q{0 - a, b}
+    qcmp(Q{a, b}, Q{c, d}) := {
+        l := a * d
+        r := c * b
+        if (l < r) -1 else if (l > r) 1 else 0
+    }
+    qabs(Q{a, b}) := if (a < 0) Q{0 - a, b} else Q{a, b}
+    qpow(x, k) := {
+        r := Q{1, 1}
+        i := 0
+        while (i < k) { r = qmul(r, x); i = i + 1 }
+        r
+    }
+    qzero(Q{n, _}) := n == 0
+    qnz(Q{n, _}) := n != 0
+    qzero_v := Q{0, 1}
+    qone_v := Q{1, 1}
+
+    # --- series
+    sconst_q(c, n) := {
+        a := array(n + 1)
+        i := 0
+        while (i <= n) { array_set(a, i, qzero_v); i = i + 1 }
+        array_set(a, 0, c)
+        a
+    }
+    sx(n) := {
+        a := sconst_q(qzero_v, n)
+        if (n >= 1) array_set(a, 1, qone_v)
+        a
+    }
+    sget(a, i) := if (i < array_len(a)) array_get(a, i) else qzero_v
+    sadd(a, b) := {
+        n := array_len(a)
+        c := array(n)
+        i := 0
+        while (i < n) { array_set(c, i, qadd(sget(a, i), sget(b, i))); i = i + 1 }
+        c
+    }
+    sneg(a) := {
+        n := array_len(a)
+        c := array(n)
+        i := 0
+        while (i < n) { array_set(c, i, qneg(array_get(a, i))); i = i + 1 }
+        c
+    }
+    smul(a, b) := {
+        n := array_len(a)
+        c := array(n)
+        k := 0
+        while (k < n) {
+            s := qzero_v
+            i := 0
+            while (i <= k) {
+                ai := array_get(a, i)
+                bi := sget(b, k - i)
+                if (qnz(ai) and qnz(bi)) s = qadd(s, qmul(ai, bi))
+                i = i + 1
+            }
+            array_set(c, k, s)
+            k = k + 1
+        }
+        c
+    }
+    # the reciprocal: b0 = 1 / a0 and bk = -b0 (a1 b(k-1) + ... + ak b0)
+    sinv(a) := {
+        n := array_len(a)
+        b := array(n)
+        b0 := qdiv(qone_v, array_get(a, 0))
+        array_set(b, 0, b0)
+        k := 1
+        while (k < n) {
+            s := qzero_v
+            i := 1
+            while (i <= k) {
+                ai := array_get(a, i)
+                if (qnz(ai)) s = qadd(s, qmul(ai, array_get(b, k - i)))
+                i = i + 1
+            }
+            array_set(b, k, qneg(qmul(b0, s)))
+            k = k + 1
+        }
+        b
+    }
+    # the integral from 0: one coefficient longer, c(k+1) = ak / (k + 1)
+    sint(a) := {
+        n := array_len(a)
+        c := array(n + 1)
+        array_set(c, 0, qzero_v)
+        k := 0
+        while (k < n) { array_set(c, k + 1, qdiv(array_get(a, k), rat(k + 1))); k = k + 1 }
+        c
+    }
+    spow(a, k) := {
+        if (k < 0) sinv(spow(a, 0 - k)) else {
+            r := sconst_q(qone_v, array_len(a) - 1)
+            i := 0
+            while (i < k) { r = smul(r, a); i = i + 1 }
+            r
+        }
+    }
+
+    # --- the derivative of an expression, in the form of the rule a student writes
+    # the derivative of f in f(u), as an expression of u
+    fprime(e) := {
+        f := app_f(e)
+        u := app_a(e, 0)
+        if (f == 'exp) mk1('exp, u)
+        else if (f == 'sin) mk1('cos, u)
+        else if (f == 'cos) mk2('_sub, 0, mk1('sin, u))
+        else if (f == 'log) mk2('_div, 1, u)
+        else if (f == 'atan) mk2('_div, 1, mk2('_add, 1, mk2('_mul, u, u)))
+        else if (f == 'atanh) mk2('_div, 1, mk2('_sub, 1, mk2('_mul, u, u)))
+        else fail("cas: a function that cannot be differentiated")
+    }
+
+    d(e, x) := {
+        if (type(e) == Int) 0
+        else if (type(e) == Symbol) { if (e == x) 1 else 0 }
+        else {
+            f := app_f(e)
+            if (f == '_add) mk2('_add, d(app_a(e, 0), x), d(app_a(e, 1), x))
+            else if (f == '_sub) mk2('_sub, d(app_a(e, 0), x), d(app_a(e, 1), x))
+            else if (f == '_mul) {
+                a := app_a(e, 0)
+                b := app_a(e, 1)
+                mk2('_add, mk2('_mul, d(a, x), b), mk2('_mul, a, d(b, x)))
+            } else if (f == '_div) {
+                a := app_a(e, 0)
+                b := app_a(e, 1)
+                mk2('_div, mk2('_sub, mk2('_mul, d(a, x), b), mk2('_mul, a, d(b, x))), mk2('_mul, b, b))
+            } else if (f == 'pow) {
+                a := app_a(e, 0)
+                n := app_a(e, 1)
+                mk2('_mul, mk2('_mul, n, mk2('pow, a, n - 1)), d(a, x))
+            } else {
+                u := app_a(e, 0)
+                mk2('_mul, fprime(e), d(u, x))
+            }
+        }
+    }
+
+    # f(0) when u(0) = c, for the functions that are rational there
+    fvalue(e, c) := {
+        f := app_f(e)
+        z := qcmp(c, qzero_v) == 0
+        if (f == 'exp and z) qone_v
+        else if (f == 'sin and z) qzero_v
+        else if (f == 'cos and z) qone_v
+        else if (f == 'log and qcmp(c, qone_v) == 0) qzero_v
+        else if (f == 'atan and z) qzero_v
+        else if (f == 'atanh and z) qzero_v
+        else fail("cas: the value is not rational")
+    }
+
+    # --- the series of an expression to degree n
+    # The series of f(u) is f(u(0)) plus the integral of f'(u) u'. The integral cuts the degree by one, so the recursion ends after n steps.
+    ser(e, x, n) := {
+        if (type(e) == Int) sconst_q(rat(e), n)
+        else if (type(e) == Symbol) { if (e == x) sx(n) else fail("cas: a variable other than x") }
+        else {
+            f := app_f(e)
+            if (f == '_add) sadd(ser(app_a(e, 0), x, n), ser(app_a(e, 1), x, n))
+            else if (f == '_sub) sadd(ser(app_a(e, 0), x, n), sneg(ser(app_a(e, 1), x, n)))
+            else if (f == '_mul) smul(ser(app_a(e, 0), x, n), ser(app_a(e, 1), x, n))
+            else if (f == '_div) smul(ser(app_a(e, 0), x, n), sinv(ser(app_a(e, 1), x, n)))
+            else if (f == 'pow) spow(ser(app_a(e, 0), x, n), app_a(e, 1))
+            else {
+                u := app_a(e, 0)
+                f0 := fvalue(e, array_get(ser(u, x, 0), 0))
+                if (n == 0) sconst_q(f0, 0)
+                else {
+                    du := d(u, x)
+                    g := ser(fprime(e), x, n - 1)
+                    sadd(sconst_q(f0, n), sint(if (du == 1) g else smul(g, ser(du, x, n - 1))))
+                }
+            }
+        }
+    }
+    taylor(e, x, n) := ser(e, x, n)
+
+    # --- polynomials from series
+    rev(Nil{}, acc) := acc
+    rev(x :: xs, acc) := rev(xs, x :: acc)
+    # the coefficients of x^start, x^(start+step), ... that matter for |x| <= xmax: the ones whose term can be 2^-bits of 1 or more
+    terms(s, start, step, xmax, bits) := {
+        eps := qq(1, pow(2, bits))
+        out := []
+        i := start
+        go := true
+        while (go and i < array_len(s)) {
+            c := array_get(s, i)
+            if (qcmp(qmul(qabs(c), qpow(xmax, i)), eps) < 0) go = false
+            else { out = c :: out; i = i + step }
+        }
+        if (go) fail("cas: the series is too short")
+        rev(out, [])
+    }
+
+    # --- evaluation
+    # the value of the series at the rational x, as an integer near v * 2^p
+    eval_fixed(s, Q{xn, xd}, p) := {
+        pw := pow(2, p)
+        sum := 0
+        k := 0
+        n := array_len(s)
+        while (k < n) {
+            c := array_get(s, k)
+            sum = sum + arg(c, 0) * pw / arg(c, 1)
+            pw = pw * xn / xd
+            k = k + 1
+        }
+        sum
+    }
+
+    # --- constants, as the series evaluated to p bits (rationals with the denominator 2^p)
+    fixed_q(v, p) := qq(v, pow(2, p))
+    # pi = 16 atan(1/5) - 4 atan(1/239) (Machin), as an integer near pi * 2^p
+    pi_int(p) := {
+        g := 16
+        n := (p + g) / 2 + 4
+        s := taylor(`(atan(x)), 'x, n)
+        (16 * eval_fixed(s, qq(1, 5), p + g) - 4 * eval_fixed(s, qq(1, 239), p + g)) / pow(2, g)
+    }
+    pi_q(p) := fixed_q(pi_int(p), p)
+    # ln 2 = 2 atanh(1/3)
+    ln2_int(p) := {
+        g := 16
+        n := (p + g) * 2 / 3 + 4
+        s := taylor(`(atanh(x)), 'x, n)
+        2 * eval_fixed(s, qq(1, 3), p + g) / pow(2, g)
+    }
+    ln2_q(p) := fixed_q(ln2_int(p), p)
+    # atan of a rational x >= 0: atan(x) = atan(1/2) + atan((x - 1/2) / (1 + x/2)) brings x below 1/2, where the series converges fast
+    atan_q(x, p) := {
+        g := 16
+        half := qq(1, 2)
+        if (qcmp(x, half) <= 0) {
+            n := (p + g) / 2 + 4
+            fixed_q(eval_fixed(taylor(`(atan(x)), 'x, n), x, p + g), p + g)
+        } else {
+            y := qdiv(qsub(x, half), qadd(qone_v, qmul(x, half)))
+            qadd(atan_q(half, p), atan_q(y, p))
+        }
+    }
+    sqrt_q(x, p) := fixed_q(isqrt(arg(x, 0) * pow(2, 2 * p) / arg(x, 1)), p)
+
+    # --- from rationals to floats
+    # an * 2^sh / d, rounded to the nearest integer (ties to even)
+    rounded(an, d, sh) := {
+        num := if (sh >= 0) an * pow(2, sh) else an
+        den := if (sh >= 0) d else d * pow(2, 0 - sh)
+        m := num / den
+        r2 := 2 * (num % den)
+        if (r2 > den or (r2 == den and m % 2 == 1)) m + 1 else m
+    }
+    # the float nearest to x (ties to even): Fl{m, sh} is m * 2^-sh with m of 53 bits and a sign
+    fl(x) := {
+        n := arg(x, 0)
+        d := arg(x, 1)
+        if (n == 0) Fl{0, 0} else {
+            an := if (n < 0) 0 - n else n
+            sh := 53 - (bit_len(an) - bit_len(d))
+            m := rounded(an, d, sh)
+            while (m >= pow(2, 53)) { sh = sh - 1; m = rounded(an, d, sh) }
+            while (m < pow(2, 52)) { sh = sh + 1; m = rounded(an, d, sh) }
+            Fl{if (n < 0) 0 - m else m, sh}
+        }
+    }
+    flq(Fl{m, sh}) := if (sh >= 0) qq(m, pow(2, sh)) else qq(m * pow(2, 0 - sh), 1)
+    p10(k) := if (k >= 0) qq(pow(10, k), 1) else qq(1, pow(10, 0 - k))
+
+    # x rounded to w significant bits, as a rational
+    round_sig(x, w) := {
+        n := arg(x, 0)
+        d := arg(x, 1)
+        if (n == 0) x else {
+            an := if (n < 0) 0 - n else n
+            sh := w - (bit_len(an) - bit_len(d))
+            m := rounded(an, d, sh)
+            while (m >= pow(2, w)) { sh = sh - 1; m = rounded(an, d, sh) }
+            while (m < pow(2, w - 1)) { sh = sh + 1; m = rounded(an, d, sh) }
+            v := if (sh >= 0) qq(m, pow(2, sh)) else qq(m * pow(2, 0 - sh), 1)
+            if (n < 0) qneg(v) else v
+        }
+    }
+    # x as the sum of floats with w1, w2, ... significant bits: the first nearest x, the second nearest the rest, and so on
+    split(x, Nil{}) := []
+    split(x, w :: ws) := {
+        p := round_sig(x, w)
+        fl(p) :: split(qsub(x, p), ws)
+    }
+
+    # --- text of a number, written to the output
+    # the digits of the integer v >= 0 with k digits, with leading zeros
+    put_digits(v, k) := {
+        if (k > 0) {
+            h := pow(10, k - 1)
+            print(v / h)
+            put_digits(v % h, k - 1)
+        }
+    }
+    ndigits(v) := {
+        n := 0
+        t := v
+        while (t > 0) { n = n + 1; t = t / 10 }
+        n
+    }
+    # the shortest decimal that reads back as the float, as a native literal: 6.931471805599453e-1
+    put_flit(f) := {
+        v := flq(f)
+        if (arg(v, 0) == 0) put("0.0") else {
+            neg := arg(v, 0) < 0
+            a := qabs(v)
+            e10 := 0
+            while (qcmp(a, p10(e10)) >= 0) e10 = e10 + 1
+            while (qcmp(a, p10(e10)) < 0) e10 = e10 - 1
+            k := 1
+            digits := none
+            while (digits == none) {
+                # a / 10^e10 * 10^(k-1) rounded to an integer of k digits
+                scaled := qmul(a, qdiv(p10(k - 1), p10(e10)))
+                dgt := rounded(arg(scaled, 0), arg(scaled, 1), 0)
+                back := qmul(qq(dgt, 1), qdiv(p10(e10), p10(k - 1)))
+                if (qcmp(flq(fl(back)), flq(fl(a))) == 0) digits = dgt else k = k + 1
+            }
+            if (neg) put("(-")
+            nd := ndigits(digits)
+            print(digits / pow(10, nd - 1))
+            put(".")
+            if (nd > 1) put_digits(digits % pow(10, nd - 1), nd - 1) else put("0")
+            put("e")
+            print(e10 + nd - k)
+            if (neg) put(")")
+        }
+    }
+
+    # the first n digits of 2/pi in base 2^24: floor(2/pi * 2^(24 n)) cut into digits, the most significant first
+    tpi_digits(n) := {
+        p := 24 * n + 64
+        v := pow(2, 24 * n + 1) * pow(2, p) / pi_int(p)
+        ds := []
+        k := 0
+        while (k < n) {
+            ds = (v % pow(2, 24)) :: ds
+            v = v / pow(2, 24)
+            k = k + 1
+        }
+        ds
+    }
+})
+
+# the statements of the program: those of cas_lib and then those of body, a quoted block
+cas_program(body) := {
+    out := []
+    i := arity(body) - 1
+    while (i >= 0) { out = arg(body, i) :: out; i = i - 1 }
+    i = arity(cas_lib) - 1
+    while (i >= 0) { out = arg(cas_lib, i) :: out; i = i - 1 }
+    out
+}
