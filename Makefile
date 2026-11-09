@@ -49,7 +49,8 @@ planck0: bootstrap/planck0.sv plisp2 $(SASM_LIBS)
 VASM_EXAMPLES := $(wildcard planck/examples/vasm/*.vasm)
 NATIVE_EXAMPLES := $(wildcard planck/examples/native/*.native)
 VASM_TARGETS := x86_64
-VM_EXAMPLES := $(wildcard planck/examples/vm/*.pk)
+# the programs that use a float are left out: planckvm does not support the float instructions
+VM_EXAMPLES := $(filter-out planck/examples/vm/float.pk planck/examples/vm/plain_float.pk planck/examples/vm/trans.pk planck/examples/vm/bits.pk planck/examples/vm/equality.pk planck/examples/vm/plain_int.pk,$(wildcard planck/examples/vm/*.pk))
 BACKEND_EXAMPLES := $(wildcard planck/examples/backend/*.pk)
 
 .PHONY: clean test test-planck0 test-all test-vm preprocess
@@ -84,7 +85,7 @@ test-planck0: planck0
 		echo "$$f: stops"; \
 	done; rm -f tmp-error.out tmp-error.err
 
-# build planck/vm as units and run the programs of planck/examples/vm on it; the standard input is the file of the same name with .in, or empty
+# build planck/vm as units and run the programs of planck/examples/vm that use no float on it; the standard input is the file of the same name with .in, or empty
 VM_UNITS := mem gc big flt dec num obj bit trans nb arr eq builtin hsh ctl ops vm
 test-vm: planck0
 	@done=; for u in $(VM_UNITS); do \
@@ -99,23 +100,6 @@ test-vm: planck0
 		echo "$$f: ok"; \
 	done; rm -f tmp-vm tmp-vm-*.unit tmp-vm.img tmp-vm.out
 
-# build planckvm0, which is planckvm without the float instructions: the units flt, dec and trans are the ones of planck/vm0, which stop when called.
-# It runs the programs of planck/examples/vm that use no float.
-VM0_EXAMPLES := $(filter-out planck/examples/vm/float.pk planck/examples/vm/plain_float.pk planck/examples/vm/trans.pk planck/examples/vm/bits.pk planck/examples/vm/equality.pk planck/examples/vm/plain_int.pk,$(VM_EXAMPLES))
-test-vm0: planck0
-	@done=; for u in $(VM_UNITS); do \
-		src=planck/vm/$$u.native; if [ -f planck/vm0/$$u.native ]; then src=planck/vm0/$$u.native; fi; \
-		./planck0 planck/vasmc.pk unit $$src tmp-vm0-$$u.unit x86_64 $$done || exit 1; \
-		done="$$done tmp-vm0-$$u.unit"; \
-	done; ./planck0 planck/vasmc.pk link tmp-vm0 x86_64 $$done || exit 1
-	@for f in $(VM0_EXAMPLES); do \
-		./planck0 $$f tmp-vm0.img || exit 1; \
-		in=/dev/null; if [ -f $${f%.pk}.in ]; then in=$${f%.pk}.in; fi; \
-		./tmp-vm0 tmp-vm0.img < $$in > tmp-vm0.out || exit 1; \
-		diff -u $${f%.pk}.out tmp-vm0.out || exit 1; \
-		echo "$$f: ok"; \
-	done; rm -f tmp-vm0 tmp-vm0-*.unit tmp-vm0.img tmp-vm0.out
-
 # run everything: test-planck0 and then the libraries, the tools, the vasm, native and backend tests, and the examples
 test-all: test-planck0
 	./planck0 planck/tests/lib.pk
@@ -127,7 +111,6 @@ test-all: test-planck0
 	tools/test_preprocess.sh
 	./planck0 planck/tests/vasm.pk
 	./planck0 planck/tests/native.pk
-	$(MAKE) test-vm0
 	$(MAKE) test-vm
 	@for f in $(PLANCK_EXAMPLES); do \
 		./planck0 $$f > tmp-example.out || exit 1; \
