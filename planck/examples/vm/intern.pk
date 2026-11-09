@@ -1,0 +1,53 @@
+# The interned objects of planckvm: the program is written with the instructions and run by planck/vm; the image path is the first argument
+use("pvm/image")
+
+# println of R[x]
+show(x) := [GETGLOBAL{30, 1}, MOVE{31, x}, CALL{30, 30, 1}]
+eq(a, b) := concat_map(x -> x, [[EQ{34, a, b}], show(34)])
+
+# R[r] := R[a] ++ R[b]
+strcat(r, a, b) := [GETGLOBAL{30, 0}, MOVE{31, a}, MOVE{32, b}, CALL{r, 30, 2}]
+
+# R[r] := the symbol of the name R[a]
+symbol(r, a) := [GETGLOBAL{30, 2}, MOVE{31, a}, CALL{r, 30, 1}]
+
+# Tuples with equal arguments are one object, also when the arguments (strings, big integers, tuples) are made in different ways, and after the collections that move them.
+# A million times a tuple is made and dropped, so that the nursery is full many times; the tuples made at the start are kept in the registers.
+body := concat_map(x -> x, [
+    [LOADI{10, 1}, LOADI{11, 2}, LOADI{12, 3}, LOADI{13, 4}, TUPLE{1, 10, 3}, TUPLE{2, 10, 3}, TUPLE{3, 11, 3}],
+    eq(1, 2), eq(1, 3),
+    # strings made in two ways
+    [LOADK{14, 4}, LOADK{15, 5}], strcat(16, 14, 15),
+    [LOADK{14, 6}, LOADK{15, 7}], strcat(17, 14, 15),
+    [TUPLE{4, 16, 1}, TUPLE{5, 17, 1}],
+    eq(4, 5), eq(16, 17),
+    symbol(6, 16), symbol(7, 17),
+    eq(6, 7),
+    # big integers of the same value in two objects
+    [LOADK{18, 8}, MUL{19, 18, 18}, MUL{20, 19, 19}, MUL{21, 18, 18}, MUL{22, 21, 21}, TUPLE{9, 20, 1}, TUPLE{23, 22, 1}],
+    eq(9, 23),
+    # tuples in tuples
+    [TUPLE{24, 1, 1}, TUPLE{25, 2, 1}],
+    eq(24, 25),
+    [LOADI{40, 0}, LOADK{41, 3}],
+    [Label{'loop}, TGE{40, 41, 1}, JMP{'done}],
+    [MOVE{42, 40}, ADDI{43, 40, 1}, ADDI{44, 40, 2}, TUPLE{45, 42, 3}, ADDI{40, 40, 1}, JMP{'loop}, Label{'done}],
+    # the same values again
+    [TUPLE{26, 10, 3}],
+    eq(1, 26),
+    [TUPLE{27, 26, 1}],
+    eq(24, 27),
+    symbol(28, 16),
+    eq(6, 28),
+    strcat(29, 14, 15),
+    eq(16, 29),
+    [TUPLE{33, 29, 1}],
+    eq(4, 33),
+    [LOADNONE{0, 1}, RET{0}]
+])
+
+main := Code{"main", 0, 48, body, [
+    C{"_strcat"}, C{"println"}, C{"intern"}, I{1000000}, S{"a"}, S{"bc"}, S{"ab"}, S{"c"}, I{536870911}
+]}
+
+write_file(array_get(argv(), 1), bytes.to_u8(pvm_image.build([main], "main")))
