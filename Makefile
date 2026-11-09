@@ -99,6 +99,23 @@ test-vm: planck0
 		echo "$$f: ok"; \
 	done; rm -f tmp-vm tmp-vm-*.unit tmp-vm.img tmp-vm.out
 
+# build planckvm0, which is planckvm without the float instructions: the units flt, dec and trans are the ones of planck/vm0, which stop when called.
+# It runs the programs of planck/examples/vm that use no float.
+VM0_EXAMPLES := $(filter-out planck/examples/vm/float.pk planck/examples/vm/plain_float.pk planck/examples/vm/trans.pk planck/examples/vm/bits.pk planck/examples/vm/equality.pk planck/examples/vm/plain_int.pk,$(VM_EXAMPLES))
+test-vm0: planck0
+	@done=; for u in $(VM_UNITS); do \
+		src=planck/vm/$$u.native; if [ -f planck/vm0/$$u.native ]; then src=planck/vm0/$$u.native; fi; \
+		./planck0 planck/vasmc.pk unit $$src tmp-vm0-$$u.unit x86_64 $$done || exit 1; \
+		done="$$done tmp-vm0-$$u.unit"; \
+	done; ./planck0 planck/vasmc.pk link tmp-vm0 x86_64 $$done || exit 1
+	@for f in $(VM0_EXAMPLES); do \
+		./planck0 $$f tmp-vm0.img || exit 1; \
+		in=/dev/null; if [ -f $${f%.pk}.in ]; then in=$${f%.pk}.in; fi; \
+		./tmp-vm0 tmp-vm0.img < $$in > tmp-vm0.out || exit 1; \
+		diff -u $${f%.pk}.out tmp-vm0.out || exit 1; \
+		echo "$$f: ok"; \
+	done; rm -f tmp-vm0 tmp-vm0-*.unit tmp-vm0.img tmp-vm0.out
+
 # run everything: test-planck0 and then the libraries, the tools, the vasm, native and backend tests, and the examples
 test-all: test-planck0
 	./planck0 planck/tests/lib.pk
