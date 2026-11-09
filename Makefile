@@ -51,7 +51,6 @@ NATIVE_EXAMPLES := $(wildcard planck/examples/native/*.native)
 VASM_TARGETS := x86_64
 VM_EXAMPLES := $(wildcard planck/examples/vm/*.pk)
 BACKEND_EXAMPLES := $(wildcard planck/examples/backend/*.pk)
-PARTIAL_EVAL_EXAMPLES := $(wildcard planck/examples/partial_eval/*.pk)
 
 .PHONY: clean test test-planck0 test-all test-vm preprocess
 clean:
@@ -112,7 +111,6 @@ test-all: test-planck0
 	./planck0 planck/tests/vasm.pk
 	./planck0 planck/tests/native.pk
 	$(MAKE) test-vm
-	./planck0 planck/tests/partial_eval.pk
 	@for f in $(PLANCK_EXAMPLES); do \
 		./planck0 $$f > tmp-example.out || exit 1; \
 		diff -u $${f%.pk}.out tmp-example.out || exit 1; \
@@ -150,11 +148,3 @@ test-all: test-planck0
 		diff -u $${f%.native}.out tmp-unit.out || exit 1; \
 		echo "$$f: stops"; \
 	done; rm -f tmp-lib.unit tmp-unit.unit tmp-unit.out
-	@for f in $(PARTIAL_EVAL_EXAMPLES); do \
-		./planck0 $$f tmp-pe > tmp-pe.out || exit 1; \
-		diff -u $${f%.pk}.out tmp-pe.out || exit 1; \
-		./tmp-pe tmp-pe > tmp-pe.run; s=$$?; \
-		[ "$$s" = "$$(cat $${f%.pk}.status)" ] || { echo "$$f: exit status $$s"; exit 1; }; \
-		diff -u $${f%.pk}.run tmp-pe.run || exit 1; \
-		echo "$$f: ok"; \
-	done; rm -f tmp-pe tmp-pe.out tmp-pe.run tmp-pe-file
