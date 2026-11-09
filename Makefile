@@ -59,6 +59,7 @@ clean:
 	rm -f pforth
 	rm -f plisp2
 	rm -f planck0
+	rm -rf tmp-vm tmp-vm-build
 	rm -f $(ASM_EXAMPLE_TARGETS)
 	rm -f $(SASM_EXAMPLE_TARGETS)
 
@@ -87,18 +88,31 @@ test-planck0: planck0
 
 # build planck/vm as units and run the programs of planck/examples/vm that use no float on it; the standard input is the file of the same name with .in, or empty
 VM_UNITS := mem gc big num obj bit nb arr eq builtin hsh ctl ops vm
-test-vm: planck0
-	@done=; for u in $(VM_UNITS); do \
-		./planck0 planck/vasmc.pk unit planck/vm/$$u.native tmp-vm-$$u.unit x86_64 $$done || exit 1; \
-		done="$$done tmp-vm-$$u.unit"; \
-	done; ./planck0 planck/vasmc.pk link tmp-vm x86_64 $$done || exit 1
+VM_BUILD := tmp-vm-build
+VM_UNIT_FILES := $(addprefix $(VM_BUILD)/,$(addsuffix .unit,$(VM_UNITS)))
+# everything that a unit depends on besides its source: the compiler, which is planck/vasmc.pk and the libraries that it uses
+VASMC_SOURCES := planck/vasmc.pk planck/init.pk planck/peg.pk planck/syntax.pk $(shell find planck/lib -name "*.pk")
+# the unit files of the units that planck/vm/$(1).native imports
+vm_imports = $(addprefix $(VM_BUILD)/,$(addsuffix .unit,$(shell sed -n 's/^import \([A-Za-z0-9_]*\).*/\1/p' planck/vm/$(1).native)))
+# a unit is compiled once the units that it imports are, so make -j compiles the units that do not depend on each other at the same time
+define VM_UNIT_RULE
+$(VM_BUILD)/$(1).unit: planck/vm/$(1).native $(call vm_imports,$(1)) $(VASMC_SOURCES) planck0 | $(VM_BUILD)
+	./planck0 planck/vasmc.pk unit $$< $$@ x86_64 $(call vm_imports,$(1))
+endef
+$(foreach u,$(VM_UNITS),$(eval $(call VM_UNIT_RULE,$(u))))
+$(VM_BUILD):
+	mkdir -p $@
+tmp-vm: $(VM_UNIT_FILES) planck0
+	./planck0 planck/vasmc.pk link $@ x86_64 $(VM_UNIT_FILES)
+
+test-vm: tmp-vm
 	@for f in $(VM_EXAMPLES); do \
 		./planck0 $$f tmp-vm.img || exit 1; \
 		in=/dev/null; if [ -f $${f%.pk}.in ]; then in=$${f%.pk}.in; fi; \
 		./tmp-vm tmp-vm.img < $$in > tmp-vm.out || exit 1; \
 		diff -u $${f%.pk}.out tmp-vm.out || exit 1; \
 		echo "$$f: ok"; \
-	done; rm -f tmp-vm tmp-vm-*.unit tmp-vm.img tmp-vm.out
+	done; rm -f tmp-vm.img tmp-vm.out
 
 # check the division by the reciprocal of planck/vm/udiv.native against its definition; the status of the program is the number of wrong results
 test-udiv: planck0

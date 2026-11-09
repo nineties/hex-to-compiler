@@ -86,7 +86,51 @@ jobs:
               if: github.ref != 'refs/heads/main'
               run:
                   make test-udiv
-            - name: test vm
+            - name: check whether the change reaches test vm
+              id: vm-scope
               if: github.ref != 'refs/heads/main'
+              run: |
+                  # test vm is skipped only when every file this branch changed from main is one of the files below, which the VM
+                  # and the compiler do not read. Any failure to find the changes, and any other file, runs it.
+                  run=true
+                  if [ "${{ github.event_name }}" = push ] && git fetch --no-tags origin main:refs/remotes/origin/main 2>/dev/null; then
+                      if base=$(git merge-base refs/remotes/origin/main HEAD 2>/dev/null) && changed=$(git diff --name-only "$base" HEAD); then
+                          run=false
+                          for f in $changed; do
+                              case "$f" in
+                                  docs/*|README.rst|LICENSE|.gitignore|planck/tests/*) ;;
+                                  planck/examples/vm/*) run=true ;;
+                                  planck/examples/*) ;;
+                                  *) run=true ;;
+                              esac
+                          done
+                      fi
+                  fi
+                  echo "run=$run" >> "$GITHUB_OUTPUT"
+                  echo "test vm runs: $run"
+            - name: restore the units and the program of vm
+              id: vm-cache
+              if: github.ref != 'refs/heads/main' && steps.vm-scope.outputs.run == 'true'
+              uses: actions/cache/restore@v6.1.0
+              with:
+                  path: |
+                      tmp-vm
+                      tmp-vm-build
+                  key: vm-${{ steps.planck0-cache.outputs.cache-primary-key }}-${{ hashFiles('Makefile', 'planck/vasmc.pk', 'planck/init.pk', 'planck/peg.pk', 'planck/syntax.pk', 'planck/lib/**', 'planck/vm/**') }}
+            - name: use the cached units
+              if: steps.vm-cache.outputs.cache-hit == 'true'
+              run: |
+                  touch tmp-vm-build/*.unit
+                  touch tmp-vm
+            - name: test vm
+              if: github.ref != 'refs/heads/main' && steps.vm-scope.outputs.run == 'true'
               run:
-                  make test-vm
+                  make -j4 test-vm
+            - name: save the units and the program of vm
+              if: github.ref != 'refs/heads/main' && steps.vm-scope.outputs.run == 'true' && steps.vm-cache.outputs.cache-hit != 'true'
+              uses: actions/cache/save@v6.1.0
+              with:
+                  path: |
+                      tmp-vm
+                      tmp-vm-build
+                  key: ${{ steps.vm-cache.outputs.cache-primary-key }}
