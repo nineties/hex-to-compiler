@@ -11,7 +11,7 @@
 # continuation (kind 11: the number, the register of PERFORM, the number of frames, the frames, the registers).
 # The result of enter and next_alt: 0 a frame was made at the index st[3]; 1 a builtin gave the value st[2] (st[3] is the frame it was called for);
 # 2 no alternative takes the arguments, 3 the call is a runtime error (the message is in st[22], see fail in builtin.native).
-# A runtime error is the effect Error{none, message} performed by the frame that made it (raise_pending); with no boundary the message is written
+# A runtime error is the effect Error{loc, message} performed by the frame that made it (raise_pending); with no boundary the message is written
 # to the standard error and the program stops.
 import mem
 import obj
@@ -411,7 +411,7 @@ fn die_pending[r](h: &r [u32], st: &r [u32]) {
     exit(1)
 }
 
-# raise_pending performs the effect Error{none, message} for the pending runtime error, in the frame fp that is the top frame. The result of the
+# raise_pending performs the effect Error{loc, message} for the pending runtime error, in the frame fp that is the top frame. The result of the
 # resumption is given to the frame as the ret word rw says. The result is the top frame after the effect.
 fn raise_pending[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], fs: &mut r [u32], fp: i64, rw: i64) -> i64 {
     if find_boundary(fs, fp) < 0 { die_pending(h, st) }
@@ -419,7 +419,7 @@ fn raise_pending[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], fs: &mu
     p(st, 22, 0)
     let sym = intern_sym(h, st, lit_string(h, st, "Error"))
     let m = new_mexpr(h, st, sym, 2)
-    set_arg(h, m, 0, g(h, 3))
+    set_arg(h, m, 0, frame_loc(h, st, fs, fp))
     set_arg(h, m, 1, msg)
     let q = fail_boundary(h, st, rs, fs, fp, rw, fin_mexpr(h, st, m))
     let status = next_alt(h, st, rs, fs, q)

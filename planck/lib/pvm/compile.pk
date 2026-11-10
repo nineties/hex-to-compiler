@@ -56,11 +56,13 @@ module pvm_compile {
     vars := vector.new()
     gl := table.new()
     nlabel := 0
+    # the position of the innermost At around the expression that is being compiled, or none
+    cur_loc := none
 
-    # a compile error is the effect Error{none, message}, which the program that compiles at run time can catch
+    # a compile error is the effect Error{loc, message}, which the program that compiles at run time can catch. loc is cur_loc.
     err(msg, e) := {
         m := _strcat("pvm_compile: ", msg)
-        perform Error{none, if (type(e) == Symbol) _strcat(m, _strcat(": ", symname(e))) else m}
+        perform Error{cur_loc, if (type(e) == Symbol) _strcat(m, _strcat(": ", symname(e))) else m}
     }
 
     new_ctx(parent, top, arity, notail) := {
@@ -362,9 +364,9 @@ module pvm_compile {
     # at_instr(loc, i) is the instruction i that has the entry loc (Loc{file, line, column}) in the position table of the code, or i when loc is none
     at_instr(loc, i) := if (loc == none) i else mk('At, [loc, i])
 
-    # call(c, e, d, tail, loc) emits the call. It is true when the code ends there (a tail call), and false when the value is in the temporary d.
+    # call_in(c, e, d, tail, loc) emits the call. It is true when the code ends there (a tail call), and false when the value is in the temporary d.
     # loc is the position of the call, or none.
-    call(c, e0, d, tail, loc) := {
+    call_in(c, e0, d, tail, loc) := {
         e := rw(c, e0)
         if (head(e) == 'Do or head(e) == 'If) {
             cx(c, e, d)
@@ -400,6 +402,15 @@ module pvm_compile {
                 false
             }
         }
+    }
+
+    # call(c, e, d, tail, loc) is call_in with cur_loc set to loc while the call is compiled, so that a compile error has the position of the call
+    call(c, e0, d, tail, loc) := {
+        saved := cur_loc
+        if (loc != none) cur_loc = loc
+        r := call_in(c, e0, d, tail, loc)
+        cur_loc = saved
+        r
     }
 
     cx_def(c, e, d) := {
