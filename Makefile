@@ -49,17 +49,18 @@ planck0: bootstrap/planck0.sv plisp2 $(SASM_LIBS)
 VASM_EXAMPLES := $(wildcard planck/examples/vasm/*.vasm)
 NATIVE_EXAMPLES := $(wildcard planck/examples/native/*.native)
 VASM_TARGETS := x86_64
-# the programs that use a float are left out: planckvm does not support the float instructions
-VM_EXAMPLES := $(filter-out planck/examples/vm/float.pk planck/examples/vm/plain_float.pk planck/examples/vm/trans.pk planck/examples/vm/bits.pk planck/examples/vm/equality.pk planck/examples/vm/plain_int.pk,$(wildcard planck/examples/vm/*.pk))
+VM_ALL_EXAMPLES := $(wildcard planck/examples/vm/*.pk)
+# the programs that use a float are left out of the examples of VM0, the planckvm without floating point
+VM0_EXAMPLES := $(filter-out planck/examples/vm/float.pk planck/examples/vm/plain_float.pk planck/examples/vm/trans.pk planck/examples/vm/bits.pk planck/examples/vm/equality.pk planck/examples/vm/plain_int.pk,$(wildcard planck/examples/vm/*.pk))
 BACKEND_EXAMPLES := $(wildcard planck/examples/backend/*.pk)
 
-.PHONY: clean test test-planck0 test-all test-vm test-udiv test-fm preprocess
+.PHONY: clean test test-planck0 test-all test-vm0 test-vm test-udiv test-fm preprocess
 clean:
 	rm -f planck/lib/*.pkm planck/lib/*/*.pkm
 	rm -f pforth
 	rm -f plisp2
 	rm -f planck0
-	rm -rf tmp-vm tmp-vm-build
+	rm -rf tmp-vm tmp-vm-build tmp-vmf tmp-vmf-build
 	rm -f $(ASM_EXAMPLE_TARGETS)
 	rm -f $(SASM_EXAMPLE_TARGETS)
 
@@ -86,17 +87,20 @@ test-planck0: planck0
 		echo "$$f: stops"; \
 	done; rm -f tmp-error.out tmp-error.err
 
-# build planck/vm as units and run the programs of planck/examples/vm that use no float on it; the standard input is the file of the same name with .in, or empty
-VM_UNITS := mem gc udiv big num obj bit nb arr eq builtin hsh ctl ops vm
+# planck/vm is built as units. tmp-vm is VM0, the planckvm without floating point: its flt, dec and trans are those of planck/vm0, which stop on a float.
+# tmp-vmf is the planckvm with floating point: it has the flt, dec and trans of planck/vm, and fm with the coefficients that VM0 made (fmk).
+# The other units are the same in both, so they are compiled once. The standard input of an example is the file of the same name with .in, or empty.
+VM_UNITS := mem gc udiv big flt dec num obj bit trans nb arr eq builtin hsh ctl ops vm
 VM_BUILD := tmp-vm-build
 VM_UNIT_FILES := $(addprefix $(VM_BUILD)/,$(addsuffix .unit,$(VM_UNITS)))
 # everything that a unit depends on besides its source: the compiler, which is planck/vasmc.pk and the libraries that it uses
 VASMC_SOURCES := planck/vasmc.pk planck/init.pk planck/peg.pk planck/syntax.pk $(shell find planck/lib -name "*.pk")
 # the unit files of the units that planck/vm/$(1).native imports
-vm_imports = $(addprefix $(VM_BUILD)/,$(addsuffix .unit,$(shell sed -n 's/^import \([A-Za-z0-9_]*\).*/\1/p' planck/vm/$(1).native)))
+vm_src = $(if $(filter flt dec trans,$(1)),planck/vm0,planck/vm)/$(1).native
+vm_imports = $(addprefix $(VM_BUILD)/,$(addsuffix .unit,$(shell sed -n 's/^import \([A-Za-z0-9_]*\).*/\1/p' $(call vm_src,$(1)))))
 # a unit is compiled once the units that it imports are, so make -j compiles the units that do not depend on each other at the same time
 define VM_UNIT_RULE
-$(VM_BUILD)/$(1).unit: planck/vm/$(1).native $(call vm_imports,$(1)) $(VASMC_SOURCES) planck0 | $(VM_BUILD)
+$(VM_BUILD)/$(1).unit: $(call vm_src,$(1)) $(call vm_imports,$(1)) $(VASMC_SOURCES) planck0 | $(VM_BUILD)
 	./planck0 planck/vasmc.pk unit $$< $$@ x86_64 $(call vm_imports,$(1))
 endef
 $(foreach u,$(VM_UNITS),$(eval $(call VM_UNIT_RULE,$(u))))
@@ -120,8 +124,34 @@ test-fm: $(VM_BUILD)/fmk.unit planck0
 	./planck0 planck/vasmc.pk link $(VM_BUILD)/fmtest x86_64 $(VM_BUILD)/fmk.unit $(VM_BUILD)/fm.unit $(VM_BUILD)/fmtest.unit
 	$(VM_BUILD)/fmtest
 
-test-vm: tmp-vm
-	@for f in $(VM_EXAMPLES); do \
+# the units of tmp-vmf: flt, dec and trans of planck/vm, and fm, which needs the units that VM0 made
+VMF_BUILD := tmp-vmf-build
+VMF_REAL := flt dec trans
+VMF_UNIT_FILES := $(filter-out $(addprefix $(VM_BUILD)/,$(addsuffix .unit,$(VMF_REAL))),$(VM_UNIT_FILES)) $(VM_BUILD)/fmk.unit $(VM_BUILD)/fm.unit $(addprefix $(VMF_BUILD)/,$(addsuffix .unit,$(VMF_REAL)))
+$(VM_BUILD)/fm.unit: planck/vm/fm.native $(VM_BUILD)/fmk.unit $(VASMC_SOURCES) planck0
+	./planck0 planck/vasmc.pk unit $< $@ x86_64 $(VM_BUILD)/fmk.unit
+$(VMF_BUILD):
+	mkdir -p $@
+$(VMF_BUILD)/flt.unit: planck/vm/flt.native $(VM_BUILD)/fm.unit $(VM_BUILD)/mem.unit $(VM_BUILD)/big.unit $(VASMC_SOURCES) planck0 | $(VMF_BUILD)
+	./planck0 planck/vasmc.pk unit $< $@ x86_64 $(VM_BUILD)/fm.unit $(VM_BUILD)/mem.unit $(VM_BUILD)/big.unit
+$(VMF_BUILD)/dec.unit: planck/vm/dec.native $(VMF_BUILD)/flt.unit $(VM_BUILD)/mem.unit $(VASMC_SOURCES) planck0 | $(VMF_BUILD)
+	./planck0 planck/vasmc.pk unit $< $@ x86_64 $(VM_BUILD)/mem.unit $(VMF_BUILD)/flt.unit
+$(VMF_BUILD)/trans.unit: planck/vm/trans.native $(VMF_BUILD)/flt.unit $(VM_BUILD)/fm.unit $(VM_BUILD)/mem.unit $(VASMC_SOURCES) planck0 | $(VMF_BUILD)
+	./planck0 planck/vasmc.pk unit $< $@ x86_64 $(VM_BUILD)/fm.unit $(VM_BUILD)/mem.unit $(VMF_BUILD)/flt.unit
+tmp-vmf: $(VMF_UNIT_FILES) planck0
+	./planck0 planck/vasmc.pk link $@ x86_64 $(VMF_UNIT_FILES)
+
+test-vm: tmp-vmf
+	@for f in $(VM_ALL_EXAMPLES); do \
+		./planck0 $$f tmp-vmf.img || exit 1; \
+		in=/dev/null; if [ -f $${f%.pk}.in ]; then in=$${f%.pk}.in; fi; \
+		./tmp-vmf tmp-vmf.img < $$in > tmp-vmf.out || exit 1; \
+		diff -u $${f%.pk}.out tmp-vmf.out || exit 1; \
+		echo "$$f: ok"; \
+	done; rm -f tmp-vmf.img tmp-vmf.out
+
+test-vm0: tmp-vm
+	@for f in $(VM0_EXAMPLES); do \
 		./planck0 $$f tmp-vm.img || exit 1; \
 		in=/dev/null; if [ -f $${f%.pk}.in ]; then in=$${f%.pk}.in; fi; \
 		./tmp-vm tmp-vm.img < $$in > tmp-vm.out || exit 1; \
@@ -148,7 +178,9 @@ test-all: test-planck0
 	./planck0 planck/tests/vasm.pk
 	./planck0 planck/tests/native.pk
 	$(MAKE) test-udiv
+	$(MAKE) test-vm0
 	$(MAKE) test-vm
+	$(MAKE) test-fm
 	@for f in $(PLANCK_EXAMPLES); do \
 		./planck0 $$f > tmp-example.out || exit 1; \
 		diff -u $${f%.pk}.out tmp-example.out || exit 1; \
