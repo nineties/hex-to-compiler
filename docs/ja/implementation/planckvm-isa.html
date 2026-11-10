@@ -54,10 +54,16 @@
 <tr class="fld"><td colspan="32">nconsts (32)</td></tr>
 <tr class="lab"><td colspan="32">語3</td></tr>
 <tr class="fld"><td colspan="32">params (32)</td></tr>
+<tr class="lab"><td colspan="32">語4</td></tr>
+<tr class="fld"><td colspan="32">nlocs (32)</td></tr>
+<tr class="lab"><td colspan="32">語5</td></tr>
+<tr class="fld"><td colspan="32">file (32)</td></tr>
 <tr class="fld"><td colspan="32">命令列 (ninstrs 語)</td></tr>
 <tr class="fld"><td colspan="32">定数表 (nconsts 語)</td></tr>
+<tr class="fld"><td colspan="32">位置の表 (nlocs × 3 語)</td></tr>
 </table>
 <p><code>nregs</code> は窓のレジスタの個数で、コードの中のレジスタ番号はすべてこれより小さい値です。<code>ninstrs</code> と <code>nconsts</code> は命令列と定数表の語数です。<code>params</code> は引数のパターンの木の定数表の添字で、関数の表示と照合失敗のメッセージに使います（トップレベルの式では <code>0xFFFFFFFF</code>）。</p>
+<p>位置の表は、呼び出しの位置から <code>MatchingFailed</code> の <code>loc</code> を引くために使います。1項目は <code>pc</code>・<code>line</code>・<code>column</code> の3語で、<code>nlocs</code> はその項目数です。<code>pc</code> は <code>CALL</code> か <code>TCALL</code> の語の、命令列の先頭からの添字で（<code>EXT</code> が前にあれば <code>EXT</code> の次の語）、項目は <code>pc</code> の昇順に並びます。<code>file</code> は表の全項目に共通のファイル名の文字列の、定数表の添字です（ファイル名がなければ <code>0xFFFFFFFF</code>）。<code>At</code> が包む呼び出しだけが項目を持ちます。</p>
 
 <h3>命令の形式</h3>
 <p>1命令は1語（<code>EXT</code> を前に置くと2語）で、下位 8 ビットがオペコードです。</p>
@@ -174,10 +180,10 @@
 <p>型で分かれる演算は、値の型を見る1つの命令にします。<code>Apply{f, Tuple{...}}</code> の <code>f</code> が「組み込み」の欄の名前で、局所変数でなく、引数の個数が合うとき、コンパイラはその命令を使い、大域変数の上書きの有無を区別しません。</p>
 <p>命令にしない組み込み（<a href="../reference/builtins.html">組み込み関数</a>）は機械の組み込みで、<code>GETGLOBAL</code> で <code>R[B]</code> に読み、引数をその上のレジスタに置いて <code>CALL</code> で呼びます。確保とエラーは、その <code>CALL</code> の S と T に含まれます。</p>
 <ul>
-<li><code>eval(e)</code>: M式 e を現在の大域環境でコードに変換して実行します。コンパイルエラーは実行時エラーと同じく止まります。内側のフレームは通常のフレームなので、<code>eval</code> の中の <code>PERFORM</code> でも複製できます。</li>
+<li><code>eval(e)</code>: M式 e を現在の大域環境でコードに変換して実行します。コンパイルエラーは実行時エラーと同じく止まり、その <code>loc</code> は、コンパイルに失敗した式を囲む一番内側の <code>At</code> の位置です。<code>At</code> が無ければ <code>none</code> です。内側のフレームは通常のフレームなので、<code>eval</code> の中の <code>PERFORM</code> でも複製できます。</li>
 <li><code>_set_file(path)</code>: 読み込み中のファイルを path にし、前の値を返します。大域変数の定義元の判定に使います。</li>
 <li>システムの組み込み: <code>_sys_open(path)</code> は読み込み用にファイルを開き、記述子か負の数を返します。<code>_sys_read(fd, buf, n)</code> は <code>u8</code> の plain array buf の先頭へ最大 n バイトを読み、読んだバイト数を返します（終わりでは 0）。<code>_sys_write(fd, buf, n)</code> は buf の先頭 n バイトを書き、書いたバイト数を返します。<code>_sys_close(fd)</code> は記述子を閉じます。<code>_sys_argc()</code> と <code>_sys_argv(i)</code> は機械のコマンドラインの個数と文字列で、先頭が機械、2番目がイメージです。</li>
-<li>実行中にコードを作る組み込み: <code>_code_new(arity, nregs, instrs, consts)</code> は、<code>u32</code> の plain array instrs の語と array consts の値から、この頁のフォーマットどおりのコードを作ります。<code>_lambda(code)</code> はコードの環境なしの Lambda です。<code>_cells()</code> は大域変数のセルすべての array です。<code>_cell_new(sym, g)</code> は世代 g で値が <code>none</code> のセルを作ります。<code>_cell_field(c, i)</code> はセル c の値（i が 0）・名前の symbol（1）・世代（2）で、<code>_cell_set(c, v)</code> は値を書きます。</li>
+<li>実行中にコードを作る組み込み: <code>_code_new(arity, nregs, instrs, consts, file, locs)</code> は、<code>u32</code> の plain array instrs の語と array consts の値から、この頁のフォーマットどおりのコードを作ります。<code>file</code> はファイル名の文字列の consts での添字（無ければ -1）で、<code>u32</code> の plain array locs は位置の表の項 <code>pc</code>・<code>line</code>・<code>column</code> を並べたものです。<code>_lambda(code)</code> はコードの環境なしの Lambda です。<code>_cells()</code> は大域変数のセルすべての array です。<code>_cell_new(sym, g)</code> は世代 g で値が <code>none</code> のセルを作ります。<code>_cell_field(c, i)</code> はセル c の値（i が 0）・名前の symbol（1）・世代（2）で、<code>_cell_set(c, v)</code> は値を書きます。</li>
 <li>ビット演算は負の数も含めて無限桁の 2 の補数として扱います。</li>
 </ul>
 
@@ -198,6 +204,7 @@
 <tr><td><code>f(p, ...) := e</code></td><td><code>&lt;f:t&gt;</code> <code>CLOSURE t+1 k</code> <code>FUSION t t t+1</code> のあと書き込み。<code>Declare{f}</code> は既存の変数があれば何もしない</td></tr>
 <tr><td><code>(p, ...) -&gt; e</code> / <code>f | g</code></td><td><code>CLOSURE</code>（コードは入口の照合と本体）/ <code>FUSION</code></td></tr>
 <tr><td><code>f(a, ...)</code></td><td><code>&lt;f:t&gt;</code> <code>&lt;a:t+1&gt;</code>... <code>CALL d t n</code>。末尾なら <code>TCALL t n</code></td></tr>
+<tr><td><code>At{Loc{file, line, column}, Apply{f, Tuple{a, ...}}}</code></td><td><code>Apply</code> と同じ命令に加えて、その <code>CALL</code> か <code>TCALL</code> の項目を位置の表に入れる。<code>file</code> はコードの <code>file</code> になる。<code>Apply</code> でない <code>e</code> を包む <code>At{loc, e}</code> は <code>e</code> と同じ</td></tr>
 <tr><td><code>a + b</code> <code>a - b</code> <code>a * b</code> <code>a / b</code> <code>a % b</code></td><td><code>ADD</code> <code>SUB</code> <code>MUL</code> <code>DIV</code> <code>MOD</code>。<code>a + b</code> は b が -128 〜 127 の整数なら <code>ADDI</code>。<code>-a</code> は <code>0 - a</code> で、<code>-0.0</code> は作らない</td></tr>
 <tr><td><code>a == b</code> <code>a != b</code> <code>a &lt; b</code> <code>a &gt;= b</code></td><td>条件の位置でなければ <code>EQ</code> <code>NE</code> <code>LT</code> <code>GE</code></td></tr>
 <tr><td><code>array_set</code> <code>plain_set</code></td><td>値を使わない位置なら <code>ASET</code> <code>PLAINSET</code>。使う位置なら <code>CALL</code></td></tr>

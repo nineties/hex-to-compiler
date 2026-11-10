@@ -372,10 +372,40 @@ Def{peg_line_at, Lambda{Tuple{p}, Do{
         Set{q, Apply{peg_inc, Tuple{q}}}},
     Apply{substr, Tuple{peg_src, p, q}}}}}
 
-" peg_parse(rule, s) parses a prefix of s by the rule. "
+" the position of the start of peg_src: Loc{file, line, column}. peg_lp is a position of the text that peg_ll and peg_lc are the line and the column of, "
+" so that the positions after it are counted from there. "
+Def{peg_loc0, none}
+Def{peg_lp, 0}
+Def{peg_ll, 1}
+Def{peg_lc, 1}
+
+" the token here consumes nothing and its value is the position p. peg_loc_at(p) is the Loc of the first token at or after p "
+Def{peg_tok_here, Lambda{Tuple{p}, Do{Set{peg_pv, p}, p}}}
+Def{peg_loc_at, Lambda{Tuple{p0}, Do{
+    Def{p, Apply{peg_skip_ws, Tuple{p0}}},
+    If{Apply{_lt, Tuple{p, peg_lp}}, Do{
+        Set{peg_lp, 0},
+        Set{peg_ll, Apply{arg, Tuple{peg_loc0, 1}}},
+        Set{peg_lc, Apply{arg, Tuple{peg_loc0, 2}}}}, none},
+    While{Apply{_lt, Tuple{peg_lp, p}}, Do{
+        If{Apply{_eq, Tuple{Apply{peg_char_at, Tuple{peg_lp}}, 10}},
+            Do{Set{peg_ll, Apply{_add, Tuple{peg_ll, 1}}}, Set{peg_lc, 1}},
+            Set{peg_lc, Apply{_add, Tuple{peg_lc, 1}}}},
+        Set{peg_lp, Apply{_add, Tuple{peg_lp, 1}}}}},
+    Apply{mexpr, Tuple{Quote{Loc}, Tuple{Apply{arg, Tuple{peg_loc0, 0}}, peg_ll, peg_lc}}}}}}
+
+" peg_at(l, e) is e wrapped in At{loc, e} with the position of the token at l, when the text is parsed with a position (peg_loc0 is not none) "
+Def{peg_at, Lambda{Tuple{l, e}, If{Apply{_ne, Tuple{peg_loc0, none}},
+    Apply{mexpr, Tuple{Quote{At}, Tuple{Apply{peg_loc_at, Tuple{l}}, e}}}, e}}}
+
+" peg_parse_at(rule, s, loc) parses a prefix of s by the rule. loc is the position of the start of s, or none for no positions: then there is no At. "
 " It returns Tuple{value, rest}, Tuple{Eof{}, \"\"} or Tuple{SyntaxError{...}, \"\"}. "
-Def{peg_parse, Lambda{Tuple{r, s}, Do{
+Def{peg_parse_at, Lambda{Tuple{r, s, loc}, Do{
     Set{peg_src, s},
+    Set{peg_loc0, loc},
+    Set{peg_lp, 0},
+    Set{peg_ll, If{Apply{_eq, Tuple{loc, none}}, 1, Apply{arg, Tuple{loc, 1}}}},
+    Set{peg_lc, If{Apply{_eq, Tuple{loc, none}}, 1, Apply{arg, Tuple{loc, 2}}}},
     Set{peg_srclen, Apply{strlen, Tuple{s}}},
     Set{peg_memo, Apply{array, Tuple{Apply{peg_inc, Tuple{Apply{strlen, Tuple{s}}}}}}},
     Set{peg_memo_w, Apply{_mul, Tuple{peg_nrules, 3}}},
@@ -389,3 +419,6 @@ Def{peg_parse, Lambda{Tuple{r, s}, Do{
                     Tuple{"unexpected end of input"},
                     Tuple{"unexpected input", Apply{peg_line_at, Tuple{peg_far}}}}}}, ""},
             Tuple{peg_pv, Apply{substr, Tuple{s, Apply{peg_skip_ws, Tuple{q}}, peg_srclen}}}}}}}}}
+
+" peg_parse(rule, s) is peg_parse_at(rule, s, none) "
+Def{peg_parse, Lambda{Tuple{r, s}, Apply{peg_parse_at, Tuple{r, s, none}}}}

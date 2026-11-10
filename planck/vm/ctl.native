@@ -11,7 +11,7 @@
 # continuation (kind 11: the number, the register of PERFORM, the number of frames, the frames, the registers).
 # The result of enter and next_alt: 0 a frame was made at the index st[3]; 1 a builtin gave the value st[2] (st[3] is the frame it was called for);
 # 2 no alternative takes the arguments, 3 the call is a runtime error (the message is in st[22], see fail in builtin.native).
-# A runtime error is the effect Error{none, message} performed by the frame that made it (raise_pending); with no boundary the message is written
+# A runtime error is the effect Error{loc, message} performed by the frame that made it (raise_pending); with no boundary the message is written
 # to the standard error and the program stops.
 import mem
 import obj
@@ -266,8 +266,52 @@ fn mf_symbol[r](h: &mut r [u32], st: &mut r [u32]) -> i64 {
     intern_sym(h, st, s)
 }
 
-# MatchingFailed{f, Tuple{the c arguments at rs[nb]}, none}: the position of the call is none
-fn mf_value[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], f: i64, nb: i64, c: i64) -> i64 {
+# the symbol Loc ("Loc" is 3 bytes: 76, 111 and 99 from the low end of the word)
+fn loc_symbol[r](h: &mut r [u32], st: &mut r [u32]) -> i64 {
+    let s = new_string(h, st, 3)
+    p(h, (s >> 1) + 2, 6516556)
+    intern_sym(h, st, s)
+}
+
+# the Loc{file, line, column} of the call that the frame q is making, or none: the entry of the position table of the code of q for the word before the saved pc,
+# found by a binary search (the entries are in ascending order of pc). It is none when q < 0 or the code has no such entry.
+fn frame_loc[r](h: &mut r [u32], st: &mut r [u32], fs: &r [u32], q: i64) -> i64 {
+    if q < 0 { return g(h, 3) }
+    let code = code_of(h, g(fs, q))
+    let nl = g(h, code + 5)
+    let fi = g(h, code + 6)
+    if nl == 0 or fi == 4294967295 { return g(h, 3) }
+    let pc = g(fs, q + 5) - 1
+    let ni = g(h, code + 2)
+    let lb = code + 7 + ni + g(h, code + 3)
+    var lo: i64
+    var hi: i64
+    var at: i64
+    lo = 0
+    hi = nl - 1
+    at = -1
+    while lo <= hi and at < 0 {
+        let mid = (lo + hi) / 2
+        let e = g(h, lb + 3 * mid)
+        if e == pc {
+            at = mid
+        } else if e < pc {
+            lo = mid + 1
+        } else {
+            hi = mid - 1
+        }
+    }
+    if at < 0 { return g(h, 3) }
+    let sym = loc_symbol(h, st)
+    let m = new_mexpr(h, st, sym, 3)
+    set_arg(h, m, 0, g(h, code + 7 + ni + fi))
+    set_arg(h, m, 1, (g(h, lb + 3 * at + 1) * 2 + 1) & 4294967295)
+    set_arg(h, m, 2, (g(h, lb + 3 * at + 2) * 2 + 1) & 4294967295)
+    fin_mexpr(h, st, m)
+}
+
+# MatchingFailed{f, Tuple{the c arguments at rs[nb]}, loc}: loc is the position of the call, Loc{file, line, column}, or none
+fn mf_value[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], f: i64, nb: i64, c: i64, loc: i64) -> i64 {
     let t = new_mexpr(h, st, g(h, 4), c)
     for i in 0 as i64..c {
         set_arg(h, t, i, g(rs, nb + i))
@@ -277,7 +321,7 @@ fn mf_value[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], f: i64, nb: i64,
     let m = new_mexpr(h, st, sym, 3)
     set_arg(h, m, 0, f)
     set_arg(h, m, 1, tt)
-    set_arg(h, m, 2, g(h, 3))
+    set_arg(h, m, 2, loc)
     fin_mexpr(h, st, m)
 }
 
@@ -303,7 +347,7 @@ fn match_failed[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], fs: &mut
     if cur < 7 { die("matching failed") }
     if (rt >> 18) != 0 { die("matching failed") }
     let c = code_arity(h, code_of(h, g(fs, cur)))
-    let v = mf_value(h, st, rs, f, g(fs, cur + 4), c)
+    let v = mf_value(h, st, rs, f, g(fs, cur + 4), c, frame_loc(h, st, fs, cur - 7))
     fail_boundary(h, st, rs, fs, cur - 7, rt & 262143, v)
 }
 
@@ -367,7 +411,7 @@ fn die_pending[r](h: &r [u32], st: &r [u32]) {
     exit(1)
 }
 
-# raise_pending performs the effect Error{none, message} for the pending runtime error, in the frame fp that is the top frame. The result of the
+# raise_pending performs the effect Error{loc, message} for the pending runtime error, in the frame fp that is the top frame. The result of the
 # resumption is given to the frame as the ret word rw says. The result is the top frame after the effect.
 fn raise_pending[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], fs: &mut r [u32], fp: i64, rw: i64) -> i64 {
     if find_boundary(fs, fp) < 0 { die_pending(h, st) }
@@ -375,7 +419,7 @@ fn raise_pending[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], fs: &mu
     p(st, 22, 0)
     let sym = intern_sym(h, st, lit_string(h, st, "Error"))
     let m = new_mexpr(h, st, sym, 2)
-    set_arg(h, m, 0, g(h, 3))
+    set_arg(h, m, 0, frame_loc(h, st, fs, fp))
     set_arg(h, m, 1, msg)
     let q = fail_boundary(h, st, rs, fs, fp, rw, fin_mexpr(h, st, m))
     let status = next_alt(h, st, rs, fs, q)
@@ -398,7 +442,7 @@ fn do_perform[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], fs: &mut r
 
 # call_failed: the call f of c arguments at rs[nb], made by the frame fp, was taken by no alternative; the call gets the value of the resumption as the ret word rw says
 fn call_failed[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], fs: &mut r [u32], fp: i64, f: i64, nb: i64, c: i64, rw: i64) -> i64 {
-    let v = mf_value(h, st, rs, f, nb, c)
+    let v = mf_value(h, st, rs, f, nb, c, frame_loc(h, st, fs, fp))
     let q = fail_boundary(h, st, rs, fs, fp, rw, v)
     let status = next_alt(h, st, rs, fs, q)
     if status == 1 { return do_return(h, st, rs, fs, g(st, 3), g(st, 2)) }

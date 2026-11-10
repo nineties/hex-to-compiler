@@ -102,9 +102,17 @@ module pvm_link {
                 if (c == none) panic(_strcat("pvm_link: no code ", name))
                 labels := pvm_image.label_table(c[3])
                 words := []
+                locs := []
+                file := none
                 pc := 0
                 each(i -> if (head(i) != 'Label) {
-                    b := pvm_image.encode(labels, pc + 1, i)
+                    ins1 := if (head(i) == 'At) arg(i, 1) else i
+                    if (head(i) == 'At) {
+                        l := arg(i, 0)
+                        locs = arg(l, 2) :: arg(l, 1) :: pc :: locs
+                        file = arg(l, 0)
+                    }
+                    b := pvm_image.encode(labels, pc + 1, ins1)
                     words = (b[0] + b[1] * 256 + b[2] * 65536 + b[3] * 16777216) :: words
                     pc = pc + 1
                 }, c[3])
@@ -114,13 +122,21 @@ module pvm_link {
                     plain_set(ins, k, w)
                     k = k - 1
                 }, words)
-                ks := array(length(c[4]))
+                ks := array(length(c[4]) + (if (file == none) 0 else 1))
                 j := 0
                 each(x -> {
                     array_set(ks, j, value_of(x, make))
                     j = j + 1
                 }, c[4])
-                code := _code_new(c[1], c[2], ins, ks)
+                if (file != none) array_set(ks, j, file)
+                nl := length(locs)
+                la := plain_array('u32, nl)
+                k2 := nl - 1
+                each(w -> {
+                    plain_set(la, k2, w)
+                    k2 = k2 - 1
+                }, locs)
+                code := _code_new(c[1], c[2], ins, ks, if (file == none) -1 else j, la)
                 table.set(made, name, code)
                 code
             }

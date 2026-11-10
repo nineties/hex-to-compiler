@@ -56,11 +56,13 @@ module pvm_compile {
     vars := vector.new()
     gl := table.new()
     nlabel := 0
+    # the position of the innermost At around the expression that is being compiled, or none
+    cur_loc := none
 
-    # a compile error is the effect Error{none, message}, which the program that compiles at run time can catch
+    # a compile error is the effect Error{loc, message}, which the program that compiles at run time can catch. loc is cur_loc.
     err(msg, e) := {
         m := _strcat("pvm_compile: ", msg)
-        perform Error{none, if (type(e) == Symbol) _strcat(m, _strcat(": ", symname(e))) else m}
+        perform Error{cur_loc, if (type(e) == Symbol) _strcat(m, _strcat(": ", symname(e))) else m}
     }
 
     new_ctx(parent, top, arity, notail) := {
@@ -359,8 +361,12 @@ module pvm_compile {
         n
     }
 
-    # call(c, e, d, tail) emits the call. It is true when the code ends there (a tail call), and false when the value is in the temporary d.
-    call(c, e0, d, tail) := {
+    # at_instr(loc, i) is the instruction i that has the entry loc (Loc{file, line, column}) in the position table of the code, or i when loc is none
+    at_instr(loc, i) := if (loc == none) i else mk('At, [loc, i])
+
+    # call_in(c, e, d, tail, loc) emits the call. It is true when the code ends there (a tail call), and false when the value is in the temporary d.
+    # loc is the position of the call, or none.
+    call_in(c, e0, d, tail, loc) := {
         e := rw(c, e0)
         if (head(e) == 'Do or head(e) == 'If) {
             cx(c, e, d)
@@ -389,13 +395,22 @@ module pvm_compile {
             n := cx_args(c, args, d)
             c[X_CALL] = true
             if (tail and not c[X_NOTAIL]) {
-                emit(c, TCALL{t(c, d), n})
+                emit(c, at_instr(loc, TCALL{t(c, d), n}))
                 true
             } else {
-                emit(c, CALL{t(c, d), t(c, d), n})
+                emit(c, at_instr(loc, CALL{t(c, d), t(c, d), n}))
                 false
             }
         }
+    }
+
+    # call(c, e, d, tail, loc) is call_in with cur_loc set to loc while the call is compiled, so that a compile error has the position of the call
+    call(c, e0, d, tail, loc) := {
+        saved := cur_loc
+        if (loc != none) cur_loc = loc
+        r := call_in(c, e0, d, tail, loc)
+        cur_loc = saved
+        r
     }
 
     cx_def(c, e, d) := {
@@ -563,9 +578,15 @@ module pvm_compile {
     cx_mexpr(c, e, d) := {
         h := head(e)
         n := arity(e)
-        if (h == 'Apply) {
+        if (h == 'At and n == 2) {
+            # At{loc, e}: the position of a call goes into the position table; any other e is compiled as it is
+            x := arg(e, 1)
+            if (type(x) == Expr and head(x) == 'Apply and arity(x) == 2) call(c, x, d, false, arg(e, 0))
+            else cx(c, x, d)
+            none
+        } else if (h == 'Apply) {
             if (n != 2) err("malformed Apply", e)
-            call(c, e, d, false)
+            call(c, e, d, false, none)
             none
         } else if (h == 'Def) {
             if (n != 2) err("malformed Def", e)
@@ -619,10 +640,15 @@ module pvm_compile {
 
     cxt(c, e, d) = {
         done := false
+        loc := none
+        if (type(e) == Expr and head(e) == 'At and arity(e) == 2) {
+            loc = arg(e, 0)
+            e = arg(e, 1)
+        }
         if (type(e) == Expr) {
             h := head(e)
             if (h == 'Apply and arity(e) == 2) {
-                done = call(c, e, d, true)
+                done = call(c, e, d, true, loc)
                 if (not done) {
                     emit(c, RET{t(c, d)})
                     done = true
@@ -662,8 +688,10 @@ module pvm_compile {
         else none
     }
 
-    cond(c, e, l, k, d) = {
+    cond(c, e0, l, k, d) = {
         done := false
+        inner0 := if (type(e0) == Expr and head(e0) == 'At and arity(e0) == 2) arg(e0, 1) else e0
+        e := inner0
         if (type(e) == Expr and head(e) == 'If and arity(e) == 3 and (arg(e, 2) == 'false or arg(e, 1) == 'true)) {
             a := arg(e, 0)
             if (arg(e, 2) == 'false) {
@@ -720,7 +748,7 @@ module pvm_compile {
             }
         }
         if (not done) {
-            cx(c, e, d)
+            cx(c, if (e == inner0) e0 else e, d)
             emit(c, TEST{t(c, d), k})
             emit(c, JMP{l})
         }
@@ -803,7 +831,12 @@ module pvm_compile {
     finish(c, out, i) := {
         h := head(i)
         if (h == 'Label) vector.push(out, i)
-        else if (h == 'GetVar) {
+        else if (h == 'At) {
+            # the entry of the position table belongs to the last word that the instruction makes
+            finish(c, out, arg(i, 1))
+            k := vector.len(out) - 1
+            vector.set(out, k, mk('At, [arg(i, 0), vector.get(out, k)]))
+        } else if (h == 'GetVar) {
             v := vector.get(vars, arg(i, 1))
             dst := reg_of(c, arg(i, 0))
             if (v[V_ENV]) finish_plain(c, out, ENVGET{dst, hops(c, v), v[V_SLOT]})
@@ -879,14 +912,26 @@ module pvm_compile {
     export parse_file(path) := {
         s := read_file(path)
         r := []
+        line := 1
+        col := 1
         go := true
         while (go) {
-            t := parse(s)
+            t := parse_at(s, Loc{path, line, col})
             e := arg(t, 0)
             if (type(e) == Expr and head(e) == 'Eof) go = false
             else {
                 r = e :: r
-                s = arg(t, 1)
+                rest := arg(t, 1)
+                n := strlen(s) - strlen(rest)
+                k := 0
+                while (k < n) {
+                    if (ord(s, k) == 10) {
+                        line = line + 1
+                        col = 1
+                    } else col = col + 1
+                    k = k + 1
+                }
+                s = rest
             }
         }
         reverse(r)

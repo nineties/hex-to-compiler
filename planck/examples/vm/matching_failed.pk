@@ -21,12 +21,18 @@ handler(name, fields, v) := Code{name, 2, 12, cat([
 # handlers that only match Other{}: MatchingFailed passes through them
 hother := Code{"hother", 2, 3, [MATCHHEAD{0, 0, 0}, NEXT{}, LOADI{2, 99}, RET{2}], [Y{"Other"}]}
 
-# bodies: f1(5), f1(5, 6), (f1 | f2)(7), a function that makes the tail call f1(5, 6), and f1(5) inside a handler that does not take it
-b_call := Code{"b_call", 0, 3, [CLOSURE{1, 0}, LOADI{2, 5}, CALL{0, 1, 1}, RET{0}], [K{"f1"}]}
-b_arity := Code{"b_arity", 0, 4, [CLOSURE{1, 0}, LOADI{2, 5}, LOADI{3, 6}, CALL{0, 1, 2}, RET{0}], [K{"f1"}]}
+# at(line, column, i) is the instruction i with the entry of the call at that position in the position table (a tree At is made with mexpr, since At{loc, e} written in a program is e)
+at(l, c, i) := mexpr('At, Tuple{Loc{"b.pk", l, c}, i})
+
+# bodies: f1(5), f1(5, 6), (f1 | f2)(7), a function that makes the tail call f1(5, 6), and f1(5) inside a handler that does not take it.
+# The calls of b_fusion have no entry in the position table.
+b_call := Code{"b_call", 0, 3, [CLOSURE{1, 0}, LOADI{2, 5}, at(3, 7, CALL{0, 1, 1}), RET{0}], [K{"f1"}]}
+b_arity := Code{"b_arity", 0, 4, [CLOSURE{1, 0}, LOADI{2, 5}, LOADI{3, 6}, at(4, 9, CALL{0, 1, 2}), RET{0}], [K{"f1"}]}
 b_fusion := Code{"b_fusion", 0, 6, [CLOSURE{1, 0}, CLOSURE{2, 1}, FUSION{1, 1, 2}, LOADI{2, 7}, CALL{0, 1, 1}, RET{0}], [K{"f1"}, K{"f2"}]}
 g_tail := Code{"g_tail", 0, 4, [CLOSURE{1, 0}, LOADI{2, 5}, LOADI{3, 6}, TCALL{1, 2}], [K{"f1"}]}
-b_tail := Code{"b_tail", 0, 2, [CLOSURE{1, 0}, CALL{0, 1, 0}, RET{0}], [K{"g_tail"}]}
+b_tail := Code{"b_tail", 0, 2, [CLOSURE{1, 0}, at(8, 4, CALL{0, 1, 0}), RET{0}], [K{"g_tail"}]}
+# two entries in the position table: the first call is taken by f2, the second is not taken by f1
+b_two := Code{"b_two", 0, 5, [CLOSURE{1, 0}, LOADI{2, 2}, LOADI{3, 0}, at(5, 3, CALL{4, 1, 2}), CLOSURE{1, 1}, LOADI{2, 5}, LOADI{3, 6}, at(6, 3, CALL{0, 1, 2}), RET{0}], [K{"f2"}, K{"f1"}]}
 b_nest := Code{"b_nest", 0, 2, [CLOSURE{0, 0}, CLOSURE{1, 1}, HANDLE{2, 0}, RET{2}], [K{"b_call"}, K{"hother"}]}
 
 # handle { body } with handler: the value of the Handle is printed
@@ -38,13 +44,13 @@ h8 := handler("h8", [Pair{0, true}], 8)
 h9 := handler("h9", [Pair{1, false}], 9)
 h11 := handler("h11", [], 11)
 
-names := ["f1", "f2", "b_call", "b_arity", "b_fusion", "g_tail", "b_tail", "b_nest", "hother", "h42", "h7", "h8", "h9", "h11"]
+names := ["f1", "f2", "b_call", "b_arity", "b_fusion", "g_tail", "b_tail", "b_nest", "hother", "h42", "h7", "h8", "h9", "h11", "b_two"]
 k(n) := list.index_of(n, names) + 1
 
 main := Code{"main", 0, 3, cat([
     # a call that no alternative takes, and the handler resumes the call with 42
     run(k("b_call"), k("h42")),
-    # the fields of the effect: the arguments and the position (none), and the type of the function
+    # the fields of the effect: the arguments, the position of the call and the type of the function
     run(k("b_call"), k("h7")),
     # a Fusion: the function is the whole Fusion; and a call with the wrong number of arguments
     run(k("b_fusion"), k("h8")),
@@ -53,7 +59,9 @@ main := Code{"main", 0, 3, cat([
     run(k("b_tail"), k("h11")),
     # the handler that does not take MatchingFailed lets it pass to the outer handler
     run(k("b_nest"), k("h42")),
+    # the position of the second entry of a table
+    run(k("b_two"), k("h7")),
     [LOADNONE{0, 1}, RET{0}]
 ]), C{"println"} :: map(n -> K{n}, names)}
 
-write_file(array_get(argv(), 1), bytes.to_u8(pvm_image.build([f1, f2, hother, b_call, b_arity, b_fusion, g_tail, b_tail, b_nest, h42, h7, h8, h9, h11, main], "main")))
+write_file(array_get(argv(), 1), bytes.to_u8(pvm_image.build([f1, f2, hother, b_call, b_arity, b_fusion, g_tail, b_tail, b_nest, h42, h7, h8, h9, h11, b_two, main], "main")))
