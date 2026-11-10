@@ -1,48 +1,124 @@
-# num: the numbers of planckvm: integers
+# num: the numbers of planckvm as one family: integers, floats and complex numbers
 #
-# planckvm does not support floats and complex numbers yet: an operation on one stops with "float is not supported".
-# The class of a number is 1 for an integer and 0 for a value that is not a number.
+# The class of a number is 1 for an integer, 2 for a float and 3 for a complex number, and 0 for a value that is not a number.
+# Mixed operands are raised to the higher class in the order integer, float, complex.
 import mem
 import big
+import flt
 
 fn num_class[r](h: &r [u32], v: i64) -> i64 {
     if is_int(v) { return 1 }
     let k = kind_of(h, v)
     if k == 0 { return 1 }
-    if k == 1 or k == 2 { die("float is not supported") }
+    if k == 1 { return 2 }
+    if k == 2 { return 3 }
     0
 }
 
-# x op y for the operators ADD SUB MUL DIV MOD (37 to 41) on integers
+# the float of a number of the class 1 or 2
+fn to_float[r](h: &mut r [u32], st: &mut r [u32], v: i64) -> i64 {
+    if is_float(h, v) { return v }
+    int_to_float(h, st, v)
+}
+
+# the real part of a number as a float
+fn re_part[r](h: &mut r [u32], st: &mut r [u32], v: i64) -> i64 {
+    if is_complex(h, v) { return mk_float(h, st, g(h, (v >> 1) + 2), g(h, (v >> 1) + 1)) }
+    to_float(h, st, v)
+}
+
+fn im_part[r](h: &mut r [u32], st: &mut r [u32], v: i64) -> i64 {
+    if is_complex(h, v) { return mk_float(h, st, g(h, (v >> 1) + 4), g(h, (v >> 1) + 3)) }
+    mk_float(h, st, 0, 0)
+}
+
+fn complex_of[r](h: &mut r [u32], st: &mut r [u32], re: i64, im: i64) -> i64 {
+    mk_complex(h, st, fl_hi(h, re), fl_lo(h, re), fl_hi(h, im), fl_lo(h, im))
+}
+
+# the operation of op (37 add, 38 sub, 39 mul, 40 div) on two floats
+fn float_op[r](h: &mut r [u32], st: &mut r [u32], op: i64, x: i64, y: i64) -> i64 {
+    let hx = fl_hi(h, x)
+    let lx = fl_lo(h, x)
+    let hy = fl_hi(h, y)
+    let ly = fl_lo(h, y)
+    if op == 37 { return f_add(h, st, hx, lx, hy, ly, 0) }
+    if op == 38 { return f_add(h, st, hx, lx, hy, ly, 1) }
+    if op == 39 { return f_mul(h, st, hx, lx, hy, ly) }
+    f_div(h, st, hx, lx, hy, ly)
+}
+
+fn complex_op[r](h: &mut r [u32], st: &mut r [u32], op: i64, x: i64, y: i64) -> i64 {
+    let a = re_part(h, st, x)
+    let b = im_part(h, st, x)
+    let c = re_part(h, st, y)
+    let d = im_part(h, st, y)
+    if op == 37 or op == 38 {
+        return complex_of(h, st, float_op(h, st, op, a, c), float_op(h, st, op, b, d))
+    }
+    if op == 39 {
+        let ac = float_op(h, st, 39, a, c)
+        let bd = float_op(h, st, 39, b, d)
+        let ad = float_op(h, st, 39, a, d)
+        let bc = float_op(h, st, 39, b, c)
+        return complex_of(h, st, float_op(h, st, 38, ac, bd), float_op(h, st, 37, ad, bc))
+    }
+    let cc = float_op(h, st, 39, c, c)
+    let dd = float_op(h, st, 39, d, d)
+    let den = float_op(h, st, 37, cc, dd)
+    let ac = float_op(h, st, 39, a, c)
+    let bd = float_op(h, st, 39, b, d)
+    let bc = float_op(h, st, 39, b, c)
+    let ad = float_op(h, st, 39, a, d)
+    complex_of(h, st, float_op(h, st, 40, float_op(h, st, 37, ac, bd), den), float_op(h, st, 40, float_op(h, st, 38, bc, ad), den))
+}
+
+# x op y for the operators ADD SUB MUL DIV MOD (37 to 41) on any numbers
 fn num_arith[r](h: &mut r [u32], st: &mut r [u32], op: i64, x: i64, y: i64) -> i64 {
     let cx = num_class(h, x)
     let cy = num_class(h, y)
     if cx == 0 or cy == 0 { die("arithmetic: not a number") }
-    if (op == 40 or op == 41) and y == 1 { die("division by zero") }
-    if is_int(x) and is_int(y) {
-        let m = int_of(x)
-        let n = int_of(y)
-        if op == 37 { return int_from_i64(h, st, m + n) }
-        if op == 38 { return int_from_i64(h, st, m - n) }
-        if op == 39 { return int_from_i64(h, st, m * n) }
-        if op == 40 { return int_from_i64(h, st, m / n) }
+    var c: i64
+    c = cx
+    if cy > c { c = cy }
+    if c == 1 {
+        if (op == 40 or op == 41) and y == 1 { die("division by zero") }
+        if is_int(x) and is_int(y) {
+            let m = int_of(x)
+            let n = int_of(y)
+            if op == 37 { return int_from_i64(h, st, m + n) }
+            if op == 38 { return int_from_i64(h, st, m - n) }
+            if op == 39 { return int_from_i64(h, st, m * n) }
+            if op == 40 { return int_from_i64(h, st, m / n) }
+            # the remainder has the sign of the divisor
+            var r: i64
+            r = m - n * (m / n)
+            if r != 0 and ((r < 0) != (n < 0)) { r += n }
+            return int_from_i64(h, st, r)
+        }
+        if op == 37 { return int_add(h, st, x, y, 0) }
+        if op == 38 { return int_add(h, st, x, y, 1) }
+        if op == 39 { return int_mul(h, st, x, y) }
+        if op == 40 { return int_divmod(h, st, x, y, 0) }
+        let r = int_divmod(h, st, x, y, 1)
         # the remainder has the sign of the divisor
-        var r: i64
-        r = m - n * (m / n)
-        if r != 0 and ((r < 0) != (n < 0)) { r += n }
-        return int_from_i64(h, st, r)
+        if r != 1 and i_sign(h, r) != i_sign(h, y) { return int_add(h, st, r, y, 0) }
+        return r
     }
-    if op == 37 { return int_add(h, st, x, y, 0) }
-    if op == 38 { return int_add(h, st, x, y, 1) }
-    if op == 39 { return int_mul(h, st, x, y) }
-    if op == 40 { return int_divmod(h, st, x, y, 0) }
-    let r = int_divmod(h, st, x, y, 1)
-    # the remainder has the sign of the divisor
-    if r != 1 and i_sign(h, r) != i_sign(h, y) { return int_add(h, st, r, y, 0) }
-    r
+    if op == 41 {
+        # b - c * (b / c) with the quotient of DIV
+        let q = num_arith(h, st, 40, x, y)
+        return num_arith(h, st, 38, x, num_arith(h, st, 39, y, q))
+    }
+    if c == 2 {
+        let fx = to_float(h, st, x)
+        let fy = to_float(h, st, y)
+        return float_op(h, st, op, fx, fy)
+    }
+    complex_op(h, st, op, x, y)
 }
 
-# the order of two numbers: -1, 0, 1
+# the order of two numbers that are not complex: -1, 0, 1, or 2 when one of them is NaN
 fn num_ord[r](h: &r [u32], x: i64, y: i64) -> i64 {
     if is_int(x) and is_int(y) {
         let a = int_of(x)
@@ -54,7 +130,13 @@ fn num_ord[r](h: &r [u32], x: i64, y: i64) -> i64 {
     let cx = num_class(h, x)
     let cy = num_class(h, y)
     if cx == 0 or cy == 0 { die("comparison: not a number") }
-    cmp_int(h, x, y)
+    if cx == 3 or cy == 3 { die("comparison: a complex number has no order") }
+    if cx == 1 and cy == 1 { return cmp_int(h, x, y) }
+    if cx == 2 and cy == 2 { return f_cmp(fl_hi(h, x), fl_lo(h, x), fl_hi(h, y), fl_lo(h, y)) }
+    if cx == 2 { return f_cmp_int(h, fl_hi(h, x), fl_lo(h, x), y) }
+    let c = f_cmp_int(h, fl_hi(h, y), fl_lo(h, y), x)
+    if c == 2 { return 2 }
+    0 - c
 }
 
 # LT: x < y
@@ -62,13 +144,45 @@ fn num_lt[r](h: &r [u32], x: i64, y: i64) -> bool {
     num_ord(h, x, y) == -1
 }
 
-# GE: x >= y
+# GE: x >= y, false for NaN
 fn num_ge[r](h: &r [u32], x: i64, y: i64) -> bool {
     let c = num_ord(h, x, y)
     c == 0 or c == 1
 }
 
-# whether two numbers are equal in value
+# the words of the components of a complex number
+fn cx_rh[r](h: &r [u32], v: i64) -> i64 {
+    g(h, (v >> 1) + 2)
+}
+
+fn cx_rl[r](h: &r [u32], v: i64) -> i64 {
+    g(h, (v >> 1) + 1)
+}
+
+fn cx_ih[r](h: &r [u32], v: i64) -> i64 {
+    g(h, (v >> 1) + 4)
+}
+
+fn cx_il[r](h: &r [u32], v: i64) -> i64 {
+    g(h, (v >> 1) + 3)
+}
+
+# whether a complex number x is equal in value to the number y that is not complex
+fn cx_eq_real[r](h: &r [u32], x: i64, y: i64) -> bool {
+    if f_cmp(cx_ih(h, x), cx_il(h, x), 0, 0) != 0 { return false }
+    if is_float(h, y) { return f_cmp(cx_rh(h, x), cx_rl(h, x), fl_hi(h, y), fl_lo(h, y)) == 0 }
+    f_cmp_int(h, cx_rh(h, x), cx_rl(h, x), y) == 0
+}
+
+# whether two numbers (of any class) are equal in value
 fn num_equal[r](h: &r [u32], x: i64, y: i64) -> bool {
+    let cx = num_class(h, x)
+    let cy = num_class(h, y)
+    if cx == 3 and cy == 3 {
+        if f_cmp(cx_rh(h, x), cx_rl(h, x), cx_rh(h, y), cx_rl(h, y)) != 0 { return false }
+        return f_cmp(cx_ih(h, x), cx_il(h, x), cx_ih(h, y), cx_il(h, y)) == 0
+    }
+    if cx == 3 { return cx_eq_real(h, x, y) }
+    if cy == 3 { return cx_eq_real(h, y, x) }
     num_ord(h, x, y) == 0
 }

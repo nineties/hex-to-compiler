@@ -1,15 +1,257 @@
-# nb: the builtin functions of the numbers: the bit operations
+# nb: the builtin functions of the numbers: the floats, the complex numbers and the bit operations
 #
 # The ids: 9 fsqrt, 10 ffloor, 11 ftoi, 12 ftobits, 13 bitstof, 14 ftos, 15 stof, 16 fexp, 17 flog, 18 fsin, 19 fcos, 20 fpow, 21 fatan2,
-# 22 complex, 23 real, 24 imag stop with "float is not supported", 25 bit_and, 26 bit_or, 27 bit_xor, 28 bit_shl, 29 bit_sar.
+# 22 complex, 23 real, 24 imag, 25 bit_and, 26 bit_or, 27 bit_xor, 28 bit_shl, 29 bit_sar.
 import mem
 import obj
 import big
+import flt
+import dec
 import num
 import bit
+import trans
+
+# the float that the argument k stands for: an integer is raised to a float, and anything else stops
+fn arg_float[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], a: i64, k: i64) -> i64 {
+    let v = g(rs, a + k)
+    let c = num_class(h, v)
+    if c == 0 { die("not a number") }
+    if c == 3 { die("a complex number is not allowed") }
+    to_float(h, st, v)
+}
+
+# the string of the bytes of the buffer
+fn string_of[r](h: &mut r [u32], st: &mut r [u32], buf: &r [u8], n: i64) -> i64 {
+    let s = new_string(h, st, n)
+    for i in 0 as i64..n {
+        set_byte(h, s, i, buf[i] as i64)
+    }
+    s
+}
+
+fn do_ftos[r](h: &mut r [u32], st: &mut r [u32], f: i64) -> i64 {
+    let buf = alloc(40, 0 as u8)
+    var res: i64
+    region q {
+        var b: &mut q [u8]
+        b = &mut q buf
+        let n = fmt_float(fl_hi(h, f), fl_lo(h, f), b)
+        res = string_of(h, st, b, n)
+    }
+    free(buf)
+    res
+}
+
+fn is_digit(c: i64) -> bool {
+    c >= 48 and c <= 57
+}
+
+# the float of the decimal text s, or 0 when the text is not a number. The text is [+-] digits [. digits] [e|E [+-] digits], with a digit before or after the point.
+fn parse_float[r](h: &mut r [u32], st: &mut r [u32], s: i64) -> i64 {
+    let n = str_len(h, s)
+    var i: i64
+    var sign: i64
+    i = 0
+    sign = 0
+    if i < n {
+        let c = str_byte(h, s, i)
+        if c == 45 {
+            sign = 1
+            i += 1
+        } else if c == 43 {
+            i += 1
+        }
+    }
+    let w = alloc(1536, 0 as u32)
+    var nd: i64
+    var dexp: i64
+    var any: i64
+    var nz: i64
+    var dropped: i64
+    nd = 0
+    dexp = 0
+    any = 0
+    nz = 0
+    dropped = 0
+    var seen_dot: i64
+    seen_dot = 0
+    var res: i64
+    res = 0
+    var ok: i64
+    ok = 1
+    var edig: i64
+    edig = 0
+    var ev: i64
+    ev = 0
+    var esign: i64
+    esign = 0
+    region q {
+        var wb: &mut q [u32]
+        wb = &mut q w
+        lb_zero(wb, 0)
+        var go: i64
+        go = 1
+        while i < n and go == 1 {
+            let c = str_byte(h, s, i)
+            if is_digit(c) {
+                any = 1
+                if nz == 0 and c == 48 {
+                    if seen_dot == 1 { dexp -= 1 }
+                } else {
+                    nz = 1
+                    if nd < 780 {
+                        lb_mul_small(wb, 0, 10)
+                        lb_add_small(wb, 0, c - 48)
+                        nd += 1
+                        if seen_dot == 1 { dexp -= 1 }
+                    } else {
+                        if c != 48 { dropped = 1 }
+                        if seen_dot == 0 { dexp += 1 }
+                    }
+                }
+                i += 1
+            } else if c == 46 and seen_dot == 0 {
+                seen_dot = 1
+                i += 1
+            } else {
+                go = 0
+            }
+        }
+        if any == 0 { ok = 0 }
+        if ok == 1 and i < n {
+            let c = str_byte(h, s, i)
+            if c == 101 or c == 69 {
+                i += 1
+                if i < n {
+                    let c2 = str_byte(h, s, i)
+                    if c2 == 45 {
+                        esign = 1
+                        i += 1
+                    } else if c2 == 43 {
+                        i += 1
+                    }
+                }
+                while i < n and is_digit(str_byte(h, s, i)) {
+                    edig = 1
+                    if ev < 100000 { ev = ev * 10 + str_byte(h, s, i) - 48 }
+                    i += 1
+                }
+                if edig == 0 { ok = 0 }
+                if esign == 1 { ev = 0 - ev }
+            }
+        }
+        if i < n { ok = 0 }
+        if ok == 1 {
+            if nz == 0 {
+                res = mk_float(h, st, sign << 31, 0)
+            } else {
+                if dropped == 1 {
+                    lb_mul_small(wb, 0, 10)
+                    lb_add_small(wb, 0, 1)
+                    dexp -= 1
+                }
+                let e10 = dexp + ev
+                # the value is about 10^(nd + e10)
+                if nd + e10 > 310 {
+                    res = f_inf(h, st, sign)
+                } else if nd + e10 < -330 {
+                    res = mk_float(h, st, sign << 31, 0)
+                } else {
+                    # the slots: 0 the numerator, 1 the denominator
+                    lb_set(wb, 1, 1)
+                    if e10 > 0 {
+                        lb_mul_pow10(wb, 0, e10)
+                    } else {
+                        lb_mul_pow10(wb, 1, 0 - e10)
+                    }
+                    let k = 61 - (lb_bits(wb, 0) - lb_bits(wb, 1))
+                    if k > 0 {
+                        lb_shl(wb, 0, k)
+                    } else {
+                        lb_shl(wb, 1, 0 - k)
+                    }
+                    # the quotient has 61 or 62 bits: divide by the denominator shifted by 61 and then by one less each time
+                    lb_shl(wb, 1, 61)
+                    var quo: i64
+                    quo = 0
+                    for j in 0 as i64..62 {
+                        quo = quo << 1
+                        if lb_cmp(wb, 0, 1) >= 0 {
+                            lb_sub(wb, 0, 1)
+                            quo = quo | 1
+                        }
+                        lb_shr1(wb, 1)
+                    }
+                    var sticky: i64
+                    sticky = 0
+                    if not lb_is_zero(wb, 0) { sticky = 1 }
+                    res = pack_round(h, st, sign, quo, 0 - k, sticky)
+                }
+            }
+        }
+    }
+    free(w)
+    res
+}
 
 fn call_nbuiltin[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], id: i64, a: i64) -> i64 {
-    if id >= 9 and id <= 24 { die("float is not supported") }
+    if id == 9 {
+        let f = arg_float(h, st, rs, a, 0)
+        return f_sqrt(h, st, fl_hi(h, f), fl_lo(h, f))
+    }
+    if id == 10 {
+        let f = arg_float(h, st, rs, a, 0)
+        return f_floor(h, st, fl_hi(h, f), fl_lo(h, f))
+    }
+    if id == 11 {
+        let f = arg_float(h, st, rs, a, 0)
+        return f_to_int(h, st, fl_hi(h, f), fl_lo(h, f))
+    }
+    if id == 12 {
+        let f = arg_float(h, st, rs, a, 0)
+        return bits_to_int(h, st, fl_hi(h, f), fl_lo(h, f))
+    }
+    if id == 13 {
+        let v = g(rs, a)
+        if not is_integer(h, v) { die("bitstof: not an integer") }
+        if i_sign(h, v) == 1 { die("bitstof: the integer does not fit 64 bits") }
+        if i_nd(h, v) > 1 { die("bitstof: the integer does not fit 64 bits") }
+        let d = i_dig(h, v, 0)
+        return mk_float(h, st, (d >> 32) as i64, (d & 4294967295) as i64)
+    }
+    if id == 14 {
+        let f = arg_float(h, st, rs, a, 0)
+        return do_ftos(h, st, f)
+    }
+    if id == 15 {
+        let sv = g(rs, a)
+        if not is_string(h, sv) { die("stof: not a string") }
+        let f = parse_float(h, st, sv)
+        if f == 0 { return g(h, 3) }
+        return f
+    }
+    if id >= 16 and id <= 21 {
+        let f = arg_float(h, st, rs, a, 0)
+        var k: i64
+        k = 0
+        if id >= 20 { k = arg_float(h, st, rs, a, 1) }
+        if id == 16 { return f_exp_fn(h, st, fl_hi(h, f), fl_lo(h, f)) }
+        if id == 17 { return f_log_fn(h, st, fl_hi(h, f), fl_lo(h, f)) }
+        if id == 20 { return f_pow_fn(h, st, fl_hi(h, f), fl_lo(h, f), fl_hi(h, k), fl_lo(h, k)) }
+        if id == 21 { return f_atan2(h, st, fl_hi(h, f), fl_lo(h, f), fl_hi(h, k), fl_lo(h, k)) }
+        return f_trig(h, st, fl_hi(h, f), fl_lo(h, f), id - 18)
+    }
+    if id == 22 {
+        let re = arg_float(h, st, rs, a, 0)
+        let im = arg_float(h, st, rs, a, 1)
+        return complex_of(h, st, re, im)
+    }
+    if id == 23 or id == 24 {
+        let z = g(rs, a)
+        if not is_complex(h, z) { die("not a complex number") }
+        if id == 23 { return re_part(h, st, z) }
+        return im_part(h, st, z)
+    }
     if id >= 25 and id <= 29 {
         let x = g(rs, a)
         let y = g(rs, a + 1)

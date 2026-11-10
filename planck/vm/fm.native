@@ -115,8 +115,10 @@ fn dd_div(a: DD, b: DD) -> DD {
 # --- exp
 # exp(r) for the part r = hi + lo of x - k ln 2 (|r| <= ln 2 / 2 + 2^-50)
 fn exp_kernel(hi: f64, lo: f64) -> f64 {
-    let y = 1.0 + (hi + hi * hi * exp_q(hi))
-    y + y * lo
+    let t = dd_mul_f(two_prod(hi, hi), exp_q(hi))
+    let y = dd_add(DD { hi: 1.0, lo: 0.0 }, dd_add(DD { hi: hi, lo: 0.0 }, t))
+    let z = fast_two_sum(y.hi, y.lo + y.hi * lo)
+    z.hi
 }
 
 fn fm_exp(x: f64) -> f64 {
@@ -285,7 +287,7 @@ struct Cols {
     n: i64
 }
 
-fn collect[r](col: &mut r [i64], c0: i64, nc: i64, e: i64) -> Cols {
+fn collect_cols[r](col: &mut r [i64], c0: i64, nc: i64, e: i64) -> Cols {
     var frac: DD
     frac = DD { hi: 0.0, lo: 0.0 }
     var n: i64
@@ -349,7 +351,7 @@ fn reduce_big(x: f64) -> Red {
     region q {
         var cm: &mut q [i64]
         cm = &mut q col
-        out = collect(cm, c0, nc, e)
+        out = collect_cols(cm, c0, nc, e)
     }
     var n: i64
     n = out.n
@@ -370,13 +372,20 @@ fn reduce(x: f64) -> Red {
 
 # sin(hi + lo) and cos(hi + lo) for |hi| <= pi/4
 fn sin_kernel(hi: f64, lo: f64) -> f64 {
-    let z = hi * hi
-    hi + (hi * z * sin_s(z) + lo * (1.0 - 0.5 * z))
+    let zz = two_prod(hi, hi)
+    let t = dd_mul_f(dd_mul_f(zz, hi), sin_s(zz.hi))
+    let s = dd_add(DD { hi: hi, lo: 0.0 }, t)
+    let z = fast_two_sum(s.hi, s.lo + lo * (1.0 - 0.5 * zz.hi))
+    z.hi
 }
 
 fn cos_kernel(hi: f64, lo: f64) -> f64 {
-    let z = hi * hi
-    1.0 - (0.5 * z - z * z * cos_c(z) + hi * lo)
+    let zz = two_prod(hi, hi)
+    let h = DD { hi: 0.5 * zz.hi, lo: 0.5 * zz.lo }
+    let q = dd_add(h, dd_neg(dd_mul_f(dd_mul(zz, zz), cos_c(zz.hi))))
+    let c = dd_add(DD { hi: 1.0, lo: 0.0 }, dd_neg(q))
+    let z = fast_two_sum(c.hi, c.lo - hi * lo)
+    z.hi
 }
 
 # sin of |x| (x finite) by the quadrant of the reduction

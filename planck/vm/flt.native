@@ -1,0 +1,380 @@
+# flt: the floats of planckvm (binary64), and the conversions between integers and floats
+#
+# A float is an object of the kind 1: the low word and the high word of the binary64. A complex number is an object of the kind 2: the low and the
+# high word of the real part, then of the imaginary part. The arithmetic is that of f64 of native: w2f makes the f64 of the two words, the operation
+# is done by the machine, and mk_f64 makes the object of the result. The rest of this unit is on the integers: the mantissa m (53 bits, bit 52 set)
+# and the exponent e of a finite number (the value is m * 2^e), the conversion between floats and big integers, and pack_sub, which rounds a result
+# below the normal numbers (a conversion of an integer to f64 rounds once, and rounding it again to fewer bits would round twice).
+import fm
+import mem
+import big
+
+fn fl_lo[r](h: &r [u32], v: i64) -> i64 {
+    g(h, (v >> 1) + 1)
+}
+
+fn fl_hi[r](h: &r [u32], v: i64) -> i64 {
+    g(h, (v >> 1) + 2)
+}
+
+fn is_float[r](h: &r [u32], v: i64) -> bool {
+    if is_int(v) { return false }
+    kind_of(h, v) == 1
+}
+
+fn is_complex[r](h: &r [u32], v: i64) -> bool {
+    if is_int(v) { return false }
+    kind_of(h, v) == 2
+}
+
+fn mk_float[r](h: &mut r [u32], st: &mut r [u32], hi: i64, lo: i64) -> i64 {
+    let v = alloc_obj(h, st, 1, 2)
+    p(h, (v >> 1) + 1, lo)
+    p(h, (v >> 1) + 2, hi)
+    v
+}
+
+# the complex number of the four words
+fn mk_complex[r](h: &mut r [u32], st: &mut r [u32], rh: i64, rl: i64, ih: i64, il: i64) -> i64 {
+    let v = alloc_obj(h, st, 2, 4)
+    p(h, (v >> 1) + 1, rl)
+    p(h, (v >> 1) + 2, rh)
+    p(h, (v >> 1) + 3, il)
+    p(h, (v >> 1) + 4, ih)
+    v
+}
+
+fn f_ex(hi: i64) -> i64 {
+    (hi >> 20) & 2047
+}
+
+fn f_frac(hi: i64, lo: i64) -> i64 {
+    ((hi & 1048575) << 32) | lo
+}
+
+fn f_is_nan(hi: i64, lo: i64) -> bool {
+    if f_ex(hi) != 2047 { return false }
+    f_frac(hi, lo) != 0
+}
+
+fn f_is_inf(hi: i64, lo: i64) -> bool {
+    if f_ex(hi) != 2047 { return false }
+    f_frac(hi, lo) == 0
+}
+
+fn f_is_zero(hi: i64, lo: i64) -> bool {
+    if f_ex(hi) != 0 { return false }
+    f_frac(hi, lo) == 0
+}
+
+# the mantissa of a finite number that is not 0, with bit 52 set
+fn f_man(hi: i64, lo: i64) -> i64 {
+    var m: i64
+    m = f_frac(hi, lo)
+    if f_ex(hi) != 0 { return m | 4503599627370496 }
+    while m < 4503599627370496 {
+        m = m << 1
+    }
+    m
+}
+
+# the exponent that goes with f_man
+fn f_exp(hi: i64, lo: i64) -> i64 {
+    let ex = f_ex(hi)
+    if ex != 0 { return ex - 1075 }
+    var m: i64
+    var e: i64
+    m = f_frac(hi, lo)
+    e = -1074
+    while m < 4503599627370496 {
+        m = m << 1
+        e -= 1
+    }
+    e
+}
+
+fn nbits(m: i64) -> i64 {
+    var n: i64
+    var x: i64
+    n = 0
+    x = m
+    while x > 0 {
+        x = x >> 1
+        n += 1
+    }
+    n
+}
+
+fn f_nan[r](h: &mut r [u32], st: &mut r [u32]) -> i64 {
+    mk_float(h, st, 2146959360, 0)
+}
+
+fn f_inf[r](h: &mut r [u32], st: &mut r [u32], sign: i64) -> i64 {
+    mk_float(h, st, (sign << 31) | 2146435072, 0)
+}
+
+# the f64 of the words
+fn w2f(hi: i64, lo: i64) -> f64 {
+    let a = hi as u64
+    let b = lo as u64
+    f64_from_bits((a << 32) | b)
+}
+
+fn f2hi(x: f64) -> i64 {
+    (f64_bits(x) >> 32) as i64
+}
+
+fn f2lo(x: f64) -> i64 {
+    (f64_bits(x) & 4294967295) as i64
+}
+
+# the float object of x; every NaN is the NaN with the bits 0x7ff8000000000000
+fn mk_f64[r](h: &mut r [u32], st: &mut r [u32], x: f64) -> i64 {
+    if x != x { return f_nan(h, st) }
+    mk_float(h, st, f2hi(x), f2lo(x))
+}
+
+# the float of (m + something below 1) * 2^e for m > 0 (m < 2^62), where sticky is 1 if there is something below. The conversion of the integer to f64 rounds
+# to the nearest even; a sticky bit goes to the lowest bit of an m that is made 62 bits long. A result below the normal numbers is rounded by pack_sub.
+fn pack_round[r](h: &mut r [u32], st: &mut r [u32], sign: i64, m: i64, e: i64, sticky: i64) -> i64 {
+    if m == 0 { return mk_float(h, st, sign << 31, 0) }
+    let nb = nbits(m)
+    let be = e + nb + 1022
+    if be > 2046 { return f_inf(h, st, sign) }
+    if be < 1 { return pack_sub(h, st, sign, m, e, sticky) }
+    var mm: i64
+    var ee: i64
+    mm = m
+    ee = e
+    if sticky == 1 {
+        mm = m << (62 - nb)
+        ee = e - (62 - nb)
+        mm = mm | 1
+    }
+    let x = scale(mm as f64, ee)
+    mk_float(h, st, (sign << 31) | f2hi(x), f2lo(x))
+}
+
+fn pack_sub[r](h: &mut r [u32], st: &mut r [u32], sign: i64, m: i64, e: i64, sticky: i64) -> i64 {
+    if m == 0 { return mk_float(h, st, sign << 31, 0) }
+    let nb = nbits(m)
+    let be = e + nb + 1022
+    if be > 2046 { return f_inf(h, st, sign) }
+    var sh: i64
+    sh = nb - 53
+    if be < 1 { sh = sh + 1 - be }
+    var q: i64
+    q = 0
+    if sh <= 0 {
+        q = m << (0 - sh)
+    } else if sh <= 62 {
+        q = m >> sh
+        let rem = m & (((1 as i64) << sh) - 1)
+        let half = (1 as i64) << (sh - 1)
+        var up: i64
+        up = 0
+        if rem > half {
+            up = 1
+        } else if rem == half {
+            if sticky == 1 or (q & 1) == 1 { up = 1 }
+        }
+        q = q + up
+    }
+    var bits: i64
+    bits = q
+    if be >= 1 { bits = ((be - 1) << 52) + q }
+    if (bits >> 52) >= 2047 { return f_inf(h, st, sign) }
+    mk_float(h, st, (sign << 31) | (bits >> 32), bits & 4294967295)
+}
+
+# the order of two floats: -1, 0, 1, or 2 when one of them is NaN
+fn f_cmp(hx: i64, lx: i64, hy: i64, ly: i64) -> i64 {
+    let a = w2f(hx, lx)
+    let b = w2f(hy, ly)
+    if a != a or b != b { return 2 }
+    if a < b { return -1 }
+    if a > b { return 1 }
+    0
+}
+
+# x + y, or x - y if sub is 1
+fn f_add[r](h: &mut r [u32], st: &mut r [u32], hx: i64, lx: i64, hy: i64, ly: i64, sub: i64) -> i64 {
+    let a = w2f(hx, lx)
+    let b = w2f(hy, ly)
+    if sub == 1 { return mk_f64(h, st, a - b) }
+    mk_f64(h, st, a + b)
+}
+
+fn f_mul[r](h: &mut r [u32], st: &mut r [u32], hx: i64, lx: i64, hy: i64, ly: i64) -> i64 {
+    mk_f64(h, st, w2f(hx, lx) * w2f(hy, ly))
+}
+
+fn f_div[r](h: &mut r [u32], st: &mut r [u32], hx: i64, lx: i64, hy: i64, ly: i64) -> i64 {
+    mk_f64(h, st, w2f(hx, lx) / w2f(hy, ly))
+}
+
+# the square root; a negative number gives NaN
+fn f_sqrt[r](h: &mut r [u32], st: &mut r [u32], hx: i64, lx: i64) -> i64 {
+    mk_f64(h, st, f64_sqrt(w2f(hx, lx)))
+}
+
+# the floor of a float, as a float
+fn f_floor[r](h: &mut r [u32], st: &mut r [u32], hx: i64, lx: i64) -> i64 {
+    let x = w2f(hx, lx)
+    if f_ex(hx) >= 1075 or f_is_zero(hx, lx) { return mk_float(h, st, hx, lx) }
+    let t = (x as i64) as f64
+    if t > x { return mk_f64(h, st, t - 1.0) }
+    if t == 0.0 and x < 0.0 { return mk_f64(h, st, -1.0) }
+    if t == 0.0 { return mk_float(h, st, 0, 0) }
+    mk_f64(h, st, t)
+}
+
+# the integer with the sign, and the digits of m * 2^e (e >= 0, m < 2^62)
+fn int_shifted[r](h: &mut r [u32], st: &mut r [u32], sign: i64, m: i64, e: i64) -> i64 {
+    let w = e / 64
+    let s = (e % 64) as u64
+    let v = alloc_big(h, st, sign, w + 2)
+    let rb = (v >> 1) + 3
+    let mu = m as u64
+    wr(h, rb + 2 * w, mu << s)
+    if s != 0 { wr(h, rb + 2 * w + 2, mu >> (64 - s)) }
+    fin(h, v)
+}
+
+# the integer truncated toward 0 of a finite float
+fn f_to_int[r](h: &mut r [u32], st: &mut r [u32], hx: i64, lx: i64) -> i64 {
+    if f_ex(hx) == 2047 { die("ftoi: not a finite number") }
+    if f_is_zero(hx, lx) or f_ex(hx) == 0 { return 1 }
+    let m = f_man(hx, lx)
+    let e = f_exp(hx, lx)
+    let sign = hx >> 31
+    if e <= -53 { return 1 }
+    if e < 0 {
+        let q = m >> (0 - e)
+        if sign == 1 { return int_from_i64(h, st, 0 - q) }
+        return int_from_i64(h, st, q)
+    }
+    int_shifted(h, st, sign, m, e)
+}
+
+# the bit k of the magnitude of the integer v
+fn i_bit[r](h: &r [u32], v: i64, k: i64) -> i64 {
+    ((i_dig(h, v, k / 64) >> ((k % 64) as u64)) & 1) as i64
+}
+
+fn i_nbits[r](h: &r [u32], v: i64) -> i64 {
+    let nd = i_nd(h, v)
+    if nd == 0 { return 0 }
+    (nd - 1) * 64 + 64 - (lz(i_dig(h, v, nd - 1)) as i64)
+}
+
+# the float nearest to v * 2^e2 for an integer v; with strict it stops when the result is beyond the range of floats
+fn big_to_float[r](h: &mut r [u32], st: &mut r [u32], v: i64, e2: i64, strict: i64) -> i64 {
+    let sign = i_sign(h, v)
+    let nb = i_nbits(h, v)
+    if nb == 0 { return mk_float(h, st, 0, 0) }
+    if strict == 1 and nb > 1024 { die("integer too large for a float") }
+    var acc: i64
+    var sticky: i64
+    var e: i64
+    acc = 0
+    sticky = 0
+    e = 0
+    if nb <= 62 {
+        for j in 0 as i64..nb {
+            acc = (acc << 1) | i_bit(h, v, nb - 1 - j)
+        }
+    } else {
+        for j in 0 as i64..62 {
+            acc = (acc << 1) | i_bit(h, v, nb - 1 - j)
+        }
+        e = nb - 62
+        var k: i64
+        k = 0
+        while k < e and sticky == 0 {
+            if i_bit(h, v, k) == 1 { sticky = 1 }
+            k += 1
+        }
+        if sticky == 1 { acc = acc | 1 }
+    }
+    let f = pack_round(h, st, sign, acc, e + e2, 0)
+    if strict == 1 and f_ex(fl_hi(h, f)) == 2047 { die("integer too large for a float") }
+    f
+}
+
+# the float nearest to the integer v; it stops when the integer is beyond the range of floats
+fn int_to_float[r](h: &mut r [u32], st: &mut r [u32], v: i64) -> i64 {
+    big_to_float(h, st, v, 0, 1)
+}
+
+# the order of the float x and the integer v: -1, 0, 1, or 2 when x is NaN
+fn f_cmp_int[r](h: &r [u32], hx: i64, lx: i64, v: i64) -> i64 {
+    if f_is_nan(hx, lx) { return 2 }
+    let sx = hx >> 31
+    let sv = i_sign(h, v)
+    let nbv = i_nbits(h, v)
+    if f_is_inf(hx, lx) {
+        if sx == 1 { return -1 }
+        return 1
+    }
+    if f_is_zero(hx, lx) {
+        if nbv == 0 { return 0 }
+        if sv == 1 { return 1 }
+        return -1
+    }
+    if nbv == 0 {
+        if sx == 1 { return -1 }
+        return 1
+    }
+    if sx != sv {
+        if sx == 1 { return -1 }
+        return 1
+    }
+    let m = f_man(hx, lx)
+    let e = f_exp(hx, lx)
+    let nbf = 53 + e
+    var c: i64
+    c = 0
+    if nbf < nbv { c = -1 }
+    if nbf > nbv { c = 1 }
+    if c == 0 {
+        var k: i64
+        k = nbv - 1
+        while k >= 0 and c == 0 {
+            var bf: i64
+            bf = 0
+            if k >= e and k - e <= 52 { bf = (m >> (k - e)) & 1 }
+            let bi = i_bit(h, v, k)
+            if bf > bi { c = 1 }
+            if bf < bi { c = -1 }
+            k -= 1
+        }
+        # the float has a fraction below the bit 0, so it is greater in magnitude
+        if c == 0 and e < 0 and e >= -52 {
+            let sh = 0 - e
+            if m - ((m >> sh) << sh) != 0 { c = 1 }
+        }
+    }
+    if sx == 1 { return 0 - c }
+    c
+}
+
+# the 64 bits of a float as a non-negative integer
+fn bits_to_int[r](h: &mut r [u32], st: &mut r [u32], hi: i64, lo: i64) -> i64 {
+    let v = alloc_big(h, st, 0, 1)
+    wr(h, (v >> 1) + 3, ((hi as u64) << 32) | (lo as u64))
+    fin(h, v)
+}
+
+# the digit i of 16 bits of the magnitude of the float that has an integer value, m * 2^e with e >= 0 or an integer m * 2^e
+fn f_int_digit(m: i64, e: i64, i: i64) -> i64 {
+    var d: i64
+    d = 0
+    for k in 0 as i64..16 {
+        let pos = i * 16 + k
+        if pos >= e and pos - e <= 52 {
+            d = d | (((m >> (pos - e)) & 1) << k)
+        }
+    }
+    d
+}
