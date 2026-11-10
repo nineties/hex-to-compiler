@@ -3,10 +3,67 @@ name: run tests
 on:
     push:
         branches: ["**"]
-        paths-ignore: ["README.rst", "LICENSE", ".gitignore", "docs/**"]
     workflow_dispatch:
 jobs:
+    changes:
+        runs-on: ubuntu-latest
+        outputs:
+            heavy: ${{ steps.scope.outputs.heavy }}
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+            - name: check whether the change needs the tests
+              id: scope
+              env:
+                  EVENT: ${{ github.event_name }}
+                  BEFORE: ${{ github.event.before }}
+              run: |
+                  # The tests are skipped only when every changed file is one of the files below. For main, the changes are the ones
+                  # of this push. For the other branches, they are the ones from main, so that a later push of docs on a branch which
+                  # changes code runs the tests. Any failure to find the changes, and any other file, runs the tests.
+                  heavy=true
+                  if [ "$EVENT" = push ]; then
+                      if [ "$GITHUB_REF" = refs/heads/main ]; then
+                          base=$BEFORE
+                      else
+                          git fetch --no-tags origin main:refs/remotes/origin/main 2>/dev/null
+                          base=$(git merge-base refs/remotes/origin/main HEAD 2>/dev/null)
+                      fi
+                      if [ -n "$base" ] && ! echo "$base" | grep -q '^0*$' && changed=$(git diff --name-only "$base" HEAD) && [ -n "$changed" ]; then
+                          heavy=false
+                          for f in $changed; do
+                              case "$f" in
+                                  docs/*|README.rst|LICENSE|.gitignore) ;;
+                                  *) heavy=true ;;
+                              esac
+                          done
+                      fi
+                  fi
+                  echo "heavy=$heavy" >> "$GITHUB_OUTPUT"
+                  echo "tests run: $heavy"
+    # The required check. It reports whether the tests passed, or were not needed, as one result named runtests.
     runtests:
+        needs: [changes, test]
+        if: ${{ always() }}
+        runs-on: ubuntu-latest
+        steps:
+            - name: report
+              env:
+                  CHANGES: ${{ needs.changes.result }}
+                  HEAVY: ${{ needs.changes.outputs.heavy }}
+                  TEST: ${{ needs.test.result }}
+              run: |
+                  echo "changes: $CHANGES, heavy: $HEAVY, test: $TEST"
+                  [ "$CHANGES" = success ] || exit 1
+                  if [ "$HEAVY" = true ]; then
+                      [ "$TEST" = success ]
+                  else
+                      [ "$TEST" = skipped ]
+                  fi
+    test:
+        needs: changes
+        if: needs.changes.outputs.heavy == 'true'
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v1
@@ -82,7 +139,70 @@ jobs:
               with:
                   path: tmp-test-planck0-passed
                   key: ${{ steps.planck0-test-cache.outputs.cache-primary-key }}
-            - name: test vm
+            - name: test udiv
               if: github.ref != 'refs/heads/main'
               run:
-                  make test-vm
+                  make test-udiv
+            - name: check whether the change reaches test vm
+              id: vm-scope
+              if: github.ref != 'refs/heads/main'
+              run: |
+                  # test vm is skipped only when every file this branch changed from main is one of the files below, which the VM
+                  # and the compiler do not read. Any failure to find the changes, and any other file, runs it.
+                  run=true
+                  if [ "${{ github.event_name }}" = push ] && git fetch --no-tags origin main:refs/remotes/origin/main 2>/dev/null; then
+                      if base=$(git merge-base refs/remotes/origin/main HEAD 2>/dev/null) && changed=$(git diff --name-only "$base" HEAD); then
+                          run=false
+                          for f in $changed; do
+                              case "$f" in
+                                  planck/tests/fm/*) run=true ;;
+                                  docs/*|README.rst|LICENSE|.gitignore|planck/tests/*) ;;
+                                  planck/examples/vm/*) run=true ;;
+                                  planck/examples/*) ;;
+                                  *) run=true ;;
+                              esac
+                          done
+                      fi
+                  fi
+                  echo "run=$run" >> "$GITHUB_OUTPUT"
+                  echo "test vm runs: $run"
+            - name: restore the units and the program of vm
+              id: vm-cache
+              if: github.ref != 'refs/heads/main' && steps.vm-scope.outputs.run == 'true'
+              uses: actions/cache/restore@v6.1.0
+              with:
+                  path: |
+                      tmp-vm
+                      tmp-vm-build
+                      tmp-vmf
+                      tmp-vmf-build
+                  key: vm-${{ steps.planck0-cache.outputs.cache-primary-key }}-${{ hashFiles('Makefile', 'planck/vasmc.pk', 'planck/init.pk', 'planck/peg.pk', 'planck/syntax.pk', 'planck/lib/**', 'planck/vm/**', 'planck/vm0/**', 'tools/gen_fm_vm0.pk') }}
+            - name: use the cached units
+              if: steps.vm-cache.outputs.cache-hit == 'true'
+              run: |
+                  touch tmp-vm-build/*.unit
+                  touch tmp-vm
+                  touch tmp-vmf-build/*.unit
+                  touch tmp-vmf
+            - name: test vm0
+              if: github.ref != 'refs/heads/main' && steps.vm-scope.outputs.run == 'true'
+              run:
+                  make -j4 test-vm0
+            - name: test vm
+              if: github.ref != 'refs/heads/main' && steps.vm-scope.outputs.run == 'true'
+              run:
+                  make -j4 test-vm
+            - name: test fm
+              if: github.ref != 'refs/heads/main' && steps.vm-scope.outputs.run == 'true'
+              run:
+                  make -j4 test-fm
+            - name: save the units and the program of vm
+              if: github.ref != 'refs/heads/main' && steps.vm-scope.outputs.run == 'true' && steps.vm-cache.outputs.cache-hit != 'true'
+              uses: actions/cache/save@v6.1.0
+              with:
+                  path: |
+                      tmp-vm
+                      tmp-vm-build
+                      tmp-vmf
+                      tmp-vmf-build
+                  key: ${{ steps.vm-cache.outputs.cache-primary-key }}

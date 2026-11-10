@@ -1,18 +1,21 @@
 # gc: the generational copying collector of planckvm
 #
 # The nursery is collected by a minor collection: the live objects of the nursery are copied to the end of the old generation. The roots are the
-# registers, the frames, and the objects of the remembered set (the old objects that were written with a
+# registers, the frames, ln2 and pi in the machine state, and the objects of the remembered set (the old objects that were written with a
 # reference to the nursery). A major collection copies the live objects of both generations to the scratch array t and then back to the heap array h,
 # so that the old generation is compact again. A collection is done only between two instructions: no reference is held by the code of the
 # instructions then, and the loop of vm.native reads the code, the pc and the base again from the top frame.
 # A forwarded object has the header (new index << 2) | 3 (the bit 1 of a header is never set otherwise).
 # The state of the collector in st: 16 the first free word of t, 19 the index in h of the word 0 of t, 20 and 21 the numbers of the minor and the major collections.
 import mem
+import big
+import obj
 
 # whether the word j (1 to size) after the header of the object at the index at of the array a holds a value
 fn is_slot[r](a: &r [u32], at: i64, kind: i64, size: i64, j: i64) -> bool {
     if kind == 5 or kind == 12 { return true }
-    if kind == 6 or kind == 8 or kind == 9 or kind == 13 or kind == 15 { return j >= 2 }
+    if kind == 6 or kind == 8 or kind == 9 or kind == 15 { return j >= 2 }
+    if kind == 13 { return true }
     if kind == 4 { return j == 1 }
     if kind == 10 { return j == 4 }
     if kind == 11 {
@@ -94,6 +97,8 @@ fn scan_roots[r](h: &mut r [u32], t: &mut r [u32], st: &mut r [u32], rs: &mut r 
             p(t, i, fwd(h, t, st, g(h, i), 1))
         }
     }
+    if g(st, 4) != 0 { p(st, 4, fwd(h, t, st, g(st, 4), major)) }
+    if g(st, 5) != 0 { p(st, 5, fwd(h, t, st, g(st, 5), major)) }
     let e = regs_end(rs, fs, fp)
     for i in 0 as i64..e {
         p(rs, i, fwd(h, t, st, g(rs, i), major))
@@ -105,6 +110,81 @@ fn scan_roots[r](h: &mut r [u32], t: &mut r [u32], st: &mut r [u32], rs: &mut r 
         p(fs, q + 1, fwd(h, t, st, g(fs, q + 1), major))
         p(fs, q + 2, fwd(h, t, st, g(fs, q + 2), major))
         q += 7
+    }
+}
+
+# ---- the table of the interned objects (obj.native): it does not keep the objects alive. After a collection the entries of the objects that died are
+# deleted, the entries of the objects that moved get the new references, and the entries are put at the slots of the new hashes.
+
+# the new reference of the object that the entry e refers to, or 0 when the object died
+fn it_map[r](h: &r [u32], st: &r [u32], e: i64, major: i64) -> i64 {
+    let idx = e >> 1
+    if major == 0 and idx < g(st, 6) { return e }
+    let hd = g(h, idx)
+    if (hd & 2) != 0 { return (hd >> 2) * 2 }
+    0
+}
+
+# it_remove deletes the entry of the slot sl; the deleted slots before a slot that is empty are made empty
+fn it_remove[r](st: &mut r [u32], sl: i64) {
+    let mask = it_cap() - 1
+    p(st, it_base() + sl, 1)
+    if g(st, it_base() + ((sl + 1) & mask)) == 0 {
+        var i: i64
+        i = sl
+        while g(st, it_base() + i) == 1 {
+            p(st, it_base() + i, 0)
+            p(st, 24, g(st, 24) - 1)
+            i = (i + mask) & mask
+        }
+    }
+}
+
+# after a minor collection: only the entries made since the last collection can have new hashes
+fn it_after_minor[r](h: &mut r [u32], st: &mut r [u32]) {
+    let n = g(st, 25)
+    for i in 0 as i64..n {
+        let sl = g(st, it_rbase() + i)
+        let ne = it_map(h, st, g(st, it_base() + sl), 0)
+        it_remove(st, sl)
+        p(st, it_rbase() + i, ne)
+    }
+    for i in 0 as i64..n {
+        let ne = g(st, it_rbase() + i)
+        if ne != 0 { it_put(h, st, ne) }
+    }
+}
+
+# it_map_all gives every entry its new reference (a major collection: before the objects are copied back), and deletes the entries of the objects that died
+fn it_map_all[r](h: &mut r [u32], st: &mut r [u32], major: i64) {
+    for i in 0 as i64..it_cap() {
+        let e = g(st, it_base() + i)
+        if e > 1 {
+            let ne = it_map(h, st, e, major)
+            if ne == 0 {
+                p(st, it_base() + i, 1)
+            } else {
+                p(st, it_base() + i, ne)
+            }
+        }
+    }
+}
+
+# it_rebuild puts every entry at the slot of its hash again; t is an array that is free
+fn it_rebuild[r](h: &mut r [u32], t: &mut r [u32], st: &mut r [u32]) {
+    var k: i64
+    k = 0
+    for i in 0 as i64..it_cap() {
+        let e = g(st, it_base() + i)
+        if e > 1 {
+            p(t, k, e)
+            k += 1
+        }
+        p(st, it_base() + i, 0)
+    }
+    p(st, 24, 0)
+    for j in 0 as i64..k {
+        it_put(h, st, g(t, j))
     }
 }
 
@@ -135,6 +215,14 @@ fn gc_minor[r](h: &mut r [u32], t: &mut r [u32], st: &mut r [u32], rs: &mut r [u
         p(h, ot + i, g(t, i))
     }
     p(st, 8, ot + tc)
+    if g(st, 26) != 0 {
+        it_map_all(h, st, 0)
+        it_rebuild(h, t, st)
+    } else {
+        it_after_minor(h, st)
+    }
+    p(st, 25, 0)
+    p(st, 26, 0)
     p(st, 20, g(st, 20) + 1)
 }
 
@@ -148,10 +236,14 @@ fn gc_major[r](h: &mut r [u32], t: &mut r [u32], st: &mut r [u32], rs: &mut r [u
         sp += scan_t(h, t, st, sp, 1)
     }
     let tc = g(st, 16)
+    it_map_all(h, st, 1)
     for i in 0 as i64..tc {
         p(h, i, g(t, i))
     }
     p(st, 8, tc)
+    it_rebuild(h, t, st)
+    p(st, 25, 0)
+    p(st, 26, 0)
     p(st, 21, g(st, 21) + 1)
 }
 

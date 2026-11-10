@@ -322,6 +322,8 @@ module pvm_compile {
                 y := intern(f"%h{nlabel}")
                 mk('Do, [mk('Def, [x, a]), mk('Def, [y, b]), mk('Apply, [op, mk('Tuple, [y, x])])])
             }
+        } else if (f == '_not and lookup(c, f) == none and head(args) == 'Tuple and arity(args) == 1) {
+            mk('If, [arg(args, 0), 'false, 'true])
         } else e
     }
 
@@ -360,7 +362,7 @@ module pvm_compile {
     # call(c, e, d, tail) emits the call. It is true when the code ends there (a tail call), and false when the value is in the temporary d.
     call(c, e0, d, tail) := {
         e := rw(c, e0)
-        if (head(e) == 'Do) {
+        if (head(e) == 'Do or head(e) == 'If) {
             cx(c, e, d)
             return false
         }
@@ -692,9 +694,14 @@ module pvm_compile {
             done = true
         } else if (type(e) == Expr and head(e) == 'Apply and arity(e) == 2) {
             e = rw(c, e)
-            o := if (head(e) == 'Apply) op_of(c, e) else none
+            if (head(e) == 'If) {
+                # not a is the condition a with the opposite truth
+                cond(c, arg(e, 0), l, 1 - k, d)
+                done = true
+            }
+            o := if (done or head(e) != 'Apply) none else op_of(c, e)
             cm := if (o == none) none else list.find(x -> x[0] == o[0], cmp_ops)
-            if (cm != none) {
+            if (not done and cm != none) {
                 args := arg(e, 1)
                 b := arg(args, 1)
                 cx(c, arg(args, 0), d)

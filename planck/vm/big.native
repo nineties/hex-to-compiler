@@ -1,10 +1,13 @@
 # big: the integers of planckvm
 #
 # An integer is a small value (31 bits, 2n+1) or a big integer, an object of the kind 0: the sign (0 or 1), the number of digits and the digits,
-# 16 bits in a word from the low end. A big integer is always normal: no digit of zero at the top and the value does not fit in 31 bits.
+# 64 bits in a digit from the low end. A digit is two words of the heap, the low half first. A big integer is always normal: no digit of zero at
+# the top and the value does not fit in 31 bits.
 # So two integers are equal if and only if the values are equal or the sign and the digits of the big integers are equal.
 # The functions work on a small or a big integer through i_sign, i_nd and i_dig; they allocate only the result (and the temporaries of the division).
+# The multiplication uses mulhi, and the division uses the reciprocal of the divisor (udiv.native).
 import mem
+import udiv
 
 fn small(n: i64) -> i64 {
     (n * 2 + 1) & 4294967295
@@ -37,27 +40,45 @@ fn small_abs(v: i64) -> i64 {
 
 fn i_nd[r](h: &r [u32], v: i64) -> i64 {
     if is_int(v) {
-        let a = small_abs(v)
-        if a == 0 { return 0 }
-        if a < 65536 { return 1 }
-        return 2
+        if small_abs(v) == 0 { return 0 }
+        return 1
     }
     g(h, (v >> 1) + 2)
 }
 
-fn i_dig[r](h: &r [u32], v: i64, i: i64) -> i64 {
+# the digit of 64 bits at the word index at
+fn rd[r](h: &r [u32], at: i64) -> u64 {
+    (g(h, at) as u64) | ((g(h, at + 1) as u64) << 32)
+}
+
+fn wr[r](h: &mut r [u32], at: i64, d: u64) {
+    p(h, at, (d & 4294967295) as i64)
+    p(h, at + 1, (d >> 32) as i64)
+}
+
+# the digit i of the magnitude of v
+fn i_dig[r](h: &r [u32], v: i64, i: i64) -> u64 {
     if i >= i_nd(h, v) { return 0 }
-    if is_int(v) {
-        let a = small_abs(v)
-        if i == 0 { return a & 65535 }
-        return (a >> 16) & 65535
+    if is_int(v) { return small_abs(v) as u64 }
+    rd(h, (v >> 1) + 3 + 2 * i)
+}
+
+# the number of the zero bits above the top bit of d (d is not zero)
+fn lz(d: u64) -> u64 {
+    var x: u64
+    var n: u64
+    x = d
+    n = 0
+    while (x >> 63) == 0 {
+        x = x << 1
+        n += 1
     }
-    g(h, (v >> 1) + 3 + i)
+    n
 }
 
 # alloc_big makes a big integer object of the sign and room for cap digits; it is not normal yet
 fn alloc_big[r](h: &mut r [u32], st: &mut r [u32], sign: i64, cap: i64) -> i64 {
-    let v = alloc_obj(h, st, 0, 2 + cap)
+    let v = alloc_obj(h, st, 0, 2 + 2 * cap)
     p(h, (v >> 1) + 1, sign)
     p(h, (v >> 1) + 2, cap)
     v
@@ -68,37 +89,33 @@ fn fin[r](h: &mut r [u32], v: i64) -> i64 {
     let b = v >> 1
     var nd: i64
     nd = g(h, b + 2)
-    while nd > 0 and g(h, b + 2 + nd) == 0 {
+    while nd > 0 and rd(h, b + 3 + 2 * (nd - 1)) == 0 {
         nd -= 1
     }
     p(h, b + 2, nd)
     if nd == 0 { return 1 }
-    if nd <= 2 {
-        var m: i64
-        m = g(h, b + 3)
-        if nd == 2 { m = m + g(h, b + 4) * 65536 }
+    if nd == 1 {
+        let m = rd(h, b + 3)
         let sg = g(h, b + 1)
-        if sg == 0 and m <= 1073741823 { return small(m) }
-        if sg == 1 and m <= 1073741824 { return small(0 - m) }
+        if sg == 0 and m <= 1073741823 { return small(m as i64) }
+        if sg == 1 and m <= 1073741824 { return small(0 - (m as i64)) }
     }
     v
 }
 
-# int_from_i64 makes the integer of n (|n| < 2^62)
+# int_from_i64 makes the integer of n
 fn int_from_i64[r](h: &mut r [u32], st: &mut r [u32], n: i64) -> i64 {
     if n >= -1073741824 and n <= 1073741823 { return small(n) }
-    var a: i64
+    var a: u64
     var sg: i64
-    a = n
+    a = n as u64
     sg = 0
     if n < 0 {
-        a = 0 - n
+        a = 0 - a
         sg = 1
     }
-    let v = alloc_big(h, st, sg, 4)
-    for i in 0 as i64..4 {
-        p(h, (v >> 1) + 3 + i, (a >> (i * 16)) & 65535)
-    }
+    let v = alloc_big(h, st, sg, 1)
+    wr(h, (v >> 1) + 3, a)
     fin(h, v)
 }
 
@@ -150,7 +167,7 @@ fn big_eq[r](h: &r [u32], x: i64, y: i64) -> bool {
     if g(h, (x >> 1) + 1) != g(h, (y >> 1) + 1) { return false }
     let n = g(h, (x >> 1) + 2)
     if n != g(h, (y >> 1) + 2) { return false }
-    for i in 0 as i64..n {
+    for i in 0 as i64..2 * n {
         if g(h, (x >> 1) + 3 + i) != g(h, (y >> 1) + 3 + i) { return false }
     }
     true
@@ -163,14 +180,21 @@ fn add_mag[r](h: &mut r [u32], st: &mut r [u32], x: i64, y: i64, sign: i64) -> i
     n = nx
     if ny > n { n = ny }
     let v = alloc_big(h, st, sign, n + 1)
-    var carry: i64
+    let rb = (v >> 1) + 3
+    var carry: u64
     carry = 0
     for i in 0 as i64..n {
-        let t = i_dig(h, x, i) + i_dig(h, y, i) + carry
-        p(h, (v >> 1) + 3 + i, t & 65535)
-        carry = t >> 16
+        let a = i_dig(h, x, i)
+        let s1 = a + i_dig(h, y, i)
+        var c: u64
+        c = 0
+        if s1 < a { c = 1 }
+        let s2 = s1 + carry
+        if s2 < s1 { c = 1 }
+        wr(h, rb + 2 * i, s2)
+        carry = c
     }
-    p(h, (v >> 1) + 3 + n, carry)
+    wr(h, rb + 2 * n, carry)
     fin(h, v)
 }
 
@@ -178,17 +202,20 @@ fn add_mag[r](h: &mut r [u32], st: &mut r [u32], x: i64, y: i64, sign: i64) -> i
 fn sub_mag[r](h: &mut r [u32], st: &mut r [u32], x: i64, y: i64, sign: i64) -> i64 {
     let nx = i_nd(h, x)
     let v = alloc_big(h, st, sign, nx)
-    var borrow: i64
+    let rb = (v >> 1) + 3
+    var borrow: u64
     borrow = 0
     for i in 0 as i64..nx {
-        var t: i64
-        t = i_dig(h, x, i) - i_dig(h, y, i) - borrow
-        borrow = 0
-        if t < 0 {
-            t = t + 65536
-            borrow = 1
-        }
-        p(h, (v >> 1) + 3 + i, t)
+        let a = i_dig(h, x, i)
+        let b = i_dig(h, y, i)
+        let t = a - b
+        var c: u64
+        c = 0
+        if a < b { c = 1 }
+        let t2 = t - borrow
+        if t < borrow { c = 1 }
+        wr(h, rb + 2 * i, t2)
+        borrow = c
     }
     fin(h, v)
 }
@@ -213,108 +240,130 @@ fn int_mul[r](h: &mut r [u32], st: &mut r [u32], x: i64, y: i64) -> i64 {
     let rb = (v >> 1) + 3
     for i in 0 as i64..nx {
         let a = i_dig(h, x, i)
-        var carry: i64
+        var carry: u64
         carry = 0
         for j in 0 as i64..ny {
-            let t = g(h, rb + i + j) + a * i_dig(h, y, j) + carry
-            p(h, rb + i + j, t & 65535)
-            carry = t >> 16
+            let b = i_dig(h, y, j)
+            let lo = a * b
+            var hi: u64
+            hi = mulhi(a, b)
+            let t = rd(h, rb + 2 * (i + j))
+            let s1 = lo + t
+            if s1 < lo { hi = hi + 1 }
+            let s2 = s1 + carry
+            if s2 < s1 { hi = hi + 1 }
+            wr(h, rb + 2 * (i + j), s2)
+            carry = hi
         }
-        p(h, rb + i + ny, carry)
+        wr(h, rb + 2 * (i + ny), carry)
     }
     fin(h, v)
 }
 
-# Knuth's algorithm D: the digits of x / y into the object q and of x % y into the object r; |x| >= |y| and y has 2 digits or more
-fn knuth[r](h: &mut r [u32], st: &mut r [u32], x: i64, y: i64, q: i64, rm: i64) {
+# the digit i of the magnitude of x shifted left by s bits (0 <= s < 64), in the digits of x
+fn shl_dig[r](h: &r [u32], x: i64, i: i64, s: u64) -> u64 {
+    var d: u64
+    d = i_dig(h, x, i) << s
+    if s > 0 and i > 0 { d = d | (i_dig(h, x, i - 1) >> (64 - s)) }
+    d
+}
+
+# Knuth's algorithm D: the digits of x / y into the object q and of x % y into the object rem; |x| >= |y| and y has 2 digits or more.
+# The estimate of a digit of the quotient is the division of three digits by the top two digits of the divisor, with the reciprocal of them (udiv.native).
+fn knuth[r](h: &mut r [u32], st: &mut r [u32], x: i64, y: i64, q: i64, rem: i64) {
     let nx = i_nd(h, x)
     let ny = i_nd(h, y)
     let un = alloc_big(h, st, 0, nx + 1)
     let vn = alloc_big(h, st, 0, ny)
     let ub = (un >> 1) + 3
     let vb = (vn >> 1) + 3
-    var s: i64
-    var top: i64
-    s = 0
-    top = i_dig(h, y, ny - 1)
-    while top < 32768 {
-        top = top * 2
-        s += 1
-    }
+    let qb = (q >> 1) + 3
+    let s = lz(i_dig(h, y, ny - 1))
     for i in 0 as i64..ny {
-        var lo: i64
-        lo = 0
-        if i > 0 { lo = i_dig(h, y, i - 1) >> (16 - s) }
-        p(h, vb + i, ((i_dig(h, y, i) << s) | lo) & 65535)
+        wr(h, vb + 2 * i, shl_dig(h, y, i, s))
     }
-    p(h, ub + nx, i_dig(h, x, nx - 1) >> (16 - s))
     for i in 0 as i64..nx {
-        var lo: i64
-        lo = 0
-        if i > 0 { lo = i_dig(h, x, i - 1) >> (16 - s) }
-        p(h, ub + i, ((i_dig(h, x, i) << s) | lo) & 65535)
+        wr(h, ub + 2 * i, shl_dig(h, x, i, s))
     }
-    let vt = g(h, vb + ny - 1)
-    let vs = g(h, vb + ny - 2)
+    var top: u64
+    top = 0
+    if s > 0 { top = i_dig(h, x, nx - 1) >> (64 - s) }
+    wr(h, ub + 2 * nx, top)
+    let d1 = rd(h, vb + 2 * (ny - 1))
+    let d0 = rd(h, vb + 2 * (ny - 2))
+    let v = recip3by2(d1, d0)
     var j: i64
     j = nx - ny
     while j >= 0 {
-        let num = g(h, ub + j + ny) * 65536 + g(h, ub + j + ny - 1)
-        var qhat: i64
-        var rhat: i64
-        qhat = num / vt
-        rhat = num - qhat * vt
-        var go: i64
-        go = 1
-        while go == 1 {
-            if qhat >= 65536 or qhat * vs > rhat * 65536 + g(h, ub + j + ny - 2) {
-                qhat -= 1
-                rhat += vt
-                if rhat >= 65536 { go = 0 }
-            } else {
-                go = 0
-            }
+        let n2 = rd(h, ub + 2 * (j + ny))
+        let n1 = rd(h, ub + 2 * (j + ny - 1))
+        let n0 = rd(h, ub + 2 * (j + ny - 2))
+        var qh: u64
+        if n2 == d1 and n1 == d0 {
+            qh = 18446744073709551615
+        } else {
+            let a = div3by2(n2, n1, n0, d1, d0, v)
+            qh = a.q
         }
-        var borrow: i64
-        var carry: i64
-        borrow = 0
+        # un[j .. j + ny] -= qh * vn
+        var carry: u64
+        var borrow: u64
         carry = 0
-        for i in 0 as i64..ny {
-            let pr = qhat * g(h, vb + i) + carry
-            carry = pr >> 16
-            var t: i64
-            t = g(h, ub + i + j) - (pr & 65535) - borrow
-            borrow = 0
-            if t < 0 {
-                t = t + 65536
-                borrow = 1
-            }
-            p(h, ub + i + j, t)
-        }
-        var t2: i64
-        t2 = g(h, ub + j + ny) - carry - borrow
         borrow = 0
-        if t2 < 0 {
-            t2 = t2 + 65536
-            borrow = 1
+        for i in 0 as i64..ny {
+            let w = rd(h, vb + 2 * i)
+            let lo = qh * w
+            var hi: u64
+            hi = mulhi(qh, w)
+            let lo2 = lo + carry
+            if lo2 < lo { hi = hi + 1 }
+            carry = hi
+            let t = rd(h, ub + 2 * (i + j))
+            let t1 = t - lo2
+            var bb: u64
+            bb = 0
+            if t < lo2 { bb = 1 }
+            let t2 = t1 - borrow
+            if t1 < borrow { bb = 1 }
+            wr(h, ub + 2 * (i + j), t2)
+            borrow = bb
         }
-        p(h, ub + j + ny, t2)
-        if borrow == 1 {
-            qhat -= 1
-            var c2: i64
-            c2 = 0
+        let tt = rd(h, ub + 2 * (j + ny))
+        let tt1 = tt - carry
+        var b: u64
+        b = 0
+        if tt < carry { b = 1 }
+        let tt2 = tt1 - borrow
+        if tt1 < borrow { b = 1 }
+        wr(h, ub + 2 * (j + ny), tt2)
+        # the estimate was too large: add the divisor back
+        while b == 1 {
+            qh = qh - 1
+            var c: u64
+            c = 0
             for i in 0 as i64..ny {
-                let t = g(h, ub + i + j) + g(h, vb + i) + c2
-                p(h, ub + i + j, t & 65535)
-                c2 = t >> 16
+                let u = rd(h, ub + 2 * (i + j))
+                let w = rd(h, vb + 2 * i)
+                let s1 = u + w
+                var c1: u64
+                c1 = 0
+                if s1 < u { c1 = 1 }
+                let s2 = s1 + c
+                if s2 < s1 { c1 = 1 }
+                wr(h, ub + 2 * (i + j), s2)
+                c = c1
             }
-            p(h, ub + j + ny, (g(h, ub + j + ny) + c2) & 65535)
+            wr(h, ub + 2 * (j + ny), rd(h, ub + 2 * (j + ny)) + c)
+            if c == 1 { b = 0 }
         }
-        p(h, (q >> 1) + 3 + j, qhat)
+        wr(h, qb + 2 * j, qh)
         j -= 1
     }
     for i in 0 as i64..ny {
-        p(h, (rm >> 1) + 3 + i, ((g(h, ub + i) >> s) | (g(h, ub + i + 1) << (16 - s))) & 65535)
+        var r: u64
+        r = rd(h, ub + 2 * i) >> s
+        if s > 0 { r = r | (rd(h, ub + 2 * (i + 1)) << (64 - s)) }
+        wr(h, (rem >> 1) + 3 + 2 * i, r)
     }
 }
 
@@ -329,25 +378,31 @@ fn int_divmod[r](h: &mut r [u32], st: &mut r [u32], x: i64, y: i64, want: i64) -
     let nx = i_nd(h, x)
     let ny = i_nd(h, y)
     if ny == 1 {
-        let dv = i_dig(h, y, 0)
+        # a divisor of one digit: the dividend is shifted so that the top bit of the divisor is set
+        let s = lz(i_dig(h, y, 0))
+        let d = i_dig(h, y, 0) << s
+        let rv = recip(d)
         let q = alloc_big(h, st, sq, nx)
-        var rem: i64
-        rem = 0
+        let qb = (q >> 1) + 3
+        var rr: u64
+        rr = 0
+        if s > 0 { rr = i_dig(h, x, nx - 1) >> (64 - s) }
         var i: i64
         i = nx - 1
         while i >= 0 {
-            let cur = rem * 65536 + i_dig(h, x, i)
-            p(h, (q >> 1) + 3 + i, cur / dv)
-            rem = cur - (cur / dv) * dv
+            let a = div2by1(rr, shl_dig(h, x, i, s), d, rv)
+            wr(h, qb + 2 * i, a.q)
+            rr = a.r
             i -= 1
         }
         if want == 0 { return fin(h, q) }
-        if sx == 1 { return small(0 - rem) }
-        return small(rem)
+        let r = alloc_big(h, st, sx, 1)
+        wr(h, (r >> 1) + 3, rr >> s)
+        return fin(h, r)
     }
     let q = alloc_big(h, st, sq, nx - ny + 1)
-    let rm = alloc_big(h, st, sx, ny)
-    knuth(h, st, x, y, q, rm)
+    let rem = alloc_big(h, st, sx, ny)
+    knuth(h, st, x, y, q, rem)
     if want == 0 { return fin(h, q) }
-    fin(h, rm)
+    fin(h, rem)
 }

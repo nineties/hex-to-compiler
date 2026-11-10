@@ -1,0 +1,193 @@
+# tests of planck/vm/udiv.native; the status is the number of wrong results (0 is right)
+# Every result is checked against its definition, not against another implementation:
+#   recip: (B + v) * d <= B^2 - 1 < (B + v + 1) * d
+#   div2by1: q * d + r == u and r < d
+#   recip3by2: (B + v) * D <= B^3 - 1 < (B + v + 1) * D
+#   div3by2: q * D + r == U and r < D
+import udiv
+
+fn step(s: u64) -> u64 {
+    s * 6364136223846793005 + 1442695040888963407
+}
+
+fn mix(s: u64) -> u64 {
+    s ^ (s >> 29) ^ (s << 17)
+}
+
+fn carry(a: u64, b: u64) -> u64 {
+    if a + b < a { return 1 }
+    0
+}
+
+# 128-bit check of a reciprocal: 0 < B^2 - (B + v) * d <= d
+fn check_recip(d: u64, v: u64) -> i64 {
+    let lo = v * d
+    let hi = d + mulhi(v, d)
+    # B^2 - (hi * B + lo) is hi' * B + lo' with lo' = -lo, hi' = -hi - (lo != 0)
+    if lo == 0 { return 1 }
+    if hi + 1 != 0 { return 1 }
+    if 0 - lo > d { return 1 }
+    0
+}
+
+fn check_div2(u1: u64, u0: u64, d: u64, v: u64) -> i64 {
+    let a = div2by1(u1, u0, d, v)
+    if a.r >= d { return 1 }
+    let lo = a.q * d
+    let hi = mulhi(a.q, d)
+    let s = lo + a.r
+    let h2 = hi + carry(lo, a.r)
+    if s != u0 { return 1 }
+    if h2 != u1 { return 1 }
+    0
+}
+
+# the 192-bit product q * (d1 * B + d0) plus (r1, r0), compared to (u2, u1, u0)
+fn check_div3(u2: u64, u1: u64, u0: u64, d1: u64, d0: u64, v: u64) -> i64 {
+    let a = div3by2(u2, u1, u0, d1, d0, v)
+    if a.r1 > d1 { return 1 }
+    if a.r1 == d1 and a.r0 >= d0 { return 1 }
+    let p0 = a.q * d0
+    let c0 = mulhi(a.q, d0)
+    let pa = a.q * d1
+    let pb = mulhi(a.q, d1)
+    let p1 = pa + c0
+    let p2 = pb + carry(pa, c0)
+    let s0 = p0 + a.r0
+    let k0 = carry(p0, a.r0)
+    let s1a = p1 + a.r1
+    let k1a = carry(p1, a.r1)
+    let s1 = s1a + k0
+    let k1 = k1a + carry(s1a, k0)
+    let s2 = p2 + k1
+    if s0 != u0 { return 1 }
+    if s1 != u1 { return 1 }
+    if s2 != u2 { return 1 }
+    0
+}
+
+# (B + v) * D = D * B + v * D must be below B^3, and adding D must reach B^3
+fn check_recip3(d1: u64, d0: u64, v: u64) -> i64 {
+    let w0 = v * d0
+    let h0 = mulhi(v, d0)
+    let a = v * d1
+    let ah = mulhi(v, d1)
+    let w1 = a + h0
+    let w2 = ah + carry(a, h0)
+    # T = (w2, w1, w0) + (d1, d0, 0)
+    let t1 = w1 + d0
+    let kc = carry(w1, d0)
+    let t2a = w2 + d1
+    let ko1 = carry(w2, d1)
+    let t2 = t2a + kc
+    let ko2 = carry(t2a, kc)
+    if ko1 + ko2 != 0 { return 1 }
+    # T + D must overflow B^3
+    let u0 = w0 + d0
+    let m0 = carry(w0, d0)
+    let u1a = t1 + d1
+    let m1a = carry(t1, d1)
+    let u1 = u1a + m0
+    let m1 = m1a + carry(u1a, m0)
+    let u2 = t2 + m1
+    let m2 = carry(t2, m1)
+    if m2 == 0 { return 1 }
+    0
+}
+
+fn main() -> i64 {
+    var bad: i64
+    var s: u64
+    bad = 0
+    s = 88172645463325252
+    let top: u64 = 9223372036854775808
+    let ones: u64 = 18446744073709551615
+    let edge = alloc(8, 0 as u64)
+    edge[0] = top
+    edge[1] = top + 1
+    edge[2] = ones
+    edge[3] = ones - 1
+    edge[4] = top + top / 2
+    edge[5] = 12297829382473034410
+    edge[6] = top + 4294967296
+    edge[7] = ones - 4294967296
+    # reciprocals and 2-by-1 divisions of the edge divisors with edge and random dividends
+    for i in 0 as i64..8 {
+        let d = edge[i]
+        let v = recip(d)
+        bad += check_recip(d, v)
+        for j in 0 as i64..8 {
+            let hi = edge[j] % d
+            bad += check_div2(0, 0, d, v)
+            bad += check_div2(d - 1, ones, d, v)
+            bad += check_div2(d - 1, 0, d, v)
+            bad += check_div2(hi, ones, d, v)
+            bad += check_div2(hi, edge[j], d, v)
+            bad += check_div2(0, edge[j], d, v)
+        }
+    }
+    for i in 0 as i64..4000 {
+        s = step(s)
+        let d = mix(s) | top
+        let v = recip(d)
+        bad += check_recip(d, v)
+        s = step(s)
+        let u1 = mix(s) % d
+        s = step(s)
+        let u0 = mix(s)
+        bad += check_div2(u1, u0, d, v)
+        bad += check_div2(d - 1, u0, d, v)
+    }
+    # divisors with few bits set, just above 2^63 and just below 2^64
+    for k in 0 as i64..63 {
+        let d = top + (1 << (k as u64))
+        bad += check_recip(d, recip(d))
+        let e = ones - (1 << (k as u64))
+        bad += check_recip(e, recip(e))
+    }
+    # 3-by-2: the divisor (d1, d0) with edge and random words
+    for i in 0 as i64..8 {
+        for j in 0 as i64..8 {
+            let d1 = edge[i]
+            let d0 = edge[j]
+            let v = recip3by2(d1, d0)
+            bad += check_recip3(d1, d0, v)
+            for k in 0 as i64..8 {
+                var w2: u64
+                w2 = edge[k]
+                if w2 > d1 { w2 = d1 }
+                var w1: u64
+                w1 = edge[(k + 3) % 8]
+                if w2 == d1 and w1 >= d0 { w1 = d0 - 1 }
+                bad += check_div3(w2, w1, edge[(k + 1) % 8], d1, d0, v)
+                bad += check_div3(d1, d0 - 1, ones, d1, d0, v)
+                bad += check_div3(0, 0, 0, d1, d0, v)
+                bad += check_div3(0, 0, ones, d1, d0, v)
+                bad += check_div3(d1 - 1, ones, ones, d1, d0, v)
+            }
+        }
+    }
+    for i in 0 as i64..4000 {
+        s = step(s)
+        var d1: u64
+        d1 = mix(s) | top
+        var d0: u64
+        s = step(s)
+        d0 = mix(s)
+        if i % 5 == 0 { d0 = 0 }
+        if i % 7 == 0 { d0 = ones }
+        if i % 11 == 0 { d1 = top }
+        let v = recip3by2(d1, d0)
+        bad += check_recip3(d1, d0, v)
+        s = step(s)
+        let u2 = mix(s) % d1
+        s = step(s)
+        let u1 = mix(s)
+        s = step(s)
+        let u0 = mix(s)
+        bad += check_div3(u2, u1, u0, d1, d0, v)
+        bad += check_div3(d1 - 1, ones, u0, d1, d0, v)
+    }
+    free(edge)
+    bad
+}
