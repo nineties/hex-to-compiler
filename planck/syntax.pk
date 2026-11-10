@@ -216,10 +216,20 @@ Apply{_define_rule, Tuple{Quote{float}, peg_tok_float}}
 Apply{_define_rule, Tuple{Quote{string}, peg_tok_str}}
 Apply{_define_rule, Tuple{Quote{keyword}, peg_tok_keyword}}
 Apply{_define_rule, Tuple{Quote{charclass}, peg_tok_class}}
+Apply{_define_rule, Tuple{Quote{here}, peg_tok_here}}
 
 " === Actions === "
 
 Def{peg_first, Lambda{Tuple{t}, Apply{arg, Tuple{t, 0}}}}
+
+" the tree t without the At of the calls in it, except in the parts !e: an f(a, ...) in a quote is a tree to be matched or built, not a call "
+Def{peg_unat, none}
+Set{peg_unat, Lambda{Tuple{t},
+    If{Apply{_ne, Tuple{Apply{type, Tuple{t}}, Expr}}, t,
+    If{If{Apply{_eq, Tuple{Apply{head, Tuple{t}}, Quote{At}}}, Apply{_eq, Tuple{Apply{arity, Tuple{t}}, 2}}, false},
+        Apply{peg_unat, Tuple{Apply{arg, Tuple{t, 1}}}},
+    If{Apply{_eq, Tuple{Apply{head, Tuple{t}}, Quote{UnQuote}}}, t,
+        Apply{peg_map_args, Tuple{peg_unat, t}}}}}}}
 
 " Tuple{a, b, c} -> Cons{a, Cons{b, Cons{c, Nil{}}}} "
 Def{peg_to_list, Lambda{Tuple{t}, Do{
@@ -359,13 +369,13 @@ Def{peg_nbrk, 0}
 
 Def{peg_ncnt, 0}
 
-Def{peg_parse_plain, peg_parse}
+Def{peg_parse_plain, peg_parse_at}
 
 Set{
-    peg_parse,
+    peg_parse_at,
     Lambda{
-        Tuple{r, s},
-        Do{Set{peg_nret, 0}, Set{peg_nbrk, 0}, Set{peg_ncnt, 0}, Apply{peg_parse_plain, Tuple{r, s}}}
+        Tuple{r, s, loc},
+        Do{Set{peg_nret, 0}, Set{peg_nbrk, 0}, Set{peg_ncnt, 0}, Apply{peg_parse_plain, Tuple{r, s, loc}}}
     }}
 
 Def{
@@ -1449,6 +1459,7 @@ Apply{_define_rule, Tuple{Quote{block}, Quote{
 " The rest of the file is read by them. The M-expression reader remains as parse_mexpr. "
 Def{parse_mexpr, parse}
 Set{parse, Lambda{Tuple{s}, Apply{peg_parse, Tuple{Quote{toplevel}, s}}}}
+Def{parse_at, Lambda{Tuple{s, loc}, Apply{peg_parse_at, Tuple{Quote{toplevel}, s, loc}}}}
 
 " === The grammar of the grammar, declared with ::= === "
 " The rules above declare themselves again, in the form that they make. "
@@ -1507,15 +1518,15 @@ index ::= e:expr { _peg_rewrite(e) }
 unary ::= postfix
         | "-" a:unary { `_sub(0, !a) }
         | "+" a:unary { a }
-        | "'" a:unary { mexpr('Quote, Tuple{a}) }
-        | "`" a:unary { mexpr('QuasiQuote, Tuple{a}) }
+        | "'" a:unary { mexpr('Quote, Tuple{peg_unat(a)}) }
+        | "`" a:unary { mexpr('QuasiQuote, Tuple{peg_unat(a)}) }
         | "!" a:unary { mexpr('UnQuote, Tuple{a}) }
 
 " the type after @: a name, or a field of a module (a.B) "
 type_ref ::= m:type_ref nospace(".") f:ident { `Apply{_record_get, Tuple{!m, Quote{!f}}} }
            | ident
 
-postfix ::= f:postfix nospace("(") args:delimited(expr, ",") ")" { `Apply{!f, !args} }
+postfix ::= l:here f:postfix nospace("(") args:delimited(expr, ",") ")" { peg_at(l, `Apply{!f, !args}) }
           | x:postfix "@" t:type_ref { `_TypeOf{!x, !t} }
           | t:postfix nospace(".") f:ident { `Apply{_record_get, Tuple{!t, Quote{!f}}} }
           | a:postfix nospace("[") i:index "]" !assign_op { `Apply{_index_get, Tuple{!a, !i}} }

@@ -127,8 +127,9 @@
 <tr><td><code>name{| text |}</code></td><td class="wrap"><code>Quote{v}</code>, where <code>v</code> is the value of the rule <code>name</code> read from <code>text</code> (see <a href="syntax.html#text">Text read by a rule</a>)</td></tr>
 </table>
 <ul>
+<li>Only the text read by <code>parse_at</code> has the <code>At</code>. <code>parse</code> reads the same text without it, and the <code>loc</code> of a failed call in such a text is <code>none</code>.</li>
 <li>Only an <code>f(a, ...)</code> written in the text is wrapped in <code>At</code>. The <code>Apply</code> that an operator, <code>t.f</code>, <code>a[i]</code>, <code>match</code> or <code>f"..."</code> makes has no <code>At</code>, and the <code>loc</code> of that call is <code>none</code>.</li>
-<li>An <code>f(a, ...)</code> inside a quote <code>'e</code> or a quasi-quote <code>`e</code> becomes <code>Apply{f, Tuple{a, ...}}</code> with no <code>At</code>. Inside the <code>!e</code> of a quasi-quote it is the same as outside.</li>
+<li>An <code>f(a, ...)</code> inside a quote <code>'e</code> or a quasi-quote <code>`e</code> becomes <code>Apply{f, Tuple{a, ...}}</code> with no <code>At</code>. Inside the <code>!e</code> of a quasi-quote it is the same as outside. An <code>At{Loc{...}, e}</code> written in the quote in the form of an M-expression is removed in the same way.</li>
 <li>An <code>f(p, ...)</code> written in a pattern stays <code>Apply{Quote{f}, Tuple{p, ...}}</code> with no <code>At</code>.</li>
 </ul>
 <div class="example">
@@ -701,7 +702,7 @@ Tuple{SyntaxError{&quot;unexpected input&quot;, &quot;)&quot;}, &quot;&quot;}</p
 
 <h3>Parsing with a rule</h3>
 <h4>peg_parse</h4>
-<p><code>peg_parse(rule, s)</code> parses a prefix of <code>s</code> by the rule and returns <code>Tuple{value, rest}</code>, <code>Tuple{Eof{}, ""}</code> when only blanks are left, or <code>Tuple{SyntaxError{...}, ""}</code>.</p>
+<p><code>peg_parse(rule, s)</code> parses a prefix of <code>s</code> by the rule and returns <code>Tuple{value, rest}</code>, <code>Tuple{Eof{}, ""}</code> when only blanks are left, or <code>Tuple{SyntaxError{...}, ""}</code>. <code>peg_parse_at(rule, s, loc)</code> does the same and counts the position of each <code>At</code> from <code>loc</code>, the <code>Loc{file, line, column}</code> of the start of <code>s</code>. When <code>loc</code> is <code>none</code> the text has no position and the tree has no <code>At</code>. <code>peg_parse(rule, s)</code> is <code>peg_parse_at(rule, s, none)</code>.</p>
 
 <h4 id="text"><code>name{| text |}</code></h4>
 <p>When the expression is parsed, <code>text</code> is read by the rule <code>name</code>. The value is the value of the rule, as a constant.</p>
@@ -791,9 +792,10 @@ Tuple{SyntaxError{&quot;unexpected input&quot;, &quot;)&quot;}, &quot;&quot;}</p
 <h3 id="toplevel">Top level</h3>
 <p>The loop looks up the global variables <code>parse</code> and <code>eval</code> for every expression, so replacing them takes effect from the next expression. <code>Apply{eval, ...}</code> also calls the replaced <code>eval</code>.</p>
 <ul>
-<li><code>parse</code>: <code>String, Loc -&gt; Tuple{M-expression, rest String}</code>. The <code>Loc{file, line, column}</code> is the position of the start of the string, and the <code>loc</code> of the <code>At</code> of each <code>f(a, ...)</code> read is counted from it. It returns <code>Tuple{Eof{}, ""}</code> when only blanks are left, and a replacement <code>parse</code> passes <code>Eof{}</code> through.</li>
+<li><code>parse</code>: <code>String -&gt; Tuple{M-expression, rest String}</code>. It returns <code>Tuple{Eof{}, ""}</code> when only blanks are left, and a replacement <code>parse</code> passes <code>Eof{}</code> through. The tree it reads has no <code>At</code>: an <code>f(a, ...)</code> is <code>Apply{f, Tuple{a, ...}}</code>.</li>
+<li><code>parse_at</code>: <code>String, Loc -&gt; Tuple{M-expression, rest String}</code>. It reads like <code>parse</code>, and wraps each <code>f(a, ...)</code> in <code>At</code>. The <code>Loc{file, line, column}</code> is the position of the start of the string, and the <code>loc</code> of each <code>At</code> is counted from it.</li>
 <li><code>eval</code>: <code>M-expression -&gt; value</code>.</li>
-<li>The loop that reads a file calls <code>parse</code> with <code>Loc{file name, 1, 1}</code>, the start of the file being loaded, and gives the next expression the position advanced by counting the characters read. The REPL passes <code>Loc{"&lt;repl&gt;", line, column}</code>.</li>
+<li>The loop that reads a file calls <code>parse</code>, so the calls in a file loaded by it have no <code>At</code>. The REPL and the compiler of PlanckVM read the text with <code>parse_at</code>, and give the next expression the position advanced by counting the characters read. The REPL passes <code>Loc{"&lt;repl&gt;", line, column}</code>.</li>
 </ul>
 <div class="example">
 <p class="file">t6_eval.pk</p>

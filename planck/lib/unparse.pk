@@ -23,6 +23,23 @@ module unparse {
 bad := Bad{}
 is_mx(x) := type(x) == Expr
 
+# t without the At{loc, e} of the calls: the text has no position. The tree of a quote is data, so an At in it stays.
+no_at(t, nest) := {
+    if (not is_mx(t)) t
+    else if (head(t) == 'At and arity(t) == 2 and nest == 0) no_at(arg(t, 1), 0)
+    else if (head(t) == 'Quote) t
+    else {
+        n2 := if (head(t) == 'QuasiQuote) nest + 1 else if (head(t) == 'UnQuote) nest - 1 else nest
+        m := mexpr(head(t), Tuple{})
+        i := 0
+        while (i < arity(t)) {
+            m = push(m, no_at(arg(t, i), n2))
+            i = i + 1
+        }
+        m
+    }
+}
+
 is_bad(x) := is_mx(x) and head(x) == 'Bad
 is_hole(p) := is_mx(p) and head(p) == 'Hole
 is_unwrap(p) := is_mx(p) and (head(p) == 'UnwrapReturn or head(p) == 'UnwrapBreak or head(p) == 'UnwrapContinue)
@@ -109,7 +126,9 @@ vars_tmpl(h, tup, labels) := {
     r := mexpr(h, Tuple{})
     i := 0
     while (not is_bad(r) and i < arity(tup)) {
-        v := arg(tup, i)
+        v0 := arg(tup, i)
+        # peg_unat(x) takes the positions out of x, and the text has none
+        v := if (is_mx(v0) and head(v0) == 'Apply and arg(v0, 0) == 'peg_unat and is_mx(arg(v0, 1)) and arity(arg(v0, 1)) == 1) arg(arg(v0, 1), 0) else v0
         r = if (label_ok(v, labels)) push(r, hole(v)) else bad
         i = i + 1
     }
@@ -168,6 +187,16 @@ mexpr_tmpl(h, args, labels) :=
     else if (label_ok(h, labels) and label_ok(args, labels)) Generic{hole(h), hole(args)}
     else bad
 
+# peg_at(l, e) that the grammar builds around a call gives At{loc, e} for a text with a position. The template is the one of e, since the text has no position.
+is_at_builder(b) := is_mx(b) and head(b) == 'Apply and arg(b, 0) == 'peg_at and is_mx(arg(b, 1)) and head(arg(b, 1)) == 'Tuple and arity(arg(b, 1)) == 2
+
+# the body of an action without the positions of the calls in it, and without the builder of the At around a call
+normal_body(b0) := {
+    b1 := no_at(b0, 0)
+    b := if (is_mx(b1) and head(b1) == 'Do and arity(b1) == 1) arg(b1, 0) else b1
+    if (is_at_builder(b)) arg(arg(b, 1), 1) else b
+}
+
 body_tmpl(b, labels) :=
     if (type(b) == Symbol) (if (label_ok(b, labels)) hole(b) else bad)
     else if (not is_mx(b)) bad
@@ -195,7 +224,7 @@ action_of(f, elems, is_seq) := {
                   else if (type(pat) == Symbol and not is_seq) [pat]
                   else bad
         if (is_bad(labels) or length(labels) != n) bad else {
-            tm := body_tmpl(arg(f, 1), labels)
+            tm := body_tmpl(normal_body(arg(f, 1)), labels)
             if (is_bad(tm)) bad else Tuple{labels, tm}
         }
     } else bad
@@ -239,7 +268,8 @@ make_items(elems, labels, holes) := {
             it := if (l == '_) {
                     c := const_text(e, 0)
                     if (is_bad(c)) bad else ConstItem{c, const_kind(e, i, n, c, prev)}
-                } else if (member(l, holes)) ValItem{l, e}
+                } else if (e == 'here) ConstItem{"", 'tight}
+                else if (member(l, holes)) ValItem{l, e}
                 else bad
             rest := go(es, ls, i + 1, e)
             if (is_bad(it) or is_bad(rest)) bad else it :: rest
@@ -573,7 +603,7 @@ pp(r, t) =
 # unparse.try_as(rule, t) is a text that the rule parses to t, or none when t has no such text
 export try_as(r, t) := {
     ensure()
-    pp(r, t)
+    pp(r, no_at(t, 0))
 }
 
 # unparse.text_as(rule, t) is like unparse.try_as and stops the program when there is no text
