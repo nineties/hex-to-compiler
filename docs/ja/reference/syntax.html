@@ -100,7 +100,7 @@
 <tr><td><code>+a</code></td><td><code>a</code></td></tr>
 <tr><td><code>'e</code>・<code>`e</code>・<code>!e</code></td><td><code>Quote{e}</code>・<code>QuasiQuote{e}</code>・<code>UnQuote{e}</code></td></tr>
 <tr><td><code>1.5</code></td><td><code>Apply{_float, Tuple{"1.5"}}</code>（引数は書かれた字面）</td></tr>
-<tr><td><code>f(a, ...)</code></td><td><code>Apply{f, Tuple{a, ...}}</code></td></tr>
+<tr><td><code>f(a, ...)</code></td><td class="wrap"><code>At{Loc{file, line, column}, Apply{f, Tuple{a, ...}}}</code>（<code>Loc</code> は <code>f</code> の先頭の位置で、行と列は 1 から数える。<a href="core.html#matching-failed">MatchingFailed</a> の <code>loc</code> になる）</td></tr>
 <tr><td><code>t.f</code></td><td><code>Apply{_record_get, Tuple{t, Quote{f}}}</code></td></tr>
 <tr><td><code>a[i]</code></td><td><code>Apply{_index_get, Tuple{a, i}}</code></td></tr>
 <tr><td><code>t[p -&gt; a | q if c -&gt; b]</code></td><td class="wrap"><code>Apply{_index_get, Tuple{t, f}}</code>。<code>f</code> は腕を <code>|</code> でつないだ関数（<a href="#index">下記</a>）</td></tr>
@@ -126,7 +126,11 @@
 <tr><td><code>test { e; ... }</code></td><td><code>If{_testing, Do{e, ...}, none}</code></td></tr>
 <tr><td><code>name{| text |}</code></td><td class="wrap"><code>Quote{v}</code>。<code>v</code> は規則 <code>name</code> で <code>text</code> を読んだ値（<a href="syntax.html#text">規則で読む文字列</a>）</td></tr>
 </table>
-
+<ul>
+<li><code>At</code> で包むのは、テキストに書いた <code>f(a, ...)</code> だけです。演算子・<code>t.f</code>・<code>a[i]</code>・<code>match</code>・<code>f"..."</code> などが作る <code>Apply</code> には付かず、その呼び出しの <code>loc</code> は <code>none</code> です。</li>
+<li>クオート <code>'e</code> と準クオート <code>`e</code> の中の <code>f(a, ...)</code> は <code>Apply{f, Tuple{a, ...}}</code> になり、<code>At</code> は付きません。準クオートの <code>!e</code> の中は、準クオートの外と同じです。</li>
+<li>パターンに書く <code>f(p, ...)</code> は <code>Apply{Quote{f}, Tuple{p, ...}}</code> のままで、<code>At</code> は付きません。</li>
+</ul>
 
 <div class="example">
 <pre class="repl"><span class="prompt">&gt; </span><span class="tok-op">'</span><span class="tok-op">(</span><span class="tok-name">x</span> <span class="tok-op">:=</span> <span class="tok-num">1</span><span class="tok-op">)</span>
@@ -764,6 +768,7 @@ Tuple{SyntaxError{&quot;unexpected input&quot;, &quot;)&quot;}, &quot;&quot;}</p
 </div>
 <ul>
 <li>式を評価する前（<code>eval</code> に渡した木も同じ）に、根から順に各部分を書き換えます。規則は後に足したものから試し、合わなければそのままです。</li>
+<li><code>f(a, ...)</code> が作る <code>At{loc, Apply{...}}</code> では、<code>Apply</code> を書き換えます。書き換えたあとも <code>At</code> は残ります。</li>
 <li>書き換えた部分は、変わらなくなるまで規則を当ててから、その中を書き換えます。1つの式で 1000 回より多く当てるとエラーで止まります。</li>
 <li>クオート <code>'e</code> の中は書き換えません。準クオート <code>`e</code> は <code>!e</code> の中だけを書き換えます。</li>
 <li>関数の引数のパターンと、<code>Def</code>・<code>Set</code>・<code>Declare</code> が定義する名前も書き換えません。</li>
@@ -787,8 +792,9 @@ Tuple{SyntaxError{&quot;unexpected input&quot;, &quot;)&quot;}, &quot;&quot;}</p
 <h3 id="toplevel">トップレベル</h3>
 <p>式を読むたびに大域変数 <code>parse</code> と <code>eval</code> を引き直すので、差し替えると次の式から新しい定義で処理されます。<code>Apply{eval, ...}</code> も差し替えた <code>eval</code> を呼びます。</p>
 <ul>
-<li><code>parse</code>：<code>文字列 -> Tuple{M式, 文字列の残り}</code>。空白しか残っていなければ <code>Tuple{Eof{}, ""}</code> を返し、差し替える <code>parse</code> は <code>Eof{}</code> をそのまま通します。</li>
+<li><code>parse</code>：<code>文字列, Loc -> Tuple{M式, 文字列の残り}</code>。<code>Loc{file, line, column}</code> は文字列の先頭の位置です。読んだ <code>f(a, ...)</code> の <code>At</code> の <code>loc</code> は、この位置から数えます。空白しか残っていなければ <code>Tuple{Eof{}, ""}</code> を返し、差し替える <code>parse</code> は <code>Eof{}</code> をそのまま通します。</li>
 <li><code>eval</code>：<code>M式 -> 値</code>。</li>
+<li>ファイルを読むループは、読み込み中のファイルの先頭を <code>Loc{ファイル名, 1, 1}</code> として <code>parse</code> を呼びます。読み終えた文字を数えて進めた位置を、次の式を読むときの <code>Loc</code> にします。REPL は <code>Loc{"&lt;repl&gt;", 行, 列}</code> を渡します。</li>
 </ul>
 <div class="example">
 <p class="file">t6_eval.pk</p>

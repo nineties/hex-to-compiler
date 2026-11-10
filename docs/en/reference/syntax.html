@@ -100,7 +100,7 @@
 <tr><td><code>+a</code></td><td><code>a</code></td></tr>
 <tr><td><code>'e</code>, <code>`e</code>, <code>!e</code></td><td><code>Quote{e}</code>, <code>QuasiQuote{e}</code>, <code>UnQuote{e}</code></td></tr>
 <tr><td><code>1.5</code></td><td><code>Apply{_float, Tuple{"1.5"}}</code>. The string is the text of the number (<code>"-0.25"</code> for <code>-0.25</code>)</td></tr>
-<tr><td><code>f(a, ...)</code></td><td><code>Apply{f, Tuple{a, ...}}</code></td></tr>
+<tr><td><code>f(a, ...)</code></td><td class="wrap"><code>At{Loc{file, line, column}, Apply{f, Tuple{a, ...}}}</code>. The <code>Loc</code> is the position of the start of <code>f</code>, with the line and the column counted from 1. It becomes the <code>loc</code> of <a href="core.html#matching-failed">MatchingFailed</a></td></tr>
 <tr><td><code>t.f</code></td><td><code>Apply{_record_get, Tuple{t, Quote{f}}}</code></td></tr>
 <tr><td><code>a[i]</code></td><td><code>Apply{_index_get, Tuple{a, i}}</code></td></tr>
 <tr><td><code>t[p -&gt; a | q if c -&gt; b]</code></td><td class="wrap"><code>Apply{_index_get, Tuple{t, f}}</code>, where <code>f</code> is the function of the arms (see <a href="#index">Indexing and rewriting</a>)</td></tr>
@@ -126,6 +126,11 @@
 <tr><td><code>test { e; ... }</code></td><td><code>If{_testing, Do{e, ...}, none}</code></td></tr>
 <tr><td><code>name{| text |}</code></td><td class="wrap"><code>Quote{v}</code>, where <code>v</code> is the value of the rule <code>name</code> read from <code>text</code> (see <a href="syntax.html#text">Text read by a rule</a>)</td></tr>
 </table>
+<ul>
+<li>Only an <code>f(a, ...)</code> written in the text is wrapped in <code>At</code>. The <code>Apply</code> that an operator, <code>t.f</code>, <code>a[i]</code>, <code>match</code> or <code>f"..."</code> makes has no <code>At</code>, and the <code>loc</code> of that call is <code>none</code>.</li>
+<li>An <code>f(a, ...)</code> inside a quote <code>'e</code> or a quasi-quote <code>`e</code> becomes <code>Apply{f, Tuple{a, ...}}</code> with no <code>At</code>. Inside the <code>!e</code> of a quasi-quote it is the same as outside.</li>
+<li>An <code>f(p, ...)</code> written in a pattern stays <code>Apply{Quote{f}, Tuple{p, ...}}</code> with no <code>At</code>.</li>
+</ul>
 <div class="example">
 <pre class="repl"><span class="prompt">&gt; </span><span class="tok-op">'</span><span class="tok-op">(</span><span class="tok-name">x</span> <span class="tok-op">:=</span> <span class="tok-num">1</span><span class="tok-op">)</span>
 <span class="res">Def{x, 1}</span>
@@ -762,6 +767,7 @@ Tuple{SyntaxError{&quot;unexpected input&quot;, &quot;)&quot;}, &quot;&quot;}</p
 </div>
 <ul>
 <li>Before an expression is evaluated (also a tree given to <code>eval</code>), each part is rewritten from the root. Rules are tried from the last added, and a part that matches none stays.</li>
+<li>In the <code>At{loc, Apply{...}}</code> that <code>f(a, ...)</code> makes, the <code>Apply</code> is rewritten. The <code>At</code> stays after the rewriting.</li>
 <li>A rewritten part gets the rules again until it no longer changes, and then its inside is rewritten. Applying more than 1000 rules to one expression stops with an error.</li>
 <li>The inside of a quote <code>'e</code> is not rewritten. In a quasi-quote <code>`e</code> only the inside of <code>!e</code> is.</li>
 <li>The parameter patterns of functions and the names defined by <code>Def</code>, <code>Set</code> and <code>Declare</code> are not rewritten.</li>
@@ -785,8 +791,9 @@ Tuple{SyntaxError{&quot;unexpected input&quot;, &quot;)&quot;}, &quot;&quot;}</p
 <h3 id="toplevel">Top level</h3>
 <p>The loop looks up the global variables <code>parse</code> and <code>eval</code> for every expression, so replacing them takes effect from the next expression. <code>Apply{eval, ...}</code> also calls the replaced <code>eval</code>.</p>
 <ul>
-<li><code>parse</code>: <code>String -&gt; Tuple{M-expression, rest String}</code>. It returns <code>Tuple{Eof{}, ""}</code> when only blanks are left, and a replacement <code>parse</code> passes <code>Eof{}</code> through.</li>
+<li><code>parse</code>: <code>String, Loc -&gt; Tuple{M-expression, rest String}</code>. The <code>Loc{file, line, column}</code> is the position of the start of the string, and the <code>loc</code> of the <code>At</code> of each <code>f(a, ...)</code> read is counted from it. It returns <code>Tuple{Eof{}, ""}</code> when only blanks are left, and a replacement <code>parse</code> passes <code>Eof{}</code> through.</li>
 <li><code>eval</code>: <code>M-expression -&gt; value</code>.</li>
+<li>The loop that reads a file calls <code>parse</code> with <code>Loc{file name, 1, 1}</code>, the start of the file being loaded, and gives the next expression the position advanced by counting the characters read. The REPL passes <code>Loc{"&lt;repl&gt;", line, column}</code>.</li>
 </ul>
 <div class="example">
 <p class="file">t6_eval.pk</p>
