@@ -51,12 +51,12 @@
 <tr class="lab"><td colspan="32">参照</td></tr>
 <tr class="fld"><td colspan="31">ヒープの添字 (31)</td><td colspan="1">0</td></tr>
 <tr class="lab"><td colspan="32">ヘッダ</td></tr>
-<tr class="fld"><td colspan="26">size (26)</td><td colspan="4">kind (4)</td><td colspan="1" class="v">m (1)</td><td colspan="1">1</td></tr>
+<tr class="fld"><td colspan="26">size (26)</td><td colspan="4">kind (4)</td><td colspan="1" class="v">r (1)</td><td colspan="1">1</td></tr>
 </table>
 <ul>
 <li>整数の即値は <code>2n+1</code> で、n は 31 ビットの 2 の補数です。即値に収まる整数は必ず即値で表し、収まらないものだけを多倍長整数のオブジェクトで表します。float・complex・文字列・symbol はすべてオブジェクトです。</li>
 <li>参照は、オブジェクトのヘッダの添字（ヒープの先頭からの word 単位）の 2 倍です。</li>
-<li>オブジェクトの先頭の word がヘッダで、値ではありません。<code>size</code> はヘッダの後の word 数、<code>m</code> は GC が使う印でイメージでは 0 です。下位ビットが 0 の word がヘッダの位置にあれば、GC がそのオブジェクトを移した先の参照です。</li>
+<li>オブジェクトの先頭の word がヘッダで、値ではありません。<code>size</code> はヘッダの後の word 数です。<code>r</code> は GC がオブジェクトを移したときだけ 1 になります。移したあとの元のヘッダは、<code>r</code> が 1 で、上位 30 ビットが移した先のヘッダの添字です。</li>
 </ul>
 
 <h2>オブジェクトの中身</h2>
@@ -75,10 +75,11 @@
 <tr><td>10</td><td>組み込み（<code>Function</code>）</td><td>identity の番号（生）、組み込みの番号（生）、arity（生）、名前（symbol）</td></tr>
 <tr><td>11</td><td>継続（<code>Function</code>）</td><td>identity の番号（生）、<code>PERFORM</code> の <code>reg</code>（生）、フレーム数 f（生）、フレームの切片（f 個。欄は<a href="planckvm-internals.html">内部仕様</a>のとおり）、レジスタの切片。GC はフレームの <code>fn</code> <code>env</code> <code>alts</code> とレジスタの切片をたどる</td></tr>
 <tr><td>12</td><td>環境</td><td>親の環境（無ければ <code>none</code>）、スロット</td></tr>
-<tr><td>13</td><td>セル</td><td>大域変数の値、名前（symbol）、組み込みの上書きを調べるビットの番号（整数の即値。無ければ -1）</td></tr>
+<tr><td>13</td><td>セル</td><td>大域変数の値、名前（symbol）、世代（整数の即値）。組み込みの値を持つのは世代 0 のセルだけ</td></tr>
 <tr><td>14</td><td>コード</td><td><a href="planckvm-isa.html#format">フォーマット</a>の word 0 から定数表まで。GC は定数表だけをたどり、命令列は読み飛ばす</td></tr>
+<tr><td>15</td><td>ユーザーデータ（<code>_record_new</code> の型ごとの値）</td><td>identity の番号（生）、型の値への参照、フィールド</td></tr>
 </table>
-<p>整数の即値の <code>head</code> も <code>Int</code> です。kind の 15 は使いません。array・plain array・Lambda・Fusion・組み込み・継続の identity の番号は、最初の <code>HASH</code> が 1 以上の番号を割り当てるまで 0 で、そのあとは変わりません。</p>
+<p>整数の即値の <code>head</code> も <code>Int</code> です。array・plain array・Lambda・Fusion・組み込み・継続・ユーザーデータの identity の番号は、最初の <code>HASH</code> が 1 以上の番号を割り当てるまで 0 で、そのあとは変わりません。</p>
 
 <h3>plain array の要素</h3>
 <p>型の番号は、<code>'bool</code> が 0、<code>'i8</code> 〜 <code>'i64</code> が 1〜4、<code>'u8</code> 〜 <code>'u64</code> が 5〜8、<code>'f16</code> <code>'f32</code> <code>'f64</code> が 9〜11、<code>'c64</code> <code>'c128</code> が 12〜13 です。要素の大きさは、<code>'bool</code> が 1 バイトで、ほかは型名のビット数です。</p>

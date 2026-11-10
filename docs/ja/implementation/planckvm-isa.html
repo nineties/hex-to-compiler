@@ -92,7 +92,7 @@
 </ul>
 
 <h3>定数表と正しいコード</h3>
-<p>定数表の要素は値1語です。リテラル・<code>Quote</code> の中身・定数だけの M式は <code>LOADK</code>、シンボルは <code>MATCHHEAD</code> <code>MATCHTYPE</code>、セルは <code>GETGLOBAL</code> <code>SETGLOBAL</code>、入れ子のコードは <code>CLOSURE</code> が指します。生成する側は次を守ります。</p>
+<p>定数表の要素は値1語です。リテラル・<code>Quote</code> の中身・定数だけの M式は <code>LOADK</code>、シンボルは <code>MATCHHEAD</code>、セルは <code>GETGLOBAL</code> <code>SETGLOBAL</code>、入れ子のコードは <code>CLOSURE</code> が指します。生成する側は次を守ります。</p>
 <ul>
 <li>ジャンプ先は命令の先頭で、命令列の最後は <code>RET</code> <code>TCALL</code> <code>JMP</code> <code>HALT</code> <code>NEXT</code> のいずれかです。</li>
 <li>条件の命令の次の語は <code>JMP</code>、<code>MATCH</code> で始まる命令の次の語は <code>NEXT</code> か <code>JMP</code> です。</li>
@@ -101,7 +101,7 @@
 </ul>
 
 <h2>命令</h2>
-<p>形式の欄のあとに並べたオペランド以外の欄は 0 です。印は、<strong>S</strong> が確保で GC が走りうる（セーフポイント）、<strong>W</strong> がライトバリア、<strong>T</strong> が条件を満たさないと止まる、です。「組み込み」の欄に名前のある命令は、セルが上書きされているとき S と T が当てはまります。</p>
+<p>形式の欄のあとに並べたオペランド以外の欄は 0 です。印は、<strong>S</strong> が確保で GC が走りうる（セーフポイント）、<strong>W</strong> がライトバリア、<strong>T</strong> が条件を満たさないと止まる、です。</p>
 <table>
 <tr><th>命令</th><th>op</th><th>形式 オペランド</th><th>動作</th><th>組み込み・印</th></tr>
 <tr><td>MOVE</td><td>0x00</td><td>ABC A B</td><td>R[A] := R[B]</td><td></td></tr>
@@ -137,7 +137,7 @@
 <tr><td>FIELD</td><td>0x1E</td><td>ABC A B C</td><td>R[A] := M式 R[B] の C 番目の引数。検査しない</td><td></td></tr>
 <tr><td>MATCHEQ</td><td>0x1F</td><td>AD A D</td><td>R[A] と K[D] が EQ で等しければ次の語を飛ばす</td><td></td></tr>
 <tr><td>MATCHHEAD</td><td>0x20</td><td>ABC A B C</td><td>R[A] が頭 K[B]、引数 C 個の M式なら次の語を飛ばす</td><td></td></tr>
-<tr><td>MATCHTYPE</td><td>0x21</td><td>AD A D</td><td>R[A] の型の名前（<code>Int</code> など）が symbol K[D] なら次の語を飛ばす</td><td></td></tr>
+<tr><td>MATCHTYPE</td><td>0x21</td><td>ABC A B</td><td>R[A] の型が R[B] なら次の語を飛ばす</td><td></td></tr>
 <tr><td>HANDLE</td><td>0x22</td><td>ABC A B</td><td>R[B]（arity 0 の Lambda）を境界フレームで実行し、結果を R[A] に入れる。R[B+1] がハンドラで、関数でなければ止まる</td><td>S T</td></tr>
 <tr><td>PERFORM</td><td>0x23</td><td>ABC A B</td><td>R[B] を引数にハンドラを呼ぶ。再開の引数が R[A] に入る</td><td>S T</td></tr>
 <tr><td>EXT</td><td>0x24</td><td>J X</td><td>次の命令のオペランドを広げる（<a href="#ext">拡張</a>）</td><td></td></tr>
@@ -145,18 +145,18 @@
 <tr><td>SUB</td><td>0x26</td><td>ABC A B C</td><td>R[A] := R[B] - R[C]</td><td><code>_sub</code> S T</td></tr>
 <tr><td>MUL</td><td>0x27</td><td>ABC A B C</td><td>R[A] := R[B] * R[C]</td><td><code>_mul</code> S T</td></tr>
 <tr><td>DIV</td><td>0x28</td><td>ABC A B C</td><td>R[A] := R[B] / R[C]。整数どうしは 0 方向へ切り捨て、除数 0 で止まる</td><td><code>_div</code> S T</td></tr>
-<tr><td>MOD</td><td>0x29</td><td>ABC A B C</td><td>整数どうしの R[B] - R[C] * (R[B] / R[C])。除数 0 で止まる</td><td><code>_mod</code> S T</td></tr>
+<tr><td>MOD</td><td>0x29</td><td>ABC A B C</td><td>整数どうしの R[B] - R[C] * floor(R[B] / R[C])（符号は除数と同じ）。除数 0 で止まる</td><td><code>_mod</code> S T</td></tr>
 <tr><td>ADDI</td><td>0x2A</td><td>ABC A B sC</td><td>R[A] := R[B] + sC</td><td><code>_add</code> S T</td></tr>
 <tr><td>LT</td><td>0x2B</td><td>ABC A B C</td><td>R[A] := R[B] &lt; R[C]（true か false）。複素数で止まる</td><td><code>_lt</code> T</td></tr>
 <tr><td>GE</td><td>0x2C</td><td>ABC A B C</td><td>R[A] := R[B] &gt;= R[C]。複素数で止まる</td><td><code>_ge</code> T</td></tr>
 <tr><td>EQ</td><td>0x2D</td><td>ABC A B C</td><td>R[A] := R[B] == R[C]。すべての値を受け取る</td><td><code>_eq</code></td></tr>
 <tr><td>NE</td><td>0x2E</td><td>ABC A B C</td><td>EQ の逆</td><td><code>_ne</code></td></tr>
 <tr><td>HEAD</td><td>0x2F</td><td>ABC A B</td><td>R[A] := M式 R[B] の頭</td><td><code>head</code> T</td></tr>
-<tr><td>ARITY</td><td>0x30</td><td>ABC A B</td><td>R[A] := M式 R[B] の引数の個数</td><td><code>arity</code> T</td></tr>
-<tr><td>ARG</td><td>0x31</td><td>ABC A B C</td><td>R[A] := M式 R[B] の R[C] 番目の引数（0 始まり）</td><td><code>arg</code> T</td></tr>
+<tr><td>ARITY</td><td>0x30</td><td>ABC A B</td><td>R[A] := M式 R[B] の引数の個数（ユーザーデータならフィールドの数）</td><td><code>arity</code> T</td></tr>
+<tr><td>ARG</td><td>0x31</td><td>ABC A B C</td><td>R[A] := M式 R[B] の R[C] 番目の引数（0 始まり。ユーザーデータならフィールド）</td><td><code>arg</code> T</td></tr>
 <tr><td>ARGI</td><td>0x32</td><td>ABC A B C</td><td>同上。番目が即値 C</td><td><code>arg</code> T</td></tr>
 <tr><td>PUSH</td><td>0x33</td><td>ABC A B C</td><td>R[A] := M式 R[B] の引数の末尾に R[C] を加えた M式</td><td><code>push</code> S T</td></tr>
-<tr><td>TYPEOF</td><td>0x34</td><td>ABC A B</td><td>R[A] := R[B] の型の名前の symbol（<code>Int</code>・<code>String</code> など）</td><td><code>type</code></td></tr>
+<tr><td>TYPEOF</td><td>0x34</td><td>ABC A B</td><td>R[A] := R[B] の型（<code>Int</code>・<code>String</code> など）</td><td><code>type</code></td></tr>
 <tr><td>STRLEN</td><td>0x35</td><td>ABC A B</td><td>R[A] := 文字列 R[B] の文字数（UTF-8 の文字）</td><td><code>strlen</code> T</td></tr>
 <tr><td>ORD</td><td>0x36</td><td>ABC A B C</td><td>R[A] := 文字列 R[B] の R[C] 番目の文字のコードポイント。範囲外なら -1</td><td><code>ord</code> T</td></tr>
 <tr><td>AGET</td><td>0x37</td><td>ABC A B C</td><td>R[A] := 配列 R[B] の要素 R[C]</td><td><code>array_get</code> T</td></tr>
@@ -171,7 +171,7 @@
 <p>算術と比較の命令は、数でない引数で止まります。T の印のある命令は、引数の型が違うときと範囲外のときにも止まります（<code>ORD</code> の範囲外を除く）。</p>
 
 <h2 id="builtins">組み込みと命令</h2>
-<p>型で分かれる演算は、値の型を見る1つの命令にします。<code>Apply{f, Tuple{...}}</code> の <code>f</code> が「組み込み」の欄の名前のセルに解決され、引数の個数が合うとき、コンパイラはその命令を使い、上書きの有無を区別しません。</p>
+<p>型で分かれる演算は、値の型を見る1つの命令にします。<code>Apply{f, Tuple{...}}</code> の <code>f</code> が「組み込み」の欄の名前で、局所変数でなく、引数の個数が合うとき、コンパイラはその命令を使い、大域変数の上書きの有無を区別しません。</p>
 <p>命令にしない組み込み（<a href="../reference/builtins.html">組み込み関数</a>）は機械の組み込みで、<code>GETGLOBAL</code> で <code>R[B]</code> に読み、引数をその上のレジスタに置いて <code>CALL</code> で呼びます。確保とエラーは、その <code>CALL</code> の S と T に含まれます。</p>
 <ul>
 <li><code>eval(e)</code>: M式 e を現在の大域環境でコードに変換して実行します。コンパイルエラーは実行時エラーと同じく止まります。内側のフレームは通常のフレームなので、<code>eval</code> の中の <code>PERFORM</code> でも複製できます。</li>
@@ -186,7 +186,8 @@
 <ul>
 <li>パラメータ i のパターンがレジスタの変数なら <code>R[i]</code> です。残りのレジスタの変数は <code>R[arity]</code> から順に割り当て、ブロックを抜けても再利用しません。一時の値はその次から、スタックのように使います。</li>
 <li>被演算子 <code>&lt;e:r&gt;</code> は、e がレジスタの変数で、後の被演算子の評価でその変数が書き換わらないなら、その変数のレジスタで命令は要りません。そうでなければ <code>t</code> に入れます。</li>
-<li>演算子・添字・<code>for</code>・<code>f"..."</code>・<code>::=</code> など、対応する命令のないものは planck の関数の <code>CALL</code> になります（<code>_le</code> <code>_gt</code> <code>_index_get</code> <code>_index_set</code> <code>_record_get</code> <code>peg_for</code> <code>_strcat</code> <code>_define_rule</code> など）。</li>
+<li>演算子・添字・<code>for</code>・<code>f"..."</code>・<code>::=</code> など、対応する命令のないものは planck の関数の <code>CALL</code> になります（<code>_index_get</code> <code>_index_set</code> <code>_record_get</code> <code>peg_for</code> <code>_strcat</code> <code>_define_rule</code> など）。</li>
+<li><code>a &lt;= b</code> と <code>a &gt; b</code> は、左右を入れ替えた <code>GE</code> と <code>LT</code> になります。</li>
 </ul>
 <table>
 <tr><th>式</th><th>命令</th></tr>
@@ -202,6 +203,7 @@
 <tr><td><code>array_set</code> <code>plain_set</code></td><td>値を使わない位置なら <code>ASET</code> <code>PLAINSET</code>。使う位置なら <code>CALL</code></td></tr>
 <tr><td><code>arg(m, i)</code> <code>array_get(a, i)</code></td><td>i が 0 〜 255 の整数なら <code>ARGI</code> <code>AGETI</code>、それ以外は <code>ARG</code> <code>AGET</code></td></tr>
 <tr><td><code>if</code> <code>while</code> <code>and</code> <code>or</code></td><td>下の条件の形で <code>JMP</code> とラベル。<code>else</code> が無ければ <code>LOADK d none</code></td></tr>
+<tr><td><code>not a</code></td><td>値の位置では <code>if (a) false else true</code>。条件の位置では、条件の向きを逆にして <code>&lt;a, L, 1-k&gt;</code></td></tr>
 <tr><td><code>return</code> <code>break</code> <code>continue</code></td><td><code>Return{...}</code> などを作って <code>PERFORM</code>。関数とループは外側を <code>Handle</code> で囲む</td></tr>
 <tr><td><code>handle e with h</code> / <code>perform e</code></td><td><code>CLOSURE t k</code>（e を本体とする arity 0 のコード）<code>&lt;h:t+1&gt;</code> <code>HANDLE d t</code> / <code>PERFORM d r</code></td></tr>
 <tr><td><code>x :: xs</code> <code>(a, b)</code> <code>[a, b]</code> <code>Head{a, ...}</code></td><td><code>CONS</code> / <code>TUPLE</code> / <code>Cons</code> の入れ子 / <code>BUILD</code>（頭は <code>LOADK</code>）。定数だけなら <code>LOADK</code></td></tr>
@@ -220,7 +222,7 @@
 <ul>
 <li><code>_</code> は無し。変数は、引数の位置なら無し、M式の引数なら <code>FIELD</code> の行き先が x のレジスタです。</li>
 <li>整数・文字列・<code>true</code> <code>false</code> <code>none</code>・<code>Quote{v}</code> は <code>MATCHEQ r k</code> <code>NEXT</code> です。</li>
-<li><code>Head{p1, ..., pn}</code> は <code>MATCHHEAD r k n</code> <code>NEXT</code> のあと、<code>_</code> でない各 p_j について <code>FIELD s r j</code> と p_j の命令を並べます。<code>_TypeOf{p, type}</code> は <code>MATCHTYPE r k</code> <code>NEXT</code> のあと p の命令です。</li>
+<li><code>Head{p1, ..., pn}</code> は <code>MATCHHEAD r k n</code> <code>NEXT</code> のあと、<code>_</code> でない各 p_j について <code>FIELD s r j</code> と p_j の命令を並べます。<code>_TypeOf{p, T}</code> は <code>MATCHTYPE r t</code> <code>NEXT</code> のあと p の命令です。T は式で、関数を作る場所で評価し、値を関数の環境に置いておきます。照合の前にその値をレジスタ t へ読みます。</li>
 </ul>
 
 <h3>コードの例</h3>

@@ -68,7 +68,6 @@
 <li>When <code>CALL A B C</code> chooses a lambda, it saves <code>pc</code> and pushes a frame with <code>base</code> = the current base + B + 1 and <code>reg</code> of <code>ret</code> = A. The arguments are not moved. <code>HANDLE A B</code> pushes a frame with <code>base + B + 2</code> and <code>kind = 1</code>.</li>
 <li><code>RET</code> drops the frame and passes the value as its <code>ret</code> says. <code>TCALL</code> moves the arguments to <code>R[-1]</code> and on and replaces the current frame. It keeps <code>ret</code> and sets only <code>kind</code> to 0.</li>
 <li><code>NEXT</code> picks, from <code>next</code> on, the first alternative whose arity fits. For a lambda it replaces <code>fn</code> and <code>env</code> and sets <code>pc</code> to 0. When none is left, a frame with <code>kind</code> 2 goes on to the transfer and any other sends <code>MatchingFailed{f, args, loc}</code> from the calling frame by the steps of <code>PERFORM</code>. When the continuation is resumed, the value given becomes the result of the failed call. With no boundary it stops with <code>matching failed</code>.</li>
-<li>An overwritten builtin is detected with the word <code>guard</code>, whose bits correspond one by one to the names in the Builtin column. <code>SETGLOBAL</code> updates the bit when it writes the cell of such a name, and an instruction first checks whether <code>guard</code> is 0. When the builtin is overwritten, the function goes to <code>R[nregs]</code> with the arguments above it, and it is called like <code>CALL</code>.</li>
 </ul>
 
 <h3>Continuations</h3>
@@ -83,12 +82,12 @@
 <h2>Heap and garbage collection</h2>
 <p>The words of values and the contents of objects are in <a href="planckvm-repr.html">planckvm internal representation</a>. The GC is a copying collector of two generations, young and old, written in native as a part of the evaluator. Allocation is from the young generation, and only an object that does not fit goes directly to the old one.</p>
 <ul>
-<li>When the young generation is full, the young objects reachable from the roots and the remembered set are copied to the old generation. When the old generation is full, it is copied between two semispaces.</li>
+<li>When the young generation is full, the young objects reachable from the roots and the remembered set are copied to the old generation. When the old generation is full, the live objects of both generations are copied to a scratch array and back to the heap, which makes the old generation compact again.</li>
 <li>An instruction marked S in the instruction table may allocate and so may run the GC. The GC runs before the side effects of the instruction, and the inputs are read again from the registers, which the GC updates. There is no safe point in the middle of a loop.</li>
 <li>Every live value is reachable from the register stack, the frame stack, the cells, the state of the evaluator (the symbol table and the temporary slots of builtins) or the remembered set. No value lives only in a local variable of the evaluator.</li>
 </ul>
 <p>There is no table of live registers, and every element of the register stack is a valid value or none. It is filled with none at start, and the GC fills with none the used range above the roots. The top of that range is recorded in the word <code>high</code>, which is updated when a window is made.</p>
-<p>When a reference to a young object is written into an old object (<code>ENVSET</code>, <code>SETGLOBAL</code>, <code>ASET</code>), the object is recorded in the remembered set if its header bit <code>r</code> is 0, and <code>r</code> becomes 1.</p>
+<p>When a reference to a young object is written into an old object (<code>ENVSET</code>, <code>SETGLOBAL</code>, <code>ASET</code>), the index of the object is added to the remembered set. An object made directly in the old generation is added too. The same object may be listed more than once, and when the remembered set overflows, the next collection examines the whole old generation as roots.</p>
 <p>The identity of a function (<code>EQ</code> and <code>HASH</code>) is not its address. It is a number assigned at the first <code>HASH</code>.</p>
 
 <nav class="pager"><a class="prev" href="planckvm-repr.html"><small>Previous</small>planckvm value representation</a></nav>

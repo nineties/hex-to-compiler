@@ -92,7 +92,7 @@
 </ul>
 
 <h3>Constant table and a correct code</h3>
-<p>An element of the constant table is one value word. <code>LOADK</code> takes literals, the content of a <code>Quote</code> and an M-expression of constants, <code>MATCHHEAD</code> and <code>MATCHTYPE</code> take symbols, <code>GETGLOBAL</code> and <code>SETGLOBAL</code> take cells, and <code>CLOSURE</code> takes a nested code. The code generator keeps the following.</p>
+<p>An element of the constant table is one value word. <code>LOADK</code> takes literals, the content of a <code>Quote</code> and an M-expression of constants, <code>MATCHHEAD</code> takes symbols, <code>GETGLOBAL</code> and <code>SETGLOBAL</code> take cells, and <code>CLOSURE</code> takes a nested code. The code generator keeps the following.</p>
 <ul>
 <li>A jump goes to the start of an instruction, and the last instruction is one of <code>RET</code>, <code>TCALL</code>, <code>JMP</code>, <code>HALT</code> and <code>NEXT</code>.</li>
 <li>The word after a test instruction is <code>JMP</code>, and the word after an instruction that starts with <code>MATCH</code> is <code>NEXT</code> or <code>JMP</code>.</li>
@@ -101,7 +101,7 @@
 </ul>
 
 <h2>Instructions</h2>
-<p>A field that the Format column does not list after its operands is 0. The marks are <strong>S</strong>, a safe point (the collector may run on an allocation), <strong>W</strong>, a write barrier, and <strong>T</strong>, the instruction stops when its conditions are not met. For an instruction with a name in the Builtin column, S and T apply while the cell is overwritten.</p>
+<p>A field that the Format column does not list after its operands is 0. The marks are <strong>S</strong>, a safe point (the collector may run on an allocation), <strong>W</strong>, a write barrier, and <strong>T</strong>, the instruction stops when its conditions are not met.</p>
 <table>
 <tr><th>Instruction</th><th>Op</th><th>Format, operands</th><th>Action</th><th>Builtin, marks</th></tr>
 <tr><td>MOVE</td><td>0x00</td><td>ABC A B</td><td>R[A] := R[B]</td><td></td></tr>
@@ -137,7 +137,7 @@
 <tr><td>FIELD</td><td>0x1E</td><td>ABC A B C</td><td>R[A] := argument C of the M-expression R[B]. Unchecked</td><td></td></tr>
 <tr><td>MATCHEQ</td><td>0x1F</td><td>AD A D</td><td>Skip the next word when R[A] and K[D] are equal by EQ</td><td></td></tr>
 <tr><td>MATCHHEAD</td><td>0x20</td><td>ABC A B C</td><td>Skip the next word when R[A] is an M-expression with the head K[B] and C arguments</td><td></td></tr>
-<tr><td>MATCHTYPE</td><td>0x21</td><td>AD A D</td><td>Skip the next word when the type name of R[A] (such as <code>Int</code>) is the symbol K[D]</td><td></td></tr>
+<tr><td>MATCHTYPE</td><td>0x21</td><td>ABC A B</td><td>Skip the next word when the type of R[A] is R[B]</td><td></td></tr>
 <tr><td>HANDLE</td><td>0x22</td><td>ABC A B</td><td>Run R[B] (a lambda of arity 0) in a boundary frame and put the result in R[A]. R[B+1] is the handler, and it stops unless that is a function</td><td>S T</td></tr>
 <tr><td>PERFORM</td><td>0x23</td><td>ABC A B</td><td>Call the handler with R[B]. The argument of the resumption goes to R[A]</td><td>S T</td></tr>
 <tr><td>EXT</td><td>0x24</td><td>J X</td><td>Widen the operands of the next instruction (<a href="#ext">Extending operands</a>)</td><td></td></tr>
@@ -145,18 +145,18 @@
 <tr><td>SUB</td><td>0x26</td><td>ABC A B C</td><td>R[A] := R[B] - R[C]</td><td><code>_sub</code> S T</td></tr>
 <tr><td>MUL</td><td>0x27</td><td>ABC A B C</td><td>R[A] := R[B] * R[C]</td><td><code>_mul</code> S T</td></tr>
 <tr><td>DIV</td><td>0x28</td><td>ABC A B C</td><td>R[A] := R[B] / R[C]. Two integers: the quotient truncated toward 0, and a zero divisor stops</td><td><code>_div</code> S T</td></tr>
-<tr><td>MOD</td><td>0x29</td><td>ABC A B C</td><td>Two integers: R[B] - R[C] * (R[B] / R[C]). A zero divisor stops</td><td><code>_mod</code> S T</td></tr>
+<tr><td>MOD</td><td>0x29</td><td>ABC A B C</td><td>Two integers: R[B] - R[C] * floor(R[B] / R[C]) (the sign of the divisor). A zero divisor stops</td><td><code>_mod</code> S T</td></tr>
 <tr><td>ADDI</td><td>0x2A</td><td>ABC A B sC</td><td>R[A] := R[B] + sC</td><td><code>_add</code> S T</td></tr>
 <tr><td>LT</td><td>0x2B</td><td>ABC A B C</td><td>R[A] := R[B] &lt; R[C] (true or false). A complex number stops</td><td><code>_lt</code> T</td></tr>
 <tr><td>GE</td><td>0x2C</td><td>ABC A B C</td><td>R[A] := R[B] &gt;= R[C]. A complex number stops</td><td><code>_ge</code> T</td></tr>
 <tr><td>EQ</td><td>0x2D</td><td>ABC A B C</td><td>R[A] := R[B] == R[C]. Takes every value</td><td><code>_eq</code></td></tr>
 <tr><td>NE</td><td>0x2E</td><td>ABC A B C</td><td>The opposite of EQ</td><td><code>_ne</code></td></tr>
 <tr><td>HEAD</td><td>0x2F</td><td>ABC A B</td><td>R[A] := the head of the M-expression R[B]</td><td><code>head</code> T</td></tr>
-<tr><td>ARITY</td><td>0x30</td><td>ABC A B</td><td>R[A] := the number of arguments of the M-expression R[B]</td><td><code>arity</code> T</td></tr>
-<tr><td>ARG</td><td>0x31</td><td>ABC A B C</td><td>R[A] := argument R[C] of the M-expression R[B], from 0</td><td><code>arg</code> T</td></tr>
+<tr><td>ARITY</td><td>0x30</td><td>ABC A B</td><td>R[A] := the number of arguments of the M-expression R[B] (the number of fields of a user data)</td><td><code>arity</code> T</td></tr>
+<tr><td>ARG</td><td>0x31</td><td>ABC A B C</td><td>R[A] := argument R[C] of the M-expression R[B], from 0 (a field of a user data)</td><td><code>arg</code> T</td></tr>
 <tr><td>ARGI</td><td>0x32</td><td>ABC A B C</td><td>Same, with the immediate C</td><td><code>arg</code> T</td></tr>
 <tr><td>PUSH</td><td>0x33</td><td>ABC A B C</td><td>R[A] := the M-expression R[B] with R[C] added at the end of its arguments</td><td><code>push</code> S T</td></tr>
-<tr><td>TYPEOF</td><td>0x34</td><td>ABC A B</td><td>R[A] := the symbol of the type name of R[B] (such as <code>Int</code> and <code>String</code>)</td><td><code>type</code></td></tr>
+<tr><td>TYPEOF</td><td>0x34</td><td>ABC A B</td><td>R[A] := the type of R[B] (such as <code>Int</code> and <code>String</code>)</td><td><code>type</code></td></tr>
 <tr><td>STRLEN</td><td>0x35</td><td>ABC A B</td><td>R[A] := the number of characters (UTF-8) of the string R[B]</td><td><code>strlen</code> T</td></tr>
 <tr><td>ORD</td><td>0x36</td><td>ABC A B C</td><td>R[A] := the code point of character R[C] of the string R[B], or -1 out of range</td><td><code>ord</code> T</td></tr>
 <tr><td>AGET</td><td>0x37</td><td>ABC A B C</td><td>R[A] := element R[C] of the array R[B]</td><td><code>array_get</code> T</td></tr>
@@ -171,7 +171,7 @@
 <p>Arithmetic and comparison instructions stop on an argument that is not a number. An instruction with the mark T also stops on a wrong type or an out-of-range value (except the range of <code>ORD</code>).</p>
 
 <h2 id="builtins">Builtins and instructions</h2>
-<p>An operation that depends on the type is one instruction that looks at the type. When the <code>f</code> of <code>Apply{f, Tuple{...}}</code> resolves to the cell of a name in the Builtin column and the number of arguments fits, the compiler uses the instruction, whether or not the cell is overwritten.</p>
+<p>An operation that depends on the type is one instruction that looks at the type. When the <code>f</code> of <code>Apply{f, Tuple{...}}</code> is a name in the Builtin column, is not a local variable and the number of arguments fits, the compiler uses the instruction, whether or not a global variable of the name is overwritten.</p>
 <p>The other <a href="../reference/builtins.html">builtins</a> are machine builtins. The code reads the function into <code>R[B]</code> with <code>GETGLOBAL</code>, puts the arguments above it and calls it with <code>CALL</code>. Their allocation and errors are included in the S and T of that <code>CALL</code>.</p>
 <ul>
 <li><code>eval(e)</code>: compile the M-expression e in the current global environment and run it. A compile error stops like a runtime error. The inner frames are ordinary frames, so they can be copied when a <code>PERFORM</code> happens inside <code>eval</code>.</li>
@@ -186,7 +186,7 @@
 <ul>
 <li>A parameter whose pattern is a register variable is <code>R[i]</code>. The other register variables are assigned from <code>R[arity]</code> and are not reused after a block. Temporaries follow them like a stack.</li>
 <li>For an operand <code>&lt;e:r&gt;</code>, when e is a register variable and the evaluation of the later operands does not write it, r is its register and no instruction is needed. Otherwise the value goes to <code>t</code>.</li>
-<li>Features with no instruction of their own are a <code>CALL</code> of a planck function (<code>_le</code>, <code>_gt</code>, <code>_index_get</code>, <code>_index_set</code>, <code>_record_get</code>, <code>peg_for</code>, <code>_strcat</code>, <code>_define_rule</code> and so on).</li>
+<li>Features with no instruction of their own are a <code>CALL</code> of a planck function (<code>_index_get</code>, <code>_index_set</code>, <code>_record_get</code>, <code>peg_for</code>, <code>_strcat</code>, <code>_define_rule</code> and so on).</li>
 </ul>
 <table>
 <tr><th>Expression</th><th>Instructions</th></tr>
@@ -202,6 +202,7 @@
 <tr><td><code>array_set</code> <code>plain_set</code></td><td><code>ASET</code> <code>PLAINSET</code> when the value is not used, otherwise <code>CALL</code></td></tr>
 <tr><td><code>arg(m, i)</code> <code>array_get(a, i)</code></td><td><code>ARGI</code> <code>AGETI</code> for an integer i from 0 to 255, otherwise <code>ARG</code> <code>AGET</code></td></tr>
 <tr><td><code>if</code> <code>while</code> <code>and</code> <code>or</code></td><td><code>JMP</code> and labels, in the form of the conditions below. Without <code>else</code>, <code>LOADK d none</code></td></tr>
+<tr><td><code>not a</code></td><td>In a value position, <code>if (a) false else true</code>. In a condition position, the condition with the opposite truth, <code>&lt;a, L, 1-k&gt;</code></td></tr>
 <tr><td><code>return</code> <code>break</code> <code>continue</code></td><td>Build <code>Return{...}</code> or the like and <code>PERFORM</code>. A function and a loop are wrapped in a <code>Handle</code></td></tr>
 <tr><td><code>handle e with h</code> / <code>perform e</code></td><td><code>CLOSURE t k</code> (e as the body, arity 0) <code>&lt;h:t+1&gt;</code> <code>HANDLE d t</code> / <code>PERFORM d r</code></td></tr>
 <tr><td><code>x :: xs</code> <code>(a, b)</code> <code>[a, b]</code> <code>Head{a, ...}</code></td><td><code>CONS</code> / <code>TUPLE</code> / nested <code>Cons</code> / <code>BUILD</code> (the head by <code>LOADK</code>). <code>LOADK</code> for constants only</td></tr>
@@ -220,7 +221,7 @@
 <ul>
 <li><code>_</code> needs none. A variable needs none as a parameter, and as an argument of an M-expression the destination of <code>FIELD</code> is its register.</li>
 <li>An integer, a string, <code>true</code>, <code>false</code>, <code>none</code> and <code>Quote{v}</code> are <code>MATCHEQ r k</code> <code>NEXT</code>.</li>
-<li><code>Head{p1, ..., pn}</code> is <code>MATCHHEAD r k n</code> <code>NEXT</code>, then <code>FIELD s r j</code> and the instructions of p_j for each p_j that is not <code>_</code>. <code>_TypeOf{p, type}</code> is <code>MATCHTYPE r k</code> <code>NEXT</code> and then the instructions of p.</li>
+<li><code>Head{p1, ..., pn}</code> is <code>MATCHHEAD r k n</code> <code>NEXT</code>, then <code>FIELD s r j</code> and the instructions of p_j for each p_j that is not <code>_</code>. <code>_TypeOf{p, T}</code> is <code>MATCHTYPE r t</code> <code>NEXT</code> and then the instructions of p. T is an expression that is evaluated where the function is made; its value is kept in the environment of the function and read into the register t before the match.</li>
 </ul>
 
 <h3>Example of code</h3>
