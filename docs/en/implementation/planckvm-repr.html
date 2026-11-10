@@ -42,30 +42,30 @@
 <p class="lead">The low bit of a word tells an immediate from a reference, and the <code>kind</code> in the header tells the kind of an object. A field marked raw is a number as it is, and every other field is a word of a value. The GC follows only the value fields.</p>
 
 <h2>Words and headers</h2>
-<p>Every word in the heap, the registers and the frames is 32 bits, and bits are numbered from 0 at the least significant bit.</p>
+<p>Every word in the heap, the registers and the frames is 64 bits, and bits are numbered from 0 at the least significant bit. The figure draws 64 bits in a width of 32.</p>
 <table class="bits">
 <colgroup><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col></colgroup>
 <tr class="ruler"><td>3<br>1</td><td>3<br>0</td><td>2<br>9</td><td>2<br>8</td><td>2<br>7</td><td>2<br>6</td><td>2<br>5</td><td>2<br>4</td><td>2<br>3</td><td>2<br>2</td><td>2<br>1</td><td>2<br>0</td><td>1<br>9</td><td>1<br>8</td><td>1<br>7</td><td>1<br>6</td><td>1<br>5</td><td>1<br>4</td><td>1<br>3</td><td>1<br>2</td><td>1<br>1</td><td>1<br>0</td><td><br>9</td><td><br>8</td><td><br>7</td><td><br>6</td><td><br>5</td><td><br>4</td><td><br>3</td><td><br>2</td><td><br>1</td><td><br>0</td></tr>
 <tr class="lab"><td colspan="32">integer</td></tr>
-<tr class="fld"><td colspan="31">value n (31)</td><td colspan="1">1</td></tr>
+<tr class="fld"><td colspan="31">value n (63)</td><td colspan="1">1</td></tr>
 <tr class="lab"><td colspan="32">reference</td></tr>
-<tr class="fld"><td colspan="31">heap index (31)</td><td colspan="1">0</td></tr>
+<tr class="fld"><td colspan="31">heap index (63)</td><td colspan="1">0</td></tr>
 <tr class="lab"><td colspan="32">header</td></tr>
-<tr class="fld"><td colspan="26">size (26)</td><td colspan="4">kind (4)</td><td colspan="1" class="v">r (1)</td><td colspan="1">1</td></tr>
+<tr class="fld"><td colspan="28">size (58)</td><td colspan="2" class="v">kind (4)</td><td colspan="1" class="v">r (1)</td><td colspan="1">1</td></tr>
 </table>
 <ul>
-<li>An immediate integer is <code>2n+1</code>, where n is 31 bits in two's complement. An integer that fits is always an immediate, and only one that does not fit is a big-integer object. Floats, complex numbers, strings and symbols are all objects.</li>
+<li>An immediate integer is <code>2n+1</code>, where n is 63 bits in two's complement. An integer that fits is always an immediate, and only one that does not fit is a big-integer object. Floats, complex numbers, strings and symbols are all objects.</li>
 <li>A reference is twice the index of the header of the object, in words from the start of the heap.</li>
-<li>The first word of an object is its header, not a value. <code>size</code> is the number of words after the header. <code>r</code> becomes 1 only when the GC moves the object. The old header of a moved object has <code>r</code> 1 and, in its upper 30 bits, the index of the new header.</li>
+<li>The first word of an object is its header, not a value. <code>size</code> is the number of words after the header. <code>r</code> becomes 1 only when the GC moves the object. The old header of a moved object has <code>r</code> 1 and, in its upper 62 bits, the index of the new header.</li>
 </ul>
 
 <h2>Contents of objects</h2>
-<p>"Word" is the position counted from 0 at the word after the header. A 64-bit quantity puts the lower word first. Environments, cells and codes are never passed to a program as values.</p>
+<p>"Word" is the position counted from 0 at the word after the header. Environments, cells and codes are never passed to a program as values.</p>
 <table>
 <tr><th>kind</th><th>Object (head)</th><th>Contents</th></tr>
-<tr><td>0</td><td>big integer (<code>Int</code>)</td><td>sign (raw; 0 for 0 or more, 1 for negative), number of digits n (raw), then n digits in base 2<sup>64</sup> from the lowest. The top digit is not 0</td></tr>
-<tr><td>1, 2</td><td>float, complex (<code>Float</code>, <code>Complex</code>)</td><td>the bits of binary64 (raw). A complex number is the real part and then the imaginary part</td></tr>
-<tr><td>3</td><td>string (<code>String</code>)</td><td>number of bytes n (raw), then the UTF-8 bytes. Byte i lies in word <code>1 + i/4</code>, at position <code>i mod 4</code> from the low end. The unused bytes of the last word are 0</td></tr>
+<tr><td>0</td><td>big integer (<code>Int</code>)</td><td>sign (raw; 0 for 0 or more, 1 for negative), number of digits n (raw), then n digits (one word each) in base 2<sup>64</sup> from the lowest. The top digit is not 0</td></tr>
+<tr><td>1, 2</td><td>float, complex (<code>Float</code>, <code>Complex</code>)</td><td>the bits of binary64 (raw, one word). A complex number is the real part and then the imaginary part (two words)</td></tr>
+<tr><td>3</td><td>string (<code>String</code>)</td><td>number of bytes n (raw), then the UTF-8 bytes. Byte i lies in word <code>1 + i/8</code>, at position <code>i mod 8</code> from the low end. The unused bytes of the last word are 0</td></tr>
 <tr><td>4</td><td>symbol (<code>Symbol</code>)</td><td>the name (a reference to a string). There is one symbol per name</td></tr>
 <tr><td>5</td><td>M-expression (the head of each)</td><td>the head (a reference to a symbol), then the arguments. Immutable</td></tr>
 <tr><td>6</td><td>array (<code>Array</code>)</td><td>identity number (raw), then the elements. The number of elements never changes</td></tr>
@@ -84,7 +84,7 @@
 <h3>Elements of a plain array</h3>
 <p>The type numbers are 0 for <code>'bool</code>, 1 to 4 for <code>'i8</code> to <code>'i64</code>, 5 to 8 for <code>'u8</code> to <code>'u64</code>, 9 to 11 for <code>'f16</code>, <code>'f32</code> and <code>'f64</code>, and 12 and 13 for <code>'c64</code> and <code>'c128</code>. The size of an element is 1 byte for <code>'bool</code> and the number of bits in the name for the others.</p>
 <ul>
-<li>Elements are untagged bits packed without gaps in little endian. Element i starts at byte position <code>i * (bytes per element)</code>, and byte position <code>b</code> is the <code>b mod 4</code>-th byte from the low end of word <code>3 + b/4</code>.</li>
+<li>Elements are untagged bits packed without gaps in little endian. Element i starts at byte position <code>i * (bytes per element)</code>, and byte position <code>b</code> is the <code>b mod 8</code>-th byte from the low end of word <code>3 + b/8</code>.</li>
 <li>Integer types are in two's complement, <code>'bool</code> is 1 for <code>true</code>, float types are IEEE 754 bits, and a complex type is the real part and then the imaginary part. The unused bytes of the last word are 0, and a new array has all bits 0.</li>
 </ul>
 

@@ -1,25 +1,25 @@
 <!--title planckvm の命令-->
 <h1>planckvm の命令</h1>
-<p class="lead">1命令は1語で、高頻度の操作だけを命令にします。他は組み込み関数です。コードの正しさは生成する側が守り、評価器は検査しません。この頁はフォーマット、命令、組み込み、planck の各機能に対応する命令を定めます。機械と値は<a href="planckvm.html">実行モデルと値</a>に、実装の設計は<a href="planckvm-internals.html">内部仕様</a>にあります。</p>
+<p class="lead">1命令は 32 ビットで、高頻度の操作だけを命令にします。他は組み込み関数です。コードの正しさは生成する側が守り、評価器は検査しません。この頁はフォーマット、命令、組み込み、planck の各機能に対応する命令を定めます。機械と値は<a href="planckvm.html">実行モデルと値</a>に、実装の設計は<a href="planckvm-internals.html">内部仕様</a>にあります。</p>
 
 <h2 id="format">バイトコードのフォーマット</h2>
-<p>基本単位は 32 ビットの語で、ビットの番号は最下位を 0 とします。1つの Lambda かトップレベルの式が1つのコードで、入れ子の関数のコードは外側の定数表に入ります。</p>
+<p>基本単位は 64 ビットの語で、ビットの番号は最下位を 0 とします。命令は 32 ビットで、1 命令を語の下位 32 ビットに置きます（上位 32 ビットは 0）。コードの図は 64 ビットの語を 32 の幅に縮めて描いています。1つの Lambda かトップレベルの式が1つのコードで、入れ子の関数のコードは外側の定数表に入ります。</p>
 <!--bits
-語0 | nregs (16)/16 | arity (8)/8 | 0 (8)/8
-語1 | ninstrs (32)/32
-語2 | nconsts (32)/32
-語3 | params (32)/32
-語4 | nlocs (32)/32
-語5 | file (32)/32
+語0 | 0 (32)/16 | nregs (16)/8 | arity (8)/4 | 0 (8)/4
+語1 | ninstrs (64)/32
+語2 | nconsts (64)/32
+語3 | params (64)/32
+語4 | nlocs (64)/32
+語5 | file (64)/32
  | 命令列 (ninstrs 語)/32
  | 定数表 (nconsts 語)/32
  | 位置の表 (nlocs × 3 語)/32
 -->
-<p><code>nregs</code> は窓のレジスタの個数で、コードの中のレジスタ番号はすべてこれより小さい値です。<code>ninstrs</code> と <code>nconsts</code> は命令列と定数表の語数です。<code>params</code> は引数のパターンの木の定数表の添字で、関数の表示と照合失敗のメッセージに使います（トップレベルの式では <code>0xFFFFFFFF</code>）。</p>
-<p>位置の表は、呼び出しの位置から <code>MatchingFailed</code> の <code>loc</code> を引くために使います。1項目は <code>pc</code>・<code>line</code>・<code>column</code> の3語で、<code>nlocs</code> はその項目数です。<code>pc</code> は <code>CALL</code> か <code>TCALL</code> の語の、命令列の先頭からの添字で（<code>EXT</code> が前にあれば <code>EXT</code> の次の語）、項目は <code>pc</code> の昇順に並びます。<code>file</code> は表の全項目に共通のファイル名の文字列の、定数表の添字です（ファイル名がなければ <code>0xFFFFFFFF</code>）。<code>At</code> が包む呼び出しだけが項目を持ちます。</p>
+<p><code>nregs</code> は窓のレジスタの個数で、コードの中のレジスタ番号はすべてこれより小さい値です。<code>ninstrs</code> と <code>nconsts</code> は命令列と定数表の語数です。<code>params</code> は引数のパターンの木の定数表の添字で、関数の表示と照合失敗のメッセージに使います（トップレベルの式では -1）。</p>
+<p>位置の表は、呼び出しの位置から <code>MatchingFailed</code> の <code>loc</code> を引くために使います。1項目は <code>pc</code>・<code>line</code>・<code>column</code> の3語で、<code>nlocs</code> はその項目数です。<code>pc</code> は <code>CALL</code> か <code>TCALL</code> の、命令列の先頭からの添字で（<code>EXT</code> が前にあれば <code>EXT</code> の次の命令）、項目は <code>pc</code> の昇順に並びます。<code>file</code> は表の全項目に共通のファイル名の文字列の、定数表の添字です（ファイル名がなければ -1）。<code>At</code> が包む呼び出しだけが項目を持ちます。</p>
 
 <h3>命令の形式</h3>
-<p>1命令は1語（<code>EXT</code> を前に置くと2語）で、下位 8 ビットがオペコードです。</p>
+<p>1命令は 32 ビット（<code>EXT</code> を前に置くと2命令）で、下位 8 ビットがオペコードです。</p>
 <!--bits
 ABC | C (8)/8 | B (8)/8 | A (8)/8 | op (8)/8
 AD | D (16)/16 | A (8)/8 | op (8)/8
@@ -27,7 +27,7 @@ J | sJ (24)/24 | op (8)/8
 -->
 <ul>
 <li><code>A</code> <code>B</code> <code>C</code> <code>D</code> は符号なしで、<code>sB</code> <code>sC</code> <code>sD</code> は同じ欄の 2 の補数です。<code>R[A]</code> とあれば A はレジスタ番号、<code>K[D]</code> とあれば D は定数表の添字です。<code>k</code> は C の欄の 0 か 1 です。</li>
-<li><code>sJ</code> は命令を読んだ時点の pc（次の語）からの語数の差で、<code>X</code> は <code>EXT</code> の符号なし 24 ビットです。</li>
+<li><code>sJ</code> は命令を読んだ時点の pc（次の命令）からの命令数の差で、<code>X</code> は <code>EXT</code> の符号なし 24 ビットです。</li>
 </ul>
 
 <h3 id="ext">オペランドの拡張</h3>
@@ -38,14 +38,14 @@ AD | D の上位 16/16 | A の上位 8/8 | EXT (8)/8
 -->
 <ul>
 <li>広げた A, B, C は 16 ビット、D は 32 ビットで、符号付きの欄も同じ幅になります。<code>k</code> は広げません。</li>
-<li>レジスタ番号が 255 を超えるときと、定数表の添字が欄を超えるときに使います。<code>J</code> 形式の前にも <code>EXT</code> の前にも置けません。広げた命令へのジャンプ先は <code>EXT</code> の語です。</li>
+<li>レジスタ番号が 255 を超えるときと、定数表の添字が欄を超えるときに使います。<code>J</code> 形式の前にも <code>EXT</code> の前にも置けません。広げた命令へのジャンプ先は <code>EXT</code> です。</li>
 </ul>
 
 <h3>定数表と正しいコード</h3>
 <p>定数表の要素は値1語です。リテラル・<code>Quote</code> の中身・定数だけの M式は <code>LOADK</code>、シンボルは <code>MATCHHEAD</code>、セルは <code>GETGLOBAL</code> <code>SETGLOBAL</code>、入れ子のコードは <code>CLOSURE</code> が指します。生成する側は次を守ります。</p>
 <ul>
 <li>ジャンプ先は命令の先頭で、命令列の最後は <code>RET</code> <code>TCALL</code> <code>JMP</code> <code>HALT</code> <code>NEXT</code> のいずれかです。</li>
-<li>条件の命令の次の語は <code>JMP</code>、<code>MATCH</code> で始まる命令の次の語は <code>NEXT</code> か <code>JMP</code> です。</li>
+<li>条件の命令の次の命令は <code>JMP</code>、<code>MATCH</code> で始まる命令の次の命令は <code>NEXT</code> か <code>JMP</code> です。</li>
 <li>局所変数は、一時の値より小さい番号のレジスタに置きます。<code>CALL</code> <code>HANDLE</code> の時点で生きている値は、すべて <code>R[B]</code> より下に置きます（<code>HANDLE</code> は <code>R[B]</code> と <code>R[B+1]</code> も保ちます）。</li>
 <li><code>NEWENV</code> は、コードの中で1回だけ、パターンの照合がすべて成功したあとに実行します。照合が終わるまで <code>R[0]</code> から <code>R[arity-1]</code> を書き換えません。</li>
 </ul>
@@ -85,9 +85,9 @@ AD | D の上位 16/16 | A の上位 8/8 | EXT (8)/8
 <tr><td>CONS</td><td>0x1C</td><td>ABC A B C</td><td>R[A] := Cons{R[B], R[C]}</td><td>S</td></tr>
 <tr><td>BUILD</td><td>0x1D</td><td>ABC A B C</td><td>R[A] := 頭が symbol R[B]、引数が R[B+1], ..., R[B+C] の M式</td><td>S T</td></tr>
 <tr><td>FIELD</td><td>0x1E</td><td>ABC A B C</td><td>R[A] := M式 R[B] の C 番目の引数。検査しない</td><td></td></tr>
-<tr><td>MATCHEQ</td><td>0x1F</td><td>AD A D</td><td>R[A] と K[D] が EQ で等しければ次の語を飛ばす</td><td></td></tr>
-<tr><td>MATCHHEAD</td><td>0x20</td><td>ABC A B C</td><td>R[A] が頭 K[B]、引数 C 個の M式なら次の語を飛ばす</td><td></td></tr>
-<tr><td>MATCHTYPE</td><td>0x21</td><td>ABC A B</td><td>R[A] の型が R[B] なら次の語を飛ばす</td><td></td></tr>
+<tr><td>MATCHEQ</td><td>0x1F</td><td>AD A D</td><td>R[A] と K[D] が EQ で等しければ次の命令を飛ばす</td><td></td></tr>
+<tr><td>MATCHHEAD</td><td>0x20</td><td>ABC A B C</td><td>R[A] が頭 K[B]、引数 C 個の M式なら次の命令を飛ばす</td><td></td></tr>
+<tr><td>MATCHTYPE</td><td>0x21</td><td>ABC A B</td><td>R[A] の型が R[B] なら次の命令を飛ばす</td><td></td></tr>
 <tr><td>HANDLE</td><td>0x22</td><td>ABC A B</td><td>R[B]（arity 0 の Lambda）を境界フレームで実行し、結果を R[A] に入れる。R[B+1] がハンドラで、関数でなければ止まる</td><td>S T</td></tr>
 <tr><td>PERFORM</td><td>0x23</td><td>ABC A B</td><td>R[B] を引数にハンドラを呼ぶ。再開の引数が R[A] に入る</td><td>S T</td></tr>
 <tr><td>EXT</td><td>0x24</td><td>J X</td><td>次の命令のオペランドを広げる（<a href="#ext">拡張</a>）</td><td></td></tr>
@@ -117,7 +117,7 @@ AD | D の上位 16/16 | A の上位 8/8 | EXT (8)/8
 <tr><td>PLAINGET</td><td>0x3C</td><td>ABC A B C</td><td>R[A] := plain 配列 R[B] の要素 R[C]</td><td><code>plain_get</code> S T</td></tr>
 <tr><td>PLAINSET</td><td>0x3D</td><td>ABC A B C</td><td>plain 配列 R[A] の要素 R[B] に R[C] を書く。型に収まらなければ止まる。値を作らない</td><td><code>plain_set</code> T</td></tr>
 </table>
-<p><strong>条件の命令</strong>（<code>TEST</code> から <code>TGEI</code> まで）は値を作りません。条件が <code>k</code> と一致すれば（<code>k = 1</code> なら真、<code>k = 0</code> なら偽のとき）次の語の <code>JMP</code> を実行し、一致しなければ飛ばします。NaN を含むと <code>TLT</code> と <code>TGE</code> はどちらも偽です。</p>
+<p><strong>条件の命令</strong>（<code>TEST</code> から <code>TGEI</code> まで）は値を作りません。条件が <code>k</code> と一致すれば（<code>k = 1</code> なら真、<code>k = 0</code> なら偽のとき）次の命令の <code>JMP</code> を実行し、一致しなければ飛ばします。NaN を含むと <code>TLT</code> と <code>TGE</code> はどちらも偽です。</p>
 <p>算術と比較の命令は、数でない引数で止まります。T の印のある命令は、引数の型が違うときと範囲外のときにも止まります（<code>ORD</code> の範囲外を除く）。</p>
 
 <h2 id="builtins">組み込みと命令</h2>
@@ -169,7 +169,7 @@ AD | D の上位 16/16 | A の上位 8/8 | EXT (8)/8
 </ul>
 
 <h3>パターン</h3>
-<p>パターンの命令は値が <code>R[r]</code> にある状態から始め、照合に失敗したとき実行する語は <code>NEXT</code> です。環境に置く変数は照合の間はレジスタに置き、すべて成功したあとの <code>NEWENV</code> に続けて <code>ENVSET</code> で移します。</p>
+<p>パターンの命令は値が <code>R[r]</code> にある状態から始め、照合に失敗したとき実行する命令は <code>NEXT</code> です。環境に置く変数は照合の間はレジスタに置き、すべて成功したあとの <code>NEWENV</code> に続けて <code>ENVSET</code> で移します。</p>
 <ul>
 <li><code>_</code> は無し。変数は、引数の位置なら無し、M式の引数なら <code>FIELD</code> の行き先が x のレジスタです。</li>
 <li>整数・文字列・<code>true</code> <code>false</code> <code>none</code>・<code>Quote{v}</code> は <code>MATCHEQ r k</code> <code>NEXT</code> です。</li>
@@ -177,7 +177,7 @@ AD | D の上位 16/16 | A の上位 8/8 | EXT (8)/8
 </ul>
 
 <h3>コードの例</h3>
-<p><code>fib(n) := if (n &lt; 2) n else fib(n - 1) + fib(n - 2)</code> の Lambda（arity 1、nregs 5、<code>K[0]</code> がセル <code>fib</code>）です。左から pc、語、命令です。</p>
+<p><code>fib(n) := if (n &lt; 2) n else fib(n - 1) + fib(n - 2)</code> の Lambda（arity 1、nregs 5、<code>K[0]</code> がセル <code>fib</code>）です。左から pc、命令の 16 進、命令です。</p>
 <pre>
 00  0x00020012  TLTI R0 2 k=0      if not (n < 2)
 01  0x00000109  JMP +1             goto 03

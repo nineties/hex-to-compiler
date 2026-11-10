@@ -1,7 +1,7 @@
 # arr: arrays and plain arrays of planckvm
 #
 # An array is an object of the kind 6: the number (the identity), then the elements, each a value.
-# A plain array is an object of the kind 7: the number, the type, the count n and the elements packed from the low end of the words after them.
+# A plain array is an object of the kind 7: the number, the type, the count n and the elements packed from the low end of the words after them (8 bytes in a word).
 # An element has no tag. The types, in the order of the type numbers: 0 bool, 1 i8, 2 i16, 3 i32, 4 i64, 5 u8, 6 u16, 7 u32, 8 u64,
 # 9 f16, 10 f32, 11 f64, 12 c64, 13 c128. The bytes of an element: 1 1 2 4 8 1 2 4 8 2 4 8 8 16. A new plain array is all zero bits, which is
 # false, 0, 0.0 or complex(0, 0).
@@ -56,7 +56,7 @@ fn t_size(t: i64) -> i64 {
 }
 
 # the type number of a symbol, or -1
-fn type_of_symbol[r](h: &r [u32], sym: i64) -> i64 {
+fn type_of_symbol[r](h: &r [i64], sym: i64) -> i64 {
     let s = g(h, (sym >> 1) + 1)
     let n = str_len(h, s)
     for t in 0 as i64..14 {
@@ -67,13 +67,13 @@ fn type_of_symbol[r](h: &r [u32], sym: i64) -> i64 {
     -1
 }
 
-fn type_symbol_of[r](h: &mut r [u32], st: &mut r [u32], t: i64) -> i64 {
+fn type_symbol_of[r](h: &mut r [i64], st: &mut r [i64], t: i64) -> i64 {
     let s = new_string(h, st, tn_len(t))
     p(h, (s >> 1) + 2, tn_code(t))
     intern_sym(h, st, s)
 }
 
-fn check_kind[r](h: &r [u32], v: i64, k: i64, m: &static [u8]) {
+fn check_kind[r](h: &r [i64], v: i64, k: i64, m: &static [u8]) {
     if is_int(v) { die(m) }
     if kind_of(h, v) != k { die(m) }
 }
@@ -87,7 +87,7 @@ fn index_of(i: i64, n: i64, m: &static [u8]) -> i64 {
 
 # ---- arrays
 
-fn new_array[r](h: &mut r [u32], st: &mut r [u32], n: i64) -> i64 {
+fn new_array[r](h: &mut r [i64], st: &mut r [i64], n: i64) -> i64 {
     if n < 0 { die("array: negative length") }
     let a = alloc_obj(h, st, 6, 1 + n)
     let nv = g(h, 3)
@@ -97,17 +97,17 @@ fn new_array[r](h: &mut r [u32], st: &mut r [u32], n: i64) -> i64 {
     a
 }
 
-fn array_len[r](h: &r [u32], a: i64) -> i64 {
+fn array_len[r](h: &r [i64], a: i64) -> i64 {
     size_of(h, a) - 1
 }
 
-fn a_get[r](h: &r [u32], a: i64, i: i64) -> i64 {
+fn a_get[r](h: &r [i64], a: i64, i: i64) -> i64 {
     check_kind(h, a, 6, "array_get: not an array")
     let k = index_of(i, array_len(h, a), "array_get: out of range")
     g(h, (a >> 1) + 2 + k)
 }
 
-fn a_set[r](h: &mut r [u32], st: &mut r [u32], a: i64, i: i64, v: i64) {
+fn a_set[r](h: &mut r [i64], st: &mut r [i64], a: i64, i: i64, v: i64) {
     check_kind(h, a, 6, "array_set: not an array")
     let k = index_of(i, array_len(h, a), "array_set: out of range")
     wb(h, st, a, v)
@@ -116,39 +116,44 @@ fn a_set[r](h: &mut r [u32], st: &mut r [u32], a: i64, i: i64, v: i64) {
 
 # ---- plain arrays: the packed words
 
-fn pl_type[r](h: &r [u32], a: i64) -> i64 {
+fn pl_type[r](h: &r [i64], a: i64) -> i64 {
     g(h, (a >> 1) + 2)
 }
 
-fn pl_count[r](h: &r [u32], a: i64) -> i64 {
+fn pl_count[r](h: &r [i64], a: i64) -> i64 {
     g(h, (a >> 1) + 3)
 }
 
-fn new_plain[r](h: &mut r [u32], st: &mut r [u32], t: i64, n: i64) -> i64 {
+fn new_plain[r](h: &mut r [i64], st: &mut r [i64], t: i64, n: i64) -> i64 {
     if n < 0 { die("plain_array: negative length") }
-    let words = (n * t_size(t) + 3) / 4
+    let words = (n * t_size(t) + 7) / 8
     let a = alloc_obj(h, st, 7, 3 + words)
     p(h, (a >> 1) + 2, t)
     p(h, (a >> 1) + 3, n)
     a
 }
 
-# the element i of a type of at most 4 bytes, as the bits
-fn raw32[r](h: &r [u32], base: i64, t: i64, i: i64) -> i64 {
+# the element i of a type of at most 8 bytes, as the bits
+fn raw[r](h: &r [i64], base: i64, t: i64, i: i64) -> i64 {
     let sz = t_size(t)
     let off = i * sz
-    let w = g(h, base + off / 4)
+    let w = g(h, base + off / 8)
+    if sz == 8 { return w }
     let mask = ((1 as i64) << (sz * 8)) - 1
-    (w >> ((off % 4) * 8)) & mask
+    (w >> ((off % 8) * 8)) & mask
 }
 
-fn set_raw32[r](h: &mut r [u32], base: i64, t: i64, i: i64, x: i64) {
+fn set_raw[r](h: &mut r [i64], base: i64, t: i64, i: i64, x: i64) {
     let sz = t_size(t)
     let off = i * sz
-    let at = base + off / 4
-    let sh = (off % 4) * 8
+    let at = base + off / 8
+    if sz == 8 {
+        p(h, at, x)
+        return
+    }
+    let sh = (off % 8) * 8
     let mask = ((1 as i64) << (sz * 8)) - 1
-    p(h, at, (g(h, at) & (4294967295 - (mask << sh))) | ((x & mask) << sh))
+    p(h, at, (g(h, at) & ((mask << sh) ^ -1)) | ((x & mask) << sh))
 }
 
 # the value of the bits x in the signed field of n bits
@@ -157,24 +162,22 @@ fn sext(x: i64, n: i64) -> i64 {
     x
 }
 
-# the integer of the sign and the magnitude of two words
-fn int_of_mag[r](h: &mut r [u32], st: &mut r [u32], sign: i64, hi: i64, lo: i64) -> i64 {
+# the integer of the sign and the magnitude
+fn int_of_mag[r](h: &mut r [i64], st: &mut r [i64], sign: i64, mag: u64) -> i64 {
     let v = alloc_big(h, st, sign, 1)
-    wr(h, (v >> 1) + 3, ((hi as u64) << 32) | (lo as u64))
+    wr(h, (v >> 1) + 3, mag)
     fin(h, v)
 }
 
-# the integer of a 64-bit element; signed is 1 for i64
-fn int_of_64[r](h: &mut r [u32], st: &mut r [u32], hi: i64, lo: i64, signed: i64) -> i64 {
-    if signed == 1 and hi >= 2147483648 {
-        let nlo = (4294967296 - lo) & 4294967295
-        var carry: i64
-        carry = 0
-        if lo == 0 { carry = 1 }
-        let nhi = (4294967295 - hi + carry) & 4294967295
-        return int_of_mag(h, st, 1, nhi, nlo)
+# the integer of a 64-bit element w; signed is 1 for i64
+fn int_of_64[r](h: &mut r [i64], st: &mut r [i64], w: i64, signed: i64) -> i64 {
+    var a: u64
+    a = w as u64
+    if signed == 1 and w < 0 {
+        a = 0 - a
+        return int_of_mag(h, st, 1, a)
     }
-    int_of_mag(h, st, 0, hi, lo)
+    int_of_mag(h, st, 0, a)
 }
 
 # the magnitude (without the sign) of the binary64 that a small float of eb exponent bits and fb fraction bits stands for
@@ -251,44 +254,50 @@ fn narrow(hi: i64, lo: i64, eb: i64, fb: i64) -> i64 {
 
 # ---- reading an element as a value
 
-fn pl_get[r](h: &mut r [u32], st: &mut r [u32], a: i64, i: i64) -> i64 {
+fn pl_get[r](h: &mut r [i64], st: &mut r [i64], a: i64, i: i64) -> i64 {
     check_kind(h, a, 7, "plain_get: not a plain array")
     let k = index_of(i, pl_count(h, a), "plain_get: out of range")
     let t = pl_type(h, a)
     let base = (a >> 1) + 4
     if t == 0 {
-        if raw32(h, base, t, k) != 0 { return g(h, 2) }
+        if raw(h, base, t, k) != 0 { return g(h, 2) }
         return g(h, 1)
     }
-    if t >= 1 and t <= 3 { return int_from_i64(h, st, sext(raw32(h, base, t, k), t_size(t) * 8)) }
-    if t >= 5 and t <= 7 { return int_from_i64(h, st, raw32(h, base, t, k)) }
+    if t >= 1 and t <= 3 { return int_from_i64(h, st, sext(raw(h, base, t, k), t_size(t) * 8)) }
+    if t >= 5 and t <= 7 { return int_from_i64(h, st, raw(h, base, t, k)) }
     if t == 4 or t == 8 {
         var sg: i64
         sg = 0
         if t == 4 { sg = 1 }
-        return int_of_64(h, st, g(h, base + 2 * k + 1), g(h, base + 2 * k), sg)
+        return int_of_64(h, st, g(h, base + k), sg)
     }
     if t == 9 {
-        let x = raw32(h, base, t, k)
+        let x = raw(h, base, t, k)
         return mk_float(h, st, w_hi(x, 5, 10), w_lo(x, 5, 10))
     }
     if t == 10 {
-        let x = raw32(h, base, t, k)
+        let x = raw(h, base, t, k)
         return mk_float(h, st, w_hi(x, 8, 23), w_lo(x, 8, 23))
     }
-    if t == 11 { return mk_float(h, st, g(h, base + 2 * k + 1), g(h, base + 2 * k)) }
+    if t == 11 {
+        let w = g(h, base + k)
+        return mk_float(h, st, hi_of(w), lo_of(w))
+    }
     if t == 12 {
-        let rx = g(h, base + 2 * k)
-        let ix = g(h, base + 2 * k + 1)
+        let w = g(h, base + k)
+        let rx = lo_of(w)
+        let ix = hi_of(w)
         return mk_complex(h, st, w_hi(rx, 8, 23), w_lo(rx, 8, 23), w_hi(ix, 8, 23), w_lo(ix, 8, 23))
     }
-    mk_complex(h, st, g(h, base + 4 * k + 1), g(h, base + 4 * k), g(h, base + 4 * k + 3), g(h, base + 4 * k + 2))
+    let wr0 = g(h, base + 2 * k)
+    let wi0 = g(h, base + 2 * k + 1)
+    mk_complex(h, st, hi_of(wr0), lo_of(wr0), hi_of(wi0), lo_of(wi0))
 }
 
 # ---- writing a value into an element
 
 # whether the value x is true as a bool element: 1 or 0
-fn truthy[r](h: &r [u32], x: i64) -> i64 {
+fn truthy[r](h: &r [i64], x: i64) -> i64 {
     if x == g(h, 2) { return 1 }
     if x == g(h, 1) { return 0 }
     let c = num_class(h, x)
@@ -306,7 +315,7 @@ fn truthy[r](h: &r [u32], x: i64) -> i64 {
 }
 
 # store_int checks that the integer iv is in the range of the integer type t and writes it
-fn store_int[r](h: &mut r [u32], a: i64, i: i64, t: i64, iv: i64) {
+fn store_int[r](h: &mut r [i64], a: i64, i: i64, t: i64, iv: i64) {
     if i_nd(h, iv) > 1 { die("plain_set: out of range") }
     let neg = i_sign(h, iv)
     let dg = i_dig(h, iv, 0)
@@ -350,20 +359,19 @@ fn store_int[r](h: &mut r [u32], a: i64, i: i64, t: i64, iv: i64) {
     }
     let base = (a >> 1) + 4
     if nbit <= 32 {
-        set_raw32(h, base, t, i, tlo)
+        set_raw(h, base, t, i, tlo)
     } else {
-        p(h, base + 2 * i, tlo)
-        p(h, base + 2 * i + 1, thi)
+        p(h, base + i, (thi << 32) | tlo)
     }
 }
 
-fn pl_set[r](h: &mut r [u32], st: &mut r [u32], a: i64, i: i64, x: i64) {
+fn pl_set[r](h: &mut r [i64], st: &mut r [i64], a: i64, i: i64, x: i64) {
     check_kind(h, a, 7, "plain_set: not a plain array")
     let k = index_of(i, pl_count(h, a), "plain_set: out of range")
     let t = pl_type(h, a)
     let base = (a >> 1) + 4
     if t == 0 {
-        set_raw32(h, base, t, k, truthy(h, x))
+        set_raw(h, base, t, k, truthy(h, x))
         return
     }
     let c = num_class(h, x)
@@ -413,26 +421,22 @@ fn pl_set[r](h: &mut r [u32], st: &mut r [u32], a: i64, i: i64, x: i64) {
         die("plain_set: not a number")
     }
     if t == 9 {
-        set_raw32(h, base, t, k, narrow(rh, rl, 5, 10))
+        set_raw(h, base, t, k, narrow(rh, rl, 5, 10))
     } else if t == 10 {
-        set_raw32(h, base, t, k, narrow(rh, rl, 8, 23))
+        set_raw(h, base, t, k, narrow(rh, rl, 8, 23))
     } else if t == 11 {
-        p(h, base + 2 * k, rl)
-        p(h, base + 2 * k + 1, rh)
+        p(h, base + k, (rh << 32) | rl)
     } else if t == 12 {
-        p(h, base + 2 * k, narrow(rh, rl, 8, 23))
-        p(h, base + 2 * k + 1, narrow(ih, il, 8, 23))
+        p(h, base + k, narrow(rh, rl, 8, 23) | (narrow(ih, il, 8, 23) << 32))
     } else {
-        p(h, base + 4 * k, rl)
-        p(h, base + 4 * k + 1, rh)
-        p(h, base + 4 * k + 2, il)
-        p(h, base + 4 * k + 3, ih)
+        p(h, base + 2 * k, (rh << 32) | rl)
+        p(h, base + 2 * k + 1, (ih << 32) | il)
     }
 }
 
 # ---- the instructions AGET AGETI ASET ALEN PLAINGET PLAINSET and the builtins
 
-fn exec_arr[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], op: i64, w: i64, base: i64) {
+fn exec_arr[r](h: &mut r [i64], st: &mut r [i64], rs: &mut r [i64], op: i64, w: i64, base: i64) {
     let a = (w >> 8) & 255
     let b = (w >> 16) & 255
     let c = w >> 24
@@ -454,20 +458,20 @@ fn exec_arr[r](h: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], op: i64, w: 
 }
 
 # str_to_bytes: the bytes of the string as a plain array of u8
-fn do_str_to_bytes[r](h: &mut r [u32], st: &mut r [u32], s: i64) -> i64 {
+fn do_str_to_bytes[r](h: &mut r [i64], st: &mut r [i64], s: i64) -> i64 {
     if not is_string(h, s) { die("str_to_bytes: not a string") }
     let n = str_len(h, s)
     let a = new_plain(h, st, 5, n)
     let base = (a >> 1) + 4
     for i in 0 as i64..n {
-        set_raw32(h, base, 5, i, str_byte(h, s, i))
+        set_raw(h, base, 5, i, str_byte(h, s, i))
     }
     a
 }
 
 # the number of bytes of the character that starts with the byte c at i of the u8 array at base (n bytes), and it stops when the bytes are not UTF-8
-fn utf8_len[r](h: &r [u32], base: i64, n: i64, i: i64) -> i64 {
-    let c = raw32(h, base, 5, i)
+fn utf8_len[r](h: &r [i64], base: i64, n: i64, i: i64) -> i64 {
+    let c = raw(h, base, 5, i)
     if c < 128 { return 1 }
     var ln: i64
     ln = 0
@@ -477,9 +481,9 @@ fn utf8_len[r](h: &r [u32], base: i64, n: i64, i: i64) -> i64 {
     if ln == 0 { die("bytes_to_str: not UTF-8") }
     if i + ln > n { die("bytes_to_str: not UTF-8") }
     for k in 1 as i64..ln {
-        if (raw32(h, base, 5, i + k) & 192) != 128 { die("bytes_to_str: not UTF-8") }
+        if (raw(h, base, 5, i + k) & 192) != 128 { die("bytes_to_str: not UTF-8") }
     }
-    let c1 = raw32(h, base, 5, i + 1)
+    let c1 = raw(h, base, 5, i + 1)
     if c == 224 and c1 < 160 { die("bytes_to_str: not UTF-8") }
     if c == 237 and c1 >= 160 { die("bytes_to_str: not UTF-8") }
     if c == 240 and c1 < 144 { die("bytes_to_str: not UTF-8") }
@@ -488,7 +492,7 @@ fn utf8_len[r](h: &r [u32], base: i64, n: i64, i: i64) -> i64 {
 }
 
 # bytes_to_str: the string of the bytes of a plain array of u8, which must be UTF-8
-fn do_bytes_to_str[r](h: &mut r [u32], st: &mut r [u32], a: i64) -> i64 {
+fn do_bytes_to_str[r](h: &mut r [i64], st: &mut r [i64], a: i64) -> i64 {
     check_kind(h, a, 7, "bytes_to_str: not a plain array")
     if pl_type(h, a) != 5 { die("bytes_to_str: not a plain array of u8") }
     let n = pl_count(h, a)
@@ -500,7 +504,7 @@ fn do_bytes_to_str[r](h: &mut r [u32], st: &mut r [u32], a: i64) -> i64 {
     }
     let s = new_string(h, st, n)
     for k in 0 as i64..n {
-        set_byte(h, s, k, raw32(h, base, 5, k))
+        set_byte(h, s, k, raw(h, base, 5, k))
     }
     fin_string(h, st, s)
 }
@@ -510,7 +514,7 @@ fn arg_count(v: i64, m: &static [u8]) -> i64 {
     int_of(v)
 }
 
-fn call_abuiltin[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], id: i64, a: i64) -> i64 {
+fn call_abuiltin[r](h: &mut r [i64], st: &mut r [i64], rs: &r [i64], id: i64, a: i64) -> i64 {
     if id == 30 { return new_array(h, st, arg_count(g(rs, a), "array: not an integer")) }
     if id == 31 {
         let sym = g(rs, a)
