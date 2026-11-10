@@ -98,18 +98,18 @@ fn run[r](h: &mut r [u32], t: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], 
     p(fs, 5, 0)
     p(fs, 6, 0)
     code = g(h, (stub >> 1) + 2) >> 1
-    ip = code + 5
-    kb = code + 5 + g(h, code + 2)
+    ip = code + 7
+    kb = code + 7 + g(h, code + 2)
     while running == 1 {
         if g(st, 12) != 0 {
             # a collection is wanted: it is done between two instructions, and the code, the pc and the base are read again from the top frame
-            p(fs, fp + 5, ip - (code + 5))
+            p(fs, fp + 5, ip - (code + 7))
             collect(h, t, st, rs, fs, fp)
             vfalse = g(h, 1)
             base = g(fs, fp + 4)
             code = g(h, (g(fs, fp) >> 1) + 2) >> 1
-            ip = code + 5 + g(fs, fp + 5)
-            kb = code + 5 + g(h, code + 2)
+            ip = code + 7 + g(fs, fp + 5)
+            kb = code + 7 + g(h, code + 2)
         }
         w = g(h, ip)
         ip += 1
@@ -185,11 +185,11 @@ fn run[r](h: &mut r [u32], t: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], 
             cond = exec_fusion(h, st, rs, w, base)
         } else if op == 20 or op == 21 or op == 22 or op == 23 or op == 34 or op == 35 {
             # the control: the frames change, so the code, the pc and the base are read again from the top frame
-            fp = exec_ctl(h, st, rs, fs, fp, op, w, ip - (code + 5))
+            fp = exec_ctl(h, st, rs, fs, fp, op, w, ip - (code + 7))
             base = g(fs, fp + 4)
             code = g(h, (g(fs, fp) >> 1) + 2) >> 1
-            ip = code + 5 + g(fs, fp + 5)
-            kb = code + 5 + g(h, code + 2)
+            ip = code + 7 + g(fs, fp + 5)
+            kb = code + 7 + g(h, code + 2)
             if base > g(st, 10) { p(st, 10, base) }
         } else if op == 24 {
             result = g(rs, base + a)
@@ -205,15 +205,15 @@ fn run[r](h: &mut r [u32], t: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], 
         }
         if cond == -2 {
             # a runtime error: the top frame performs the effect Error{none, message}; with no handler the program stops with the message
-            p(fs, fp + 5, ip - (code + 5))
+            p(fs, fp + 5, ip - (code + 7))
             var rw: i64
             rw = ret_word(a, 0, 0)
             if op >= 13 and op <= 19 { rw = ret_word(0, 3, 0) }
             fp = raise_pending(h, st, rs, fs, fp, rw)
             base = g(fs, fp + 4)
             code = g(h, (g(fs, fp) >> 1) + 2) >> 1
-            ip = code + 5 + g(fs, fp + 5)
-            kb = code + 5 + g(h, code + 2)
+            ip = code + 7 + g(fs, fp + 5)
+            kb = code + 7 + g(h, code + 2)
             if base > g(st, 10) { p(st, 10, base) }
             cond = -1
         }
@@ -283,43 +283,45 @@ fn main() -> i64 {
         var n: i64
         n = load(h, argv(1))
         # the entry stub: a code of 2 instructions CALL R0 R0 0 and HALT R0, and its Lambda
-        p(h, n, (2 + 4) * 64 + 14 * 4 + 1)
+        p(h, n, (2 + 6) * 64 + 14 * 4 + 1)
         p(h, n + 1, 65536)
         p(h, n + 2, 2)
         p(h, n + 3, 0)
         p(h, n + 4, -1)
-        p(h, n + 5, 20)
-        p(h, n + 6, 24)
-        p(h, n + 7, 3 * 64 + 8 * 4 + 1)
-        p(h, n + 8, 0)
-        p(h, n + 9, n * 2)
-        p(h, n + 10, g(h, 3))
+        p(h, n + 5, 0)
+        p(h, n + 6, -1)
+        p(h, n + 7, 20)
+        p(h, n + 8, 24)
+        p(h, n + 9, 3 * 64 + 8 * 4 + 1)
+        p(h, n + 10, 0)
+        p(h, n + 11, n * 2)
+        p(h, n + 12, g(h, 3))
         # the old generation is the image and the stub; the nursery is the end of the heap before the remembered set
         var nsize: i64
         nsize = 4194304
         if argc() >= 3 { nsize = parse_num(argv(2)) }
         let ns = len(h) - 262144 - nsize
-        if n + 11 > ns { die("the image is too big") }
+        if n + 13 > ns { die("the image is too big") }
         p(st, 0, ns)
         p(st, 6, ns)
         p(st, 7, ns + nsize)
-        p(st, 8, n + 11)
+        p(st, 8, n + 13)
         p(st, 13, ns + nsize / 4 * 3)
         p(st, 15, nsize / 8)
         p(st, 17, nsize)
         if argc() >= 4 { p(st, 18, parse_num(argv(3))) }
         var slack: i64
         slack = g(st, 18)
-        if slack == 0 { slack = (ns - n - 11) / 2 }
+        if slack == 0 { slack = (ns - n - 13) / 2 }
         var thr: i64
-        thr = n + 11 + slack
+        thr = n + 13 + slack
         if thr > ns - nsize { thr = ns - nsize }
         p(st, 14, thr)
         for i in 0 as i64..len(rs) {
             p(rs, i, g(h, 3))
         }
         register_image(h, st, n)
-        result = run(h, sc, st, rs, fs, (n + 7) * 2, g(h, 0))
+        result = run(h, sc, st, rs, fs, (n + 9) * 2, g(h, 0))
         if argc() >= 3 {
             write(2, "minor ")
             err_num(g(st, 20))

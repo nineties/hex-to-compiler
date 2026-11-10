@@ -62,7 +62,7 @@ module pvm_image {
         ["str_to_bytes", 39, 1], ["bytes_to_str", 40, 1], ["bit_not", 41, 1], ["bit_shr", 42, 2],
         ["_record_new", 43, 2],
         ["_sys_open", 45, 1], ["_sys_read", 46, 3], ["_sys_write", 47, 3], ["_sys_close", 48, 1], ["_sys_argc", 49, 0], ["_sys_argv", 50, 1],
-        ["_cells", 51, 0], ["_cell_new", 52, 2], ["_cell_field", 53, 2], ["_cell_set", 54, 2], ["_code_new", 55, 4], ["_lambda", 56, 1], ["_quo", 57, 2]
+        ["_cells", 51, 0], ["_cell_new", 52, 2], ["_cell_field", 53, 2], ["_cell_set", 54, 2], ["_code_new", 55, 6], ["_lambda", 56, 1], ["_quo", 57, 2]
     ]
 
     export type_names := ["Int", "String", "Symbol", "Expr", "Function", "Array", "Plain", "Float", "Complex"]
@@ -232,14 +232,23 @@ module pvm_image {
         each(c -> {
             labels := label_table(c[3])
             words := []
+            locs := []
+            file := none
             pc := 0
+            # an instruction At{Loc{file, line, column}, i} has an entry in the position table: the file is the string after the constants
             each(i -> if (not is_label(i)) {
-                words = B{encode(labels, pc + 1, i)} :: words
+                if (head(i) == 'At) {
+                    l := arg(i, 0)
+                    locs = W{arg(l, 2)} :: W{arg(l, 1)} :: W{pc} :: locs
+                    file = arg(l, 0)
+                    words = B{encode(labels, pc + 1, arg(i, 1))} :: words
+                } else words = B{encode(labels, pc + 1, i)} :: words
                 pc = pc + 1
             }, c[3])
-            consts := map(value_of, c[4])
-            hdr := [W{bit_shl(c[2], 16) + bit_shl(c[1], 8)}, W{pc}, W{length(consts)}, W{-1}]
-            vector.set(objs, table.get(names, ['code, c[0]], none), Obj{14, append(hdr, append(reverse(words), consts))})
+            consts := append(map(value_of, c[4]), if (file == none) [] else [value_of(S{file})])
+            fidx := if (file == none) -1 else length(consts) - 1
+            hdr := [W{bit_shl(c[2], 16) + bit_shl(c[1], 8)}, W{pc}, W{length(consts)}, W{-1}, W{length(locs) // 3}, W{fidx}]
+            vector.set(objs, table.get(names, ['code, c[0]], none), Obj{14, append(hdr, append(reverse(words), append(consts, reverse(locs))))})
         }, codes)
         lam := add(['lambda], Obj{8, [W{0}, R{table.get(names, ['code, entry], none)}, R{n_}]})
         layout(objs, append([lam, f_, t_, n_, tuple_, cons_, nil_], types))

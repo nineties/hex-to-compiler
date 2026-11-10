@@ -572,13 +572,20 @@ fn do_cell_set[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], a: i64) -> i6
     v
 }
 
-# _code_new(arity, nregs, instrs, consts): a code. instrs is a u32 plain array of the instruction words and consts an array of values.
+# _code_new(arity, nregs, instrs, consts, file, locs): a code. instrs is a u32 plain array of the instruction words and consts an array of values.
+# file is the index in consts of the string of the file name, or -1. locs is a u32 plain array of the entries (pc, line, column) of the position table.
 fn do_code_new[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], a: i64) -> i64 {
     let ar = arg_int(h, st, rs, a, 0, "_code_new: not an integer")
     let nr = arg_int(h, st, rs, a, 1, "_code_new: not an integer")
     if g(st, 22) != 0 { return 0 }
     let ins = g(rs, a + 2)
     let ks = g(rs, a + 3)
+    let fi = arg_int(h, st, rs, a, 4, "_code_new: not an integer")
+    if g(st, 22) != 0 { return 0 }
+    let ls = g(rs, a + 5)
+    if is_int(ls) { return fail(h, st, "_code_new: the positions are not a u32 plain array") }
+    if kind_of(h, ls) != 7 { return fail(h, st, "_code_new: the positions are not a u32 plain array") }
+    if g(h, (ls >> 1) + 2) != 7 { return fail(h, st, "_code_new: the positions are not a u32 plain array") }
     if ar < 0 or ar > 255 or nr < 0 or nr > 65535 { return fail(h, st, "_code_new: out of range") }
     if is_int(ins) { return fail(h, st, "_code_new: the instructions are not a u32 plain array") }
     if kind_of(h, ins) != 7 { return fail(h, st, "_code_new: the instructions are not a u32 plain array") }
@@ -587,17 +594,25 @@ fn do_code_new[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], a: i64) -> i6
     if kind_of(h, ks) != 6 { return fail(h, st, "_code_new: the constants are not an array") }
     let n = g(h, (ins >> 1) + 3)
     let m = size_of(h, ks) - 1
-    let c = alloc_obj(h, st, 14, 4 + n + m)
+    let nw = g(h, (ls >> 1) + 3)
+    if nw % 3 != 0 { return fail(h, st, "_code_new: the positions are not a u32 plain array") }
+    if fi < -1 or fi >= m { return fail(h, st, "_code_new: out of range") }
+    let c = alloc_obj(h, st, 14, 6 + n + m + nw)
     let cb = c >> 1
     p(h, cb + 1, nr * 65536 + ar * 256)
     p(h, cb + 2, n)
     p(h, cb + 3, m)
     p(h, cb + 4, 4294967295)
+    p(h, cb + 5, nw / 3)
+    if fi < 0 { p(h, cb + 6, 4294967295) } else { p(h, cb + 6, fi) }
     for i in 0 as i64..n {
-        p(h, cb + 5 + i, g(h, (ins >> 1) + 4 + i))
+        p(h, cb + 7 + i, g(h, (ins >> 1) + 4 + i))
     }
     for j in 0 as i64..m {
-        p(h, cb + 5 + n + j, g(h, (ks >> 1) + 2 + j))
+        p(h, cb + 7 + n + j, g(h, (ks >> 1) + 2 + j))
+    }
+    for q in 0 as i64..nw {
+        p(h, cb + 7 + n + m + q, g(h, (ls >> 1) + 4 + q))
     }
     c
 }
