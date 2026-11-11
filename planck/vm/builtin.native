@@ -30,7 +30,7 @@ fn out_byte(b: i64) {
 }
 
 # out_bytes writes the bytes of the string s from lo to hi-1
-fn out_bytes[r](h: &r [u32], s: i64, lo: i64, hi: i64) {
+fn out_bytes[r](h: &r [i64], s: i64, lo: i64, hi: i64) {
     let n = hi - lo
     if n <= 0 { return }
     let buf = alloc(n, 0 as u8)
@@ -100,7 +100,7 @@ fn escape_code(c: i64) -> i64 {
     return -1
 }
 
-fn out_quoted[r](h: &r [u32], s: i64) {
+fn out_quoted[r](h: &r [i64], s: i64) {
     let n = str_len(h, s)
     out_lit("\"")
     var start: i64
@@ -121,7 +121,7 @@ fn out_quoted[r](h: &r [u32], s: i64) {
     out_lit("\"")
 }
 
-fn out_symbol[r](h: &r [u32], sym: i64) {
+fn out_symbol[r](h: &r [i64], sym: i64) {
     let name = g(h, (sym >> 1) + 1)
     out_bytes(h, name, 0, str_len(h, name))
 }
@@ -147,14 +147,14 @@ fn out_pad(n: i64, w: i64) {
 }
 
 # out_big writes the decimal digits of a big integer: the digits are divided by 10^19 again and again
-fn out_big[r](h: &r [u32], v: i64) {
+fn out_big[r](h: &r [i64], v: i64) {
     let nd = g(h, (v >> 1) + 2)
     let dd: u64 = 10000000000000000000
     let rv = recip(dd)
     let t = alloc(nd, 0 as u64)
     let chunks = alloc(2 * nd + 2, 0 as u64)
     for i in 0 as i64..nd {
-        t[i] = rd(h, (v >> 1) + 3 + 2 * i)
+        t[i] = rd(h, (v >> 1) + 3 + i)
     }
     var n: i64
     var nc: i64
@@ -221,7 +221,7 @@ fn out_float(hi: i64, lo: i64) {
 }
 
 # print_value writes the text of a value like print does
-fn print_value[r](h: &r [u32], v: i64) {
+fn print_value[r](h: &r [i64], v: i64) {
     if is_int(v) {
         out_int(int_of(v))
         return
@@ -289,7 +289,7 @@ fn print_value[r](h: &r [u32], v: i64) {
 }
 
 # the string with the bytes of the literal m
-fn lit_string[r](h: &mut r [u32], st: &mut r [u32], m: &static [u8]) -> i64 {
+fn lit_string[r](h: &mut r [i64], st: &mut r [i64], m: &static [u8]) -> i64 {
     let n = len(m)
     let s = new_string(h, st, n)
     for i in 0 as i64..n {
@@ -299,19 +299,19 @@ fn lit_string[r](h: &mut r [u32], st: &mut r [u32], m: &static [u8]) -> i64 {
 }
 
 # fail records the message m of a runtime error in st[22] and gives 0
-fn fail[r](h: &mut r [u32], st: &mut r [u32], m: &static [u8]) -> i64 {
+fn fail[r](h: &mut r [i64], st: &mut r [i64], m: &static [u8]) -> i64 {
     p(st, 22, lit_string(h, st, m))
     0
 }
 
-fn arg_string[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], a: i64, k: i64, m: &static [u8]) -> i64 {
+fn arg_string[r](h: &mut r [i64], st: &mut r [i64], rs: &r [i64], a: i64, k: i64, m: &static [u8]) -> i64 {
     let v = g(rs, a + k)
     if not is_string(h, v) { return fail(h, st, m) }
     v
 }
 
 # the integer of the argument k; with a wrong argument the error is recorded and the result is 0
-fn arg_int[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], a: i64, k: i64, m: &static [u8]) -> i64 {
+fn arg_int[r](h: &mut r [i64], st: &mut r [i64], rs: &r [i64], a: i64, k: i64, m: &static [u8]) -> i64 {
     let v = g(rs, a + k)
     if not is_int(v) {
         fail(h, st, m)
@@ -320,7 +320,7 @@ fn arg_int[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], a: i64, k: i64, m
     int_of(v)
 }
 
-fn do_substr[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], a: i64) -> i64 {
+fn do_substr[r](h: &mut r [i64], st: &mut r [i64], rs: &r [i64], a: i64) -> i64 {
     let s = arg_string(h, st, rs, a, 0, "substr: not a string")
     let i = arg_int(h, st, rs, a, 1, "substr: not an integer")
     let j = arg_int(h, st, rs, a, 2, "substr: not an integer")
@@ -337,7 +337,7 @@ fn do_substr[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], a: i64) -> i64 
     fin_string(h, st, t)
 }
 
-fn do_strcat[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], a: i64) -> i64 {
+fn do_strcat[r](h: &mut r [i64], st: &mut r [i64], rs: &r [i64], a: i64) -> i64 {
     let x = arg_string(h, st, rs, a, 0, "_strcat: not a string")
     let y = arg_string(h, st, rs, a, 1, "_strcat: not a string")
     if g(st, 22) != 0 { return 0 }
@@ -353,7 +353,7 @@ fn do_strcat[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], a: i64) -> i64 
     fin_string(h, st, t)
 }
 
-fn do_mexpr[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], a: i64) -> i64 {
+fn do_mexpr[r](h: &mut r [i64], st: &mut r [i64], rs: &r [i64], a: i64) -> i64 {
     let hd = g(rs, a)
     let t = g(rs, a + 1)
     if not is_symbol(h, hd) { return fail(h, st, "mexpr: the head is not a symbol") }
@@ -367,7 +367,7 @@ fn do_mexpr[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], a: i64) -> i64 {
 }
 
 # _record_new(name, Tuple{field, ...}) is Tuple{type, make}. make is the builtin of the id 44: it takes the fields and gives a data of the type.
-fn do_record_new[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], a: i64) -> i64 {
+fn do_record_new[r](h: &mut r [i64], st: &mut r [i64], rs: &r [i64], a: i64) -> i64 {
     let name = g(rs, a)
     let fields = g(rs, a + 1)
     if not is_symbol(h, name) { die("_record_new: the name is not a symbol") }
@@ -392,7 +392,7 @@ fn do_record_new[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], a: i64) -> 
 }
 
 # new_data makes a data of the type of the builtin mk from the c fields in the registers from a
-fn new_data[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], mk: i64, a: i64, c: i64) -> i64 {
+fn new_data[r](h: &mut r [i64], st: &mut r [i64], rs: &r [i64], mk: i64, a: i64, c: i64) -> i64 {
     let t = g(h, (mk >> 1) + 4)
     let d = alloc_obj(h, st, 15, 2 + c)
     p(h, (d >> 1) + 2, t)
@@ -407,25 +407,25 @@ fn new_data[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], mk: i64, a: i64,
 # A buffer is a plain array of u8: the object of the kind 7 (the number, the type 5, the count n, then the bytes packed from the low end of the words).
 
 # the count of the u8 plain array v, or -1
-fn u8_count[r](h: &r [u32], v: i64) -> i64 {
+fn u8_count[r](h: &r [i64], v: i64) -> i64 {
     if is_int(v) { return -1 }
     if kind_of(h, v) != 7 { return -1 }
     if g(h, (v >> 1) + 2) != 5 { return -1 }
     g(h, (v >> 1) + 3)
 }
 
-fn u8_get[r](h: &r [u32], v: i64, i: i64) -> i64 {
-    (g(h, (v >> 1) + 4 + i / 4) >> ((i % 4) * 8)) & 255
+fn u8_get[r](h: &r [i64], v: i64, i: i64) -> i64 {
+    (g(h, (v >> 1) + 4 + i / 8) >> ((i % 8) * 8)) & 255
 }
 
-fn u8_put[r](h: &mut r [u32], v: i64, i: i64, b: i64) {
-    let at = (v >> 1) + 4 + i / 4
-    let sh = (i % 4) * 8
-    p(h, at, (g(h, at) & (4294967295 - (255 << sh))) | (b << sh))
+fn u8_put[r](h: &mut r [i64], v: i64, i: i64, b: i64) {
+    let at = (v >> 1) + 4 + i / 8
+    let sh = (i % 8) * 8
+    p(h, at, (g(h, at) & ((255 << sh) ^ -1)) | (b << sh))
 }
 
 # _sys_open(path): the file descriptor of the file opened for reading, or a negative number
-fn do_open[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], a: i64) -> i64 {
+fn do_open[r](h: &mut r [i64], st: &mut r [i64], rs: &r [i64], a: i64) -> i64 {
     let s = arg_string(h, st, rs, a, 0, "_sys_open: not a string")
     if g(st, 22) != 0 { return 0 }
     let n = str_len(h, s)
@@ -445,7 +445,7 @@ fn do_open[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], a: i64) -> i64 {
 }
 
 # _sys_read(fd, buf, n): reads at most n bytes into the start of buf and gives the number of the bytes, 0 at the end of the file, or a negative number
-fn do_read[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], a: i64) -> i64 {
+fn do_read[r](h: &mut r [i64], st: &mut r [i64], rs: &r [i64], a: i64) -> i64 {
     let fd = arg_int(h, st, rs, a, 0, "_sys_read: not an integer")
     let want = arg_int(h, st, rs, a, 2, "_sys_read: not an integer")
     if g(st, 22) != 0 { return 0 }
@@ -473,7 +473,7 @@ fn do_read[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], a: i64) -> i64 {
 }
 
 # _sys_write(fd, buf, n): writes the first n bytes of buf and gives the number of the bytes written, or a negative number
-fn do_write[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], a: i64) -> i64 {
+fn do_write[r](h: &mut r [i64], st: &mut r [i64], rs: &r [i64], a: i64) -> i64 {
     let fd = arg_int(h, st, rs, a, 0, "_sys_write: not an integer")
     let want = arg_int(h, st, rs, a, 2, "_sys_write: not an integer")
     if g(st, 22) != 0 { return 0 }
@@ -500,7 +500,7 @@ fn do_write[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], a: i64) -> i64 {
 # A cell is an object of the kind 13 (the value, the name symbol, the generation as an integer value).
 
 # walk_cells counts the cells of the heap, and when out is an array it puts them in it
-fn walk_cells[r](h: &mut r [u32], st: &r [u32], out: i64) -> i64 {
+fn walk_cells[r](h: &mut r [i64], st: &r [i64], out: i64) -> i64 {
     var cnt: i64
     var at: i64
     var top: i64
@@ -528,20 +528,20 @@ fn walk_cells[r](h: &mut r [u32], st: &r [u32], out: i64) -> i64 {
     cnt
 }
 
-fn is_cell[r](h: &r [u32], v: i64) -> bool {
+fn is_cell[r](h: &r [i64], v: i64) -> bool {
     if is_int(v) { return false }
     kind_of(h, v) == 13
 }
 
 # _cells(): an array of all the cells of the global variables
-fn do_cells[r](h: &mut r [u32], st: &mut r [u32]) -> i64 {
+fn do_cells[r](h: &mut r [i64], st: &mut r [i64]) -> i64 {
     let n = walk_cells(h, st, 0)
     let out = new_array(h, st, n)
     walk_cells(h, st, out)
     out
 }
 
-fn do_cell_new[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], a: i64) -> i64 {
+fn do_cell_new[r](h: &mut r [i64], st: &mut r [i64], rs: &r [i64], a: i64) -> i64 {
     let sym = g(rs, a)
     let gn = arg_int(h, st, rs, a, 1, "_cell_new: not an integer")
     if g(st, 22) != 0 { return 0 }
@@ -554,7 +554,7 @@ fn do_cell_new[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], a: i64) -> i6
 }
 
 # _cell_field(c, i): 0 the value, 1 the name symbol, 2 the generation
-fn do_cell_field[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], a: i64) -> i64 {
+fn do_cell_field[r](h: &mut r [i64], st: &mut r [i64], rs: &r [i64], a: i64) -> i64 {
     let c = g(rs, a)
     let i = arg_int(h, st, rs, a, 1, "_cell_field: not an integer")
     if g(st, 22) != 0 { return 0 }
@@ -563,7 +563,7 @@ fn do_cell_field[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], a: i64) -> 
     g(h, (c >> 1) + 1 + i)
 }
 
-fn do_cell_set[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], a: i64) -> i64 {
+fn do_cell_set[r](h: &mut r [i64], st: &mut r [i64], rs: &r [i64], a: i64) -> i64 {
     let c = g(rs, a)
     let v = g(rs, a + 1)
     if not is_cell(h, c) { return fail(h, st, "_cell_set: not a cell") }
@@ -574,7 +574,7 @@ fn do_cell_set[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], a: i64) -> i6
 
 # _code_new(arity, nregs, instrs, consts, file, locs): a code. instrs is a u32 plain array of the instruction words and consts an array of values.
 # file is the index in consts of the string of the file name, or -1. locs is a u32 plain array of the entries (pc, line, column) of the position table.
-fn do_code_new[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], a: i64) -> i64 {
+fn do_code_new[r](h: &mut r [i64], st: &mut r [i64], rs: &r [i64], a: i64) -> i64 {
     let ar = arg_int(h, st, rs, a, 0, "_code_new: not an integer")
     let nr = arg_int(h, st, rs, a, 1, "_code_new: not an integer")
     if g(st, 22) != 0 { return 0 }
@@ -602,23 +602,23 @@ fn do_code_new[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], a: i64) -> i6
     p(h, cb + 1, nr * 65536 + ar * 256)
     p(h, cb + 2, n)
     p(h, cb + 3, m)
-    p(h, cb + 4, 4294967295)
+    p(h, cb + 4, -1)
     p(h, cb + 5, nw / 3)
-    if fi < 0 { p(h, cb + 6, 4294967295) } else { p(h, cb + 6, fi) }
+    if fi < 0 { p(h, cb + 6, -1) } else { p(h, cb + 6, fi) }
     for i in 0 as i64..n {
-        p(h, cb + 7 + i, g(h, (ins >> 1) + 4 + i))
+        p(h, cb + 7 + i, raw(h, (ins >> 1) + 4, 7, i))
     }
     for j in 0 as i64..m {
         p(h, cb + 7 + n + j, g(h, (ks >> 1) + 2 + j))
     }
     for q in 0 as i64..nw {
-        p(h, cb + 7 + n + m + q, g(h, (ls >> 1) + 4 + q))
+        p(h, cb + 7 + n + m + q, raw(h, (ls >> 1) + 4, 7, q))
     }
     c
 }
 
 # _lambda(code): the Lambda of a code with no environment
-fn do_lambda[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], a: i64) -> i64 {
+fn do_lambda[r](h: &mut r [i64], st: &mut r [i64], rs: &r [i64], a: i64) -> i64 {
     let c = g(rs, a)
     if is_int(c) { return fail(h, st, "_lambda: not a code") }
     if kind_of(h, c) != 14 { return fail(h, st, "_lambda: not a code") }
@@ -629,7 +629,7 @@ fn do_lambda[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], a: i64) -> i64 
 }
 
 # _quo(x, y): the quotient of two integers cut toward the negative infinity
-fn do_quo[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], a: i64) -> i64 {
+fn do_quo[r](h: &mut r [i64], st: &mut r [i64], rs: &r [i64], a: i64) -> i64 {
     let x = g(rs, a)
     let y = g(rs, a + 1)
     if not is_integer(h, x) or not is_integer(h, y) { return fail(h, st, "_quo: not an integer") }
@@ -640,7 +640,7 @@ fn do_quo[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], a: i64) -> i64 {
     q
 }
 
-fn call_sys[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], id: i64, a: i64) -> i64 {
+fn call_sys[r](h: &mut r [i64], st: &mut r [i64], rs: &r [i64], id: i64, a: i64) -> i64 {
     if id == 45 { return do_open(h, st, rs, a) }
     if id == 46 { return do_read(h, st, rs, a) }
     if id == 47 { return do_write(h, st, rs, a) }
@@ -669,7 +669,7 @@ fn call_sys[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], id: i64, a: i64)
 }
 
 # call_builtin runs the builtin id with the arguments in the registers from a; the result is a value, or 0 for a runtime error (see fail)
-fn call_builtin[r](h: &mut r [u32], st: &mut r [u32], rs: &r [u32], id: i64, a: i64) -> i64 {
+fn call_builtin[r](h: &mut r [i64], st: &mut r [i64], rs: &r [i64], id: i64, a: i64) -> i64 {
     let nv = g(h, 3)
     if id == 0 {
         let s = arg_string(h, st, rs, a, 0, "put: not a string")

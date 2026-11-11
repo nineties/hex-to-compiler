@@ -3,23 +3,23 @@
 <p class="lead">An instruction is one word, and only high-frequency operations are instructions. Everything else is a builtin function. The code generator keeps the code correct, and the evaluator does not check it. This page defines the bytecode format, the instructions, the builtins and the instructions for each feature of planck. The machine and the values are in <a href="planckvm.html">planckvm: execution model and values</a>, and the design inside an implementation is in <a href="planckvm-internals.html">planckvm internals</a>.</p>
 
 <h2 id="format">Bytecode format</h2>
-<p>The basic unit is a 32-bit word, and bits are numbered from 0 at the least significant bit. One lambda or one top-level expression is one code. The code of a nested function lies in the constant table of the outer code.</p>
+<p>The basic unit is a 64-bit word, and bits are numbered from 0 at the least significant bit. An instruction is 32 bits, and one instruction lies in the low 32 bits of a word (the upper 32 bits are 0). The figure of the code draws a 64-bit word in a width of 32. One lambda or one top-level expression is one code. The code of a nested function lies in the constant table of the outer code.</p>
 <!--bits
-word 0 | nregs (16)/16 | arity (8)/8 | 0 (8)/8
-word 1 | ninstrs (32)/32
-word 2 | nconsts (32)/32
-word 3 | params (32)/32
-word 4 | nlocs (32)/32
-word 5 | file (32)/32
+word 0 | 0 (32)/16 | nregs (16)/8 | arity (8)/4 | 0 (8)/4
+word 1 | ninstrs (64)/32
+word 2 | nconsts (64)/32
+word 3 | params (64)/32
+word 4 | nlocs (64)/32
+word 5 | file (64)/32
  | instructions (ninstrs words)/32
  | constant table (nconsts words)/32
  | position table (nlocs x 3 words)/32
 -->
-<p><code>nregs</code> is the number of registers of the window, and every register number in the code is smaller than it. <code>ninstrs</code> and <code>nconsts</code> are the numbers of words of the instructions and of the constant table. <code>params</code> is the index of the tree of the parameter patterns in the constant table. It is used to print a function and in the message of a matching failure (<code>0xFFFFFFFF</code> for a top-level expression).</p>
-<p>The position table gives the <code>loc</code> of <code>MatchingFailed</code> from the position of a call. An entry is the three words <code>pc</code>, <code>line</code> and <code>column</code>, and <code>nlocs</code> is the number of entries. <code>pc</code> is the index, from the start of the instructions, of the word of a <code>CALL</code> or a <code>TCALL</code> (the word after the <code>EXT</code> when one precedes it), and the entries are in ascending order of <code>pc</code>. <code>file</code> is the index in the constant table of the string of the file name that all entries share (<code>0xFFFFFFFF</code> when there is no file name). Only a call wrapped in <code>At</code> has an entry.</p>
+<p><code>nregs</code> is the number of registers of the window, and every register number in the code is smaller than it. <code>ninstrs</code> and <code>nconsts</code> are the numbers of words of the instructions and of the constant table. <code>params</code> is the index of the tree of the parameter patterns in the constant table. It is used to print a function and in the message of a matching failure (-1 for a top-level expression).</p>
+<p>The position table gives the <code>loc</code> of <code>MatchingFailed</code> from the position of a call. An entry is the three words <code>pc</code>, <code>line</code> and <code>column</code>, and <code>nlocs</code> is the number of entries. <code>pc</code> is the index, from the start of the instructions, of a <code>CALL</code> or a <code>TCALL</code> (the instruction after the <code>EXT</code> when one precedes it), and the entries are in ascending order of <code>pc</code>. <code>file</code> is the index in the constant table of the string of the file name that all entries share (-1 when there is no file name). Only a call wrapped in <code>At</code> has an entry.</p>
 
 <h3>Instruction formats</h3>
-<p>An instruction is one word (two with a preceding <code>EXT</code>), and the low 8 bits are the opcode.</p>
+<p>An instruction is 32 bits (two instructions with a preceding <code>EXT</code>), and the low 8 bits are the opcode.</p>
 <!--bits
 ABC | C (8)/8 | B (8)/8 | A (8)/8 | op (8)/8
 AD | D (16)/16 | A (8)/8 | op (8)/8
@@ -27,7 +27,7 @@ J | sJ (24)/24 | op (8)/8
 -->
 <ul>
 <li><code>A</code>, <code>B</code>, <code>C</code> and <code>D</code> are unsigned, and <code>sB</code>, <code>sC</code> and <code>sD</code> are the same fields in two's complement. <code>R[A]</code> means that A is a register number, and <code>K[D]</code> that D is an index of the constant table. <code>k</code> is 0 or 1 in the field C.</li>
-<li><code>sJ</code> is the difference in words from the pc after reading the instruction (the next word), and <code>X</code> is the unsigned 24 bits of <code>EXT</code>.</li>
+<li><code>sJ</code> is the difference in instructions from the pc after reading the instruction (the next instruction), and <code>X</code> is the unsigned 24 bits of <code>EXT</code>.</li>
 </ul>
 
 <h3 id="ext">Extending operands</h3>
@@ -45,7 +45,7 @@ AD | high 16 of D/16 | high 8 of A/8 | EXT (8)/8
 <p>An element of the constant table is one value word. <code>LOADK</code> takes literals, the content of a <code>Quote</code> and an M-expression of constants, <code>MATCHHEAD</code> takes symbols, <code>GETGLOBAL</code> and <code>SETGLOBAL</code> take cells, and <code>CLOSURE</code> takes a nested code. The code generator keeps the following.</p>
 <ul>
 <li>A jump goes to the start of an instruction, and the last instruction is one of <code>RET</code>, <code>TCALL</code>, <code>JMP</code>, <code>HALT</code> and <code>NEXT</code>.</li>
-<li>The word after a test instruction is <code>JMP</code>, and the word after an instruction that starts with <code>MATCH</code> is <code>NEXT</code> or <code>JMP</code>.</li>
+<li>The instruction after a test instruction is <code>JMP</code>, and the instruction after an instruction that starts with <code>MATCH</code> is <code>NEXT</code> or <code>JMP</code>.</li>
 <li>Local variables are in registers with smaller numbers than the temporaries. At a <code>CALL</code> or <code>HANDLE</code>, every live value is below <code>R[B]</code> (<code>HANDLE</code> also keeps <code>R[B]</code> and <code>R[B+1]</code>).</li>
 <li><code>NEWENV</code> runs once in a code, after all the pattern matches have succeeded. <code>R[0]</code> to <code>R[arity-1]</code> are not written until then.</li>
 </ul>
@@ -85,9 +85,9 @@ AD | high 16 of D/16 | high 8 of A/8 | EXT (8)/8
 <tr><td>CONS</td><td>0x1C</td><td>ABC A B C</td><td>R[A] := Cons{R[B], R[C]}</td><td>S</td></tr>
 <tr><td>BUILD</td><td>0x1D</td><td>ABC A B C</td><td>R[A] := the M-expression with the head symbol R[B] and the arguments R[B+1], ..., R[B+C]</td><td>S T</td></tr>
 <tr><td>FIELD</td><td>0x1E</td><td>ABC A B C</td><td>R[A] := argument C of the M-expression R[B]. Unchecked</td><td></td></tr>
-<tr><td>MATCHEQ</td><td>0x1F</td><td>AD A D</td><td>Skip the next word when R[A] and K[D] are equal by EQ</td><td></td></tr>
-<tr><td>MATCHHEAD</td><td>0x20</td><td>ABC A B C</td><td>Skip the next word when R[A] is an M-expression with the head K[B] and C arguments</td><td></td></tr>
-<tr><td>MATCHTYPE</td><td>0x21</td><td>ABC A B</td><td>Skip the next word when the type of R[A] is R[B]</td><td></td></tr>
+<tr><td>MATCHEQ</td><td>0x1F</td><td>AD A D</td><td>Skip the next instruction when R[A] and K[D] are equal by EQ</td><td></td></tr>
+<tr><td>MATCHHEAD</td><td>0x20</td><td>ABC A B C</td><td>Skip the next instruction when R[A] is an M-expression with the head K[B] and C arguments</td><td></td></tr>
+<tr><td>MATCHTYPE</td><td>0x21</td><td>ABC A B</td><td>Skip the next instruction when the type of R[A] is R[B]</td><td></td></tr>
 <tr><td>HANDLE</td><td>0x22</td><td>ABC A B</td><td>Run R[B] (a lambda of arity 0) in a boundary frame and put the result in R[A]. R[B+1] is the handler, and it stops unless that is a function</td><td>S T</td></tr>
 <tr><td>PERFORM</td><td>0x23</td><td>ABC A B</td><td>Call the handler with R[B]. The argument of the resumption goes to R[A]</td><td>S T</td></tr>
 <tr><td>EXT</td><td>0x24</td><td>J X</td><td>Widen the operands of the next instruction (<a href="#ext">Extending operands</a>)</td><td></td></tr>
@@ -168,7 +168,7 @@ AD | high 16 of D/16 | high 8 of A/8 | EXT (8)/8
 </ul>
 
 <h3>Patterns</h3>
-<p>The instructions of a pattern start with the value in <code>R[r]</code>, and the word run on a failed match is <code>NEXT</code>. A variable that lives in an environment is kept in a register during the match, and <code>ENVSET</code> moves it after the <code>NEWENV</code> that follows a successful match.</p>
+<p>The instructions of a pattern start with the value in <code>R[r]</code>, and the instruction run on a failed match is <code>NEXT</code>. A variable that lives in an environment is kept in a register during the match, and <code>ENVSET</code> moves it after the <code>NEWENV</code> that follows a successful match.</p>
 <ul>
 <li><code>_</code> needs none. A variable needs none as a parameter, and as an argument of an M-expression the destination of <code>FIELD</code> is its register.</li>
 <li>An integer, a string, <code>true</code>, <code>false</code>, <code>none</code> and <code>Quote{v}</code> are <code>MATCHEQ r k</code> <code>NEXT</code>.</li>

@@ -2,7 +2,7 @@
 #
 # Usage: vm <image>. The image is written by pvm/image.pk. The words, the objects and the instructions that do not change the control are in the
 # units mem, obj, builtin and ops; this unit has the loop, the calls and the returns.
-# The heap, the registers and the frames are arrays of u32. The machine state st: st[0] is the first free word of the heap.
+# The heap, the registers and the frames are arrays of i64. The machine state st: st[0] is the first free word of the heap.
 import mem
 import obj
 import builtin
@@ -12,8 +12,8 @@ import ctl
 import ops
 import gc
 
-# the file is read into the heap from the index 0, 4 bytes for a word; the number of words is the result
-fn load[r](h: &mut r [u32], path: &static [u8]) -> i64 {
+# the file is read into the heap from the index 0, 8 bytes for a word; the number of words is the result
+fn load[r](h: &mut r [i64], path: &static [u8]) -> i64 {
     let fd = open(path)
     if fd < 0 { die("cannot open the image") }
     let chunk = alloc(4096, 0 as u8)
@@ -36,7 +36,7 @@ fn load[r](h: &mut r [u32], path: &static [u8]) -> i64 {
             for i in 0 as i64..n {
                 acc = acc | ((cb[i] as i64) << (ncarry * 8))
                 ncarry += 1
-                if ncarry == 4 {
+                if ncarry == 8 {
                     p(h, words, acc)
                     words += 1
                     acc = 0
@@ -54,7 +54,7 @@ fn load[r](h: &mut r [u32], path: &static [u8]) -> i64 {
 
 # register_image puts the strings, the symbols and the m-exprs of the image (the words 16 to n) in the table of the interned objects; the image has
 # no two of them that are equal
-fn register_image[r](h: &mut r [u32], st: &mut r [u32], n: i64) {
+fn register_image[r](h: &mut r [i64], st: &mut r [i64], n: i64) {
     var at: i64
     at = 16
     while at < n {
@@ -68,7 +68,7 @@ fn register_image[r](h: &mut r [u32], st: &mut r [u32], n: i64) {
 }
 
 # run runs the code of the Lambda entry in a stub frame whose code is the Lambda stub, and gives the value that HALT has
-fn run[r](h: &mut r [u32], t: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], fs: &mut r [u32], stub: i64, entry: i64) -> i64 {
+fn run[r](h: &mut r [i64], t: &mut r [i64], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i64], stub: i64, entry: i64) -> i64 {
     var vfalse: i64
     vfalse = g(h, 1)
     var fp: i64
@@ -158,7 +158,7 @@ fn run[r](h: &mut r [u32], t: &mut r [u32], st: &mut r [u32], rs: &mut r [u32], 
             sb = b
             if sb > 127 { sb = sb - 256 }
             cond = 0
-            if s32(g(rs, base + a)) == sb * 2 + 1 { cond = 1 }
+            if g(rs, base + a) == sb * 2 + 1 { cond = 1 }
         } else if op == 18 {
             var sb: i64
             sb = b
@@ -258,23 +258,23 @@ fn err_num(n: i64) {
 # usage: vm <image> [nursery words [slack of the old generation words]]; the arguments after the image are for testing the collector, and the numbers of the collections are written to stderr
 fn main() -> i64 {
     if argc() < 2 { die("usage: vm <image>") }
-    var heap: own [u32]
-    var machine: own [u32]
-    var regs: own [u32]
-    var frames: own [u32]
-    heap = alloc(33554432, 0 as u32)
-    machine = alloc(st_words(), 0 as u32)
-    var scratch: own [u32]
-    scratch = alloc(33554432 - 262144 + 16, 0 as u32)
-    regs = alloc(1048576, 0 as u32)
-    frames = alloc(458752, 0 as u32)
+    var heap: own [i64]
+    var machine: own [i64]
+    var regs: own [i64]
+    var frames: own [i64]
+    heap = alloc(33554432, 0 as i64)
+    machine = alloc(st_words(), 0 as i64)
+    var scratch: own [i64]
+    scratch = alloc(33554432 - 262144 + 16, 0 as i64)
+    regs = alloc(1048576, 0 as i64)
+    frames = alloc(458752, 0 as i64)
     var result: i64
     region r {
-        var h: &mut r [u32]
-        var st: &mut r [u32]
-        var rs: &mut r [u32]
-        var fs: &mut r [u32]
-        var sc: &mut r [u32]
+        var h: &mut r [i64]
+        var st: &mut r [i64]
+        var rs: &mut r [i64]
+        var fs: &mut r [i64]
+        var sc: &mut r [i64]
         sc = &mut r scratch
         h = &mut r heap
         st = &mut r machine

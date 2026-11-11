@@ -1,7 +1,7 @@
 # pvm/image: writes the image file that planckvm reads
 # Copyright (C) 2026 nineties
 #
-# The image is the initial heap of planckvm as 32-bit little-endian words; the word index in the file is the heap index.
+# The image is the initial heap of planckvm as 64-bit little-endian words; the word index in the file is the heap index.
 # Words 0 to 15 are the roots: 0 is the Lambda that is run first, 1 false, 2 true, 3 none, 4 Tuple, 5 Cons, 6 Nil, and 7 to 15 the symbols
 # the types of the values (Int String Symbol Expr Function Array Plain Float Complex). The objects follow.
 # The global variables of the cells Int, String, Symbol, Expr, Function, Array, Plain, Float, Complex and Type have the types as the values.
@@ -13,7 +13,7 @@
 #   I{n}  integer       S{"text"}  string       Y{"name"}  symbol       C{"name"}  cell of the global variable
 #   Cg{"name", g}  the cell of generation g of the global variable (C{"name"} is generation 0)
 #   (the cell of a builtin name has the builtin as the value; a cell holds its generation, which _cell_field gives)
-#   Fl{hi, lo}  float of the two words of its binary64 (each 0 to 2^32-1)
+#   Fl{hi, lo}  float of the two halves of its binary64 (each 0 to 2^32-1, given as the integer that has the same low 32 bits as a signed value)
 #   K{"code"}  code     M{"head", [consts]}  m-expr whose arguments are constants       T{}  true, F{}  false, N{}  none
 # An integer is a small integer here: |n| < 2^29.
 
@@ -96,6 +96,9 @@ module pvm_image {
 
     byte(n) := bit_and(n, 255)
 
+    # the 4 bytes of a 32-bit value from the low end; a negative integer stands for the value with the same low 32 bits
+    u32_bytes(n) := [byte(n), byte(bit_sar(n, 8)), byte(bit_sar(n, 16)), byte(bit_sar(n, 24))]
+
     # one instruction as 4 bytes [op, a, b, c]; pc is the index of the next word
     export encode(labels, pc, i) := {
         e := find_op(symname(head(i)))
@@ -135,25 +138,25 @@ module pvm_image {
         }
         out := bytes.new()
         value(id) := bit_shl(array_get(addr, id), 1)
-        each(r -> bytes.u32(out, value(r)), roots)
+        each(r -> bytes.u64(out, value(r)), roots)
         i = 0
         while (i < n) {
             o := vector.get(objs, i)
             kind := arg(o, 0)
             items := arg(o, 1)
-            bytes.u32(out, length(items) * 64 + kind * 4 + 1)
+            bytes.u64(out, length(items) * 64 + kind * 4 + 1)
             each(it -> match it {
-                W{x} -> bytes.u32(out, x)
+                W{x} -> bytes.u64(out, x)
               | B{bs} -> each(b -> bytes.u8(out, b), bs)
-              | R{id} -> bytes.u32(out, value(id))
-              | V{x} -> bytes.u32(out, x * 2 + 1)
+              | R{id} -> bytes.u64(out, value(id))
+              | V{x} -> bytes.u64(out, x * 2 + 1)
             }, items)
             i = i + 1
         }
         out
     }
 
-    # an object is Obj{kind, items}; an item is W{n} (a word, a small integer in the low 30 bits), B{[b0, b1, b2, b3]} (bytes), R{id} (a reference), V{n} (a small integer value)
+    # an object is Obj{kind, items}; an item is W{n} (a word, a small integer in the low 30 bits), B{[b0, ..., b7]} (the 8 bytes of a word), R{id} (a reference), V{n} (a small integer value)
     export build(codes, entry) := {
         objs := vector.new()
         names := table.new()
@@ -169,8 +172,8 @@ module pvm_image {
             words := []
             i := 0
             while (i < n) {
-                words = [ord(s, i), if (i + 1 < n) ord(s, i + 1) else 0, if (i + 2 < n) ord(s, i + 2) else 0, if (i + 3 < n) ord(s, i + 3) else 0] :: words
-                i = i + 4
+                words = map(k -> if (i + k < n) ord(s, i + k) else 0, [0, 1, 2, 3, 4, 5, 6, 7]) :: words
+                i = i + 8
             }
             add(['str, s], Obj{3, W{n} :: map(w -> B{w}, reverse(words))})
         })
@@ -220,7 +223,7 @@ module pvm_image {
           | F{} -> R{f_}
           | N{} -> R{n_}
           | Fl{hi, lo} -> {
-                add(['float, hi, lo, vector.len(objs)], Obj{1, [W{lo}, W{hi}]})
+                add(['float, hi, lo, vector.len(objs)], Obj{1, [B{append(u32_bytes(lo), u32_bytes(hi))}]})
                 R{vector.len(objs) - 1}
             }
           | M{h, xs} -> R{once(['mexpr, h, xs], () -> {
@@ -241,8 +244,8 @@ module pvm_image {
                     l := arg(i, 0)
                     locs = W{arg(l, 2)} :: W{arg(l, 1)} :: W{pc} :: locs
                     file = arg(l, 0)
-                    words = B{encode(labels, pc + 1, arg(i, 1))} :: words
-                } else words = B{encode(labels, pc + 1, i)} :: words
+                    words = B{append(encode(labels, pc + 1, arg(i, 1)), [0, 0, 0, 0])} :: words
+                } else words = B{append(encode(labels, pc + 1, i), [0, 0, 0, 0])} :: words
                 pc = pc + 1
             }, c[3])
             consts := append(map(value_of, c[4]), if (file == none) [] else [value_of(S{file})])
