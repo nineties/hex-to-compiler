@@ -1,7 +1,7 @@
 # mem: the words of planckvm and the allocation of heap objects
 #
 # The registers and the frames are arrays of i64: a word is a value or a number. The heap is a byte array: the word i is the 8 bytes at 8 * i, little endian.
-# A value is an integer 2n+1 (n has 63 bits) or a reference, twice the index of the heap.
+# A value is an integer 2n+1 (n has 63 bits) or a reference, the byte position of the header in the heap (a multiple of 8, so the bit 0 is 0).
 # Heap object: the header (size << 6 | kind << 2 | r << 1 | 1) and the words after it. size is the number of the words after the header.
 # The machine state st: st[0] is the index of the first free word of the heap.
 
@@ -57,11 +57,11 @@ fn is_int(v: i64) -> bool {
 
 # the kind of the object that the reference v points to
 fn kind_of[r](h: &r [u8], v: i64) -> i64 {
-    (hg(h, v >> 1) >> 2) & 15
+    (hg(h, v >> 3) >> 2) & 15
 }
 
 fn size_of[r](h: &r [u8], v: i64) -> i64 {
-    hg(h, v >> 1) >> 6
+    hg(h, v >> 3) >> 6
 }
 
 # The heap array h has three parts. The old generation is the words from 0 to ns (the image and the promoted objects, up to st[8]); the nursery is
@@ -110,9 +110,9 @@ fn remember[r](h: &mut r [u8], st: &mut r [i64], idx: i64) {
 # wb is called when the value v is put in the object obj that already exists: the object of the old generation that has a reference to the nursery is remembered
 fn wb[r](h: &mut r [u8], st: &mut r [i64], obj: i64, v: i64) {
     if (v & 1) == 1 { return }
-    if (v >> 1) < g(st, 6) { return }
-    if (obj >> 1) >= g(st, 6) { return }
-    remember(h, st, obj >> 1)
+    if (v >> 3) < g(st, 6) { return }
+    if (obj >> 3) >= g(st, 6) { return }
+    remember(h, st, obj >> 3)
 }
 
 # alloc_obj makes an object of the kind and the size (words after the header), and returns its reference; the words are 0
@@ -125,7 +125,7 @@ fn alloc_obj[r](h: &mut r [u8], st: &mut r [i64], kind: i64, size: i64) -> i64 {
         }
         p(st, 0, at + 1 + size)
         if at + 1 + size >= g(st, 13) { p(st, 12, 1) }
-        return at * 2
+        return at * 8
     }
     let ot = g(st, 8)
     if ot + 1 + size > g(st, 6) { die("out of memory") }
@@ -137,5 +137,5 @@ fn alloc_obj[r](h: &mut r [u8], st: &mut r [i64], kind: i64, size: i64) -> i64 {
     if ot + 1 + size > g(st, 14) { p(st, 12, 1) }
     if size < g(st, 15) { p(st, 12, 1) }
     remember(h, st, ot)
-    ot * 2
+    ot * 8
 }

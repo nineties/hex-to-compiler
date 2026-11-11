@@ -18,7 +18,7 @@ import obj
 import builtin
 
 fn code_of[r](h: &r [u8], lam: i64) -> i64 {
-    hg(h, (lam >> 1) + 2) >> 1
+    hg(h, (lam >> 3) + 2) >> 3
 }
 
 fn code_arity[r](h: &r [u8], code: i64) -> i64 {
@@ -46,7 +46,7 @@ fn alt_count[r](h: &r [u8], f: i64) -> i64 {
 }
 
 fn alt_at[r](h: &r [u8], f: i64, i: i64) -> i64 {
-    if kind_of(h, f) == 9 { return hg(h, (f >> 1) + 2 + i) }
+    if kind_of(h, f) == 9 { return hg(h, (f >> 3) + 2 + i) }
     f
 }
 
@@ -54,7 +54,7 @@ fn alt_at[r](h: &r [u8], f: i64, i: i64) -> i64 {
 fn alt_takes[r](h: &r [u8], f: i64, c: i64) -> bool {
     let k = kind_of(h, f)
     if k == 8 { return code_arity(h, code_of(h, f)) == c }
-    if k == 10 { return (hg(h, (f >> 1) + 3) >> 1) == c }
+    if k == 10 { return (hg(h, (f >> 3) + 3) >> 1) == c }
     if k == 11 { return c == 1 }
     false
 }
@@ -83,7 +83,7 @@ fn do_return[r](h: &r [u8], st: &r [i64], rs: &mut r [i64], fs: &mut r [i64], fp
 # resume copies the frames and the registers of the continuation k to fs from fp and to rs from sl, with the argument at rs[nb]
 fn resume[r](h: &r [u8], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i64], fp: i64, k: i64, nb: i64, rt: i64, sl: i64) -> i64 {
     let v = g(rs, nb)
-    let kb = k >> 1
+    let kb = k >> 3
     let nf = hg(h, kb + 3)
     let nr = size_of(h, k) - 3 - 7 * nf
     if sl + nr > len(rs) { die("stack overflow") }
@@ -113,7 +113,7 @@ fn enter[r](h: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i64]
     }
     let fk = kind_of(h, f)
     if fk == 10 {
-        if (hg(h, (f >> 1) + 3) >> 1) != c {
+        if (hg(h, (f >> 3) + 3) >> 1) != c {
             fail(h, st, "not a function")
             return 3
         }
@@ -140,10 +140,10 @@ fn enter[r](h: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i64]
     let kd = kind_of(h, alt)
     if kd == 10 {
         var res: i64
-        if (hg(h, (alt >> 1) + 2) >> 1) == 44 {
+        if (hg(h, (alt >> 3) + 2) >> 1) == 44 {
             res = new_data(h, st, rs, alt, nb, c)
         } else {
-            res = call_builtin(h, st, rs, hg(h, (alt >> 1) + 2) >> 1, nb)
+            res = call_builtin(h, st, rs, hg(h, (alt >> 3) + 2) >> 1, nb)
         }
         if res == 0 { return 3 }
         p(st, 2, res)
@@ -154,7 +154,7 @@ fn enter[r](h: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i64]
     if nb + code_nregs(h, code) > len(rs) { die("stack overflow") }
     if fp + 7 > len(fs) { die("stack overflow") }
     p(fs, fp, alt)
-    p(fs, fp + 1, hg(h, (alt >> 1) + 3))
+    p(fs, fp + 1, hg(h, (alt >> 3) + 3))
     if keep == 1 {
         p(fs, fp + 2, f)
     } else {
@@ -178,12 +178,12 @@ fn capture[r](h: &mut r [u8], st: &mut r [i64], rs: &r [i64], fs: &r [i64], q: i
     nrp = 0
     pb = 0
     if prior != 0 {
-        pb = prior >> 1
+        pb = prior >> 3
         nfp = hg(h, pb + 3)
         nrp = size_of(h, prior) - 3 - 7 * nfp
     }
     let k = alloc_obj(h, st, 11, 3 + 7 * (nfa + nfp) + nra + nrp)
-    let kb = k >> 1
+    let kb = k >> 3
     hp(h, kb + 1, 0)
     hp(h, kb + 2, reg)
     hp(h, kb + 3, nfa + nfp)
@@ -241,13 +241,13 @@ fn prepare[r](rs: &mut r [i64], fs: &mut r [i64], q: i64, v: i64, k: i64) {
 # whether the string s is "MatchingFailed" (14 bytes, packed from the low end of the words)
 fn is_mf_name[r](h: &r [u8], s: i64) -> bool {
     if str_len(h, s) != 14 { return false }
-    let b = (s >> 1) + 2
+    let b = (s >> 3) + 2
     hg(h, b) == 7453010330410836301 and hg(h, b + 1) == 110386773320006
 }
 
 fn is_mf[r](h: &r [u8], v: i64) -> bool {
     if not is_mexpr(h, v) { return false }
-    is_mf_name(h, hg(h, (mexpr_head(h, v) >> 1) + 1))
+    is_mf_name(h, hg(h, (mexpr_head(h, v) >> 3) + 1))
 }
 
 # no boundary takes the effect v: a MatchingFailed stops with matching failed, any other effect with unhandled effect
@@ -258,7 +258,7 @@ fn no_handler[r](h: &r [u8], v: i64) {
 
 fn mf_symbol[r](h: &mut r [u8], st: &mut r [i64]) -> i64 {
     let s = new_string(h, st, 14)
-    let b = (s >> 1) + 2
+    let b = (s >> 3) + 2
     hp(h, b, 7453010330410836301)
     hp(h, b + 1, 110386773320006)
     intern_sym(h, st, s)
@@ -267,7 +267,7 @@ fn mf_symbol[r](h: &mut r [u8], st: &mut r [i64]) -> i64 {
 # the symbol Loc ("Loc" is 3 bytes: 76, 111 and 99 from the low end of the word)
 fn loc_symbol[r](h: &mut r [u8], st: &mut r [i64]) -> i64 {
     let s = new_string(h, st, 3)
-    hp(h, (s >> 1) + 2, 6516556)
+    hp(h, (s >> 3) + 2, 6516556)
     intern_sym(h, st, s)
 }
 
@@ -357,7 +357,7 @@ fn transfer[r](h: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i
     let q = find_boundary(fs, t - 7)
     if q < 0 { no_handler(h, v) }
     let gb = g(fs, q + 4)
-    let k = capture(h, st, rs, fs, q, t - 7, gb - 2, tb - 2, hg(h, (k0 >> 1) + 2), k0)
+    let k = capture(h, st, rs, fs, q, t - 7, gb - 2, tb - 2, hg(h, (k0 >> 3) + 2), k0)
     prepare(rs, fs, q, v, k)
     q
 }
@@ -517,9 +517,9 @@ fn exec_env[r](h: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i
     if op == 6 {
         let n = w >> 16
         let e = alloc_obj(h, st, 12, 1 + n)
-        hp(h, (e >> 1) + 1, g(fs, fp + 1))
+        hp(h, (e >> 3) + 1, g(fs, fp + 1))
         for i in 0 as i64..n {
-            hp(h, (e >> 1) + 2 + i, hg(h, 3))
+            hp(h, (e >> 3) + 2 + i, hg(h, 3))
         }
         p(fs, fp + 1, e)
         return
@@ -527,13 +527,13 @@ fn exec_env[r](h: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i
     var e: i64
     e = g(fs, fp + 1)
     for i in 0 as i64..b {
-        e = hg(h, (e >> 1) + 1)
+        e = hg(h, (e >> 3) + 1)
     }
     if op == 7 {
-        p(rs, base + a, hg(h, (e >> 1) + 2 + c))
+        p(rs, base + a, hg(h, (e >> 3) + 2 + c))
     } else {
         wb(h, st, e, g(rs, base + a))
-        hp(h, (e >> 1) + 2 + c, g(rs, base + a))
+        hp(h, (e >> 3) + 2 + c, g(rs, base + a))
     }
 }
 
@@ -559,10 +559,10 @@ fn exec_fusion[r](h: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], w: i64, ba
     let ny = alt_count(h, y)
     let f = alloc_obj(h, st, 9, 1 + nx + ny)
     for i in 0 as i64..nx {
-        hp(h, (f >> 1) + 2 + i, alt_at(h, x, i))
+        hp(h, (f >> 3) + 2 + i, alt_at(h, x, i))
     }
     for i in 0 as i64..ny {
-        hp(h, (f >> 1) + 2 + nx + i, alt_at(h, y, i))
+        hp(h, (f >> 3) + 2 + nx + i, alt_at(h, y, i))
     }
     p(rs, base + a, f)
     return -1

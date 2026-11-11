@@ -51,7 +51,7 @@ fn register_image[r](h: &mut r [u8], st: &mut r [i64], n: i64) {
     while at < n {
         let hd = hg(h, at)
         let k = (hd >> 2) & 15
-        if k == 3 or k == 4 or k == 5 { it_find(h, st, at * 2) }
+        if k == 3 or k == 4 or k == 5 { it_find(h, st, at * 8) }
         at += 1 + (hd >> 6)
     }
     p(st, 25, 0)
@@ -88,7 +88,7 @@ fn run[r](h: &mut r [u8], t: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], fs
     p(fs, 4, 0)
     p(fs, 5, 0)
     p(fs, 6, 0)
-    code = hg(h, (stub >> 1) + 2) >> 1
+    code = hg(h, (stub >> 3) + 2) >> 3
     ip = code + 7
     kb = code + 7 + hg(h, code + 2)
     while running == 1 {
@@ -98,7 +98,7 @@ fn run[r](h: &mut r [u8], t: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], fs
             collect(h, t, st, rs, fs, fp)
             vfalse = hg(h, 1)
             base = g(fs, fp + 4)
-            code = hg(h, (g(fs, fp) >> 1) + 2) >> 1
+            code = hg(h, (g(fs, fp) >> 3) + 2) >> 3
             ip = code + 7 + g(fs, fp + 5)
             kb = code + 7 + hg(h, code + 2)
         }
@@ -120,10 +120,10 @@ fn run[r](h: &mut r [u8], t: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], fs
                 p(rs, base + a + i, hg(h, 3))
             }
         } else if op == 4 {
-            p(rs, base + a, hg(h, (hg(h, kb + ((w >> 16) & 65535)) >> 1) + 1))
+            p(rs, base + a, hg(h, (hg(h, kb + ((w >> 16) & 65535)) >> 3) + 1))
         } else if op == 5 {
             wb(h, st, hg(h, kb + ((w >> 16) & 65535)), g(rs, base + a))
-            hp(h, (hg(h, kb + ((w >> 16) & 65535)) >> 1) + 1, g(rs, base + a))
+            hp(h, (hg(h, kb + ((w >> 16) & 65535)) >> 3) + 1, g(rs, base + a))
         } else if op == 9 {
             ip += s24(w >> 8)
         } else if op == 10 {
@@ -178,7 +178,7 @@ fn run[r](h: &mut r [u8], t: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], fs
             # the control: the frames change, so the code, the pc and the base are read again from the top frame
             fp = exec_ctl(h, st, rs, fs, fp, op, w, ip - (code + 7))
             base = g(fs, fp + 4)
-            code = hg(h, (g(fs, fp) >> 1) + 2) >> 1
+            code = hg(h, (g(fs, fp) >> 3) + 2) >> 3
             ip = code + 7 + g(fs, fp + 5)
             kb = code + 7 + hg(h, code + 2)
             if base > g(st, 10) { p(st, 10, base) }
@@ -188,8 +188,8 @@ fn run[r](h: &mut r [u8], t: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], fs
         } else if op == 25 {
             # CLOSURE A D: a Lambda of the code K[D] and the current environment
             let lam = alloc_obj(h, st, 8, 3)
-            hp(h, (lam >> 1) + 2, hg(h, kb + ((w >> 16) & 65535)))
-            hp(h, (lam >> 1) + 3, g(fs, fp + 1))
+            hp(h, (lam >> 3) + 2, hg(h, kb + ((w >> 16) & 65535)))
+            hp(h, (lam >> 3) + 3, g(fs, fp + 1))
             p(rs, base + a, lam)
         } else {
             cond = exec_op(h, st, rs, op, w, base, kb)
@@ -202,7 +202,7 @@ fn run[r](h: &mut r [u8], t: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], fs
             if op >= 13 and op <= 19 { rw = ret_word(0, 3, 0) }
             fp = raise_pending(h, st, rs, fs, fp, rw)
             base = g(fs, fp + 4)
-            code = hg(h, (g(fs, fp) >> 1) + 2) >> 1
+            code = hg(h, (g(fs, fp) >> 3) + 2) >> 3
             ip = code + 7 + g(fs, fp + 5)
             kb = code + 7 + hg(h, code + 2)
             if base > g(st, 10) { p(st, 10, base) }
@@ -285,7 +285,7 @@ fn main() -> i64 {
         hp(h, n + 8, 24)
         hp(h, n + 9, 3 * 64 + 8 * 4 + 1)
         hp(h, n + 10, 0)
-        hp(h, n + 11, n * 2)
+        hp(h, n + 11, n * 8)
         hp(h, n + 12, hg(h, 3))
         # the old generation is the image and the stub; the nursery is the end of the heap before the remembered set
         var nsize: i64
@@ -312,7 +312,7 @@ fn main() -> i64 {
             p(rs, i, hg(h, 3))
         }
         register_image(h, st, n)
-        result = run(h, sc, st, rs, fs, (n + 9) * 2, hg(h, 0))
+        result = run(h, sc, st, rs, fs, (n + 9) * 8, hg(h, 0))
         if argc() >= 3 {
             write(2, "minor ")
             err_num(g(st, 20))

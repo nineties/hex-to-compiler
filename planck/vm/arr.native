@@ -57,11 +57,11 @@ fn t_size(t: i64) -> i64 {
 
 # the type number of a symbol, or -1
 fn type_of_symbol[r](h: &r [u8], sym: i64) -> i64 {
-    let s = hg(h, (sym >> 1) + 1)
+    let s = hg(h, (sym >> 3) + 1)
     let n = str_len(h, s)
     for t in 0 as i64..14 {
         if n == tn_len(t) {
-            if hg(h, (s >> 1) + 2) == tn_code(t) { return t }
+            if hg(h, (s >> 3) + 2) == tn_code(t) { return t }
         }
     }
     -1
@@ -69,7 +69,7 @@ fn type_of_symbol[r](h: &r [u8], sym: i64) -> i64 {
 
 fn type_symbol_of[r](h: &mut r [u8], st: &mut r [i64], t: i64) -> i64 {
     let s = new_string(h, st, tn_len(t))
-    hp(h, (s >> 1) + 2, tn_code(t))
+    hp(h, (s >> 3) + 2, tn_code(t))
     intern_sym(h, st, s)
 }
 
@@ -92,7 +92,7 @@ fn new_array[r](h: &mut r [u8], st: &mut r [i64], n: i64) -> i64 {
     let a = alloc_obj(h, st, 6, 1 + n)
     let nv = hg(h, 3)
     for k in 0 as i64..n {
-        hp(h, (a >> 1) + 2 + k, nv)
+        hp(h, (a >> 3) + 2 + k, nv)
     }
     a
 }
@@ -104,32 +104,32 @@ fn array_len[r](h: &r [u8], a: i64) -> i64 {
 fn a_get[r](h: &r [u8], a: i64, i: i64) -> i64 {
     check_kind(h, a, 6, "array_get: not an array")
     let k = index_of(i, array_len(h, a), "array_get: out of range")
-    hg(h, (a >> 1) + 2 + k)
+    hg(h, (a >> 3) + 2 + k)
 }
 
 fn a_set[r](h: &mut r [u8], st: &mut r [i64], a: i64, i: i64, v: i64) {
     check_kind(h, a, 6, "array_set: not an array")
     let k = index_of(i, array_len(h, a), "array_set: out of range")
     wb(h, st, a, v)
-    hp(h, (a >> 1) + 2 + k, v)
+    hp(h, (a >> 3) + 2 + k, v)
 }
 
 # ---- plain arrays: the packed words
 
 fn pl_type[r](h: &r [u8], a: i64) -> i64 {
-    hg(h, (a >> 1) + 2)
+    hg(h, (a >> 3) + 2)
 }
 
 fn pl_count[r](h: &r [u8], a: i64) -> i64 {
-    hg(h, (a >> 1) + 3)
+    hg(h, (a >> 3) + 3)
 }
 
 fn new_plain[r](h: &mut r [u8], st: &mut r [i64], t: i64, n: i64) -> i64 {
     if n < 0 { die("plain_array: negative length") }
     let words = (n * t_size(t) + 7) / 8
     let a = alloc_obj(h, st, 7, 3 + words)
-    hp(h, (a >> 1) + 2, t)
-    hp(h, (a >> 1) + 3, n)
+    hp(h, (a >> 3) + 2, t)
+    hp(h, (a >> 3) + 3, n)
     a
 }
 
@@ -166,7 +166,7 @@ fn sext(x: i64, n: i64) -> i64 {
 # the integer of the sign and the magnitude
 fn int_of_mag[r](h: &mut r [u8], st: &mut r [i64], sign: i64, mag: u64) -> i64 {
     let v = alloc_big(h, st, sign, 1)
-    wr(h, (v >> 1) + 3, mag)
+    wr(h, (v >> 3) + 3, mag)
     fin(h, v)
 }
 
@@ -259,7 +259,7 @@ fn pl_get[r](h: &mut r [u8], st: &mut r [i64], a: i64, i: i64) -> i64 {
     check_kind(h, a, 7, "plain_get: not a plain array")
     let k = index_of(i, pl_count(h, a), "plain_get: out of range")
     let t = pl_type(h, a)
-    let base = (a >> 1) + 4
+    let base = (a >> 3) + 4
     if t == 0 {
         if raw(h, base, t, k) != 0 { return hg(h, 2) }
         return hg(h, 1)
@@ -358,7 +358,7 @@ fn store_int[r](h: &mut r [u8], a: i64, i: i64, t: i64, iv: i64) {
         if lo == 0 { carry = 1 }
         thi = (4294967295 - hi + carry) & 4294967295
     }
-    let base = (a >> 1) + 4
+    let base = (a >> 3) + 4
     if nbit <= 32 {
         set_raw(h, base, t, i, tlo)
     } else {
@@ -370,7 +370,7 @@ fn pl_set[r](h: &mut r [u8], st: &mut r [i64], a: i64, i: i64, x: i64) {
     check_kind(h, a, 7, "plain_set: not a plain array")
     let k = index_of(i, pl_count(h, a), "plain_set: out of range")
     let t = pl_type(h, a)
-    let base = (a >> 1) + 4
+    let base = (a >> 3) + 4
     if t == 0 {
         set_raw(h, base, t, k, truthy(h, x))
         return
@@ -463,7 +463,7 @@ fn do_str_to_bytes[r](h: &mut r [u8], st: &mut r [i64], s: i64) -> i64 {
     if not is_string(h, s) { die("str_to_bytes: not a string") }
     let n = str_len(h, s)
     let a = new_plain(h, st, 5, n)
-    let base = (a >> 1) + 4
+    let base = (a >> 3) + 4
     for i in 0 as i64..n {
         set_raw(h, base, 5, i, str_byte(h, s, i))
     }
@@ -497,7 +497,7 @@ fn do_bytes_to_str[r](h: &mut r [u8], st: &mut r [i64], a: i64) -> i64 {
     check_kind(h, a, 7, "bytes_to_str: not a plain array")
     if pl_type(h, a) != 5 { die("bytes_to_str: not a plain array of u8") }
     let n = pl_count(h, a)
-    let base = (a >> 1) + 4
+    let base = (a >> 3) + 4
     var i: i64
     i = 0
     while i < n {

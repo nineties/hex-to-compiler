@@ -29,7 +29,7 @@ fn i_sign[r](h: &r [u8], v: i64) -> i64 {
         if int_of(v) < 0 { return 1 }
         return 0
     }
-    hg(h, (v >> 1) + 1)
+    hg(h, (v >> 3) + 1)
 }
 
 fn small_abs(v: i64) -> i64 {
@@ -43,7 +43,7 @@ fn i_nd[r](h: &r [u8], v: i64) -> i64 {
         if small_abs(v) == 0 { return 0 }
         return 1
     }
-    hg(h, (v >> 1) + 2)
+    hg(h, (v >> 3) + 2)
 }
 
 # the digit of 64 bits at the word index at
@@ -59,7 +59,7 @@ fn wr[r](h: &mut r [u8], at: i64, d: u64) {
 fn i_dig[r](h: &r [u8], v: i64, i: i64) -> u64 {
     if i >= i_nd(h, v) { return 0 }
     if is_int(v) { return small_abs(v) as u64 }
-    rd(h, (v >> 1) + 3 + i)
+    rd(h, (v >> 3) + 3 + i)
 }
 
 # the number of the zero bits above the top bit of d (d is not zero)
@@ -78,14 +78,14 @@ fn lz(d: u64) -> u64 {
 # alloc_big makes a big integer object of the sign and room for cap digits; it is not normal yet
 fn alloc_big[r](h: &mut r [u8], st: &mut r [i64], sign: i64, cap: i64) -> i64 {
     let v = alloc_obj(h, st, 0, 2 + cap)
-    hp(h, (v >> 1) + 1, sign)
-    hp(h, (v >> 1) + 2, cap)
+    hp(h, (v >> 3) + 1, sign)
+    hp(h, (v >> 3) + 2, cap)
     v
 }
 
 # fin trims the digits of the object v and gives a small value if the value fits in 63 bits
 fn fin[r](h: &mut r [u8], v: i64) -> i64 {
-    let b = v >> 1
+    let b = v >> 3
     var nd: i64
     nd = hg(h, b + 2)
     while nd > 0 and rd(h, b + 3 + (nd - 1)) == 0 {
@@ -114,7 +114,7 @@ fn int_from_i64[r](h: &mut r [u8], st: &mut r [i64], n: i64) -> i64 {
         sg = 1
     }
     let v = alloc_big(h, st, sg, 1)
-    wr(h, (v >> 1) + 3, a)
+    wr(h, (v >> 3) + 3, a)
     fin(h, v)
 }
 
@@ -163,11 +163,11 @@ fn num_cmp[r](h: &r [u8], x: i64, y: i64) -> i64 {
 }
 
 fn big_eq[r](h: &r [u8], x: i64, y: i64) -> bool {
-    if hg(h, (x >> 1) + 1) != hg(h, (y >> 1) + 1) { return false }
-    let n = hg(h, (x >> 1) + 2)
-    if n != hg(h, (y >> 1) + 2) { return false }
+    if hg(h, (x >> 3) + 1) != hg(h, (y >> 3) + 1) { return false }
+    let n = hg(h, (x >> 3) + 2)
+    if n != hg(h, (y >> 3) + 2) { return false }
     for i in 0 as i64..n {
-        if hg(h, (x >> 1) + 3 + i) != hg(h, (y >> 1) + 3 + i) { return false }
+        if hg(h, (x >> 3) + 3 + i) != hg(h, (y >> 3) + 3 + i) { return false }
     }
     true
 }
@@ -179,7 +179,7 @@ fn add_mag[r](h: &mut r [u8], st: &mut r [i64], x: i64, y: i64, sign: i64) -> i6
     n = nx
     if ny > n { n = ny }
     let v = alloc_big(h, st, sign, n + 1)
-    let rb = (v >> 1) + 3
+    let rb = (v >> 3) + 3
     var carry: u64
     carry = 0
     for i in 0 as i64..n {
@@ -201,7 +201,7 @@ fn add_mag[r](h: &mut r [u8], st: &mut r [i64], x: i64, y: i64, sign: i64) -> i6
 fn sub_mag[r](h: &mut r [u8], st: &mut r [i64], x: i64, y: i64, sign: i64) -> i64 {
     let nx = i_nd(h, x)
     let v = alloc_big(h, st, sign, nx)
-    let rb = (v >> 1) + 3
+    let rb = (v >> 3) + 3
     var borrow: u64
     borrow = 0
     for i in 0 as i64..nx {
@@ -236,7 +236,7 @@ fn int_mul[r](h: &mut r [u8], st: &mut r [i64], x: i64, y: i64) -> i64 {
     let nx = i_nd(h, x)
     let ny = i_nd(h, y)
     let v = alloc_big(h, st, i_sign(h, x) ^ i_sign(h, y), nx + ny)
-    let rb = (v >> 1) + 3
+    let rb = (v >> 3) + 3
     for i in 0 as i64..nx {
         let a = i_dig(h, x, i)
         var carry: u64
@@ -274,9 +274,9 @@ fn knuth[r](h: &mut r [u8], st: &mut r [i64], x: i64, y: i64, q: i64, rem: i64) 
     let ny = i_nd(h, y)
     let un = alloc_big(h, st, 0, nx + 1)
     let vn = alloc_big(h, st, 0, ny)
-    let ub = (un >> 1) + 3
-    let vb = (vn >> 1) + 3
-    let qb = (q >> 1) + 3
+    let ub = (un >> 3) + 3
+    let vb = (vn >> 3) + 3
+    let qb = (q >> 3) + 3
     let s = lz(i_dig(h, y, ny - 1))
     for i in 0 as i64..ny {
         wr(h, vb + i, shl_dig(h, y, i, s))
@@ -362,7 +362,7 @@ fn knuth[r](h: &mut r [u8], st: &mut r [i64], x: i64, y: i64, q: i64, rem: i64) 
         var r: u64
         r = rd(h, ub + i) >> s
         if s > 0 { r = r | (rd(h, ub + (i + 1)) << (64 - s)) }
-        wr(h, (rem >> 1) + 3 + i, r)
+        wr(h, (rem >> 3) + 3 + i, r)
     }
 }
 
@@ -382,7 +382,7 @@ fn int_divmod[r](h: &mut r [u8], st: &mut r [i64], x: i64, y: i64, want: i64) ->
         let d = i_dig(h, y, 0) << s
         let rv = recip(d)
         let q = alloc_big(h, st, sq, nx)
-        let qb = (q >> 1) + 3
+        let qb = (q >> 3) + 3
         var rr: u64
         rr = 0
         if s > 0 { rr = i_dig(h, x, nx - 1) >> (64 - s) }
@@ -396,7 +396,7 @@ fn int_divmod[r](h: &mut r [u8], st: &mut r [i64], x: i64, y: i64, want: i64) ->
         }
         if want == 0 { return fin(h, q) }
         let r = alloc_big(h, st, sx, 1)
-        wr(h, (r >> 1) + 3, rr >> s)
+        wr(h, (r >> 3) + 3, rr >> s)
         return fin(h, r)
     }
     let q = alloc_big(h, st, sq, nx - ny + 1)

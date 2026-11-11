@@ -13,11 +13,11 @@ import flt
 import num
 
 fn str_len[r](h: &r [u8], s: i64) -> i64 {
-    hg(h, (s >> 1) + 1)
+    hg(h, (s >> 3) + 1)
 }
 
 fn str_byte[r](h: &r [u8], s: i64, i: i64) -> i64 {
-    h[(s >> 1) * 8 + 16 + i] as i64
+    h[s + 16 + i] as i64
 }
 
 # A string is UTF-8: a byte of the form 10xxxxxx continues the character before it. strlen, ord and substr count the characters.
@@ -65,13 +65,13 @@ fn char_at[r](h: &r [u8], s: i64, b: i64) -> i64 {
 
 fn new_string[r](h: &mut r [u8], st: &mut r [i64], n: i64) -> i64 {
     let s = alloc_obj(h, st, 3, 1 + (n + 7) / 8)
-    hp(h, (s >> 1) + 1, n)
+    hp(h, (s >> 3) + 1, n)
     s
 }
 
 # set_byte puts the byte b at i of a string that was made by new_string and has 0 there
 fn set_byte[r](h: &mut r [u8], s: i64, i: i64, b: i64) {
-    h[(s >> 1) * 8 + 16 + i] = b as u8
+    h[s + 16 + i] = b as u8
 }
 
 fn str_eq[r](h: &r [u8], x: i64, y: i64) -> bool {
@@ -91,11 +91,11 @@ fn mexpr_arity[r](h: &r [u8], m: i64) -> i64 {
 }
 
 fn mexpr_head[r](h: &r [u8], m: i64) -> i64 {
-    hg(h, (m >> 1) + 1)
+    hg(h, (m >> 3) + 1)
 }
 
 fn mexpr_arg[r](h: &r [u8], m: i64, i: i64) -> i64 {
-    hg(h, (m >> 1) + 2 + i)
+    hg(h, (m >> 3) + 2 + i)
 }
 
 # ---- the table of the interned objects
@@ -116,9 +116,9 @@ fn arg_key[r](h: &r [u8], a: i64) -> i64 {
     if kind_of(h, a) == 0 {
         var acc: i64
         acc = 17
-        let n = 2 + hg(h, (a >> 1) + 2)
+        let n = 2 + hg(h, (a >> 3) + 2)
         for i in 0 as i64..n {
-            acc = mixh(acc, hg(h, (a >> 1) + 1 + i))
+            acc = mixh(acc, hg(h, (a >> 3) + 1 + i))
         }
         return acc
     }
@@ -133,11 +133,11 @@ fn key_hash[r](h: &r [u8], v: i64) -> i64 {
         let n = str_len(h, v)
         acc = n
         for i in 0 as i64..(n + 7) / 8 {
-            acc = mixh(acc, hg(h, (v >> 1) + 2 + i))
+            acc = mixh(acc, hg(h, (v >> 3) + 2 + i))
         }
         return acc
     }
-    if k == 4 { return mixh(4, hg(h, (v >> 1) + 1)) }
+    if k == 4 { return mixh(4, hg(h, (v >> 3) + 1)) }
     acc = mixh(5, mexpr_head(h, v))
     let n = mexpr_arity(h, v)
     for i in 0 as i64..n {
@@ -158,7 +158,7 @@ fn key_eq[r](h: &r [u8], a: i64, b: i64) -> bool {
     let k = kind_of(h, a)
     if k != kind_of(h, b) { return false }
     if k == 3 { return str_eq(h, a, b) }
-    if k == 4 { return hg(h, (a >> 1) + 1) == hg(h, (b >> 1) + 1) }
+    if k == 4 { return hg(h, (a >> 3) + 1) == hg(h, (b >> 3) + 1) }
     if mexpr_head(h, a) != mexpr_head(h, b) { return false }
     let n = mexpr_arity(h, a)
     if n != mexpr_arity(h, b) { return false }
@@ -201,7 +201,7 @@ fn it_find[r](h: &mut r [u8], st: &mut r [i64], v: i64) -> i64 {
             if e != 1 {
                 if key_eq(h, e, v) {
                     # v is the last object of the nursery and is not the object e itself (an interned object can be passed again): its words are given back
-                    if e != v and (v >> 1) >= g(st, 6) and g(st, 0) == (v >> 1) + 1 + size_of(h, v) { p(st, 0, v >> 1) }
+                    if e != v and (v >> 3) >= g(st, 6) and g(st, 0) == (v >> 3) + 1 + size_of(h, v) { p(st, 0, v >> 3) }
                     return e
                 }
             }
@@ -238,33 +238,33 @@ fn fin_mexpr[r](h: &mut r [u8], st: &mut r [i64], m: i64) -> i64 {
 fn intern_sym[r](h: &mut r [u8], st: &mut r [i64], s: i64) -> i64 {
     let name = it_find(h, st, s)
     let sym = alloc_obj(h, st, 4, 2)
-    hp(h, (sym >> 1) + 1, name)
-    hp(h, (sym >> 1) + 2, 1)
+    hp(h, (sym >> 3) + 1, name)
+    hp(h, (sym >> 3) + 2, 1)
     it_find(h, st, sym)
 }
 
 # new_mexpr makes a m-expr of the head and n arguments that are 0; the arguments are put with set_arg and then fin_mexpr gives the m-expr
 fn new_mexpr[r](h: &mut r [u8], st: &mut r [i64], head: i64, n: i64) -> i64 {
     let m = alloc_obj(h, st, 5, 1 + n)
-    hp(h, (m >> 1) + 1, head)
+    hp(h, (m >> 3) + 1, head)
     m
 }
 
 fn set_arg[r](h: &mut r [u8], m: i64, i: i64, v: i64) {
-    hp(h, (m >> 1) + 2 + i, v)
+    hp(h, (m >> 3) + 2 + i, v)
 }
 
 # the type Type
 fn type_type[r](h: &r [u8]) -> i64 {
-    hg(h, (hg(h, 7) >> 1) + 4)
+    hg(h, (hg(h, 7) >> 3) + 4)
 }
 
 # the value of type: the type of the value
 fn type_of[r](h: &r [u8], v: i64) -> i64 {
     if (v & 1) == 1 { return hg(h, 7) }
     let k = kind_of(h, v)
-    if k == 15 { return hg(h, (v >> 1) + 2) }
-    if k == 13 { return hg(h, (v >> 1) + 4) }
+    if k == 15 { return hg(h, (v >> 3) + 2) }
+    if k == 13 { return hg(h, (v >> 3) + 4) }
     if k == 3 { return hg(h, 8) }
     if k == 4 { return hg(h, 9) }
     if k == 5 { return hg(h, 10) }
@@ -291,7 +291,7 @@ fn data_arity[r](h: &r [u8], d: i64) -> i64 {
 }
 
 fn data_arg[r](h: &r [u8], d: i64, i: i64) -> i64 {
-    hg(h, (d >> 1) + 3 + i)
+    hg(h, (d >> 3) + 3 + i)
 }
 
 fn is_string[r](h: &r [u8], v: i64) -> bool {
