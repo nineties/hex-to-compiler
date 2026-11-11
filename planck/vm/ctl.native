@@ -17,50 +17,50 @@ import mem
 import obj
 import builtin
 
-fn code_of[r](h: &r [i64], lam: i64) -> i64 {
-    g(h, (lam >> 1) + 2) >> 1
+fn code_of[r](h: &r [u8], lam: i64) -> i64 {
+    hg(h, (lam >> 1) + 2) >> 1
 }
 
-fn code_arity[r](h: &r [i64], code: i64) -> i64 {
-    (g(h, code + 1) >> 8) & 255
+fn code_arity[r](h: &r [u8], code: i64) -> i64 {
+    (hg(h, code + 1) >> 8) & 255
 }
 
-fn code_nregs[r](h: &r [i64], code: i64) -> i64 {
-    (g(h, code + 1) >> 16) & 65535
+fn code_nregs[r](h: &r [u8], code: i64) -> i64 {
+    (hg(h, code + 1) >> 16) & 65535
 }
 
 fn ret_word(a: i64, mode: i64, kind: i64) -> i64 {
     a + mode * 65536 + kind * 262144
 }
 
-fn is_func[r](h: &r [i64], f: i64) -> bool {
+fn is_func[r](h: &r [u8], f: i64) -> bool {
     if is_int(f) { return false }
     let k = kind_of(h, f)
     k == 8 or k == 9 or k == 10 or k == 11
 }
 
 # the alternatives of a function: the elements of a Fusion, or the function itself
-fn alt_count[r](h: &r [i64], f: i64) -> i64 {
+fn alt_count[r](h: &r [u8], f: i64) -> i64 {
     if kind_of(h, f) == 9 { return size_of(h, f) - 1 }
     1
 }
 
-fn alt_at[r](h: &r [i64], f: i64, i: i64) -> i64 {
-    if kind_of(h, f) == 9 { return g(h, (f >> 1) + 2 + i) }
+fn alt_at[r](h: &r [u8], f: i64, i: i64) -> i64 {
+    if kind_of(h, f) == 9 { return hg(h, (f >> 1) + 2 + i) }
     f
 }
 
 # whether the alternative (a Lambda, a builtin or a continuation) takes c arguments
-fn alt_takes[r](h: &r [i64], f: i64, c: i64) -> bool {
+fn alt_takes[r](h: &r [u8], f: i64, c: i64) -> bool {
     let k = kind_of(h, f)
     if k == 8 { return code_arity(h, code_of(h, f)) == c }
-    if k == 10 { return (g(h, (f >> 1) + 3) >> 1) == c }
+    if k == 10 { return (hg(h, (f >> 1) + 3) >> 1) == c }
     if k == 11 { return c == 1 }
     false
 }
 
 # deliver gives the value v to the frame q as the ret word rt says: into a register, or as the truth of the condition instruction
-fn deliver[r](h: &r [i64], rs: &mut r [i64], fs: &mut r [i64], q: i64, rt: i64, v: i64) {
+fn deliver[r](h: &r [u8], rs: &mut r [i64], fs: &mut r [i64], q: i64, rt: i64, v: i64) {
     let mode = (rt >> 16) & 3
     if mode == 0 {
         p(rs, g(fs, q + 4) + (rt & 65535), v)
@@ -68,52 +68,52 @@ fn deliver[r](h: &r [i64], rs: &mut r [i64], fs: &mut r [i64], q: i64, rt: i64, 
         # the word after the condition instruction is JMP: it is run when the truth equals k, else skipped
         var cond: i64
         cond = 0
-        if v != g(h, 1) { cond = 1 }
+        if v != hg(h, 1) { cond = 1 }
         if cond != mode - 1 { p(fs, q + 5, g(fs, q + 5) + 1) }
     }
 }
 
 # do_return drops the frame fp and gives the value v to the frame below as the ret of the dropped frame says; the result is the frame below
-fn do_return[r](h: &r [i64], st: &r [i64], rs: &mut r [i64], fs: &mut r [i64], fp: i64, v: i64) -> i64 {
+fn do_return[r](h: &r [u8], st: &r [i64], rs: &mut r [i64], fs: &mut r [i64], fp: i64, v: i64) -> i64 {
     let q = fp - 7
     deliver(h, rs, fs, q, g(fs, fp + 6), v)
     q
 }
 
 # resume copies the frames and the registers of the continuation k to fs from fp and to rs from sl, with the argument at rs[nb]
-fn resume[r](h: &r [i64], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i64], fp: i64, k: i64, nb: i64, rt: i64, sl: i64) -> i64 {
+fn resume[r](h: &r [u8], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i64], fp: i64, k: i64, nb: i64, rt: i64, sl: i64) -> i64 {
     let v = g(rs, nb)
     let kb = k >> 1
-    let nf = g(h, kb + 3)
+    let nf = hg(h, kb + 3)
     let nr = size_of(h, k) - 3 - 7 * nf
     if sl + nr > len(rs) { die("stack overflow") }
     if fp + 7 * nf > len(fs) { die("stack overflow") }
     for i in 0 as i64..nr {
-        p(rs, sl + i, g(h, kb + 4 + 7 * nf + i))
+        p(rs, sl + i, hg(h, kb + 4 + 7 * nf + i))
     }
     for j in 0 as i64..nf {
         for t in 0 as i64..7 {
-            p(fs, fp + 7 * j + t, g(h, kb + 4 + 7 * j + t))
+            p(fs, fp + 7 * j + t, hg(h, kb + 4 + 7 * j + t))
         }
         p(fs, fp + 7 * j + 4, g(fs, fp + 7 * j + 4) + sl)
     }
     p(fs, fp + 6, (rt & 262143) + 262144)
     let last = fp + 7 * (nf - 1)
-    deliver(h, rs, fs, last, g(h, kb + 2), v)
+    deliver(h, rs, fs, last, hg(h, kb + 2), v)
     p(st, 3, last)
     0
 }
 
 # enter calls f with c arguments that are at rs[nb]. The new frame is at fp and its ret is rt. sl is the place where a continuation is copied.
 # The alternatives are tried from start.
-fn enter[r](h: &mut r [i64], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i64], fp: i64, f: i64, c: i64, nb: i64, rt: i64, sl: i64, start: i64) -> i64 {
+fn enter[r](h: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i64], fp: i64, f: i64, c: i64, nb: i64, rt: i64, sl: i64, start: i64) -> i64 {
     if not is_func(h, f) {
         fail(h, st, "not a function")
         return 3
     }
     let fk = kind_of(h, f)
     if fk == 10 {
-        if (g(h, (f >> 1) + 3) >> 1) != c {
+        if (hg(h, (f >> 1) + 3) >> 1) != c {
             fail(h, st, "not a function")
             return 3
         }
@@ -140,10 +140,10 @@ fn enter[r](h: &mut r [i64], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i64
     let kd = kind_of(h, alt)
     if kd == 10 {
         var res: i64
-        if (g(h, (alt >> 1) + 2) >> 1) == 44 {
+        if (hg(h, (alt >> 1) + 2) >> 1) == 44 {
             res = new_data(h, st, rs, alt, nb, c)
         } else {
-            res = call_builtin(h, st, rs, g(h, (alt >> 1) + 2) >> 1, nb)
+            res = call_builtin(h, st, rs, hg(h, (alt >> 1) + 2) >> 1, nb)
         }
         if res == 0 { return 3 }
         p(st, 2, res)
@@ -154,11 +154,11 @@ fn enter[r](h: &mut r [i64], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i64
     if nb + code_nregs(h, code) > len(rs) { die("stack overflow") }
     if fp + 7 > len(fs) { die("stack overflow") }
     p(fs, fp, alt)
-    p(fs, fp + 1, g(h, (alt >> 1) + 3))
+    p(fs, fp + 1, hg(h, (alt >> 1) + 3))
     if keep == 1 {
         p(fs, fp + 2, f)
     } else {
-        p(fs, fp + 2, g(h, 3))
+        p(fs, fp + 2, hg(h, 3))
     }
     p(fs, fp + 3, sel + 1)
     p(fs, fp + 4, nb)
@@ -168,7 +168,7 @@ fn enter[r](h: &mut r [i64], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i64
 }
 
 # capture makes a continuation of the frames q to last, the registers s0 to rend-1, and the continuation prior (0 if none) after them
-fn capture[r](h: &mut r [i64], st: &mut r [i64], rs: &r [i64], fs: &r [i64], q: i64, last: i64, s0: i64, rend: i64, reg: i64, prior: i64) -> i64 {
+fn capture[r](h: &mut r [u8], st: &mut r [i64], rs: &r [i64], fs: &r [i64], q: i64, last: i64, s0: i64, rend: i64, reg: i64, prior: i64) -> i64 {
     let nfa = (last - q) / 7 + 1
     let nra = rend - s0
     var nfp: i64
@@ -179,32 +179,32 @@ fn capture[r](h: &mut r [i64], st: &mut r [i64], rs: &r [i64], fs: &r [i64], q: 
     pb = 0
     if prior != 0 {
         pb = prior >> 1
-        nfp = g(h, pb + 3)
+        nfp = hg(h, pb + 3)
         nrp = size_of(h, prior) - 3 - 7 * nfp
     }
     let k = alloc_obj(h, st, 11, 3 + 7 * (nfa + nfp) + nra + nrp)
     let kb = k >> 1
-    p(h, kb + 1, 0)
-    p(h, kb + 2, reg)
-    p(h, kb + 3, nfa + nfp)
+    hp(h, kb + 1, 0)
+    hp(h, kb + 2, reg)
+    hp(h, kb + 3, nfa + nfp)
     for j in 0 as i64..nfa {
         for t in 0 as i64..7 {
-            p(h, kb + 4 + 7 * j + t, g(fs, q + 7 * j + t))
+            hp(h, kb + 4 + 7 * j + t, g(fs, q + 7 * j + t))
         }
-        p(h, kb + 4 + 7 * j + 4, g(fs, q + 7 * j + 4) - s0)
+        hp(h, kb + 4 + 7 * j + 4, g(fs, q + 7 * j + 4) - s0)
     }
     for j in 0 as i64..nfp {
         for t in 0 as i64..7 {
-            p(h, kb + 4 + 7 * (nfa + j) + t, g(h, pb + 4 + 7 * j + t))
+            hp(h, kb + 4 + 7 * (nfa + j) + t, hg(h, pb + 4 + 7 * j + t))
         }
-        p(h, kb + 4 + 7 * (nfa + j) + 4, g(h, pb + 4 + 7 * j + 4) + (rend - s0))
+        hp(h, kb + 4 + 7 * (nfa + j) + 4, hg(h, pb + 4 + 7 * j + 4) + (rend - s0))
     }
     let rb = kb + 4 + 7 * (nfa + nfp)
     for i in 0 as i64..nra {
-        p(h, rb + i, g(rs, s0 + i))
+        hp(h, rb + i, g(rs, s0 + i))
     }
     for i in 0 as i64..nrp {
-        p(h, rb + nra + i, g(h, pb + 4 + 7 * nfp + i))
+        hp(h, rb + nra + i, hg(h, pb + 4 + 7 * nfp + i))
     }
     k
 }
@@ -239,49 +239,49 @@ fn prepare[r](rs: &mut r [i64], fs: &mut r [i64], q: i64, v: i64, k: i64) {
 }
 
 # whether the string s is "MatchingFailed" (14 bytes, packed from the low end of the words)
-fn is_mf_name[r](h: &r [i64], s: i64) -> bool {
+fn is_mf_name[r](h: &r [u8], s: i64) -> bool {
     if str_len(h, s) != 14 { return false }
     let b = (s >> 1) + 2
-    g(h, b) == 7453010330410836301 and g(h, b + 1) == 110386773320006
+    hg(h, b) == 7453010330410836301 and hg(h, b + 1) == 110386773320006
 }
 
-fn is_mf[r](h: &r [i64], v: i64) -> bool {
+fn is_mf[r](h: &r [u8], v: i64) -> bool {
     if not is_mexpr(h, v) { return false }
-    is_mf_name(h, g(h, (mexpr_head(h, v) >> 1) + 1))
+    is_mf_name(h, hg(h, (mexpr_head(h, v) >> 1) + 1))
 }
 
 # no boundary takes the effect v: a MatchingFailed stops with matching failed, any other effect with unhandled effect
-fn no_handler[r](h: &r [i64], v: i64) {
+fn no_handler[r](h: &r [u8], v: i64) {
     if is_mf(h, v) { die("matching failed") }
     die("unhandled effect")
 }
 
-fn mf_symbol[r](h: &mut r [i64], st: &mut r [i64]) -> i64 {
+fn mf_symbol[r](h: &mut r [u8], st: &mut r [i64]) -> i64 {
     let s = new_string(h, st, 14)
     let b = (s >> 1) + 2
-    p(h, b, 7453010330410836301)
-    p(h, b + 1, 110386773320006)
+    hp(h, b, 7453010330410836301)
+    hp(h, b + 1, 110386773320006)
     intern_sym(h, st, s)
 }
 
 # the symbol Loc ("Loc" is 3 bytes: 76, 111 and 99 from the low end of the word)
-fn loc_symbol[r](h: &mut r [i64], st: &mut r [i64]) -> i64 {
+fn loc_symbol[r](h: &mut r [u8], st: &mut r [i64]) -> i64 {
     let s = new_string(h, st, 3)
-    p(h, (s >> 1) + 2, 6516556)
+    hp(h, (s >> 1) + 2, 6516556)
     intern_sym(h, st, s)
 }
 
 # the Loc{file, line, column} of the call that the frame q is making, or none: the entry of the position table of the code of q for the word before the saved pc,
 # found by a binary search (the entries are in ascending order of pc). It is none when q < 0 or the code has no such entry.
-fn frame_loc[r](h: &mut r [i64], st: &mut r [i64], fs: &r [i64], q: i64) -> i64 {
-    if q < 0 { return g(h, 3) }
+fn frame_loc[r](h: &mut r [u8], st: &mut r [i64], fs: &r [i64], q: i64) -> i64 {
+    if q < 0 { return hg(h, 3) }
     let code = code_of(h, g(fs, q))
-    let nl = g(h, code + 5)
-    let fi = g(h, code + 6)
-    if nl == 0 or fi == -1 { return g(h, 3) }
+    let nl = hg(h, code + 5)
+    let fi = hg(h, code + 6)
+    if nl == 0 or fi == -1 { return hg(h, 3) }
     let pc = g(fs, q + 5) - 1
-    let ni = g(h, code + 2)
-    let lb = code + 7 + ni + g(h, code + 3)
+    let ni = hg(h, code + 2)
+    let lb = code + 7 + ni + hg(h, code + 3)
     var lo: i64
     var hi: i64
     var at: i64
@@ -290,7 +290,7 @@ fn frame_loc[r](h: &mut r [i64], st: &mut r [i64], fs: &r [i64], q: i64) -> i64 
     at = -1
     while lo <= hi and at < 0 {
         let mid = (lo + hi) / 2
-        let e = g(h, lb + 3 * mid)
+        let e = hg(h, lb + 3 * mid)
         if e == pc {
             at = mid
         } else if e < pc {
@@ -299,18 +299,18 @@ fn frame_loc[r](h: &mut r [i64], st: &mut r [i64], fs: &r [i64], q: i64) -> i64 
             hi = mid - 1
         }
     }
-    if at < 0 { return g(h, 3) }
+    if at < 0 { return hg(h, 3) }
     let sym = loc_symbol(h, st)
     let m = new_mexpr(h, st, sym, 3)
-    set_arg(h, m, 0, g(h, code + 7 + ni + fi))
-    set_arg(h, m, 1, g(h, lb + 3 * at + 1) * 2 + 1)
-    set_arg(h, m, 2, g(h, lb + 3 * at + 2) * 2 + 1)
+    set_arg(h, m, 0, hg(h, code + 7 + ni + fi))
+    set_arg(h, m, 1, hg(h, lb + 3 * at + 1) * 2 + 1)
+    set_arg(h, m, 2, hg(h, lb + 3 * at + 2) * 2 + 1)
     fin_mexpr(h, st, m)
 }
 
 # MatchingFailed{f, Tuple{the c arguments at rs[nb]}, loc}: loc is the position of the call, Loc{file, line, column}, or none
-fn mf_value[r](h: &mut r [i64], st: &mut r [i64], rs: &r [i64], f: i64, nb: i64, c: i64, loc: i64) -> i64 {
-    let t = new_mexpr(h, st, g(h, 4), c)
+fn mf_value[r](h: &mut r [u8], st: &mut r [i64], rs: &r [i64], f: i64, nb: i64, c: i64, loc: i64) -> i64 {
+    let t = new_mexpr(h, st, hg(h, 4), c)
     for i in 0 as i64..c {
         set_arg(h, t, i, g(rs, nb + i))
     }
@@ -324,13 +324,13 @@ fn mf_value[r](h: &mut r [i64], st: &mut r [i64], rs: &r [i64], f: i64, nb: i64,
 }
 
 # the end of the registers of the frame q
-fn frame_end[r](h: &r [i64], fs: &r [i64], q: i64) -> i64 {
+fn frame_end[r](h: &r [u8], fs: &r [i64], q: i64) -> i64 {
     g(fs, q + 4) + code_nregs(h, code_of(h, g(fs, q)))
 }
 
 # fail_boundary performs the effect v for a call that did not match, made by the frame last; the value that the continuation gets is given to
 # last as the ret word rw says. The result is the boundary frame, made into the transfer frame; with no boundary the program stops.
-fn fail_boundary[r](h: &mut r [i64], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i64], last: i64, rw: i64, v: i64) -> i64 {
+fn fail_boundary[r](h: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i64], last: i64, rw: i64, v: i64) -> i64 {
     let q = find_boundary(fs, last)
     if q < 0 { die("matching failed") }
     let fb = g(fs, q + 4)
@@ -340,7 +340,7 @@ fn fail_boundary[r](h: &mut r [i64], st: &mut r [i64], rs: &mut r [i64], fs: &mu
 }
 
 # match_failed: the frame cur ran out of alternatives. f is the function that was called. The call returns to the frame below cur with the value of the resumption.
-fn match_failed[r](h: &mut r [i64], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i64], cur: i64, f: i64) -> i64 {
+fn match_failed[r](h: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i64], cur: i64, f: i64) -> i64 {
     let rt = g(fs, cur + 6)
     if cur < 7 { die("matching failed") }
     if (rt >> 18) != 0 { die("matching failed") }
@@ -350,20 +350,20 @@ fn match_failed[r](h: &mut r [i64], st: &mut r [i64], rs: &mut r [i64], fs: &mut
 }
 
 # transfer: no alternative of the handler in the transfer frame t took the effect; the next boundary below gets it with a longer continuation
-fn transfer[r](h: &mut r [i64], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i64], t: i64) -> i64 {
+fn transfer[r](h: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i64], t: i64) -> i64 {
     let tb = g(fs, t + 4)
     let v = g(rs, tb)
     let k0 = g(rs, tb + 1)
     let q = find_boundary(fs, t - 7)
     if q < 0 { no_handler(h, v) }
     let gb = g(fs, q + 4)
-    let k = capture(h, st, rs, fs, q, t - 7, gb - 2, tb - 2, g(h, (k0 >> 1) + 2), k0)
+    let k = capture(h, st, rs, fs, q, t - 7, gb - 2, tb - 2, hg(h, (k0 >> 1) + 2), k0)
     prepare(rs, fs, q, v, k)
     q
 }
 
 # next_alt tries the next alternatives of the function that was called for the frame fp; the transfer frame goes on to the outer boundary
-fn next_alt[r](h: &mut r [i64], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i64], fp: i64) -> i64 {
+fn next_alt[r](h: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i64], fp: i64) -> i64 {
     var cur: i64
     var status: i64
     cur = fp
@@ -371,7 +371,7 @@ fn next_alt[r](h: &mut r [i64], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [
     while status == 2 {
         let alts = g(fs, cur + 2)
         let rt = g(fs, cur + 6)
-        if alts == g(h, 3) {
+        if alts == hg(h, 3) {
             cur = match_failed(h, st, rs, fs, cur, g(fs, cur))
         } else {
             var c: i64
@@ -392,7 +392,7 @@ fn next_alt[r](h: &mut r [i64], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [
 }
 
 # die_pending writes the pending message to the standard error and stops the program
-fn die_pending[r](h: &r [i64], st: &r [i64]) {
+fn die_pending[r](h: &r [u8], st: &r [i64]) {
     let s = g(st, 22)
     let n = str_len(h, s)
     let buf = alloc(n + 1, 0 as u8)
@@ -411,7 +411,7 @@ fn die_pending[r](h: &r [i64], st: &r [i64]) {
 
 # raise_pending performs the effect Error{loc, message} for the pending runtime error, in the frame fp that is the top frame. The result of the
 # resumption is given to the frame as the ret word rw says. The result is the top frame after the effect.
-fn raise_pending[r](h: &mut r [i64], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i64], fp: i64, rw: i64) -> i64 {
+fn raise_pending[r](h: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i64], fp: i64, rw: i64) -> i64 {
     if find_boundary(fs, fp) < 0 { die_pending(h, st) }
     let msg = g(st, 22)
     p(st, 22, 0)
@@ -426,7 +426,7 @@ fn raise_pending[r](h: &mut r [i64], st: &mut r [i64], rs: &mut r [i64], fs: &mu
     g(st, 3)
 }
 
-fn do_perform[r](h: &mut r [i64], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i64], fp: i64, a: i64, b: i64) -> i64 {
+fn do_perform[r](h: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i64], fp: i64, a: i64, b: i64) -> i64 {
     let base = g(fs, fp + 4)
     let v = g(rs, base + b)
     let q = find_boundary(fs, fp)
@@ -439,7 +439,7 @@ fn do_perform[r](h: &mut r [i64], st: &mut r [i64], rs: &mut r [i64], fs: &mut r
 }
 
 # call_failed: the call f of c arguments at rs[nb], made by the frame fp, was taken by no alternative; the call gets the value of the resumption as the ret word rw says
-fn call_failed[r](h: &mut r [i64], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i64], fp: i64, f: i64, nb: i64, c: i64, rw: i64) -> i64 {
+fn call_failed[r](h: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i64], fp: i64, f: i64, nb: i64, c: i64, rw: i64) -> i64 {
     let v = mf_value(h, st, rs, f, nb, c, frame_loc(h, st, fs, fp))
     let q = fail_boundary(h, st, rs, fs, fp, rw, v)
     let status = next_alt(h, st, rs, fs, q)
@@ -449,7 +449,7 @@ fn call_failed[r](h: &mut r [i64], st: &mut r [i64], rs: &mut r [i64], fs: &mut 
 }
 
 # the instructions CALL TCALL RET NEXT HANDLE PERFORM; pc is the saved pc of the top frame fp. The result is the top frame after the instruction.
-fn exec_ctl[r](h: &mut r [i64], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i64], fp: i64, op: i64, w: i64, pc: i64) -> i64 {
+fn exec_ctl[r](h: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i64], fp: i64, op: i64, w: i64, pc: i64) -> i64 {
     let base = g(fs, fp + 4)
     let a = (w >> 8) & 255
     let b = (w >> 16) & 255
@@ -510,16 +510,16 @@ fn exec_ctl[r](h: &mut r [i64], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [
 }
 
 # NEWENV ENVGET ENVSET
-fn exec_env[r](h: &mut r [i64], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i64], fp: i64, op: i64, w: i64, base: i64) {
+fn exec_env[r](h: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i64], fp: i64, op: i64, w: i64, base: i64) {
     let a = (w >> 8) & 255
     let b = (w >> 16) & 255
     let c = w >> 24
     if op == 6 {
         let n = w >> 16
         let e = alloc_obj(h, st, 12, 1 + n)
-        p(h, (e >> 1) + 1, g(fs, fp + 1))
+        hp(h, (e >> 1) + 1, g(fs, fp + 1))
         for i in 0 as i64..n {
-            p(h, (e >> 1) + 2 + i, g(h, 3))
+            hp(h, (e >> 1) + 2 + i, hg(h, 3))
         }
         p(fs, fp + 1, e)
         return
@@ -527,23 +527,23 @@ fn exec_env[r](h: &mut r [i64], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [
     var e: i64
     e = g(fs, fp + 1)
     for i in 0 as i64..b {
-        e = g(h, (e >> 1) + 1)
+        e = hg(h, (e >> 1) + 1)
     }
     if op == 7 {
-        p(rs, base + a, g(h, (e >> 1) + 2 + c))
+        p(rs, base + a, hg(h, (e >> 1) + 2 + c))
     } else {
         wb(h, st, e, g(rs, base + a))
-        p(h, (e >> 1) + 2 + c, g(rs, base + a))
+        hp(h, (e >> 1) + 2 + c, g(rs, base + a))
     }
 }
 
 # FUSION: R[A] := R[B] | R[C]
 # the result is -1, or -2 for a runtime error (the message is in st[22])
-fn exec_fusion[r](h: &mut r [i64], st: &mut r [i64], rs: &mut r [i64], w: i64, base: i64) -> i64 {
+fn exec_fusion[r](h: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], w: i64, base: i64) -> i64 {
     let a = (w >> 8) & 255
     let x = g(rs, base + ((w >> 16) & 255))
     let y = g(rs, base + (w >> 24))
-    if x == g(h, 3) {
+    if x == hg(h, 3) {
         p(rs, base + a, y)
         return -1
     }
@@ -559,10 +559,10 @@ fn exec_fusion[r](h: &mut r [i64], st: &mut r [i64], rs: &mut r [i64], w: i64, b
     let ny = alt_count(h, y)
     let f = alloc_obj(h, st, 9, 1 + nx + ny)
     for i in 0 as i64..nx {
-        p(h, (f >> 1) + 2 + i, alt_at(h, x, i))
+        hp(h, (f >> 1) + 2 + i, alt_at(h, x, i))
     }
     for i in 0 as i64..ny {
-        p(h, (f >> 1) + 2 + nx + i, alt_at(h, y, i))
+        hp(h, (f >> 1) + 2 + nx + i, alt_at(h, y, i))
     }
     p(rs, base + a, f)
     return -1

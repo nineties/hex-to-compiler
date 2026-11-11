@@ -1,6 +1,6 @@
 # mem: the words of planckvm and the allocation of heap objects
 #
-# The heap, the registers and the frames are arrays of i64: a word is a value or a number.
+# The registers and the frames are arrays of i64: a word is a value or a number. The heap is a byte array: the word i is the 8 bytes at 8 * i, little endian.
 # A value is an integer 2n+1 (n has 63 bits) or a reference, twice the index of the heap.
 # Heap object: the header (size << 6 | kind << 2 | r << 1 | 1) and the words after it. size is the number of the words after the header.
 # The machine state st: st[0] is the index of the first free word of the heap.
@@ -12,6 +12,15 @@ fn g[r](a: &r [i64], i: i64) -> i64 {
 
 fn p[r](a: &mut r [i64], i: i64, v: i64) {
     a[i] = v
+}
+
+# hg reads the word i of a byte array (the heap or the scratch array) and hp writes it
+fn hg[r](a: &r [u8], i: i64) -> i64 {
+    ld_64(a, i * 8)
+}
+
+fn hp[r](a: &mut r [u8], i: i64, v: i64) {
+    st_64(a, i * 8, v)
 }
 
 fn s16(v: i64) -> i64 {
@@ -47,12 +56,12 @@ fn is_int(v: i64) -> bool {
 }
 
 # the kind of the object that the reference v points to
-fn kind_of[r](h: &r [i64], v: i64) -> i64 {
-    (g(h, v >> 1) >> 2) & 15
+fn kind_of[r](h: &r [u8], v: i64) -> i64 {
+    (hg(h, v >> 1) >> 2) & 15
 }
 
-fn size_of[r](h: &r [i64], v: i64) -> i64 {
-    g(h, v >> 1) >> 6
+fn size_of[r](h: &r [u8], v: i64) -> i64 {
+    hg(h, v >> 1) >> 6
 }
 
 # The heap array h has three parts. The old generation is the words from 0 to ns (the image and the promoted objects, up to st[8]); the nursery is
@@ -88,18 +97,18 @@ fn st_words() -> i64 {
 }
 
 # remember puts the object at the index idx of the old generation in the remembered set
-fn remember[r](h: &mut r [i64], st: &mut r [i64], idx: i64) {
+fn remember[r](h: &mut r [u8], st: &mut r [i64], idx: i64) {
     let c = g(st, 9)
     if c >= 262144 {
         p(st, 11, 1)
         return
     }
-    p(h, len(h) - 262144 + c, idx)
+    hp(h, len(h) / 8 - 262144 + c, idx)
     p(st, 9, c + 1)
 }
 
 # wb is called when the value v is put in the object obj that already exists: the object of the old generation that has a reference to the nursery is remembered
-fn wb[r](h: &mut r [i64], st: &mut r [i64], obj: i64, v: i64) {
+fn wb[r](h: &mut r [u8], st: &mut r [i64], obj: i64, v: i64) {
     if (v & 1) == 1 { return }
     if (v >> 1) < g(st, 6) { return }
     if (obj >> 1) >= g(st, 6) { return }
@@ -107,12 +116,12 @@ fn wb[r](h: &mut r [i64], st: &mut r [i64], obj: i64, v: i64) {
 }
 
 # alloc_obj makes an object of the kind and the size (words after the header), and returns its reference; the words are 0
-fn alloc_obj[r](h: &mut r [i64], st: &mut r [i64], kind: i64, size: i64) -> i64 {
+fn alloc_obj[r](h: &mut r [u8], st: &mut r [i64], kind: i64, size: i64) -> i64 {
     let at = g(st, 0)
     if size < g(st, 15) and at + 1 + size <= g(st, 7) {
-        p(h, at, size * 64 + kind * 4 + 1)
+        hp(h, at, size * 64 + kind * 4 + 1)
         for i in 0 as i64..size {
-            p(h, at + 1 + i, 0)
+            hp(h, at + 1 + i, 0)
         }
         p(st, 0, at + 1 + size)
         if at + 1 + size >= g(st, 13) { p(st, 12, 1) }
@@ -120,9 +129,9 @@ fn alloc_obj[r](h: &mut r [i64], st: &mut r [i64], kind: i64, size: i64) -> i64 
     }
     let ot = g(st, 8)
     if ot + 1 + size > g(st, 6) { die("out of memory") }
-    p(h, ot, size * 64 + kind * 4 + 1)
+    hp(h, ot, size * 64 + kind * 4 + 1)
     for i in 0 as i64..size {
-        p(h, ot + 1 + i, 0)
+        hp(h, ot + 1 + i, 0)
     }
     p(st, 8, ot + 1 + size)
     if ot + 1 + size > g(st, 14) { p(st, 12, 1) }

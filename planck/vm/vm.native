@@ -2,7 +2,7 @@
 #
 # Usage: vm <image>. The image is written by pvm/image.pk. The words, the objects and the instructions that do not change the control are in the
 # units mem, obj, builtin and ops; this unit has the loop, the calls and the returns.
-# The heap, the registers and the frames are arrays of i64. The machine state st: st[0] is the first free word of the heap.
+# The heap is an array of bytes and the registers and the frames are arrays of i64. The machine state st: st[0] is the first free word of the heap.
 import mem
 import obj
 import builtin
@@ -12,53 +12,44 @@ import ctl
 import ops
 import gc
 
-# the file is read into the heap from the index 0, 8 bytes for a word; the number of words is the result
-fn load[r](h: &mut r [i64], path: &static [u8]) -> i64 {
+# the file is read into the heap from the byte 0; the number of words is the result
+fn load[r](h: &mut r [u8], path: &static [u8]) -> i64 {
     let fd = open(path)
     if fd < 0 { die("cannot open the image") }
     let chunk = alloc(4096, 0 as u8)
-    var words: i64
-    var carry: i64
-    var ncarry: i64
-    var acc: i64
-    words = 0
-    ncarry = 0
-    acc = 0
-    carry = 1
+    var pos: i64
+    var more: i64
+    pos = 0
+    more = 1
     region q {
     var cb: &mut q [u8]
     cb = &mut q chunk
-    while carry != 0 {
+    while more != 0 {
         let n = read(fd, cb)
         if n <= 0 {
-            carry = 0
+            more = 0
         } else {
+            if pos + n > len(h) { die("the image is too big") }
             for i in 0 as i64..n {
-                acc = acc | ((cb[i] as i64) << (ncarry * 8))
-                ncarry += 1
-                if ncarry == 8 {
-                    p(h, words, acc)
-                    words += 1
-                    acc = 0
-                    ncarry = 0
-                }
+                h[pos + i] = cb[i]
             }
+            pos += n
         }
     }
     }
     close(fd)
     free(chunk)
-    words
+    pos / 8
 }
 
 
 # register_image puts the strings, the symbols and the m-exprs of the image (the words 16 to n) in the table of the interned objects; the image has
 # no two of them that are equal
-fn register_image[r](h: &mut r [i64], st: &mut r [i64], n: i64) {
+fn register_image[r](h: &mut r [u8], st: &mut r [i64], n: i64) {
     var at: i64
     at = 16
     while at < n {
-        let hd = g(h, at)
+        let hd = hg(h, at)
         let k = (hd >> 2) & 15
         if k == 3 or k == 4 or k == 5 { it_find(h, st, at * 2) }
         at += 1 + (hd >> 6)
@@ -68,9 +59,9 @@ fn register_image[r](h: &mut r [i64], st: &mut r [i64], n: i64) {
 }
 
 # run runs the code of the Lambda entry in a stub frame whose code is the Lambda stub, and gives the value that HALT has
-fn run[r](h: &mut r [i64], t: &mut r [i64], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i64], stub: i64, entry: i64) -> i64 {
+fn run[r](h: &mut r [u8], t: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i64], stub: i64, entry: i64) -> i64 {
     var vfalse: i64
-    vfalse = g(h, 1)
+    vfalse = hg(h, 1)
     var fp: i64
     var base: i64
     var code: i64
@@ -91,27 +82,27 @@ fn run[r](h: &mut r [i64], t: &mut r [i64], st: &mut r [i64], rs: &mut r [i64], 
     fp = 0
     base = 0
     p(fs, 0, stub)
-    p(fs, 1, g(h, 3))
-    p(fs, 2, g(h, 3))
+    p(fs, 1, hg(h, 3))
+    p(fs, 2, hg(h, 3))
     p(fs, 3, 0)
     p(fs, 4, 0)
     p(fs, 5, 0)
     p(fs, 6, 0)
-    code = g(h, (stub >> 1) + 2) >> 1
+    code = hg(h, (stub >> 1) + 2) >> 1
     ip = code + 7
-    kb = code + 7 + g(h, code + 2)
+    kb = code + 7 + hg(h, code + 2)
     while running == 1 {
         if g(st, 12) != 0 {
             # a collection is wanted: it is done between two instructions, and the code, the pc and the base are read again from the top frame
             p(fs, fp + 5, ip - (code + 7))
             collect(h, t, st, rs, fs, fp)
-            vfalse = g(h, 1)
+            vfalse = hg(h, 1)
             base = g(fs, fp + 4)
-            code = g(h, (g(fs, fp) >> 1) + 2) >> 1
+            code = hg(h, (g(fs, fp) >> 1) + 2) >> 1
             ip = code + 7 + g(fs, fp + 5)
-            kb = code + 7 + g(h, code + 2)
+            kb = code + 7 + hg(h, code + 2)
         }
-        w = g(h, ip)
+        w = hg(h, ip)
         ip += 1
         op = w & 255
         a = (w >> 8) & 255
@@ -123,16 +114,16 @@ fn run[r](h: &mut r [i64], t: &mut r [i64], st: &mut r [i64], rs: &mut r [i64], 
         } else if op == 1 {
             p(rs, base + a, s16(w >> 16) * 2 + 1)
         } else if op == 2 {
-            p(rs, base + a, g(h, kb + ((w >> 16) & 65535)))
+            p(rs, base + a, hg(h, kb + ((w >> 16) & 65535)))
         } else if op == 3 {
             for i in 0 as i64..b {
-                p(rs, base + a + i, g(h, 3))
+                p(rs, base + a + i, hg(h, 3))
             }
         } else if op == 4 {
-            p(rs, base + a, g(h, (g(h, kb + ((w >> 16) & 65535)) >> 1) + 1))
+            p(rs, base + a, hg(h, (hg(h, kb + ((w >> 16) & 65535)) >> 1) + 1))
         } else if op == 5 {
-            wb(h, st, g(h, kb + ((w >> 16) & 65535)), g(rs, base + a))
-            p(h, (g(h, kb + ((w >> 16) & 65535)) >> 1) + 1, g(rs, base + a))
+            wb(h, st, hg(h, kb + ((w >> 16) & 65535)), g(rs, base + a))
+            hp(h, (hg(h, kb + ((w >> 16) & 65535)) >> 1) + 1, g(rs, base + a))
         } else if op == 9 {
             ip += s24(w >> 8)
         } else if op == 10 {
@@ -187,9 +178,9 @@ fn run[r](h: &mut r [i64], t: &mut r [i64], st: &mut r [i64], rs: &mut r [i64], 
             # the control: the frames change, so the code, the pc and the base are read again from the top frame
             fp = exec_ctl(h, st, rs, fs, fp, op, w, ip - (code + 7))
             base = g(fs, fp + 4)
-            code = g(h, (g(fs, fp) >> 1) + 2) >> 1
+            code = hg(h, (g(fs, fp) >> 1) + 2) >> 1
             ip = code + 7 + g(fs, fp + 5)
-            kb = code + 7 + g(h, code + 2)
+            kb = code + 7 + hg(h, code + 2)
             if base > g(st, 10) { p(st, 10, base) }
         } else if op == 24 {
             result = g(rs, base + a)
@@ -197,8 +188,8 @@ fn run[r](h: &mut r [i64], t: &mut r [i64], st: &mut r [i64], rs: &mut r [i64], 
         } else if op == 25 {
             # CLOSURE A D: a Lambda of the code K[D] and the current environment
             let lam = alloc_obj(h, st, 8, 3)
-            p(h, (lam >> 1) + 2, g(h, kb + ((w >> 16) & 65535)))
-            p(h, (lam >> 1) + 3, g(fs, fp + 1))
+            hp(h, (lam >> 1) + 2, hg(h, kb + ((w >> 16) & 65535)))
+            hp(h, (lam >> 1) + 3, g(fs, fp + 1))
             p(rs, base + a, lam)
         } else {
             cond = exec_op(h, st, rs, op, w, base, kb)
@@ -211,9 +202,9 @@ fn run[r](h: &mut r [i64], t: &mut r [i64], st: &mut r [i64], rs: &mut r [i64], 
             if op >= 13 and op <= 19 { rw = ret_word(0, 3, 0) }
             fp = raise_pending(h, st, rs, fs, fp, rw)
             base = g(fs, fp + 4)
-            code = g(h, (g(fs, fp) >> 1) + 2) >> 1
+            code = hg(h, (g(fs, fp) >> 1) + 2) >> 1
             ip = code + 7 + g(fs, fp + 5)
-            kb = code + 7 + g(h, code + 2)
+            kb = code + 7 + hg(h, code + 2)
             if base > g(st, 10) { p(st, 10, base) }
             cond = -1
         }
@@ -258,23 +249,23 @@ fn err_num(n: i64) {
 # usage: vm <image> [nursery words [slack of the old generation words]]; the arguments after the image are for testing the collector, and the numbers of the collections are written to stderr
 fn main() -> i64 {
     if argc() < 2 { die("usage: vm <image>") }
-    var heap: own [i64]
+    var heap: own [u8]
     var machine: own [i64]
     var regs: own [i64]
     var frames: own [i64]
-    heap = alloc(33554432, 0 as i64)
+    heap = alloc(268435456, 0 as u8)
     machine = alloc(st_words(), 0 as i64)
-    var scratch: own [i64]
-    scratch = alloc(33554432 - 262144 + 16, 0 as i64)
+    var scratch: own [u8]
+    scratch = alloc(266338432, 0 as u8)
     regs = alloc(1048576, 0 as i64)
     frames = alloc(458752, 0 as i64)
     var result: i64
     region r {
-        var h: &mut r [i64]
+        var h: &mut r [u8]
         var st: &mut r [i64]
         var rs: &mut r [i64]
         var fs: &mut r [i64]
-        var sc: &mut r [i64]
+        var sc: &mut r [u8]
         sc = &mut r scratch
         h = &mut r heap
         st = &mut r machine
@@ -283,24 +274,24 @@ fn main() -> i64 {
         var n: i64
         n = load(h, argv(1))
         # the entry stub: a code of 2 instructions CALL R0 R0 0 and HALT R0, and its Lambda
-        p(h, n, (2 + 6) * 64 + 14 * 4 + 1)
-        p(h, n + 1, 65536)
-        p(h, n + 2, 2)
-        p(h, n + 3, 0)
-        p(h, n + 4, -1)
-        p(h, n + 5, 0)
-        p(h, n + 6, -1)
-        p(h, n + 7, 20)
-        p(h, n + 8, 24)
-        p(h, n + 9, 3 * 64 + 8 * 4 + 1)
-        p(h, n + 10, 0)
-        p(h, n + 11, n * 2)
-        p(h, n + 12, g(h, 3))
+        hp(h, n, (2 + 6) * 64 + 14 * 4 + 1)
+        hp(h, n + 1, 65536)
+        hp(h, n + 2, 2)
+        hp(h, n + 3, 0)
+        hp(h, n + 4, -1)
+        hp(h, n + 5, 0)
+        hp(h, n + 6, -1)
+        hp(h, n + 7, 20)
+        hp(h, n + 8, 24)
+        hp(h, n + 9, 3 * 64 + 8 * 4 + 1)
+        hp(h, n + 10, 0)
+        hp(h, n + 11, n * 2)
+        hp(h, n + 12, hg(h, 3))
         # the old generation is the image and the stub; the nursery is the end of the heap before the remembered set
         var nsize: i64
         nsize = 4194304
         if argc() >= 3 { nsize = parse_num(argv(2)) }
-        let ns = len(h) - 262144 - nsize
+        let ns = len(h) / 8 - 262144 - nsize
         if n + 13 > ns { die("the image is too big") }
         p(st, 0, ns)
         p(st, 6, ns)
@@ -318,10 +309,10 @@ fn main() -> i64 {
         if thr > ns - nsize { thr = ns - nsize }
         p(st, 14, thr)
         for i in 0 as i64..len(rs) {
-            p(rs, i, g(h, 3))
+            p(rs, i, hg(h, 3))
         }
         register_image(h, st, n)
-        result = run(h, sc, st, rs, fs, (n + 9) * 2, g(h, 0))
+        result = run(h, sc, st, rs, fs, (n + 9) * 2, hg(h, 0))
         if argc() >= 3 {
             write(2, "minor ")
             err_num(g(st, 20))
