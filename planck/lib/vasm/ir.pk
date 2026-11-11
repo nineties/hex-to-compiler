@@ -898,7 +898,7 @@ module vasm_ir {
         e := arg(arg(expected, 0), 0)
         nw := ureg(opnd(args[0], I64{}), I64{})
         v := vi_use(args[1], e)
-        vi_check('gtu, nw, K{134217727})
+        vi_check('gtu, nw, K{if (size(e) >= 8) 134217727 else 134217727 * 8 / (if (size(e) == 0) 1 else size(e))})
         n := ir.vreg(vi_f, 32)
         nbytes := ir.vreg(vi_f, 32)
         sz := ir.vreg(vi_f, 32)
@@ -940,6 +940,59 @@ module vasm_ir {
         ve(I{'mulhu, [D{d}, U{ra}, U{rb}]})
         val1(U64{}, U{d})
     }
+    # the address of the w bytes at the byte position off of the byte array a (displacement 8); off is checked to leave all w bytes in the array
+    byte_addr(a, offop, w) := {
+        n := ir.vreg(vi_f, 32)
+        nw := ir.vreg(vi_f, 64)
+        ve(I{'ld, [W{'w32}, D{n}, M{U{a}, 0}]})
+        ve(I{'zext64, [D{nw}, U{n}]})
+        ix := ureg(opnd(offop, I64{}), I64{})
+        vi_check('geu, ix, U{nw})
+        e := ir.vreg(vi_f, 64)
+        ve(I{'add, [D{e}, U{ix}, K{w}]})
+        vi_check('gtu, e, U{nw})
+        i32 := ir.vreg(vi_f, 32)
+        ad := preg()
+        ve(I{'trunc, [D{i32}, U{ix}]})
+        ve(I{'add, [D{ad}, U{a}, U{zx(i32)}]})
+        ad
+    }
+    # the load of the width lw (the width of a load in 32 bits or less) extended to 64 bits by ext
+    ld_small(args, lw, w, ext) := {
+        a := array_ptr(args[0])
+        ad := byte_addr(a, args[1], w)
+        r := ir.vreg(vi_f, 32)
+        d := ir.vreg(vi_f, 64)
+        ve(I{'ld, [W{lw}, D{r}, M{U{ad}, 8}]})
+        ve(I{ext, [D{d}, U{r}]})
+        val1(I64{}, U{d})
+    }
+    call_system('ld_u16, args, expected) = ld_small(args, 'u16, 2, 'zext64)
+    call_system('ld_s16, args, expected) = ld_small(args, 's16, 2, 'sext64)
+    call_system('ld_u32, args, expected) = ld_small(args, 'w32, 4, 'zext64)
+    call_system('ld_s32, args, expected) = ld_small(args, 'w32, 4, 'sext64)
+    call_system('ld_64, args, expected) = {
+        a := array_ptr(args[0])
+        ad := byte_addr(a, args[1], 8)
+        d := ir.vreg(vi_f, 64)
+        ve(I{'ld, [W{'w64}, D{d}, M{U{ad}, 8}]})
+        val1(I64{}, U{d})
+    }
+    # the store of the lower w bytes of the i64 value args[2] at the byte position args[1] of the array args[0]
+    st_bytes(args, sw, w) := {
+        a := array_ptr(args[0])
+        ad := byte_addr(a, args[1], w)
+        v := ureg(opnd(args[2], I64{}), I64{})
+        if (w == 8) ve(I{'st, [W{sw}, M{U{ad}, 8}, U{v}]}) else {
+            t := ir.vreg(vi_f, 32)
+            ve(I{'trunc, [D{t}, U{v}]})
+            ve(I{'st, [W{sw}, M{U{ad}, 8}, U{t}]})
+        }
+        []
+    }
+    call_system('st_16, args, expected) = st_bytes(args, 'w16, 2)
+    call_system('st_32, args, expected) = st_bytes(args, 'w32, 4)
+    call_system('st_64, args, expected) = st_bytes(args, 'w64, 8)
     call_system('len, args, expected) = {
         a := array_ptr(args[0])
         n := ir.vreg(vi_f, 32)
