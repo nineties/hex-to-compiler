@@ -595,7 +595,8 @@ fn do_code_new[r](h: &mut r [u8], st: &mut r [i64], rs: &r [i64], a: i64) -> i64
     let nw = hg(h, (ls >> 3) + 3)
     if nw % 3 != 0 { return fail(h, st, "_code_new: the positions are not a u32 plain array") }
     if fi < -1 or fi >= m { return fail(h, st, "_code_new: out of range") }
-    let c = alloc_obj(h, st, 14, 6 + n + m + nw)
+    let iw = code_iw(n)
+    let c = alloc_obj(h, st, 14, 6 + iw + m + nw)
     let cb = c >> 3
     hp(h, cb + 1, nr * 65536 + ar * 256)
     hp(h, cb + 2, n)
@@ -603,14 +604,19 @@ fn do_code_new[r](h: &mut r [u8], st: &mut r [i64], rs: &r [i64], a: i64) -> i64
     hp(h, cb + 4, -1)
     hp(h, cb + 5, nw / 3)
     if fi < 0 { hp(h, cb + 6, -1) } else { hp(h, cb + 6, fi) }
-    for i in 0 as i64..n {
-        hp(h, cb + 7 + i, raw(h, (ins >> 3) + 4, 7, i))
+    for i in 0 as i64..iw {
+        # the u32 elements are in the plain array the same way as in the code: two in a word
+        if n % 2 == 1 and i == iw - 1 {
+            hp(h, cb + 7 + i, hg(h, (ins >> 3) + 4 + i) & 4294967295)
+        } else {
+            hp(h, cb + 7 + i, hg(h, (ins >> 3) + 4 + i))
+        }
     }
     for j in 0 as i64..m {
-        hp(h, cb + 7 + n + j, hg(h, (ks >> 3) + 2 + j))
+        hp(h, cb + 7 + iw + j, hg(h, (ks >> 3) + 2 + j))
     }
     for q in 0 as i64..nw {
-        hp(h, cb + 7 + n + m + q, raw(h, (ls >> 3) + 4, 7, q))
+        hp(h, cb + 7 + iw + m + q, raw(h, (ls >> 3) + 4, 7, q))
     }
     c
 }

@@ -234,7 +234,7 @@ module pvm_image {
         }
         each(c -> {
             labels := label_table(c[3])
-            words := []
+            ins := []
             locs := []
             file := none
             pc := 0
@@ -244,14 +244,32 @@ module pvm_image {
                     l := arg(i, 0)
                     locs = W{arg(l, 2)} :: W{arg(l, 1)} :: W{pc} :: locs
                     file = arg(l, 0)
-                    words = B{append(encode(labels, pc + 1, arg(i, 1)), [0, 0, 0, 0])} :: words
-                } else words = B{append(encode(labels, pc + 1, i), [0, 0, 0, 0])} :: words
+                    ins = encode(labels, pc + 1, arg(i, 1)) :: ins
+                } else ins = encode(labels, pc + 1, i) :: ins
                 pc = pc + 1
             }, c[3])
+            # two instructions of 32 bits are in a word; the last word of an odd number is filled with zeros
+            nw := (pc + 1) // 2
+            iarr := array(nw * 8)
+            k := 0
+            each(bs -> each(b -> {
+                array_set(iarr, k, b)
+                k = k + 1
+            }, bs), reverse(ins))
+            while (k < nw * 8) {
+                array_set(iarr, k, 0)
+                k = k + 1
+            }
+            words := []
+            j := nw - 1
+            while (j >= 0) {
+                words = B{map(t -> array_get(iarr, j * 8 + t), [0, 1, 2, 3, 4, 5, 6, 7])} :: words
+                j = j - 1
+            }
             consts := append(map(value_of, c[4]), if (file == none) [] else [value_of(S{file})])
             fidx := if (file == none) -1 else length(consts) - 1
             hdr := [W{bit_shl(c[2], 16) + bit_shl(c[1], 8)}, W{pc}, W{length(consts)}, W{-1}, W{length(locs) // 3}, W{fidx}]
-            vector.set(objs, table.get(names, ['code, c[0]], none), Obj{14, append(hdr, append(reverse(words), append(consts, reverse(locs))))})
+            vector.set(objs, table.get(names, ['code, c[0]], none), Obj{14, append(hdr, append(words, append(consts, reverse(locs))))})
         }, codes)
         lam := add(['lambda], Obj{8, [W{0}, R{table.get(names, ['code, entry], none)}, R{n_}]})
         layout(objs, append([lam, f_, t_, n_, tuple_, cons_, nil_], types))

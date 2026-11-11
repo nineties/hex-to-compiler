@@ -89,21 +89,21 @@ fn run[r](h: &mut r [u8], t: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], fs
     p(fs, 5, 0)
     p(fs, 6, 0)
     code = hg(h, (stub >> 3) + 2) >> 3
-    ip = code + 7
-    kb = code + 7 + hg(h, code + 2)
+    ip = (code + 7) * 8
+    kb = code + 7 + code_iw(hg(h, code + 2))
     while running == 1 {
         if g(st, 12) != 0 {
             # a collection is wanted: it is done between two instructions, and the code, the pc and the base are read again from the top frame
-            p(fs, fp + 5, ip - (code + 7))
+            p(fs, fp + 5, (ip - (code + 7) * 8) >> 2)
             collect(h, t, st, rs, fs, fp)
             vfalse = hg(h, 1)
             base = g(fs, fp + 4)
             code = hg(h, (g(fs, fp) >> 3) + 2) >> 3
-            ip = code + 7 + g(fs, fp + 5)
-            kb = code + 7 + hg(h, code + 2)
+            ip = (code + 7) * 8 + g(fs, fp + 5) * 4
+            kb = code + 7 + code_iw(hg(h, code + 2))
         }
-        w = hg(h, ip)
-        ip += 1
+        w = ld_u32(h, ip)
+        ip += 4
         op = w & 255
         a = (w >> 8) & 255
         b = (w >> 16) & 255
@@ -125,7 +125,7 @@ fn run[r](h: &mut r [u8], t: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], fs
             wb(h, st, hg(h, kb + ((w >> 16) & 65535)), g(rs, base + a))
             hp(h, (hg(h, kb + ((w >> 16) & 65535)) >> 3) + 1, g(rs, base + a))
         } else if op == 9 {
-            ip += s24(w >> 8)
+            ip += s24(w >> 8) * 4
         } else if op == 10 {
             cond = 0
             if g(rs, base + a) != vfalse { cond = 1 }
@@ -176,11 +176,11 @@ fn run[r](h: &mut r [u8], t: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], fs
             cond = exec_fusion(h, st, rs, w, base)
         } else if op == 20 or op == 21 or op == 22 or op == 23 or op == 34 or op == 35 {
             # the control: the frames change, so the code, the pc and the base are read again from the top frame
-            fp = exec_ctl(h, st, rs, fs, fp, op, w, ip - (code + 7))
+            fp = exec_ctl(h, st, rs, fs, fp, op, w, (ip - (code + 7) * 8) >> 2)
             base = g(fs, fp + 4)
             code = hg(h, (g(fs, fp) >> 3) + 2) >> 3
-            ip = code + 7 + g(fs, fp + 5)
-            kb = code + 7 + hg(h, code + 2)
+            ip = (code + 7) * 8 + g(fs, fp + 5) * 4
+            kb = code + 7 + code_iw(hg(h, code + 2))
             if base > g(st, 10) { p(st, 10, base) }
         } else if op == 24 {
             result = g(rs, base + a)
@@ -196,25 +196,25 @@ fn run[r](h: &mut r [u8], t: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], fs
         }
         if cond == -2 {
             # a runtime error: the top frame performs the effect Error{loc, message}; with no handler the program stops with the message
-            p(fs, fp + 5, ip - (code + 7))
+            p(fs, fp + 5, (ip - (code + 7) * 8) >> 2)
             var rw: i64
             rw = ret_word(a, 0, 0)
             if op >= 13 and op <= 19 { rw = ret_word(0, 3, 0) }
             fp = raise_pending(h, st, rs, fs, fp, rw)
             base = g(fs, fp + 4)
             code = hg(h, (g(fs, fp) >> 3) + 2) >> 3
-            ip = code + 7 + g(fs, fp + 5)
-            kb = code + 7 + hg(h, code + 2)
+            ip = (code + 7) * 8 + g(fs, fp + 5) * 4
+            kb = code + 7 + code_iw(hg(h, code + 2))
             if base > g(st, 10) { p(st, 10, base) }
             cond = -1
         }
         if cond >= 0 {
             if cond >= 2 {
                 # a match instruction: skip the next word when it matched
-                if cond == 2 { ip += 1 }
+                if cond == 2 { ip += 4 }
             } else if cond != c {
                 # a condition instruction: the next word is JMP; run it when the condition equals k (the field c), else skip it
-                ip += 1
+                ip += 4
             }
         }
     }
