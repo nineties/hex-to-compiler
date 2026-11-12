@@ -6,7 +6,7 @@
 # 9 f16, 10 f32, 11 f64, 12 c64, 13 c128. The bytes of an element: 1 1 2 4 8 1 2 4 8 2 4 8 8 16. A new plain array is all zero bits, which is
 # false, 0, 0.0 or complex(0, 0).
 # The builtin ids: 30 array, 31 plain_array, 32 plain_len, 33 plain_kind, 34 array_get, 35 array_set, 36 array_len, 37 plain_get, 38 plain_set,
-# 39 str_to_bytes, 40 bytes_to_str, 41 bit_not, 42 bit_shr.
+# 39 string_to_bytes, 40 bytes_to_string, 41 bit_not, 42 bit_shr.
 import mem
 import obj
 import big
@@ -15,7 +15,7 @@ import num
 import bit
 
 # the bytes of the name of a type packed from the low end of a word (the data word of the string), and its length
-fn tn_code(t: i64) -> i64 {
+fun tn_code(t: i64) -> i64 {
     if t == 0 { return 1819242338 }
     if t == 1 { return 14441 }
     if t == 2 { return 3551593 }
@@ -32,14 +32,14 @@ fn tn_code(t: i64) -> i64 {
     942813539
 }
 
-fn tn_len(t: i64) -> i64 {
+fun tn_len(t: i64) -> i64 {
     if t == 0 { return 4 }
     if t == 1 or t == 5 { return 2 }
     if t == 13 { return 4 }
     3
 }
 
-fn t_size(t: i64) -> i64 {
+fun t_size(t: i64) -> i64 {
     if t <= 1 { return 1 }
     if t == 2 { return 2 }
     if t == 3 { return 4 }
@@ -56,7 +56,7 @@ fn t_size(t: i64) -> i64 {
 }
 
 # the type number of a symbol, or -1
-fn type_of_symbol[r](h: &r [u8], sym: i64) -> i64 {
+fun type_of_symbol[r](h: &r [u8], sym: i64) -> i64 {
     let s = hg(h, (sym >> 3) + 1)
     let n = str_len(h, s)
     for t in 0 as i64..14 {
@@ -67,18 +67,18 @@ fn type_of_symbol[r](h: &r [u8], sym: i64) -> i64 {
     -1
 }
 
-fn type_symbol_of[r](h: &mut r [u8], st: &mut r [i64], t: i64) -> i64 {
+fun type_symbol_of[r](h: &mutable r [u8], st: &mutable r [i64], t: i64) -> i64 {
     let s = new_string(h, st, tn_len(t))
     hp(h, (s >> 3) + 2, tn_code(t))
     intern_sym(h, st, s)
 }
 
-fn check_kind[r](h: &r [u8], v: i64, k: i64, m: &static [u8]) {
+fun check_kind[r](h: &r [u8], v: i64, k: i64, m: &static [u8]) {
     if is_int(v) { die(m) }
     if kind_of(h, v) != k { die(m) }
 }
 
-fn index_of(i: i64, n: i64, m: &static [u8]) -> i64 {
+fun index_of(i: i64, n: i64, m: &static [u8]) -> i64 {
     if not is_int(i) { die(m) }
     let k = int_of(i)
     if k < 0 or k >= n { die(m) }
@@ -87,7 +87,7 @@ fn index_of(i: i64, n: i64, m: &static [u8]) -> i64 {
 
 # ---- arrays
 
-fn new_array[r](h: &mut r [u8], st: &mut r [i64], n: i64) -> i64 {
+fun new_array[r](h: &mutable r [u8], st: &mutable r [i64], n: i64) -> i64 {
     if n < 0 { die("array: negative length") }
     let a = alloc_obj(h, st, 6, 1 + n)
     let nv = hg(h, 3)
@@ -97,17 +97,17 @@ fn new_array[r](h: &mut r [u8], st: &mut r [i64], n: i64) -> i64 {
     a
 }
 
-fn array_len[r](h: &r [u8], a: i64) -> i64 {
+fun array_len[r](h: &r [u8], a: i64) -> i64 {
     size_of(h, a) - 1
 }
 
-fn a_get[r](h: &r [u8], a: i64, i: i64) -> i64 {
+fun a_get[r](h: &r [u8], a: i64, i: i64) -> i64 {
     check_kind(h, a, 6, "array_get: not an array")
     let k = index_of(i, array_len(h, a), "array_get: out of range")
     hg(h, (a >> 3) + 2 + k)
 }
 
-fn a_set[r](h: &mut r [u8], st: &mut r [i64], a: i64, i: i64, v: i64) {
+fun a_set[r](h: &mutable r [u8], st: &mutable r [i64], a: i64, i: i64, v: i64) {
     check_kind(h, a, 6, "array_set: not an array")
     let k = index_of(i, array_len(h, a), "array_set: out of range")
     wb(h, st, a, v)
@@ -116,15 +116,15 @@ fn a_set[r](h: &mut r [u8], st: &mut r [i64], a: i64, i: i64, v: i64) {
 
 # ---- plain arrays: the packed words
 
-fn pl_type[r](h: &r [u8], a: i64) -> i64 {
+fun pl_type[r](h: &r [u8], a: i64) -> i64 {
     hg(h, (a >> 3) + 2)
 }
 
-fn pl_count[r](h: &r [u8], a: i64) -> i64 {
+fun pl_count[r](h: &r [u8], a: i64) -> i64 {
     hg(h, (a >> 3) + 3)
 }
 
-fn new_plain[r](h: &mut r [u8], st: &mut r [i64], t: i64, n: i64) -> i64 {
+fun new_plain[r](h: &mutable r [u8], st: &mutable r [i64], t: i64, n: i64) -> i64 {
     if n < 0 { die("plain_array: negative length") }
     let words = (n * t_size(t) + 7) / 8
     let a = alloc_obj(h, st, 7, 3 + words)
@@ -134,22 +134,22 @@ fn new_plain[r](h: &mut r [u8], st: &mut r [i64], t: i64, n: i64) -> i64 {
 }
 
 # the element i of a type of at most 8 bytes, as the bits (the elements start at the word base)
-fn raw[r](h: &r [u8], base: i64, t: i64, i: i64) -> i64 {
+fun raw[r](h: &r [u8], base: i64, t: i64, i: i64) -> i64 {
     let sz = t_size(t)
     let pos = base * 8 + i * sz
     if sz == 1 { return h[pos] as i64 }
-    if sz == 2 { return ld_u16(h, pos) }
+    if sz == 2 { return load_u16(h, pos) }
     if sz == 4 { return ld_u32(h, pos) }
     ld_64(h, pos)
 }
 
-fn set_raw[r](h: &mut r [u8], base: i64, t: i64, i: i64, x: i64) {
+fun set_raw[r](h: &mutable r [u8], base: i64, t: i64, i: i64, x: i64) {
     let sz = t_size(t)
     let pos = base * 8 + i * sz
     if sz == 1 {
         h[pos] = x as u8
     } else if sz == 2 {
-        st_16(h, pos, x)
+        store_16(h, pos, x)
     } else if sz == 4 {
         st_32(h, pos, x)
     } else {
@@ -158,20 +158,20 @@ fn set_raw[r](h: &mut r [u8], base: i64, t: i64, i: i64, x: i64) {
 }
 
 # the value of the bits x in the signed field of n bits
-fn sext(x: i64, n: i64) -> i64 {
+fun sext(x: i64, n: i64) -> i64 {
     if x >= ((1 as i64) << (n - 1)) { return x - ((1 as i64) << n) }
     x
 }
 
 # the integer of the sign and the magnitude
-fn int_of_mag[r](h: &mut r [u8], st: &mut r [i64], sign: i64, mag: u64) -> i64 {
+fun int_of_mag[r](h: &mutable r [u8], st: &mutable r [i64], sign: i64, mag: u64) -> i64 {
     let v = alloc_big(h, st, sign, 1)
     wr(h, (v >> 3) + 3, mag)
     fin(h, v)
 }
 
 # the integer of a 64-bit element w; signed is 1 for i64
-fn int_of_64[r](h: &mut r [u8], st: &mut r [i64], w: i64, signed: i64) -> i64 {
+fun int_of_64[r](h: &mutable r [u8], st: &mutable r [i64], w: i64, signed: i64) -> i64 {
     var a: u64
     a = w as u64
     if signed == 1 and w < 0 {
@@ -182,7 +182,7 @@ fn int_of_64[r](h: &mut r [u8], st: &mut r [i64], w: i64, signed: i64) -> i64 {
 }
 
 # the magnitude (without the sign) of the binary64 that a small float of eb exponent bits and fb fraction bits stands for
-fn widen(x: i64, eb: i64, fb: i64) -> i64 {
+fun widen(x: i64, eb: i64, fb: i64) -> i64 {
     let bias = (((1 as i64) << (eb - 1)) - 1)
     let mag = x & (((1 as i64) << (eb + fb)) - 1)
     let ex = mag >> fb
@@ -198,24 +198,24 @@ fn widen(x: i64, eb: i64, fb: i64) -> i64 {
 }
 
 # the f64 of the bits of an f32
-fn from32(x: i64) -> f64 {
+fun from32(x: i64) -> f64 {
     let b = x as u32
     f32_from_bits(b) as f64
 }
 
-fn w_hi(x: i64, eb: i64, fb: i64) -> i64 {
+fun w_hi(x: i64, eb: i64, fb: i64) -> i64 {
     if eb == 8 { return f2hi(from32(x)) }
     (((x >> (eb + fb)) & 1) << 31) | (widen(x, eb, fb) >> 32)
 }
 
-fn w_lo(x: i64, eb: i64, fb: i64) -> i64 {
+fun w_lo(x: i64, eb: i64, fb: i64) -> i64 {
     if eb == 8 { return f2lo(from32(x)) }
     widen(x, eb, fb) & 4294967295
 }
 
 # the bits of the float of eb exponent bits and fb fraction bits that is nearest to the binary64 of the two words (round to nearest even): an f32 by the conversion of the
 # machine, and a float16 on the integers (there is no f16)
-fn narrow(hi: i64, lo: i64, eb: i64, fb: i64) -> i64 {
+fun narrow(hi: i64, lo: i64, eb: i64, fb: i64) -> i64 {
     if eb == 8 {
         let f = w2f(hi, lo) as f32
         return f32_bits(f) as i64
@@ -255,7 +255,7 @@ fn narrow(hi: i64, lo: i64, eb: i64, fb: i64) -> i64 {
 
 # ---- reading an element as a value
 
-fn pl_get[r](h: &mut r [u8], st: &mut r [i64], a: i64, i: i64) -> i64 {
+fun pl_get[r](h: &mutable r [u8], st: &mutable r [i64], a: i64, i: i64) -> i64 {
     check_kind(h, a, 7, "plain_get: not a plain array")
     let k = index_of(i, pl_count(h, a), "plain_get: out of range")
     let t = pl_type(h, a)
@@ -298,7 +298,7 @@ fn pl_get[r](h: &mut r [u8], st: &mut r [i64], a: i64, i: i64) -> i64 {
 # ---- writing a value into an element
 
 # whether the value x is true as a bool element: 1 or 0
-fn truthy[r](h: &r [u8], x: i64) -> i64 {
+fun truthy[r](h: &r [u8], x: i64) -> i64 {
     if x == hg(h, 2) { return 1 }
     if x == hg(h, 1) { return 0 }
     let c = num_class(h, x)
@@ -316,7 +316,7 @@ fn truthy[r](h: &r [u8], x: i64) -> i64 {
 }
 
 # store_int checks that the integer iv is in the range of the integer type t and writes it
-fn store_int[r](h: &mut r [u8], a: i64, i: i64, t: i64, iv: i64) {
+fun store_int[r](h: &mutable r [u8], a: i64, i: i64, t: i64, iv: i64) {
     if i_nd(h, iv) > 1 { die("plain_set: out of range") }
     let neg = i_sign(h, iv)
     let dg = i_dig(h, iv, 0)
@@ -366,7 +366,7 @@ fn store_int[r](h: &mut r [u8], a: i64, i: i64, t: i64, iv: i64) {
     }
 }
 
-fn pl_set[r](h: &mut r [u8], st: &mut r [i64], a: i64, i: i64, x: i64) {
+fun pl_set[r](h: &mutable r [u8], st: &mutable r [i64], a: i64, i: i64, x: i64) {
     check_kind(h, a, 7, "plain_set: not a plain array")
     let k = index_of(i, pl_count(h, a), "plain_set: out of range")
     let t = pl_type(h, a)
@@ -437,7 +437,7 @@ fn pl_set[r](h: &mut r [u8], st: &mut r [i64], a: i64, i: i64, x: i64) {
 
 # ---- the instructions AGET AGETI ASET ALEN PLAINGET PLAINSET and the builtins
 
-fn exec_arr[r](h: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], op: i64, w: i64, base: i64) {
+fun exec_arr[r](h: &mutable r [u8], st: &mutable r [i64], rs: &mutable r [i64], op: i64, w: i64, base: i64) {
     let a = (w >> 8) & 255
     let b = (w >> 16) & 255
     let c = w >> 24
@@ -458,9 +458,9 @@ fn exec_arr[r](h: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], op: i64, w: i
     }
 }
 
-# str_to_bytes: the bytes of the string as a plain array of u8
-fn do_str_to_bytes[r](h: &mut r [u8], st: &mut r [i64], s: i64) -> i64 {
-    if not is_string(h, s) { die("str_to_bytes: not a string") }
+# string_to_bytes: the bytes of the string as a plain array of u8
+fun do_str_to_bytes[r](h: &mutable r [u8], st: &mutable r [i64], s: i64) -> i64 {
+    if not is_string(h, s) { die("string_to_bytes: not a string") }
     let n = str_len(h, s)
     let a = new_plain(h, st, 5, n)
     let base = (a >> 3) + 4
@@ -471,7 +471,7 @@ fn do_str_to_bytes[r](h: &mut r [u8], st: &mut r [i64], s: i64) -> i64 {
 }
 
 # the number of bytes of the character that starts with the byte c at i of the u8 array at base (n bytes), and it stops when the bytes are not UTF-8
-fn utf8_len[r](h: &r [u8], base: i64, n: i64, i: i64) -> i64 {
+fun utf8_len[r](h: &r [u8], base: i64, n: i64, i: i64) -> i64 {
     let c = raw(h, base, 5, i)
     if c < 128 { return 1 }
     var ln: i64
@@ -479,23 +479,23 @@ fn utf8_len[r](h: &r [u8], base: i64, n: i64, i: i64) -> i64 {
     if c >= 194 and c <= 223 { ln = 2 }
     if c >= 224 and c <= 239 { ln = 3 }
     if c >= 240 and c <= 244 { ln = 4 }
-    if ln == 0 { die("bytes_to_str: not UTF-8") }
-    if i + ln > n { die("bytes_to_str: not UTF-8") }
+    if ln == 0 { die("bytes_to_string: not UTF-8") }
+    if i + ln > n { die("bytes_to_string: not UTF-8") }
     for k in 1 as i64..ln {
-        if (raw(h, base, 5, i + k) & 192) != 128 { die("bytes_to_str: not UTF-8") }
+        if (raw(h, base, 5, i + k) & 192) != 128 { die("bytes_to_string: not UTF-8") }
     }
     let c1 = raw(h, base, 5, i + 1)
-    if c == 224 and c1 < 160 { die("bytes_to_str: not UTF-8") }
-    if c == 237 and c1 >= 160 { die("bytes_to_str: not UTF-8") }
-    if c == 240 and c1 < 144 { die("bytes_to_str: not UTF-8") }
-    if c == 244 and c1 >= 144 { die("bytes_to_str: not UTF-8") }
+    if c == 224 and c1 < 160 { die("bytes_to_string: not UTF-8") }
+    if c == 237 and c1 >= 160 { die("bytes_to_string: not UTF-8") }
+    if c == 240 and c1 < 144 { die("bytes_to_string: not UTF-8") }
+    if c == 244 and c1 >= 144 { die("bytes_to_string: not UTF-8") }
     ln
 }
 
-# bytes_to_str: the string of the bytes of a plain array of u8, which must be UTF-8
-fn do_bytes_to_str[r](h: &mut r [u8], st: &mut r [i64], a: i64) -> i64 {
-    check_kind(h, a, 7, "bytes_to_str: not a plain array")
-    if pl_type(h, a) != 5 { die("bytes_to_str: not a plain array of u8") }
+# bytes_to_string: the string of the bytes of a plain array of u8, which must be UTF-8
+fun do_bytes_to_str[r](h: &mutable r [u8], st: &mutable r [i64], a: i64) -> i64 {
+    check_kind(h, a, 7, "bytes_to_string: not a plain array")
+    if pl_type(h, a) != 5 { die("bytes_to_string: not a plain array of u8") }
     let n = pl_count(h, a)
     let base = (a >> 3) + 4
     var i: i64
@@ -510,12 +510,12 @@ fn do_bytes_to_str[r](h: &mut r [u8], st: &mut r [i64], a: i64) -> i64 {
     fin_string(h, st, s)
 }
 
-fn arg_count(v: i64, m: &static [u8]) -> i64 {
+fun arg_count(v: i64, m: &static [u8]) -> i64 {
     if not is_int(v) { die(m) }
     int_of(v)
 }
 
-fn call_abuiltin[r](h: &mut r [u8], st: &mut r [i64], rs: &r [i64], id: i64, a: i64) -> i64 {
+fun call_abuiltin[r](h: &mutable r [u8], st: &mutable r [i64], rs: &r [i64], id: i64, a: i64) -> i64 {
     if id == 30 { return new_array(h, st, arg_count(g(rs, a), "array: not an integer")) }
     if id == 31 {
         let sym = g(rs, a)

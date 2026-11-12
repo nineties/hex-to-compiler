@@ -67,8 +67,8 @@ cas_lib := `({
     app_f(e) := arg(e, 0)
     app_a(e, k) := arg(arg(e, 1), k)
     app_n(e) := arity(arg(e, 1))
-    mk1(f, a) := mexpr('Apply, X{f, mexpr('Tuple, X{a})})
-    mk2(f, a, b) := mexpr('Apply, X{f, mexpr('Tuple, X{a, b})})
+    make1(f, a) := mexpr('Apply, X{f, mexpr('Tuple, X{a})})
+    make2(f, a, b) := mexpr('Apply, X{f, mexpr('Tuple, X{a, b})})
 
     # --- rationals
     qq(n, d) := {
@@ -189,12 +189,12 @@ cas_lib := `({
     fprime(e) := {
         f := app_f(e)
         u := app_a(e, 0)
-        if (f == 'exp) mk1('exp, u)
-        else if (f == 'sin) mk1('cos, u)
-        else if (f == 'cos) mk2('_sub, 0, mk1('sin, u))
-        else if (f == 'log) mk2('_div, 1, u)
-        else if (f == 'atan) mk2('_div, 1, mk2('_add, 1, mk2('_mul, u, u)))
-        else if (f == 'atanh) mk2('_div, 1, mk2('_sub, 1, mk2('_mul, u, u)))
+        if (f == 'exp) make1('exp, u)
+        else if (f == 'sin) make1('cos, u)
+        else if (f == 'cos) make2('_sub, 0, make1('sin, u))
+        else if (f == 'log) make2('_div, 1, u)
+        else if (f == 'atan) make2('_div, 1, make2('_add, 1, make2('_mul, u, u)))
+        else if (f == 'atanh) make2('_div, 1, make2('_sub, 1, make2('_mul, u, u)))
         else fail("cas: a function that cannot be differentiated")
     }
 
@@ -203,23 +203,23 @@ cas_lib := `({
         else if (type(e) == Symbol) { if (e == x) 1 else 0 }
         else {
             f := app_f(e)
-            if (f == '_add) mk2('_add, d(app_a(e, 0), x), d(app_a(e, 1), x))
-            else if (f == '_sub) mk2('_sub, d(app_a(e, 0), x), d(app_a(e, 1), x))
+            if (f == '_add) make2('_add, d(app_a(e, 0), x), d(app_a(e, 1), x))
+            else if (f == '_sub) make2('_sub, d(app_a(e, 0), x), d(app_a(e, 1), x))
             else if (f == '_mul) {
                 a := app_a(e, 0)
                 b := app_a(e, 1)
-                mk2('_add, mk2('_mul, d(a, x), b), mk2('_mul, a, d(b, x)))
+                make2('_add, make2('_mul, d(a, x), b), make2('_mul, a, d(b, x)))
             } else if (f == '_div) {
                 a := app_a(e, 0)
                 b := app_a(e, 1)
-                mk2('_div, mk2('_sub, mk2('_mul, d(a, x), b), mk2('_mul, a, d(b, x))), mk2('_mul, b, b))
+                make2('_div, make2('_sub, make2('_mul, d(a, x), b), make2('_mul, a, d(b, x))), make2('_mul, b, b))
             } else if (f == 'pow) {
                 a := app_a(e, 0)
                 n := app_a(e, 1)
-                mk2('_mul, mk2('_mul, n, mk2('pow, a, n - 1)), d(a, x))
+                make2('_mul, make2('_mul, n, make2('pow, a, n - 1)), d(a, x))
             } else {
                 u := app_a(e, 0)
-                mk2('_mul, fprime(e), d(u, x))
+                make2('_mul, fprime(e), d(u, x))
             }
         }
     }
@@ -264,8 +264,8 @@ cas_lib := `({
     taylor(e, x, n) := ser(e, x, n)
 
     # --- polynomials from series
-    rev(Nil{}, acc) := acc
-    rev(x :: xs, acc) := rev(xs, x :: acc)
+    reverse(Nil{}, acc) := acc
+    reverse(x :: xs, acc) := reverse(xs, x :: acc)
     # the coefficients of x^start, x^(start+step), ... that matter for |x| <= xmax: the ones whose term can be 2^-bits of 1 or more
     terms(s, start, step, xmax, bits) := {
         eps := qq(1, pow(2, bits))
@@ -278,7 +278,7 @@ cas_lib := `({
             else { out = c :: out; i = i + step }
         }
         if (go) fail("cas: the series is too short")
-        rev(out, [])
+        reverse(out, [])
     }
 
     # --- evaluation
@@ -404,9 +404,9 @@ cas_lib := `({
             while (digits == none) {
                 # a / 10^e10 * 10^(k-1) rounded to an integer of k digits
                 scaled := qmul(a, qdiv(p10(k - 1), p10(e10)))
-                dgt := rounded(arg(scaled, 0), arg(scaled, 1), 0)
-                back := qmul(qq(dgt, 1), qdiv(p10(e10), p10(k - 1)))
-                if (qcmp(flq(fl(back)), flq(fl(a))) == 0) digits = dgt else k = k + 1
+                digit := rounded(arg(scaled, 0), arg(scaled, 1), 0)
+                back := qmul(qq(digit, 1), qdiv(p10(e10), p10(k - 1)))
+                if (qcmp(flq(fl(back)), flq(fl(a))) == 0) digits = digit else k = k + 1
             }
             if (neg) put("(-")
             nd := ndigits(digits)

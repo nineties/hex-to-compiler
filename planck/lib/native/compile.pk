@@ -2,9 +2,9 @@
 # Copyright (C) 2026 nineties
 #
 # native_compile.compile(m) is the Module{[...]} of vasm for the module m = PModule{[...]} that native{| ... |} reads.
-# native_compile.compile_all(m) is Tuple{module, errors} with the errors [VasmErr{kind, Pos{d}, msg}, ...], the first of each function.
+# native_compile.compile_all(m) is Tuple{module, errors} with the errors [VasmError{kind, Pos{d}, msg}, ...], the first of each function.
 # native_compile.compile_with(m, imports) and native_compile.compile_all_with(m, imports) compile a module whose functions may call the functions
-# and use the structs of imports, the interfaces of other units (vasm_unit.ifaces of vasm/unit.pk): a list of Fn and Struct items, whose bodies
+# and use the structs of imports, the interfaces of other units (vasm_unit.ifaces of vasm/unit.pk): a list of Fun and Struct items, whose bodies
 # are not read. An import item (PImport{at, u}) of m names a unit; the caller picks the interfaces of the units named (native_compile.import_items(m))
 # and the expansion does not use the item.
 # The expansion makes the form that vasm_check.check checks; it does not check ownership, borrows or regions.
@@ -65,27 +65,27 @@ fresh(prefix) := {
 
 # the statements of a block are made in a scope that ends with the block
 begin() := {
-    tok := Tuple{px_out, length(scope)}
+    token := Tuple{px_out, length(scope)}
     px_out = []
-    tok
+    token
 }
 
-end(tok) := {
+end(token) := {
     body := reverse(px_out)
-    while (length(scope) > arg(tok, 1)) {
+    while (length(scope) > arg(token, 1)) {
         e := scope[0]
         scope = list.drop(scope, 1)
         if (arg(e, 0) != none) table.set(env, arg(e, 0), arg(e, 1))
         table.set(live, arg(e, 2), none)
     }
-    px_out = arg(tok, 0)
+    px_out = arg(token, 0)
     body
 }
 
 block(ss) := {
-    tok := begin()
+    token := begin()
     each(stmt, ss)
-    end(tok)
+    end(token)
 }
 
 # declares a variable of type t and gives its name in vasm. The name in the source is src, or none for a temporary.
@@ -105,24 +105,24 @@ declare(at, src, t, bind) := {
 
 pos(e) := arg(e, 0)
 
-known(t) := not (head(t) == 'Lit or head(t) == 'FLit or head(t) == 'Unk)
+known(t) := not (head(t) == 'Literal or head(t) == 'FLiteral or head(t) == 'Unknown)
 
 # the types that give a literal its type: the integer types and the floating point types
 numt(t) := vasm_check.int(t) or vasm_check.flt(t)
 
 # the type of a value that is kept in a variable. A literal has the type that the context gives.
-keep(at, Lit{_}, want) := if (vasm_check.int(want)) want else fail(at, 'type, "the type of this value is not known; write the type, as in let x: i32 = ... or e as i32")
-keep(at, FLit{}, want) := if (vasm_check.flt(want)) want else F64{}
-keep(at, Unk{msg}, want) := fail(at, 'type, msg)
+keep(at, Literal{_}, want) := if (vasm_check.int(want)) want else fail(at, 'type, "the type of this value is not known; write the type, as in let x: i32 = ... or e as i32")
+keep(at, FLiteral{}, want) := if (vasm_check.flt(want)) want else F64{}
+keep(at, Unknown{msg}, want) := fail(at, 'type, msg)
 keep(at, Unit{}, want) := fail(at, 'type, "this call gives no value")
 keep(at, t, want) := t
 
 # the type to give a literal beside a value of type t
 px_hint(t, want) := if (vasm_check.int(t)) t else want
 
-elem(at, Val{}) := Val{}
-elem(at, Own{Arr{u}}) := u
-elem(at, Ref{_, _, Arr{u}}) := u
+elem(at, Value{}) := Value{}
+elem(at, Own{Array{u}}) := u
+elem(at, Ref{_, _, Array{u}}) := u
 elem(at, t) := fail(at, 'type, f"{vasm_check.show_type(t)} is not an array to index")
 
 pointee(at, Own{u}) := u
@@ -220,9 +220,9 @@ big(at, s, t) := {
 # context asks for, or none; it gives the type of a literal that is beyond the range of vasm.
 # px_rhs(e, want) gives Tuple{right-hand side, type}, to put the value in a variable without a temporary.
 
-litlike(e) := head(e) == 'ELit or (head(e) == 'ENeg and head(arg(e, 1)) == 'ELit)
+litlike(e) := head(e) == 'ELiteral or (head(e) == 'ENeg and head(arg(e, 1)) == 'ELiteral)
 
-simple(e) := member(head(e), ['ELit, 'EFlt, 'EBool, 'EStr, 'ESym, 'EVar]) or (head(e) == 'ENeg and head(arg(e, 1)) == 'ELit)
+simple(e) := member(head(e), ['ELiteral, 'EFlt, 'EBool, 'EString, 'ESymbol, 'EVar]) or (head(e) == 'ENeg and head(arg(e, 1)) == 'ELiteral)
 
 var(at, x) := {
     b := table.get(env, x, none)
@@ -230,17 +230,17 @@ var(at, x) := {
     Tuple{Reg{at, arg(b, 0)}, arg(b, 1)}
 }
 
-lit(at, n, want) := if (type(n) == Int) Tuple{Imm{at, n}, Lit{n}}
+literal(at, n, want) := if (type(n) == Int) Tuple{Imm{at, n}, Literal{n}}
     else if (vasm_check.int(want)) big(at, arg(n, 0), want)
     else fail(at, 'type, f"the type of {arg(n, 0)} is not known; write it as {arg(n, 0)} as i32 or give the type of the variable")
 
-simple_ex(ELit{at, n}, want) := lit(at, n, want)
-simple_ex(EFlt{at, x}, want) := Tuple{FImm{at, x}, FLit{}}
+simple_ex(ELiteral{at, n}, want) := literal(at, n, want)
+simple_ex(EFlt{at, x}, want) := Tuple{FImm{at, x}, FLiteral{}}
 simple_ex(EBool{at, b}, want) := Tuple{Imm{at, b}, Bool{}}
-simple_ex(EStr{at, s}, want) := Tuple{Str{at, s}, Ref{'shr, 'static, Arr{U8{}}}}
-simple_ex(ESym{at, s}, want) := Tuple{Sym{at, s}, Val{}}
+simple_ex(EString{at, s}, want) := Tuple{String{at, s}, Ref{'shr, 'static, Array{U8{}}}}
+simple_ex(ESymbol{at, s}, want) := Tuple{Symbol{at, s}, Value{}}
 simple_ex(EVar{at, x}, want) := var(at, x)
-simple_ex(ENeg{at, ELit{_, n}}, want) := if (type(n) == Int) Tuple{Imm{at, 0 - n}, Lit{0 - n}} else lit(at, Big{_strcat("-", arg(n, 0))}, want)
+simple_ex(ENeg{at, ELiteral{_, n}}, want) := if (type(n) == Int) Tuple{Imm{at, 0 - n}, Literal{0 - n}} else literal(at, Big{_strcat("-", arg(n, 0))}, want)
 
 ex(e, want) := if (simple(e)) simple_ex(e, want) else {
     at := pos(e)
@@ -317,21 +317,21 @@ result(at, f, sig, ts, tsub) := {
     }, rs)
     bad := list.any(r -> vasm_check.mentions(ret, r) and table.get(rmap, r, none) == none, rs)
     t := vasm_check.subst(ret, rmap, tsub)
-    if (bad) Unk{f"the region of the result of {symname(f)} is not known; write the type: let x: T = ..."}
-    else if (has_tvar(t)) Unk{f"the type of the result of {symname(f)} is not known; write the type: let x: T = ..."}
+    if (bad) Unknown{f"the region of the result of {symname(f)} is not known; write the type: let x: T = ..."}
+    else if (has_tvar(t)) Unknown{f"the type of the result of {symname(f)} is not known; write the type: let x: T = ..."}
     else t
 }
 
 has_tvar(TVar{_}) = true
 has_tvar(Own{u}) = has_tvar(u)
-has_tvar(Arr{u}) = has_tvar(u)
+has_tvar(Array{u}) = has_tvar(u)
 has_tvar(Ref{_, _, u}) = has_tvar(u)
 has_tvar(_) = false
 
 call(at, f, args) := {
     b := table.get(env, f, none)
-    if (b != none and arg(b, 1) == Val{}) {
-        Tuple{Call{at, arg(b, 0), map(v -> arg(v, 0), exs(args, none))}, Val{}}
+    if (b != none and arg(b, 1) == Value{}) {
+        Tuple{Call{at, arg(b, 0), map(v -> arg(v, 0), exs(args, none))}, Value{}}
     } else {
         user := table.get(sigs, f, none)
         sig := if (user == none) table.get(vasm_check.builtins, f, none) else user
@@ -368,16 +368,16 @@ px_rhs(e, want) = if (simple(e)) {
         vb := arg(two, 1)
         ta := arg(va, 1)
         tb := arg(vb, 1)
-        islit := t -> head(t) == 'Lit or head(t) == 'FLit
-        t := if (cmp(op)) Bool{} else if (islit(ta)) (if (islit(tb)) (if (ta == FLit{} or tb == FLit{}) FLit{} else Lit{none}) else tb) else ta
+        islit := t -> head(t) == 'Literal or head(t) == 'FLiteral
+        t := if (cmp(op)) Bool{} else if (islit(ta)) (if (islit(tb)) (if (ta == FLiteral{} or tb == FLiteral{}) FLiteral{} else Literal{none}) else tb) else ta
         Tuple{Bin{op, arg(va, 0), arg(vb, 0)}, t}
     }
   | ENeg{at, a} -> {
         v := ex(a, want)
         t := arg(v, 1)
         # -e of a floating point number is e * -1.0, which also gives the sign of a zero
-        if (vasm_check.flt(t) or t == FLit{}) Tuple{Bin{'mul, arg(v, 0), FImm{at, "-1.0"}}, t}
-        else Tuple{Bin{'sub, Imm{at, 0}, arg(v, 0)}, if (head(t) == 'Lit) Lit{none} else t}
+        if (vasm_check.flt(t) or t == FLiteral{}) Tuple{Bin{'mul, arg(v, 0), FImm{at, "-1.0"}}, t}
+        else Tuple{Bin{'sub, Imm{at, 0}, arg(v, 0)}, if (head(t) == 'Literal) Literal{none} else t}
     }
   | ENot{at, a} -> {
         v := ex(a, Bool{})
@@ -415,10 +415,10 @@ px_rhs(e, want) = if (simple(e)) {
   | EBorrow{at, k, r, y} -> {
         b := var(at, y)
         t := arg(b, 1)
-        Tuple{Borrow{at, k, r, arg(arg(b, 0), 1)}, if (head(t) == 'Own) Ref{k, r, arg(t, 0)} else Unk{f"{symname(y)} is not own, and only an own value is borrowed"}}
+        Tuple{Borrow{at, k, r, arg(arg(b, 0), 1)}, if (head(t) == 'Own) Ref{k, r, arg(t, 0)} else Unknown{f"{symname(y)} is not own, and only an own value is borrowed"}}
     }
-  | ECon{at, h, args} -> Tuple{Con{at, h, map(v -> arg(v, 0), exs(args, none))}, Val{}}
-  | EClo{at, f, args} -> Tuple{Clo{at, f, map(v -> arg(v, 0), exs(args, none))}, Val{}}
+  | ECon{at, h, args} -> Tuple{Con{at, h, map(v -> arg(v, 0), exs(args, none))}, Value{}}
+  | EClosure{at, f, args} -> Tuple{Closure{at, f, map(v -> arg(v, 0), exs(args, none))}, Value{}}
 }
 
 # a and b (and is true) or a or b: b is computed only when a does not decide the value
@@ -426,10 +426,10 @@ short(at, a, b, is_and) = {
     va := ex(a, Bool{})
     x := declare(at, none, Bool{}, false)
     emit(Assign{at, x, Mov{arg(va, 0)}})
-    tok := begin()
+    token := begin()
     vb := ex(b, Bool{})
     emit(Assign{at, x, Mov{arg(vb, 0)}})
-    body := end(tok)
+    body := end(token)
     cond := if (is_and) Mov{Reg{at, x}} else Bin{'eq, Reg{at, x}, Imm{at, false}}
     emit(IfS{at, cond, body, []})
     Tuple{Mov{Reg{at, x}}, Bool{}}
@@ -470,19 +470,19 @@ px_set(at, tg, op, e) := {
         }
       | _ -> {
             v := ex(e, want)
-            val := arg(v, 0)
+            value := arg(v, 0)
             # the place and the value that is there now
             kind := head(tg)
             pn := arg(arg(var(pos(tg), if (kind == 'EDeref) arg(tg, 1) else arg(arg(tg, 1), 1)), 0), 1)
             idx := if (kind == 'EIndex) index(arg(tg, 2)) else none
-            val2 := if (op == none) val else {
+            value2 := if (op == none) value else {
                 cur := declare(at, none, ty, false)
                 read := if (kind == 'EDeref) Load{at, pn} else if (kind == 'EIndex) Index{at, pn, idx} else Get{at, pn, arg(tg, 2)}
                 emit(Assign{at, cur, read})
-                emit(Assign{at, cur, Bin{op, Reg{at, cur}, val}})
+                emit(Assign{at, cur, Bin{op, Reg{at, cur}, value}})
                 Reg{at, cur}
             }
-            emit(if (kind == 'EDeref) Store{at, pn, val2} else if (kind == 'EIndex) IStore{at, pn, idx, val2} else FStore{at, pn, arg(tg, 2), val2})
+            emit(if (kind == 'EDeref) Store{at, pn, value2} else if (kind == 'EIndex) IStore{at, pn, idx, value2} else FStore{at, pn, arg(tg, 2), value2})
         }
     }
 }
@@ -511,7 +511,7 @@ px_for(at, i, lo, hi, body) := {
     vh := ex(hi, px_hint(arg(vl, 1), none))
     tl := arg(vl, 1)
     th := arg(vh, 1)
-    ty := if (known(tl) and head(tl) != 'Lit) tl else if (known(th) and head(th) != 'Lit) th
+    ty := if (known(tl) and head(tl) != 'Literal) tl else if (known(th) and head(th) != 'Literal) th
         else fail(at, 'type, "the type of the loop variable is not known; write one bound with its type, as in 0 as i64..n")
     # the end is read once, before the loop
     h := if (head(hi) == 'EVar) {
@@ -590,7 +590,7 @@ tail(ret, body) := if (ret != Unit{} and body != [] and head(list.last(body)) ==
     append(list.take(body, length(body) - 1), [SRet{arg(s, 0), arg(s, 1)}])
 } else body
 
-fn(PFn{at, f, rs, ps, ret, body}) := {
+fn(PFun{at, f, rs, ps, ret, body}) := {
     env = table.new()
     live = table.new()
     used = table.new()
@@ -604,7 +604,7 @@ fn(PFn{at, f, rs, ps, ret, body}) := {
         table.set(env, x, Tuple{x, t})
     }, ps)
     collect(body)
-    Fn{at, f, rs, ps, ret, block(tail(ret, body))}
+    Fun{at, f, rs, ps, ret, block(tail(ret, body))}
 }
 
 export compile_all_with(m, imports) := {
@@ -613,25 +613,25 @@ export compile_all_with(m, imports) := {
     structs = table.new()
     each(d -> match d {
         PImport{_, _} -> none
-      | PFn{_, f, rs, ps, ret, _} -> table.set(sigs, f, Sig{rs, map(p -> arg(p, 2), ps), ret})
-      | Fn{_, f, rs, ps, ret, _} -> table.set(sigs, f, Sig{rs, map(p -> arg(p, 2), ps), ret})
+      | PFun{_, f, rs, ps, ret, _} -> table.set(sigs, f, Sig{rs, map(p -> arg(p, 2), ps), ret})
+      | Fun{_, f, rs, ps, ret, _} -> table.set(sigs, f, Sig{rs, map(p -> arg(p, 2), ps), ret})
       | Struct{_, s, _} -> if (table.get(structs, s, none) == none) table.set(structs, s, d)
     }, append(imports, items))
-    errs := []
+    errors := []
     out := []
     each(d -> match d {
         PImport{_, _} -> none
       | Struct{_, _, _} -> {
             out = d :: out
         }
-      | PFn{_, _, _, _, _, _} -> {
+      | PFun{_, _, _, _, _, _} -> {
             r := handle {
                 fn(d)
-            } with (NativeFail{at, kind, msg}, k) -> VasmErr{kind, at, msg}
-            if (head(r) == 'VasmErr) errs = r :: errs else out = r :: out
+            } with (NativeFail{at, kind, msg}, k) -> VasmError{kind, at, msg}
+            if (head(r) == 'VasmError) errors = r :: errors else out = r :: out
         }
     }, items)
-    Tuple{Module{reverse(out)}, reverse(errs)}
+    Tuple{Module{reverse(out)}, reverse(errors)}
 }
 
 export compile_all(m) := compile_all_with(m, [])
@@ -647,10 +647,10 @@ export compile_with(m, imports) := {
 
 export compile(m) := compile_with(m, [])
 
-# the errors of compile_all with the positions in the file: [VasmErr{kind, Loc{file, line, column}, msg}, ...]
-export errors(file, errs) := {
+# the errors of compile_all with the positions in the file: [VasmError{kind, Loc{file, line, column}, msg}, ...]
+export errors(file, errors) := {
     src := read_file(file)
     n := strlen(src)
-    map((VasmErr{kind, Pos{d}, msg}) -> VasmErr{kind, error.loc_at(file, src, n - d), msg}, errs)
+    map((VasmError{kind, Pos{d}, msg}) -> VasmError{kind, error.loc_at(file, src, n - d), msg}, errors)
 }
 }

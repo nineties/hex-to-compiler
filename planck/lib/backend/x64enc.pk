@@ -17,7 +17,7 @@ use("list")
 use("table")
 use("vector")
 use("bytes")
-use("backend/obj")
+use("backend/object")
 use("backend/ir")
 use("backend/x86enc")
 
@@ -44,10 +44,10 @@ x64_reg(U{r}) := r
 x64_reg(DU{r}) := r
 x64_reg(_) := panic("x64: a register is expected")
 
-is_mem(o) := member(head(o), ['M, 'MX, 'MG])
+is_memory(o) := member(head(o), ['M, 'MX, 'MG])
 
 # the register or the memory operand rm of an instruction
-x64_rm(o) := if (is_mem(o)) o else x64_reg(o)
+x64_rm(o) := if (is_memory(o)) o else x64_reg(o)
 
 # the registers that rm needs a bit of the prefix for: Tuple{index, base}
 rm_regs(r @ Int) := Tuple{0, r}
@@ -79,7 +79,7 @@ modrm(em, reg, MX{'none, U{x}, s, d}, trail) := {
 }
 modrm(em, reg, MG{name, d}, trail) := {
     x86enc.u8(em, (reg % 8) * 8 + 5)
-    x86enc.sym(em, 'Pc32, name, d - trail)
+    x86enc.symbol(em, 'Pc32, name, d - trail)
 }
 modrm(em, reg, _, trail) := panic("x64: a memory operand is expected")
 
@@ -109,7 +109,7 @@ x64_op(em, pre, w, ops, reg, rm, trail, force) := {
 byte(r) := r >= 4 and r < 8
 
 # the operand s of a byte instruction is one of those registers
-byte_rm(s) := if (is_mem(s)) false else byte(x64_reg(s))
+byte_rm(s) := if (is_memory(s)) false else byte(x64_reg(s))
 
 # the opcodes of the ALU operations: the opcode of op r/m, r and the digit of the immediate forms
 alu := [Tuple{'add, 1, 0}, Tuple{'bor, 9, 1}, Tuple{'adc, 17, 2}, Tuple{'sbb, 25, 3}, Tuple{'band, 33, 4},
@@ -187,7 +187,7 @@ emit(em, i) := match I{ir.op(i), ir.explicit(i)} {
     }
   | I{'call, [S{name, _}]} -> {
         x86enc.u8(em, 232)
-        x86enc.sym(em, 'Pc32, name, 0)
+        x86enc.symbol(em, 'Pc32, name, 0)
     }
   | I{'call, [U{r}]} -> x64_op(em, 0, false, [255], 2, r, 0, false)
   | I{'ret, []} -> x86enc.u8(em, 195)
@@ -259,10 +259,10 @@ export emit_code(em, code) := {
 
 test {
     code(is) := {
-        o := obj.new("t")
+        o := object.new("t")
         e := x86enc.new(o, ".text")
         each(i -> emit(e, i), is)
-        vector.to_list(obj.buf(obj.sec(o, ".text", 'code, 16)))
+        vector.to_list(object.buf(object.section(o, ".text", 'code, 16)))
     }
     w32 := W{'w32}
     w64 := W{'w64}
@@ -325,11 +325,11 @@ test {
     assert(code([I{'movabs, [D{0}, K{16368}, K{0}, K{0}, K{0}]}]) == [72, 184, 0, 0, 0, 0, 0, 0, 240, 63], "movabs rax, 1.0")
     assert(code([I{'movabs, [D{9}, K{49152}, K{4660}, K{22136}, K{43981}]}]) == [73, 185, 205, 171, 120, 86, 52, 18, 0, 192], "movabs r9, four parts")
     # the address of a symbol is relative to the next instruction
-    o2 := obj.new("r")
+    o2 := object.new("r")
     e2 := x86enc.new(o2, ".text")
     emit(e2, I{'lea, [w64, D{7}, MG{"s", 0}]})
-    assert(vector.to_list(obj.buf(obj.sec(o2, ".text", 'code, 16))) == [72, 141, 61, 0, 0, 0, 0], "lea of a symbol")
-    assert(map((Rel{_, off, kind, sym, addend}) -> Tuple{off, kind, sym, addend}, obj.relocs(o2)) == [Tuple{3, 'Pc32, "s", -4}], "the relocation of a symbol")
+    assert(vector.to_list(object.buf(object.section(o2, ".text", 'code, 16))) == [72, 141, 61, 0, 0, 0, 0], "lea of a symbol")
+    assert(map((Rel{_, off, kind, symbol, addend}) -> Tuple{off, kind, symbol, addend}, object.relocs(o2)) == [Tuple{3, 'Pc32, "s", -4}], "the relocation of a symbol")
 }
 
 }

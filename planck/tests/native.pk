@@ -32,20 +32,20 @@ same(m, n) := {
 ng(m, kind) := {
     r := native_compile.compile_all(m)
     es := native_compile.errors(this_file, arg(r, 1))
-    check(map((VasmErr{k, _, _}) -> k, es), [kind])
+    check(map((VasmError{k, _, _}) -> k, es), [kind])
     if (length(es) == 1) {
         line := error.line_text(this_src, arg(arg(arg(es, 0), 1), 1))
-        check(string.index_of_str(line, "# NG", 0) >= 0, true)
+        check(string.index_of_string(line, "# NG", 0) >= 0, true)
     }
 }
 
 # === syntax ===
 m := native{|
     struct S { a: i32, b: i64 }
-    fn f[r](x: i32, p: &r [i32]) -> i32 { let y: i32 = x + 1; y }
+    fun f[r](x: i32, p: &r [i32]) -> i32 { let y: i32 = x + 1; y }
 |}
 check(head(m), 'PModule)
-check(map(head, arg(m, 0)), ['Struct, 'PFn])
+check(map(head, arg(m, 0)), ['Struct, 'PFun])
 body := arg(arg(m, 0)[1], 5)
 check(map(head, body), ['SLet, 'SExpr])
 check(arg(body[0], 2), I32{})
@@ -54,32 +54,32 @@ check(head(arg(body[0], 3)), 'EBin)
 mi := native{|
     import lib
     import other
-    fn f() { }
+    fun f() { }
 |}
-check(map(head, arg(mi, 0)), ['PImport, 'PImport, 'PFn])
+check(map(head, arg(mi, 0)), ['PImport, 'PImport, 'PFun])
 check(map(i -> arg(i, 1), native_compile.import_items(mi)), ['lib, 'other])
-check(map(head, arg(native_compile.compile(mi), 0)), ['Fn])
+check(map(head, arg(native_compile.compile(mi), 0)), ['Fun])
 # the precedence: & binds tighter than ==, == tighter than and, and and tighter than or
-e1 := arg(arg(native{| fn f() { a | b and c == d & e } |}, 0)[0], 5)[0]
+e1 := arg(arg(native{| fun f() { a | b and c == d & e } |}, 0)[0], 5)[0]
 check(head(arg(e1, 1)), 'EAnd)
 check(arg(arg(arg(e1, 1), 1), 1), 'bit_or)
 check(arg(arg(arg(e1, 1), 2), 1), 'eq)
 check(arg(arg(arg(arg(e1, 1), 2), 3), 1), 'bit_and)
-e2 := arg(arg(native{| fn f() { a or b and c } |}, 0)[0], 5)[0]
+e2 := arg(arg(native{| fun f() { a or b and c } |}, 0)[0], 5)[0]
 check(head(arg(e2, 1)), 'EOr)
 check(head(arg(arg(e2, 1), 2)), 'EAnd)
-e3 := arg(arg(native{| fn f() { h & 1 == 0 } |}, 0)[0], 5)[0]
+e3 := arg(arg(native{| fun f() { h & 1 == 0 } |}, 0)[0], 5)[0]
 check(arg(arg(e3, 1), 1), 'eq)
 check(arg(arg(arg(e3, 1), 2), 1), 'bit_and)
 # a new line separates statements: *p = 1 is not a multiplication
-b4 := arg(arg(native{| fn f() {
+b4 := arg(arg(native{| fun f() {
     x = a
     *p = 1
 } |}, 0)[0], 5)
 check(map(head, b4), ['SSet, 'SSet])
 check(map(s -> head(arg(s, 1)), b4), ['EVar, 'EDeref])
 # S { starts a block after a condition, and S{f: e} is a struct value
-b5 := arg(arg(native{| fn f() {
+b5 := arg(arg(native{| fun f() {
     if x { y = 1 }
     s = S { a: 1, b: 2 }
 } |}, 0)[0], 5)
@@ -87,7 +87,7 @@ check(map(head, b5), ['SIf, 'SSet])
 check(head(arg(b5[1], 3)), 'EMake)
 check(map(s -> head(s), arg(b5[0], 2)), ['SSet])
 # for, compound assignments, else if
-b6 := arg(arg(native{| fn f() {
+b6 := arg(arg(native{| fun f() {
     for i in 0..n { x += i }
     if a { return } else if b { return 1 } else { x <<= 2 }
 } |}, 0)[0], 5)
@@ -99,12 +99,12 @@ check(head(arg(b6[1], 3)[0]), 'SIf)
 
 # nested expressions, let and a result at the end
 same(native{|
-    fn f(a: i32, b: i32) -> i32 {
+    fun f(a: i32, b: i32) -> i32 {
         let c = a + b * 2
         c
     }
 |}, vasm{|
-    fn f(a: i32, b: i32) -> i32 {
+    fun f(a: i32, b: i32) -> i32 {
         var t0: i32
         t0 = b * 2
         var c: i32
@@ -115,13 +115,13 @@ same(native{|
 
 # a type after the name gives the type of a literal
 same(native{|
-    fn f() -> i64 {
+    fun f() -> i64 {
         let x: i64 = 5
         let y = x << 2
         y - 1
     }
 |}, vasm{|
-    fn f() -> i64 {
+    fun f() -> i64 {
         var x: i64
         x = 5
         var y: i64
@@ -134,13 +134,13 @@ same(native{|
 
 # for: the end is read once, and the index is converted to i64
 same(native{|
-    fn fill[r](m: &mut r [i32], n: i32) {
+    fun fill[r](m: &mutable r [i32], n: i32) {
         for i in 0 as i32..n {
             m[i] = i * 2
         }
     }
 |}, vasm{|
-    fn fill[r](m: &mut r [i32], n: i32) {
+    fun fill[r](m: &mutable r [i32], n: i32) {
         var t0: i32
         t0 = n
         var i: i32
@@ -158,11 +158,11 @@ same(native{|
 
 # a compound assignment to an element reads the element once
 same(native{|
-    fn bump[r](m: &mut r [i64], k: i64) {
+    fun bump[r](m: &mutable r [i64], k: i64) {
         m[k] += 3
     }
 |}, vasm{|
-    fn bump[r](m: &mut r [i64], k: i64) {
+    fun bump[r](m: &mutable r [i64], k: i64) {
         var t0: i64
         t0 = m[k]
         t0 = t0 + 3
@@ -173,7 +173,7 @@ same(native{|
 # a compound assignment to a variable and to a field
 same(native{|
     struct P { x: i64, y: i64 }
-    fn f(p: P, k: i64) -> i64 {
+    fun f(p: P, k: i64) -> i64 {
         var q: P
         q = p
         q.x -= k
@@ -182,7 +182,7 @@ same(native{|
     }
 |}, vasm{|
     struct P { x: i64, y: i64 }
-    fn f(p: P, k: i64) -> i64 {
+    fun f(p: P, k: i64) -> i64 {
         var q: P
         q = p
         var t0: i64
@@ -205,13 +205,13 @@ same(native{|
 
 # and, or and not make if; the condition of while is computed again at the end of each round
 same(native{|
-    fn f(a: i64, b: i64) -> bool {
+    fun f(a: i64, b: i64) -> bool {
         if a > 0 and b > 0 { return true }
         while a < 10 or not (b < 3) { a += 1 }
         a == b
     }
 |}, vasm{|
-    fn f(a: i64, b: i64) -> bool {
+    fun f(a: i64, b: i64) -> bool {
         var t0: bool
         t0 = a > 0
         var t1: bool
@@ -260,14 +260,14 @@ same(native{|
 
 # a literal beyond the range of vasm is made from parts of 15 bits, in the type that the context gives
 same(native{|
-    fn f(x: i32) -> i32 {
+    fun f(x: i32) -> i32 {
         let a: i64 = 0x123456789
         let b: u32 = 4294967295
         let c: i32 = -2147483648
         x + 100000
     }
 |}, vasm{|
-    fn f(x: i32) -> i32 {
+    fun f(x: i32) -> i32 {
         var t0: i64
         t0 = 4
         t0 = t0 << 15
@@ -305,18 +305,18 @@ same(native{|
 
 # calls: the results of nested calls are kept in temporaries, and a borrow keeps its region
 same(native{|
-    fn g(a: i64, b: i64) -> i64 { a + b }
-    fn h[r](a: &r [u8]) -> i64 {
+    fun g(a: i64, b: i64) -> i64 { a + b }
+    fun h[r](a: &r [u8]) -> i64 {
         let k = len(a)
         g(k, g(1, 2)) * 3
     }
 |}, vasm{|
-    fn g(a: i64, b: i64) -> i64 {
+    fun g(a: i64, b: i64) -> i64 {
         var t0: i64
         t0 = a + b
         return t0
     }
-    fn h[r](a: &r [u8]) -> i64 {
+    fun h[r](a: &r [u8]) -> i64 {
         var k: i64
         k = len(a)
         var t0: i64
@@ -331,7 +331,7 @@ same(native{|
 
 # a name that is declared again gets another name in vasm, and the loop variable ends with the loop
 same(native{|
-    fn f(n: i64) -> i64 {
+    fun f(n: i64) -> i64 {
         var s: i64
         s = 0
         for i in 0 as i64..n { s += i }
@@ -340,7 +340,7 @@ same(native{|
         s2
     }
 |}, vasm{|
-    fn f(n: i64) -> i64 {
+    fun f(n: i64) -> i64 {
         var s: i64
         s = 0
         var t0: i64
@@ -365,15 +365,15 @@ same(native{|
     }
 |})
 
-# a value of val, a closure and a call of a val
+# a value of value, a closure and a call of a value
 same(native{|
-    fn f(v: val) -> val {
+    fun f(v: value) -> value {
         let w = v('a, 'b)
         'done
     }
 |}, vasm{|
-    fn f(v: val) -> val {
-        var w: val
+    fun f(v: value) -> value {
+        var w: value
         w = v('a, 'b)
         return 'done
     }
@@ -381,11 +381,11 @@ same(native{|
 
 # a statement that returns in the middle, and the result of an if that ends a function
 same(native{|
-    fn f(x: i64) -> i64 {
+    fun f(x: i64) -> i64 {
         if x == 0 { return 1 } else { return 2 }
     }
 |}, vasm{|
-    fn f(x: i64) -> i64 {
+    fun f(x: i64) -> i64 {
         if (x == 0) {
             return 1
         } else {
@@ -398,44 +398,44 @@ same(native{|
 
 # the type of a literal alone is not known
 ng(native{|
-    fn f() {
+    fun f() {
         let x = 5  # NG
     }
 |}, 'type)
 
 ng(native{|
-    fn f() {
+    fun f() {
         let x = 0x12345  # NG
     }
 |}, 'type)
 
 # a literal beyond the range of its type
 ng(native{|
-    fn f() {
+    fun f() {
         let x: i32 = 4294967296  # NG
     }
 |}, 'type)
 
 ng(native{|
-    fn f() {
+    fun f() {
         let x: u32 = -1000000  # NG
     }
 |}, 'type)
 
 ng(native{|
-    fn f(n: i64) {
+    fun f(n: i64) {
         y = n  # NG
     }
 |}, 'undefined)
 
 ng(native{|
-    fn f(n: i64) {
+    fun f(n: i64) {
         g(n)  # NG
     }
 |}, 'undefined)
 
 ng(native{|
-    fn f(n: i64) -> i64 {
+    fun f(n: i64) -> i64 {
         n + 1  # NG
         n
     }
@@ -443,7 +443,7 @@ ng(native{|
 
 # for needs the type of the variable
 ng(native{|
-    fn f(n: i64) {
+    fun f(n: i64) {
         for i in 0..10 {  # NG
             n += 1
         }
@@ -452,29 +452,29 @@ ng(native{|
 
 # only the first error of a function is reported, and the other functions are expanded
 r := native_compile.compile_all(native{|
-    fn f() { x = 1 }
-    fn g() { y = 2 }
-    fn h() { }
+    fun f() { x = 1 }
+    fun g() { y = 2 }
+    fun h() { }
 |})
 check(length(arg(r, 1)), 2)
 check(map(f -> arg(f, 1), arg(arg(r, 0), 0)), ['h])
 
 # an error of vasm_check.check on the expanded form is reported by vasm_check.check
-check(map((VasmErr{k, _, _}) -> k, vasm_check.check(native_compile.compile(native{|
-    fn f(x: i64) -> i32 { x }
+check(map((VasmError{k, _, _}) -> k, vasm_check.check(native_compile.compile(native{|
+    fun f(x: i64) -> i32 { x }
 |}))), ['type])
 
 # the functions and the structs of other units are used through their interfaces, and are not in the expanded module
 lib_iface := vasm_unit.iface(vasm{|
     struct P { x: i64, y: i64 }
-    fn twice(a: i64) -> i64 {
+    fun twice(a: i64) -> i64 {
         var t: i64
         t = a + a
         return t
     }
 |})
 user := native{|
-    fn f(a: i64) -> i64 {
+    fun f(a: i64) -> i64 {
         let p = P{x: twice(a), y: 1}
         p.x + p.y
     }
@@ -484,7 +484,7 @@ same2 := native_compile.compile_with(user, lib_iface)
 check(map(d -> arg(d, 1), arg(same2, 0)), ['f])
 check(vasm_check.check_with(same2, lib_iface), [])
 check(vasm_text.text(same2), vasm_text.text(vasm{|
-    fn f(a: i64) -> i64 {
+    fun f(a: i64) -> i64 {
         var t0: i64
         t0 = twice(a)
         var p: P
@@ -500,7 +500,7 @@ check(vasm_text.text(same2), vasm_text.text(vasm{|
 |}))
 
 # without the interface the function is not defined
-check(map((VasmErr{k, _, _}) -> k, arg(native_compile.compile_all(user), 1)), ['undefined])
+check(map((VasmError{k, _, _}) -> k, arg(native_compile.compile_all(user), 1)), ['undefined])
 
 put(f"native: {passed} passed, {failed} failed\n")
 if (failed > 0) exit(1)

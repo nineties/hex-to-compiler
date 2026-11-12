@@ -3,7 +3,7 @@
 #
 # A segment is Seg{vaddr, off, data, memsz, flags}: its bytes are at the file offset off and are loaded at vaddr, and memsz is
 # the size in memory (the rest after the bytes is 0). flags is 4 for read, 2 for write and 1 for execute.
-# The first segment starts at the file offset 0 and its first elf.hdr_size(n) bytes are the headers: the writer fills them in.
+# The first segment starts at the file offset 0 and its first elf.header_size(n) bytes are the headers: the writer fills them in.
 # The file offset of the other segments is congruent to vaddr modulo 4096.
 
 use("base")
@@ -14,15 +14,15 @@ module elf {
 
 machines := [Tuple{'x86_64, 62}]
 
-# image(machine, entry, segs) is the file as a buffer of bytes; the first hdr_size(n) bytes of the first segment are the headers
-export hdr_size(nsegs) := 64 + 56 * nsegs
+# image(machine, entry, segs) is the file as a buffer of bytes; the first header_size(n) bytes of the first segment are the headers
+export header_size(nsegs) := 64 + 56 * nsegs
 
 export image(machine, entry, segs) := {
     n := length(segs)
-    hdr := hdr_size(n)
+    header := header_size(n)
     if (n == 0) panic("elf.image: no segments")
     s0 := segs[0]
-    if (arg(s0, 1) != 0 or bytes.len(arg(s0, 2)) < hdr) panic("elf.image: the first segment must start at the file offset 0 and hold the headers")
+    if (arg(s0, 1) != 0 or bytes.len(arg(s0, 2)) < header) panic("elf.image: the first segment must start at the file offset 0 and hold the headers")
     code := find(e -> arg(e, 0) == machine, machines)
     if (code == none) panic("elf.image: unknown machine")
     b := bytes.new()
@@ -62,7 +62,7 @@ export image(machine, entry, segs) := {
     each((Seg{_, off, data, _, _}) -> {
         if (off > 0 and bytes.len(b) > off) panic("elf.image: segments overlap in the file")
         bytes.zeros(b, off - bytes.len(b))
-        i := if (off == 0) hdr else 0
+        i := if (off == 0) header else 0
         while (i < bytes.len(data)) {
             bytes.u8(b, bytes.get(data, i))
             i = i + 1

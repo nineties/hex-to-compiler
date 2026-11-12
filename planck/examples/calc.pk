@@ -14,9 +14,9 @@ cur_file := ""
 cur_src := ""
 here(p) := error.loc_at(cur_file, cur_src, p)
 
-record Tok(kind, value, pos) = tok
+record Token(kind, value, pos) = token
 
-# === Lexer: the source text to a vector of Tok(kind, value, position) ===
+# === Lexer: the source text to a vector of Token(kind, value, position) ===
 lex(src) := {
     toks := vector.new()
     n := strlen(src)
@@ -25,30 +25,30 @@ lex(src) := {
         c := ord(src, i)
         match c {
             10 -> {
-                vector.push(toks, tok('nl, "\n", i))
+                vector.push(toks, token('nl, "\n", i))
                 i = i + 1
             }
           | c if string.is_space(c) -> { i = i + 1 }
           | c if string.is_digit(c) -> {
                 j := i
                 while (j < n and string.is_digit(ord(src, j))) j = j + 1
-                vector.push(toks, tok('num, string.str_to_int(substr(src, i, j)), i))
+                vector.push(toks, token('num, string.string_to_int(substr(src, i, j)), i))
                 i = j
             }
           | c if string.is_ident_start(c) -> {
                 j := i
                 while (j < n and string.is_ident_char(ord(src, j))) j = j + 1
-                vector.push(toks, tok('id, substr(src, i, j), i))
+                vector.push(toks, token('id, substr(src, i, j), i))
                 i = j
             }
-          | c if string.index_of_str("+-*/()=", string.chr(c), 0) >= 0 -> {
-                vector.push(toks, tok('op, string.chr(c), i))
+          | c if string.index_of_string("+-*/()=", string.char(c), 0) >= 0 -> {
+                vector.push(toks, token('op, string.char(c), i))
                 i = i + 1
             }
-          | _ -> error.at(here(i), f"unexpected character {pretty.quote_str(string.chr(c))}")
+          | _ -> error.at(here(i), f"unexpected character {pretty.quote_string(string.char(c))}")
         }
     }
-    vector.push(toks, tok('eof, "", n))
+    vector.push(toks, token('eof, "", n))
     toks
 }
 
@@ -150,7 +150,7 @@ compile(stmts) := {
     vector.to_list(code)
 }
 
-show_operand(o) := if (type(o) == Int) string.int_to_str(o) else symname(o)
+show_operand(o) := if (type(o) == Int) string.int_to_string(o) else symname(o)
 show_instr(Bin{d, op, a, b, _}) := join(" ", [show_operand(d), "=", show_operand(a), op, show_operand(b)])
 show_instr(Copy{d, a}) := join(" ", [show_operand(d), "=", show_operand(a)])
 show_instr(Print{a}) := _strcat("print ", show_operand(a))
@@ -163,13 +163,13 @@ run_code(code) := {
     table.set(ops, "-", (a, b) -> a - b)
     table.set(ops, "*", (a, b) -> a * b)
     table.set(ops, "/", (a, b) -> a / b)
-    val(o) := if (type(o) == Int) o else table.get(vars, o, none)
+    value(o) := if (type(o) == Int) o else table.get(vars, o, none)
     each((Bin{d, op, a, b, p}) -> {
-             y := val(b)
+             y := value(b)
              if (op == "/" and y == 0) error.at(here(p), "division by zero")
-             table.set(vars, d, table.get(ops, op, none)(val(a), y))
-         } | (Copy{d, a}) -> table.set(vars, d, val(a))
-           | (Print{a}) -> { put("= "); println(val(a)) }, code)
+             table.set(vars, d, table.get(ops, op, none)(value(a), y))
+         } | (Copy{d, a}) -> table.set(vars, d, value(a))
+           | (Print{a}) -> { put("= "); println(value(a)) }, code)
 }
 
 calc(file, src, verbose) := {
@@ -191,7 +191,7 @@ calc(file, src, verbose) := {
         }
         run_code(code)
     })
-    if (head(r) == 'Err) {
+    if (head(r) == 'Error) {
         put("error: ")
         put(error.show(src, arg(r, 0), arg(r, 1)))
         put("\n")

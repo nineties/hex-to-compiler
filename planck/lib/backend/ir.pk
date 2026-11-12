@@ -9,7 +9,7 @@
 #   M{base, disp}, MX{base, index, scale, disp}, MG{name, disp} and MF{kind, n, disp} memory operands.
 #   base and index are U{r} or none. MF is a stack slot ('slot, n) or an incoming argument ('arg, n).
 # Registers are integers. 0 to 31 are the physical registers of a target, and 32 and above are virtual registers.
-# A function is IRFn{name, code, meta}: code is a vector of instructions and meta a table.
+# A function is IRFun{name, code, meta}: code is a vector of instructions and meta a table.
 
 use("base")
 use("list")
@@ -32,14 +32,14 @@ export fn(name) := {
     table.set(meta, 'width, table.new())
     table.set(meta, 'class, table.new())
     table.set(meta, 'exported, true)
-    IRFn{name, vector.new(), meta}
+    IRFun{name, vector.new(), meta}
 }
 
-export name(IRFn{n, _, _}) := n
-export meta(IRFn{_, _, m}) := m
-export emit(IRFn{_, c, _}, i) := vector.push(c, i)
-export code(IRFn{_, c, _}) := vector.to_list(c)
-export set_code(IRFn{n, _, m}, xs) := IRFn{n, vector.from_list(xs), m}
+export name(IRFun{n, _, _}) := n
+export meta(IRFun{_, _, m}) := m
+export emit(IRFun{_, c, _}, i) := vector.push(c, i)
+export code(IRFun{_, c, _}) := vector.to_list(c)
+export set_code(IRFun{n, _, m}, xs) := IRFun{n, vector.from_list(xs), m}
 
 # vreg(f, w) is a new virtual register that holds a w-bit value
 export vreg(f, w) := {
@@ -72,18 +72,18 @@ export slot(f, size, align) := {
 }
 
 # === Instructions ===
-op_regs(D{r}, role) := if (role == 'def) [r] else []
-op_regs(ID{r}, role) := if (role == 'def) [r] else []
+op_regs(D{r}, role) := if (role == 'define) [r] else []
+op_regs(ID{r}, role) := if (role == 'define) [r] else []
 op_regs(U{r}, role) := if (role == 'use) [r] else []
 op_regs(IU{r}, role) := if (role == 'use) [r] else []
 op_regs(DU{r}, role) := [r]
-op_regs(Ds{rs}, role) := if (role == 'def) rs else []
+op_regs(Ds{rs}, role) := if (role == 'define) rs else []
 op_regs(Us{rs}, role) := if (role == 'use) rs else []
 op_regs(M{b, _}, role) := op_regs(b, role)
 op_regs(MX{b, x, _, _}, role) := append(op_regs(b, role), op_regs(x, role))
 op_regs(_, role) := []
 
-export defs(I{_, ops}) := concat_map(o -> op_regs(o, 'def), ops)
+export defs(I{_, ops}) := concat_map(o -> op_regs(o, 'define), ops)
 export uses(I{_, ops}) := concat_map(o -> op_regs(o, 'use), ops)
 
 # map_op(f, o) renames every register of the operand o with f
@@ -124,7 +124,7 @@ move_pair(I{'mov, [W{_}, D{a}, U{b}]}) := Tuple{a, b}
 move_pair(_) := none
 
 # === Text ===
-show_regs(rs) := join(" ", map(r -> string.int_to_str(r), rs))
+show_regs(rs) := join(" ", map(r -> string.int_to_string(r), rs))
 
 show_op(D{r}) := f"d{r}"
 show_op(U{r}) := f"u{r}"
@@ -133,7 +133,7 @@ show_op(ID{r}) := f"id{r}"
 show_op(IU{r}) := f"iu{r}"
 show_op(Ds{rs}) := f"d[{show_regs(rs)}]"
 show_op(Us{rs}) := f"u[{show_regs(rs)}]"
-show_op(K{n}) := string.int_to_str(n)
+show_op(K{n}) := string.int_to_string(n)
 show_op(S{n, off}) := if (off == 0) n else f"{n}+{off}"
 show_op(L{l}) := f"L{l}"
 show_op(Cc{c}) := symname(c)
@@ -150,7 +150,7 @@ show_ops(ops) := join(", ", map(show_op, ops))
 
 export show(I{op, ops}) := if (op == 'label) f"{show_op(ops[0])}:" else f"  {symname(op)} {show_ops(ops)}"
 
-show_fn(f) := _strcat(_strcat(name(f), ":\n"), join("\n", map(show, code(f))))
+show_fun(f) := _strcat(_strcat(name(f), ":\n"), join("\n", map(show, code(f))))
 
 # the number of the label that a label instruction defines
 export label_id(I{'label, [L{l}]}) := l

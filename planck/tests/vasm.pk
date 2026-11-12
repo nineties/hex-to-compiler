@@ -1,6 +1,6 @@
 # tests for the vasm language of planck/lib/vasm/check.pk: syntax, the modules that pass and
 # fail, own in own, arrays and structs, conversions of integers, the range of literals,
-# string literals, val and the services of the system
+# string literals, value and the services of the system
 # Copyright (C) 2026 nineties
 
 passed := 0
@@ -27,41 +27,41 @@ ok(m) := check(vasm_check.errors(this_file, m), [])
 # the module has one error of the kind, on the line marked with "# NG"
 ng(m, kind) := {
     es := vasm_check.errors(this_file, m)
-    check(map((VasmErr{k, _, _}) -> k, es), [kind])
+    check(map((VasmError{k, _, _}) -> k, es), [kind])
     if (length(es) == 1) {
         line := error.line_text(this_src, arg(arg(arg(es, 0), 1), 1))
-        check(string.index_of_str(line, "# NG", 0) >= 0, true)
+        check(string.index_of_string(line, "# NG", 0) >= 0, true)
     }
 }
 
 # === syntax ===
 m := vasm{|
-    fn f(a: i64, b: &r i64) -> i64 { return a }
+    fun f(a: i64, b: &r i64) -> i64 { return a }
 |}
 fn_f := arg(m, 0)[0]
 check(length(arg(m, 0)), 1)
-check(head(fn_f), 'Fn)
+check(head(fn_f), 'Fun)
 check(arg(fn_f, 1), 'f)
 check(map((Param{_, x, t}) -> Tuple{x, t}, arg(fn_f, 3)), [Tuple{'a, I64{}}, Tuple{'b, Ref{'shr, 'r, I64{}}}])
 check(arg(fn_f, 4), I64{})
-body := arg(arg(vasm{| fn g() { x = a + 1; *p = 2; y = *p; return } |}, 0)[0], 5)
+body := arg(arg(vasm{| fun g() { x = a + 1; *p = 2; y = *p; return } |}, 0)[0], 5)
 check(map(head, body), ['Assign, 'Store, 'Assign, 'Ret])
 check(arg(arg(body, 0)[2], 0), 'add)
 check(head(arg(body[2], 2)), 'Load)
 # a new line separates statements: *p = 1 is not a multiplication
-body2 := arg(arg(vasm{| fn g() {
+body2 := arg(arg(vasm{| fun g() {
     x = a
     *p = 1
 } |}, 0)[0], 5)
 check(map(head, body2), ['Assign, 'Store])
-check(map(t -> vasm_check.show_type(t), [I64{}, Own{Bool{}}, Ref{'mut, 'r, I64{}}, Ref{'shr, 'q, I64{}}]),
-    ["i64", "own bool", "&mut r i64", "&q i64"])
+check(map(t -> vasm_check.show_type(t), [I64{}, Own{Bool{}}, Ref{'mutable, 'r, I64{}}, Ref{'shr, 'q, I64{}}]),
+    ["i64", "own bool", "&mutable r i64", "&q i64"])
 
 # === modules that pass ===
 
 # integers, if and while
 ok(vasm{|
-    fn sum(n: i64) -> i64 {
+    fun sum(n: i64) -> i64 {
         var s: i64
         var i: i64
         s = 0
@@ -72,12 +72,12 @@ ok(vasm{|
         }
         return s
     }
-    fn max(a: i64, b: i64) -> i64 {
+    fun max(a: i64, b: i64) -> i64 {
         var m: i64
         if (a < b) { m = b } else { m = a }
         return m
     }
-    fn twice(n: i64) -> i64 {
+    fun twice(n: i64) -> i64 {
         var r: i64
         var s: i64
         r = sum(n)
@@ -89,7 +89,7 @@ ok(vasm{|
 
 # a value owned by a register is moved to another and freed once
 ok(vasm{|
-    fn own_move() -> i64 {
+    fun own_move() -> i64 {
         var p: own i64
         var q: own i64
         var v: i64
@@ -104,15 +104,15 @@ ok(vasm{|
 
 # an own value is given to a function, which frees it, or is given back
 ok(vasm{|
-    fn consume(p: own i64) { free(p) }
-    fn inc(p: own i64) -> own i64 {
+    fun consume(p: own i64) { free(p) }
+    fun inc(p: own i64) -> own i64 {
         var v: i64
         v = *p
         v = v + 1
         *p = v
         return p
     }
-    fn caller() {
+    fun caller() {
         var p: own i64
         p = box(41)
         p = inc(p)
@@ -122,19 +122,19 @@ ok(vasm{|
 
 # borrows in a region; the owner is used again after the region
 ok(vasm{|
-    fn get[r](p: &r i64) -> i64 {
+    fun get[r](p: &r i64) -> i64 {
         var v: i64
         v = *p
         return v
     }
-    fn set[r](p: &mut r i64, v: i64) { *p = v }
-    fn borrow() -> i64 {
+    fun set[r](p: &mutable r i64, v: i64) { *p = v }
+    fun borrow() -> i64 {
         var p: own i64
         var v: i64
         p = box(1)
         region r {
-            var m: &mut r i64
-            m = &mut r p
+            var m: &mutable r i64
+            m = &mutable r p
             set(m, 5)
         }
         region r {
@@ -154,11 +154,11 @@ ok(vasm{|
 
 # a function returns a borrow of a region given by its parameters
 ok(vasm{|
-    fn pick[r](a: &r i64, b: &r i64, first: bool) -> &r i64 {
+    fun pick[r](a: &r i64, b: &r i64, first: bool) -> &r i64 {
         if (first) { return a }
         return b
     }
-    fn use_pick() -> i64 {
+    fun use_pick() -> i64 {
         var x: own i64
         var y: own i64
         var v: i64
@@ -181,7 +181,7 @@ ok(vasm{|
 
 # a register is initialized in both branches; an own value is freed in both branches
 ok(vasm{|
-    fn branches(c: bool, p: own i64) -> i64 {
+    fun branches(c: bool, p: own i64) -> i64 {
         var v: i64
         if (c) {
             v = *p
@@ -192,7 +192,7 @@ ok(vasm{|
         }
         return v
     }
-    fn loop_keeps(n: i64) {
+    fun loop_keeps(n: i64) {
         var p: own i64
         var i: i64
         p = box(0)
@@ -210,7 +210,7 @@ ok(vasm{|
 
 # moved twice
 ng(vasm{|
-    fn twice_moved() {
+    fun twice_moved() {
         var p: own i64
         var q: own i64
         var r: own i64
@@ -224,8 +224,8 @@ ng(vasm{|
 
 # given to a function and used again
 ng(vasm{|
-    fn consume(p: own i64) { free(p) }
-    fn moved_by_call() {
+    fun consume(p: own i64) { free(p) }
+    fun moved_by_call() {
         var p: own i64
         p = box(1)
         consume(p)
@@ -235,7 +235,7 @@ ng(vasm{|
 
 # used after it is freed
 ng(vasm{|
-    fn after_free() -> i64 {
+    fun after_free() -> i64 {
         var p: own i64
         var v: i64
         p = box(1)
@@ -247,7 +247,7 @@ ng(vasm{|
 
 # freed twice
 ng(vasm{|
-    fn double_free() {
+    fun double_free() {
         var p: own i64
         p = box(1)
         free(p)
@@ -257,7 +257,7 @@ ng(vasm{|
 
 # read before it is initialized
 ng(vasm{|
-    fn uninit() -> i64 {
+    fun uninit() -> i64 {
         var v: i64
         var w: i64
         w = v + 1   # NG
@@ -267,7 +267,7 @@ ng(vasm{|
 
 # initialized in one branch only
 ng(vasm{|
-    fn one_branch(c: bool) -> i64 {
+    fun one_branch(c: bool) -> i64 {
         var v: i64
         if (c) { v = 1 }
         return v    # NG
@@ -276,7 +276,7 @@ ng(vasm{|
 
 # initialized only in the loop, which may not run
 ng(vasm{|
-    fn in_loop(n: i64) -> i64 {
+    fun in_loop(n: i64) -> i64 {
         var v: i64
         while (n > 0) {
             v = n
@@ -288,7 +288,7 @@ ng(vasm{|
 
 # a borrow is put in a register outside its region
 ng(vasm{|
-    fn escape_by_register() -> i64 {
+    fun escape_by_register() -> i64 {
         var p: own i64
         var v: i64
         p = box(1)
@@ -306,7 +306,7 @@ ng(vasm{|
 
 # a borrow of a region of the function is returned
 ng(vasm{|
-    fn escape_by_return[q](a: &q i64) -> &q i64 {
+    fun escape_by_return[q](a: &q i64) -> &q i64 {
         var p: own i64
         var b: &q i64
         p = box(1)
@@ -321,14 +321,14 @@ ng(vasm{|
 
 # a register of a type of a region is declared outside the region
 ng(vasm{|
-    fn region_not_open() {
+    fun region_not_open() {
         var b: &r i64   # NG
     }
 |}, 'region)
 
 # borrowed into a region that outlives the owner
 ng(vasm{|
-    fn short_owner() {
+    fun short_owner() {
         region r {
             var p: own i64
             var b: &r i64
@@ -341,7 +341,7 @@ ng(vasm{|
 
 # freed while it is borrowed
 ng(vasm{|
-    fn free_borrowed() {
+    fun free_borrowed() {
         var p: own i64
         p = box(1)
         region r {
@@ -352,30 +352,30 @@ ng(vasm{|
     }
 |}, 'borrowed)
 
-# borrowed as mut twice
+# borrowed as mutable twice
 ng(vasm{|
-    fn two_mut() {
+    fun two_mut() {
         var p: own i64
         p = box(1)
         region r {
-            var a: &mut r i64
-            var b: &mut r i64
-            a = &mut r p
-            b = &mut r p    # NG
+            var a: &mutable r i64
+            var b: &mutable r i64
+            a = &mutable r p
+            b = &mutable r p    # NG
         }
         free(p)
     }
 |}, 'borrowed)
 
-# read through the owner while it is borrowed as mut
+# read through the owner while it is borrowed as mutable
 ng(vasm{|
-    fn read_mut_borrowed() -> i64 {
+    fun read_mut_borrowed() -> i64 {
         var p: own i64
         var v: i64
         p = box(1)
         region r {
-            var a: &mut r i64
-            a = &mut r p
+            var a: &mutable r i64
+            a = &mutable r p
             v = *p      # NG
         }
         free(p)
@@ -385,7 +385,7 @@ ng(vasm{|
 
 # written through a shared borrow
 ng(vasm{|
-    fn write_shared() {
+    fun write_shared() {
         var p: own i64
         p = box(1)
         region r {
@@ -400,16 +400,16 @@ ng(vasm{|
 # an own value is not freed
 # an own value that is left at the return is released there
 ok(vasm{|
-    fn dropped_at_return() -> i64 {
+    fun dropped_at_return() -> i64 {
         var p: own i64
         p = box(1)
         return 0
     }
-    fn dropped_at_end() {
+    fun dropped_at_end() {
         var p: own i64
         p = box(1)
     }
-    fn dropped_at_block_end(c: bool) {
+    fun dropped_at_block_end(c: bool) {
         if (c) {
             var q: own i64
             q = box(2)
@@ -419,19 +419,19 @@ ok(vasm{|
 
 # an own value that is overwritten is released
 ok(vasm{|
-    fn overwrite() {
+    fun overwrite() {
         var p: own i64
         p = box(1)
         p = box(2)
         free(p)
     }
-    fn overwrite_twice() {
+    fun overwrite_twice() {
         var p: own i64
         p = box(1)
         p = box(2)
         p = box(3)
     }
-    fn overwrite_in_loop(n: i64) {
+    fun overwrite_in_loop(n: i64) {
         var p: own i64
         var i: i64
         p = box(0)
@@ -444,7 +444,7 @@ ok(vasm{|
 |})
 # the new value is freed twice, and the old borrow is not used after the overwrite
 ng(vasm{|
-    fn overwrite_free_twice() {
+    fun overwrite_free_twice() {
         var p: own i64
         p = box(1)
         p = box(2)
@@ -453,7 +453,7 @@ ng(vasm{|
     }
 |}, 'freed)
 ng(vasm{|
-    fn overwrite_borrowed() {
+    fun overwrite_borrowed() {
         var p: own i64
         var v: i64
         p = box(1)
@@ -468,14 +468,14 @@ ng(vasm{|
 
 # freed in one branch only
 ng(vasm{|
-    fn one_free(c: bool, p: own i64) {
+    fun one_free(c: bool, p: own i64) {
         if (c) { free(p) }  # NG
     }
 |}, 'branch)
 
 # freed in a loop
 ng(vasm{|
-    fn free_in_loop(n: i64) {
+    fun free_in_loop(n: i64) {
         var p: own i64
         p = box(1)
         while (n > 0) {     # NG
@@ -487,12 +487,12 @@ ng(vasm{|
 
 # types
 ng(vasm{|
-    fn not_bool(n: i64) {
+    fun not_bool(n: i64) {
         if (n) { return }   # NG
     }
 |}, 'type)
 ng(vasm{|
-    fn wrong_arg(p: own i64) {
+    fun wrong_arg(p: own i64) {
         var q: own i64
         q = box(true)   # NG
         free(q)
@@ -500,40 +500,40 @@ ng(vasm{|
     }
 |}, 'type)
 ng(vasm{|
-    fn no_return(n: i64) -> i64 {   # NG
+    fun no_return(n: i64) -> i64 {   # NG
         if (n > 0) { return n }
     }
 |}, 'type)
 ng(vasm{|
-    fn undefined_function() {
+    fun undefined_function() {
         nothing(1)  # NG
     }
 |}, 'undefined)
 
 # one error for each function
-check(map((VasmErr{k, _, _}) -> k, vasm_check.errors(this_file, vasm{|
-    fn a1() { var v: i64; v = v }
-    fn a2() { var v: i64; v = 1 }
-    fn a3() { var p: own i64; p = box(1); free(p); free(p) }
+check(map((VasmError{k, _, _}) -> k, vasm_check.errors(this_file, vasm{|
+    fun a1() { var v: i64; v = v }
+    fun a2() { var v: i64; v = 1 }
+    fun a3() { var p: own i64; p = box(1); free(p); free(p) }
 |})), ['uninit, 'freed])
 
 # the message with the position, at the second free
-shown_at := error.line_col(this_src, string.index_of_str(this_src, "free(p) }", string.index_of_str(this_src, "fn shown(", 0)))
-check(map((VasmErr{_, loc, msg}) -> f"{error.show_loc(loc)}: {msg}", vasm_check.errors(this_file, vasm{|
-    fn shown() { var p: own i64; p = box(1); free(p); free(p) }
+shown_at := error.line_col(this_src, string.index_of_string(this_src, "free(p) }", string.index_of_string(this_src, "fun shown(", 0)))
+check(map((VasmError{_, loc, msg}) -> f"{error.show_loc(loc)}: {msg}", vasm_check.errors(this_file, vasm{|
+    fun shown() { var p: own i64; p = box(1); free(p); free(p) }
 |})), [f"planck/tests/vasm.pk:{arg(shown_at, 0)}:{arg(shown_at, 1)}: p is freed twice"])
 
 # === integer types, arrays, structs and built-in functions ===
 
-check(map(t -> vasm_check.show_type(t), [I8{}, U64{}, Own{Arr{U8{}}}, Ref{'shr, 'r, Arr{Named{'Point}}}]),
+check(map(t -> vasm_check.show_type(t), [I8{}, U64{}, Own{Array{U8{}}}, Ref{'shr, 'r, Array{Named{'Point}}}]),
     ["i8", "u64", "own [u8]", "&r [Point]"])
 m2 := vasm{|
     struct Point { x: i64, y: i64 }
-    fn g(a: own [u8], p: Point) { b = box(1); free(b); v = a[0]; a[i] = 2; w = p.x; p.y = 3; q = Point{x: 1, y: 2} }
+    fun g(a: own [u8], p: Point) { b = box(1); free(b); v = a[0]; a[i] = 2; w = p.x; p.y = 3; q = Point{x: 1, y: 2} }
 |}
-check(map(head, arg(m2, 0)), ['Struct, 'Fn])
+check(map(head, arg(m2, 0)), ['Struct, 'Fun])
 check(map((Field{_, x, t}) -> Tuple{x, t}, arg(arg(m2, 0)[0], 2)), [Tuple{'x, I64{}}, Tuple{'y, I64{}}])
-check(map((Param{_, x, t}) -> t, arg(arg(m2, 0)[1], 3)), [Own{Arr{U8{}}}, Named{'Point}])
+check(map((Param{_, x, t}) -> t, arg(arg(m2, 0)[1], 3)), [Own{Array{U8{}}}, Named{'Point}])
 body3 := arg(arg(m2, 0)[1], 5)
 check(map(head, body3), ['Assign, 'CallS, 'Assign, 'IStore, 'Assign, 'FStore, 'Assign])
 check(map(s -> if (head(s) == 'Assign) head(arg(s, 2)) else arg(s, 1), body3), ['Call, 'free, 'Index, 'a, 'Get, 'p, 'Make])
@@ -542,7 +542,7 @@ check(arg(arg(body3[0], 2), 1), 'box)
 
 # integers of each width; a literal takes the type of the other operand or of the register
 ok(vasm{|
-    fn widths(a: u8, b: i32) -> u8 {
+    fun widths(a: u8, b: i32) -> u8 {
         var c: u8
         var d: i32
         var e: u64
@@ -555,41 +555,41 @@ ok(vasm{|
         if (d >= 0) { c = c << 1 }
         return c
     }
-    fn call_widths() -> u8 {
+    fun call_widths() -> u8 {
         var r: u8
         r = widths(200, -5)
         return r
     }
 |})
 ng(vasm{|
-    fn mixed(a: i8, b: i64) -> i64 {
+    fun mixed(a: i8, b: i64) -> i64 {
         var c: i64
         c = a + b   # NG
         return c
     }
 |}, 'type)
 ng(vasm{|
-    fn too_big() {
+    fun too_big() {
         var c: u8
         c = 256     # NG
     }
 |}, 'type)
 ng(vasm{|
-    fn negative_unsigned(n: u32) -> u32 {
+    fun negative_unsigned(n: u32) -> u32 {
         var m: u32
         m = n + -1  # NG
         return m
     }
 |}, 'type)
 ng(vasm{|
-    fn wrong_width(a: i32) -> i64 {
+    fun wrong_width(a: i32) -> i64 {
         return a    # NG
     }
 |}, 'type)
 
-# arrays: alloc(n, v) has n elements v; a[i] reads and writes; len gives the length
+# arrays: allocate(n, v) has n elements v; a[i] reads and writes; len gives the length
 ok(vasm{|
-    fn sum[r](a: &r [i64]) -> i64 {
+    fun sum[r](a: &r [i64]) -> i64 {
         var s: i64
         var i: i64
         var n: i64
@@ -604,7 +604,7 @@ ok(vasm{|
         }
         return s
     }
-    fn fill[r](a: &mut r [i64], v: i64) {
+    fun fill[r](a: &mutable r [i64], v: i64) {
         var i: i64
         var n: i64
         i = 0
@@ -614,14 +614,14 @@ ok(vasm{|
             i = i + 1
         }
     }
-    fn arrays() -> i64 {
+    fun arrays() -> i64 {
         var a: own [i64]
         var s: i64
-        a = alloc(4, 0)
+        a = allocate(4, 0)
         a[0] = 5
         region r {
-            var m: &mut r [i64]
-            m = &mut r a
+            var m: &mutable r [i64]
+            m = &mutable r a
             fill(m, 2)
         }
         region r {
@@ -634,7 +634,7 @@ ok(vasm{|
     }
 |})
 ng(vasm{|
-    fn bad_index(a: own [i64], c: bool) -> i64 {
+    fun bad_index(a: own [i64], c: bool) -> i64 {
         var x: i64
         x = a[c]    # NG
         free(a)
@@ -642,7 +642,7 @@ ng(vasm{|
     }
 |}, 'type)
 ng(vasm{|
-    fn whole_array(a: own [i64]) -> i64 {
+    fun whole_array(a: own [i64]) -> i64 {
         var x: i64
         x = *a      # NG
         free(a)
@@ -650,24 +650,24 @@ ng(vasm{|
     }
 |}, 'type)
 ng(vasm{|
-    fn write_shared_array[r](a: &r [i64]) {
+    fun write_shared_array[r](a: &r [i64]) {
         a[0] = 1    # NG
     }
 |}, 'borrowed)
 ok(vasm{|
-    fn array_dropped(n: i64) {
+    fun array_dropped(n: i64) {
         var a: own [u8]
-        a = alloc(n, 0)
+        a = allocate(n, 0)
         return
     }
 |})
 ng(vasm{|
-    fn bare_array() {
+    fun bare_array() {
         var a: [i64]    # NG
     }
 |}, 'type)
 ng(vasm{|
-    fn elem_range(a: own [u8]) {
+    fun elem_range(a: own [u8]) {
         a[0] = 300  # NG
         free(a)
     }
@@ -682,7 +682,7 @@ ok(vasm{|
         size: u16
         origin: Point
     }
-    fn norm1(p: Point) -> i64 {
+    fun norm1(p: Point) -> i64 {
         var x: i64
         var y: i64
         x = p.x
@@ -690,8 +690,8 @@ ok(vasm{|
         x = x + y
         return x
     }
-    fn move_x[r](p: &mut r Point, x: i64) { p.x = x }
-    fn structs() -> i64 {
+    fun move_x[r](p: &mutable r Point, x: i64) { p.x = x }
+    fun structs() -> i64 {
         var p: Point
         var b: own Point
         var h: own [Header]
@@ -702,14 +702,14 @@ ok(vasm{|
         b = box(p)
         b.y = 4
         region r {
-            var m: &mut r Point
-            m = &mut r b
+            var m: &mutable r Point
+            m = &mutable r b
             move_x(m, 5)
         }
         p = *b
         free(b)
         e = Header{magic: 1179, size: 64, origin: p}
-        h = alloc(2, e)
+        h = allocate(2, e)
         e = h[1]
         p = e.origin
         free(h)
@@ -719,7 +719,7 @@ ok(vasm{|
 |})
 ng(vasm{|
     struct Point { x: i64, y: i64 }
-    fn missing() -> Point {
+    fun missing() -> Point {
         var p: Point
         p = Point{x: 1}     # NG
         return p
@@ -727,21 +727,21 @@ ng(vasm{|
 |}, 'type)
 ng(vasm{|
     struct Point { x: i64, y: i64 }
-    fn no_field(p: Point) -> i64 {
+    fun no_field(p: Point) -> i64 {
         var v: i64
         v = p.z     # NG
         return v
     }
 |}, 'type)
 ng(vasm{|
-    fn no_struct(p: own Pair) { free(p) }   # NG
+    fun no_struct(p: own Pair) { free(p) }   # NG
 |}, 'undefined)
 ng(vasm{|
-    struct Node { value: i64, next: Node }  # NG
+    struct Node { item: i64, next: Node }  # NG
 |}, 'type)
 ng(vasm{|
     struct Point { x: i64, y: i64 }
-    fn shared_field[r](p: &r Point) {
+    fun shared_field[r](p: &r Point) {
         p.x = 1     # NG
     }
 |}, 'borrowed)
@@ -752,7 +752,7 @@ ng(vasm{|
     }
 |}, 'type)
 ng(vasm{|
-    fn box_borrow() {
+    fun box_borrow() {
         var p: own i64
         p = box(1)
         region r {
@@ -767,34 +767,34 @@ ng(vasm{|
 
 # built-in functions: they are not defined again, and their types are checked like other functions
 ng(vasm{|
-    fn box(a: i64) -> i64 { return a }  # NG
+    fun box(a: i64) -> i64 { return a }  # NG
 |}, 'type)
 ng(vasm{|
-    fn free_int(n: i64) {
+    fun free_int(n: i64) {
         free(n)     # NG
     }
 |}, 'type)
 # a result that is not kept is released
 ok(vasm{|
-    fn dropped() {
+    fun dropped() {
         box(1)
     }
-    fn dropped_twice() {
+    fun dropped_twice() {
         box(1)
         box(2)
     }
-    fn make(n: i64) -> own i64 {
+    fun make(n: i64) -> own i64 {
         var p: own i64
         p = box(n)
         return p
     }
-    fn dropped_user() {
+    fun dropped_user() {
         make(3)
     }
 |})
 # the borrow of an own value that is dropped is not used (a call is not an own value)
 ng(vasm{|
-    fn dropped_free() {
+    fun dropped_free() {
         var p: own i64
         p = box(1)
         box(2)
@@ -803,21 +803,21 @@ ng(vasm{|
     }
 |}, 'freed)
 
-# === &mut given to a function is borrowed again for the call ===
+# === &mutable given to a function is borrowed again for the call ===
 ok(vasm{|
-    fn set[r](p: &mut r i64, v: i64) { *p = v }
-    fn get[r](p: &r i64) -> i64 {
+    fun set[r](p: &mutable r i64, v: i64) { *p = v }
+    fun get[r](p: &r i64) -> i64 {
         var v: i64
         v = *p
         return v
     }
-    fn reborrow() -> i64 {
+    fun reborrow() -> i64 {
         var p: own i64
         var v: i64
         p = box(0)
         region r {
-            var m: &mut r i64
-            m = &mut r p
+            var m: &mutable r i64
+            m = &mutable r p
             set(m, 1)
             set(m, 2)
             v = get(m)
@@ -829,13 +829,13 @@ ok(vasm{|
     }
 |})
 ng(vasm{|
-    fn set2[r](a: &mut r i64, b: &mut r i64) { *a = 1; *b = 2 }
-    fn alias() {
+    fun set2[r](a: &mutable r i64, b: &mutable r i64) { *a = 1; *b = 2 }
+    fun alias() {
         var p: own i64
         p = box(0)
         region r {
-            var m: &mut r i64
-            m = &mut r p
+            var m: &mutable r i64
+            m = &mutable r p
             set2(m, m)  # NG
         }
         free(p)
@@ -843,14 +843,14 @@ ng(vasm{|
 |}, 'borrowed)
 # the result has the region of the parameter, so m is moved
 ng(vasm{|
-    fn id[r](p: &mut r i64) -> &mut r i64 { return p }
-    fn kept() {
+    fun id[r](p: &mutable r i64) -> &mutable r i64 { return p }
+    fun kept() {
         var p: own i64
         p = box(0)
         region r {
-            var m: &mut r i64
-            var n: &mut r i64
-            m = &mut r p
+            var m: &mutable r i64
+            var n: &mutable r i64
+            m = &mutable r p
             n = id(m)
             *m = 1      # NG
         }
@@ -860,11 +860,11 @@ ng(vasm{|
 
 # === a borrow of an outer region is given where an inner region is expected ===
 ok(vasm{|
-    fn pick[r](a: &r i64, b: &r i64, first: bool) -> &r i64 {
+    fun pick[r](a: &r i64, b: &r i64, first: bool) -> &r i64 {
         if (first) { return a }
         return b
     }
-    fn nested() -> i64 {
+    fun nested() -> i64 {
         var x: own i64
         var y: own i64
         var v: i64
@@ -887,7 +887,7 @@ ok(vasm{|
         free(y)
         return v
     }
-    fn from_param[q](a: &q i64) -> i64 {
+    fun from_param[q](a: &q i64) -> i64 {
         var v: i64
         region r {
             var b: &r i64
@@ -898,8 +898,8 @@ ok(vasm{|
     }
 |})
 ng(vasm{|
-    fn pick[r](a: &r i64, b: &r i64) -> &r i64 { return a }
-    fn inner_result() -> i64 {
+    fun pick[r](a: &r i64, b: &r i64) -> &r i64 { return a }
+    fun inner_result() -> i64 {
         var x: own i64
         var y: own i64
         var v: i64
@@ -923,8 +923,8 @@ ng(vasm{|
 |}, 'escape)
 # the regions of a function are not ordered
 ng(vasm{|
-    fn pick[r](a: &r i64, b: &r i64) -> &r i64 { return a }
-    fn two_params[q, s](a: &q i64, b: &s i64) -> &q i64 {
+    fun pick[r](a: &r i64, b: &r i64) -> &r i64 { return a }
+    fun two_params[q, s](a: &q i64, b: &s i64) -> &q i64 {
         var c: &q i64
         c = pick(a, b)  # NG
         return c
@@ -933,15 +933,15 @@ ng(vasm{|
 
 # === services of the system: write and exit ===
 ok(vasm{|
-    fn say[r](s: &r [u8]) -> i64 {
+    fun say[r](s: &r [u8]) -> i64 {
         var n: i64
         n = write(1, s)
         return n
     }
-    fn services() {
+    fun services() {
         var a: own [u8]
         var n: i64
-        a = alloc(3, 65)
+        a = allocate(3, 65)
         region r {
             var b: &r [u8]
             b = &r a
@@ -954,61 +954,61 @@ ok(vasm{|
 |})
 # the file and the status are integers
 ng(vasm{|
-    fn bad_fd[r](s: &r [u8], c: bool) {
+    fun bad_fd[r](s: &r [u8], c: bool) {
         var n: i64
         n = write(c, s)     # NG
     }
 |}, 'type)
 ng(vasm{|
-    fn bad_status(c: bool) {
+    fun bad_status(c: bool) {
         exit(c)     # NG
     }
 |}, 'type)
 ng(vasm{|
-    fn bad_count[r](s: &r [u8]) {
+    fun bad_count[r](s: &r [u8]) {
         var n: i64
         n = write(s)    # NG
     }
 |}, 'type)
 # the result is i64
 ng(vasm{|
-    fn bad_result[r](s: &r [u8]) {
+    fun bad_result[r](s: &r [u8]) {
         var n: i32
         n = write(1, s)     # NG
     }
 |}, 'type)
 # the data is a borrow of an array of u8, not an address, an integer, an owner or another element type
 ng(vasm{|
-    fn bad_address() {
+    fun bad_address() {
         var n: i64
         n = write(1, 4096)  # NG
     }
 |}, 'type)
 ng(vasm{|
-    fn bad_owner(a: own [u8]) {
+    fun bad_owner(a: own [u8]) {
         var n: i64
         n = write(1, a)     # NG
         free(a)
     }
 |}, 'type)
 ng(vasm{|
-    fn bad_element[r](s: &r [i64]) {
+    fun bad_element[r](s: &r [i64]) {
         var n: i64
         n = write(1, s)     # NG
     }
 |}, 'type)
 ng(vasm{|
-    fn bad_box[r](s: &r u8) {
+    fun bad_box[r](s: &r u8) {
         var n: i64
         n = write(1, s)     # NG
     }
 |}, 'type)
 # the array is only borrowed: it cannot be freed while the write borrows it, and it is not moved by the write
 ng(vasm{|
-    fn free_while_borrowed() {
+    fun free_while_borrowed() {
         var a: own [u8]
         var n: i64
-        a = alloc(3, 65)
+        a = allocate(3, 65)
         region r {
             var b: &r [u8]
             b = &r a
@@ -1019,10 +1019,10 @@ ng(vasm{|
     }
 |}, 'borrowed)
 ng(vasm{|
-    fn write_freed() {
+    fun write_freed() {
         var a: own [u8]
         var n: i64
-        a = alloc(3, 65)
+        a = allocate(3, 65)
         free(a)
         region r {
             var b: &r [u8]
@@ -1033,7 +1033,7 @@ ng(vasm{|
 |}, 'freed)
 # a borrow that is not set cannot be written
 ng(vasm{|
-    fn write_uninit() {
+    fun write_uninit() {
         var n: i64
         region r {
             var b: &r [u8]
@@ -1043,13 +1043,13 @@ ng(vasm{|
 |}, 'uninit)
 # the names of the services belong to the language
 ng(vasm{|
-    fn write(a: i64) {  # NG
+    fun write(a: i64) {  # NG
     }
 |}, 'type)
 
 # === ports to the arguments and the files: argc, argv, open, read and close ===
 ok(vasm{|
-    fn ports[r](name: &r [u8]) -> i64 {
+    fun ports[r](name: &r [u8]) -> i64 {
         var n: i64
         var fd: i64
         var a: own [u8]
@@ -1057,10 +1057,10 @@ ok(vasm{|
         n = argc()
         s = argv(0)
         fd = open(name)
-        a = alloc(16, 0)
+        a = allocate(16, 0)
         region q {
-            var m: &mut q [u8]
-            m = &mut q a
+            var m: &mutable q [u8]
+            m = &mutable q a
             n = read(fd, m)
         }
         close(fd)
@@ -1070,31 +1070,31 @@ ok(vasm{|
 |})
 # the index of argv, the file of read and close are integers; the result of argv is a borrow that lasts to the end of the program
 ng(vasm{|
-    fn bad_index(c: bool) {
+    fun bad_index(c: bool) {
         var s: &static [u8]
         s = argv(c)     # NG
     }
 |}, 'type)
 ng(vasm{|
-    fn bad_count() {
+    fun bad_count() {
         var n: i32
         n = argc()      # NG
     }
 |}, 'type)
 ng(vasm{|
-    fn bad_close(c: bool) {
+    fun bad_close(c: bool) {
         close(c)    # NG
     }
 |}, 'type)
 # the name of the file is a borrow of an array of u8, not an integer or an owner
 ng(vasm{|
-    fn bad_name() {
+    fun bad_name() {
         var fd: i64
         fd = open(3)    # NG
     }
 |}, 'type)
 ng(vasm{|
-    fn bad_owner_name(a: own [u8]) {
+    fun bad_owner_name(a: own [u8]) {
         var fd: i64
         fd = open(a)    # NG
         free(a)
@@ -1102,26 +1102,26 @@ ng(vasm{|
 |}, 'type)
 # read writes the array, so it takes a mutable borrow of an array of u8
 ng(vasm{|
-    fn read_shared[r](a: &r [u8]) {
+    fun read_shared[r](a: &r [u8]) {
         var n: i64
         n = read(0, a)  # NG
     }
 |}, 'type)
 ng(vasm{|
-    fn read_words[r](a: &mut r [i64]) {
+    fun read_words[r](a: &mutable r [i64]) {
         var n: i64
         n = read(0, a)  # NG
     }
 |}, 'type)
 # the borrow of the array of read lasts only for the call, and the array cannot be freed while it is borrowed by a name
 ng(vasm{|
-    fn read_freed() {
+    fun read_freed() {
         var a: own [u8]
         var n: i64
-        a = alloc(4, 0)
+        a = allocate(4, 0)
         region r {
-            var m: &mut r [u8]
-            m = &mut r a
+            var m: &mutable r [u8]
+            m = &mutable r a
             free(a)     # NG
             n = read(0, m)
         }
@@ -1129,20 +1129,20 @@ ng(vasm{|
 |}, 'borrowed)
 # the names of the ports belong to the language
 ng(vasm{|
-    fn open(a: i64) {  # NG
+    fun open(a: i64) {  # NG
     }
 |}, 'type)
 
 # === own in own, in arrays and in structs ===
 
 # syntax: swap takes a place *p, p[i] or p.f
-swap_body := arg(arg(vasm{| fn g() { x = swap(*p, y); x = swap(a[i], y); x = swap(s.f, y) } |}, 0)[0], 5)
+swap_body := arg(arg(vasm{| fun g() { x = swap(*p, y); x = swap(a[i], y); x = swap(s.f, y) } |}, 0)[0], 5)
 check(map(s -> map(head, arg(arg(s, 2), 2)), swap_body), [['Load, 'Reg], ['Index, 'Reg], ['Get, 'Reg]])
-check(vasm_check.show_type(Own{Own{Arr{Own{U8{}}}}}), "own own [own u8]")
+check(vasm_check.show_type(Own{Own{Array{Own{U8{}}}}}), "own own [own u8]")
 
 # own in own: x = *p moves the contents out, and p is freed or given contents again
 ok(vasm{|
-    fn nested_box() -> i64 {
+    fun nested_box() -> i64 {
         var p: own own i64
         var q: own i64
         var v: i64
@@ -1161,14 +1161,14 @@ ok(vasm{|
 # a struct with own: made with the own values, moved as a whole, and taken apart by its fields
 ok(vasm{|
     struct Buf { data: own [u8], size: i64 }
-    fn make(n: i64) -> Buf {
+    fun make(n: i64) -> Buf {
         var a: own [u8]
         var b: Buf
-        a = alloc(n, 0)
+        a = allocate(n, 0)
         b = Buf{data: a, size: n}
         return b
     }
-    fn drop(b: Buf) -> i64 {
+    fun drop(b: Buf) -> i64 {
         var a: own [u8]
         var n: i64
         a = b.data
@@ -1176,16 +1176,16 @@ ok(vasm{|
         free(a)
         return n
     }
-    fn refill(b: Buf) -> Buf {
+    fun refill(b: Buf) -> Buf {
         var a: own [u8]
         var c: own [u8]
         a = b.data
-        c = alloc(4, 1)
+        c = allocate(4, 1)
         b.data = c
         free(a)
         return b
     }
-    fn use_buf() -> i64 {
+    fun use_buf() -> i64 {
         var b: Buf
         var c: Buf
         var n: i64
@@ -1200,7 +1200,7 @@ ok(vasm{|
 # swap takes own values out of arrays, structs and borrows, and puts others in
 ok(vasm{|
     struct Pair { left: own i64, right: own i64 }
-    fn swaps[r](a: &mut r [own i64], m: &mut r own i64, p: &mut r Pair) {
+    fun swaps[r](a: &mutable r [own i64], m: &mutable r own i64, p: &mutable r Pair) {
         var x: own i64
         var y: own i64
         var n: i64
@@ -1212,7 +1212,7 @@ ok(vasm{|
         n = len(a)
         free(y)
     }
-    fn pair_box() {
+    fun pair_box() {
         var b: own Pair
         var s: Pair
         var l: own i64
@@ -1226,8 +1226,8 @@ ok(vasm{|
         l = swap(b.left, l)
         free(l)
         region q {
-            var m: &mut q Pair
-            m = &mut q b
+            var m: &mutable q Pair
+            m = &mutable q b
             l = box(4)
             l = swap(m.right, l)
             free(l)
@@ -1239,7 +1239,7 @@ ok(vasm{|
         free(l)
         free(r)
     }
-    fn plain_swap(a: own [i64]) -> i64 {
+    fun plain_swap(a: own [i64]) -> i64 {
         var v: i64
         v = swap(a[0], 7)
         free(a)
@@ -1249,7 +1249,7 @@ ok(vasm{|
 
 # an own value in an array is not copied out
 ng(vasm{|
-    fn copy_elem[r](a: &r [own i64]) -> i64 {
+    fun copy_elem[r](a: &r [own i64]) -> i64 {
         var x: own i64
         x = a[0]    # NG
         free(x)
@@ -1259,7 +1259,7 @@ ng(vasm{|
 # a field that owns is not copied out of a pointer
 ng(vasm{|
     struct Pair { left: own i64, right: own i64 }
-    fn copy_field[r](p: &mut r Pair) {
+    fun copy_field[r](p: &mutable r Pair) {
         var x: own i64
         x = p.left  # NG
         free(x)
@@ -1267,47 +1267,47 @@ ng(vasm{|
 |}, 'owner)
 # the contents are not moved out of a borrow
 ng(vasm{|
-    fn out_of_borrow[r](m: &mut r own i64) {
+    fun out_of_borrow[r](m: &mutable r own i64) {
         var x: own i64
         x = *m      # NG
         free(x)
     }
 |}, 'owner)
-# alloc copies its value
+# allocate copies its value
 ng(vasm{|
-    fn alloc_own() {
+    fun alloc_own() {
         var q: own i64
         var a: own [own i64]
         q = box(1)
-        a = alloc(2, q)     # NG
+        a = allocate(2, q)     # NG
     }
 |}, 'owner)
 # the outer own is freed together with what is left in it
 ok(vasm{|
-    fn free_full() {
+    fun free_full() {
         var q: own i64
         var p: own own i64
         q = box(1)
         p = box(q)
         free(p)
     }
-    fn free_elems(a: own [own i64]) {
+    fun free_elems(a: own [own i64]) {
         free(a)
     }
     struct Buf { data: own [u8], size: i64 }
-    fn free_struct(b: own Buf) {
+    fun free_struct(b: own Buf) {
         free(b)
     }
-    fn free_field_moved(b: own Buf) -> own [u8] {
+    fun free_field_moved(b: own Buf) -> own [u8] {
         var d: own [u8]
-        d = alloc(1, 0)
+        d = allocate(1, 0)
         d = swap(b.data, d)
         free(b)
         return d
     }
 |})
 ng(vasm{|
-    fn free_full_twice() {
+    fun free_full_twice() {
         var q: own i64
         var p: own own i64
         q = box(1)
@@ -1317,9 +1317,9 @@ ng(vasm{|
     }
 |}, 'freed)
 ng(vasm{|
-    fn free_struct_use(b: own Buf) -> own [u8] {
+    fun free_struct_use(b: own Buf) -> own [u8] {
         var d: own [u8]
-        d = alloc(1, 0)
+        d = allocate(1, 0)
         free(b)
         d = swap(b.data, d)     # NG
         return d
@@ -1328,30 +1328,30 @@ ng(vasm{|
 |}, 'freed)
 # what is written over is released
 ok(vasm{|
-    fn over_elem[r](a: &mut r [own i64]) {
+    fun over_elem[r](a: &mutable r [own i64]) {
         var x: own i64
         x = box(1)
         a[0] = x
     }
     struct Pair { left: own i64, right: own i64 }
-    fn over_field[r](p: &mut r Pair) {
+    fun over_field[r](p: &mutable r Pair) {
         var x: own i64
         x = box(1)
         p.left = x
     }
-    fn over_box(p: own own i64) {
+    fun over_box(p: own own i64) {
         var q: own i64
         q = box(1)
         *p = q
         free(p)
     }
-    fn over_reg(s: Pair) -> Pair {
+    fun over_reg(s: Pair) -> Pair {
         var x: own i64
         x = box(1)
         s.left = x
         return s
     }
-    fn over_reg_twice(s: Pair) -> Pair {
+    fun over_reg_twice(s: Pair) -> Pair {
         var x: own i64
         var y: own i64
         x = box(1)
@@ -1363,7 +1363,7 @@ ok(vasm{|
 |})
 # the value that was written over is not used again
 ng(vasm{|
-    fn over_moved(p: own own i64) {
+    fun over_moved(p: own own i64) {
         var q: own i64
         var r: own i64
         q = box(1)
@@ -1373,7 +1373,7 @@ ng(vasm{|
     }
 |}, 'moved)
 ng(vasm{|
-    fn over_elem_moved[r](a: &mut r [own i64]) {
+    fun over_elem_moved[r](a: &mutable r [own i64]) {
         var x: own i64
         x = box(1)
         a[0] = x
@@ -1382,7 +1382,7 @@ ng(vasm{|
 |}, 'moved)
 # the contents are moved out once
 ng(vasm{|
-    fn out_twice(p: own own i64) {
+    fun out_twice(p: own own i64) {
         var q: own i64
         var r: own i64
         q = *p
@@ -1394,7 +1394,7 @@ ng(vasm{|
 |}, 'moved)
 # a box whose contents are moved out is not moved or kept
 ng(vasm{|
-    fn move_empty(p: own own i64) -> own own i64 {
+    fun move_empty(p: own own i64) -> own own i64 {
         var q: own i64
         q = *p
         free(q)
@@ -1403,7 +1403,7 @@ ng(vasm{|
 |}, 'moved)
 # the box that is left empty is released at the return, and so is the rest of a struct
 ok(vasm{|
-    fn keep_empty(p: own own i64) {
+    fun keep_empty(p: own own i64) {
         var q: own i64
         q = *p
         free(q)
@@ -1413,7 +1413,7 @@ ok(vasm{|
 # a struct whose field is moved out is not used as a whole, and its other fields that own are not left
 ng(vasm{|
     struct Buf { data: own [u8], size: i64 }
-    fn part_moved(b: Buf) -> Buf {
+    fun part_moved(b: Buf) -> Buf {
         var a: own [u8]
         a = b.data
         free(a)
@@ -1422,7 +1422,7 @@ ng(vasm{|
 |}, 'moved)
 ok(vasm{|
     struct Pair { left: own i64, right: own i64 }
-    fn part_left(s: Pair) {
+    fun part_left(s: Pair) {
         var l: own i64
         l = s.left
         free(l)
@@ -1431,7 +1431,7 @@ ok(vasm{|
 |})
 ng(vasm{|
     struct Pair { left: own i64, right: own i64 }
-    fn field_twice(s: Pair) {
+    fun field_twice(s: Pair) {
         var l: own i64
         var m: own i64
         l = s.left
@@ -1444,7 +1444,7 @@ ng(vasm{|
 ok(vasm{|
     struct Pair { left: own i64, right: own i64 }
     struct Buf { data: own [u8], size: i64 }
-    fn take_all(s: Pair) {
+    fun take_all(s: Pair) {
         var l: own i64
         var r: own i64
         l = s.left
@@ -1452,7 +1452,7 @@ ok(vasm{|
         free(l)
         free(r)         # s owns nothing now and is dropped
     }
-    fn take_and_put_back(b: Buf) -> Buf {
+    fun take_and_put_back(b: Buf) -> Buf {
         var a: own [u8]
         var n: i64
         a = b.data
@@ -1460,7 +1460,7 @@ ok(vasm{|
         b.data = a      # put back, so b is whole again
         return b
     }
-    fn take_in_both(c: bool, s: Pair) {
+    fun take_in_both(c: bool, s: Pair) {
         var l: own i64
         var r: own i64
         l = s.left
@@ -1470,7 +1470,7 @@ ok(vasm{|
 |})
 ng(vasm{|
     struct Pair { left: own i64, right: own i64 }
-    fn whole_after_all(s: Pair) -> Pair {
+    fun whole_after_all(s: Pair) -> Pair {
         var l: own i64
         var r: own i64
         l = s.left
@@ -1482,7 +1482,7 @@ ng(vasm{|
 |}, 'moved)
 ng(vasm{|
     struct Pair { left: own i64, right: own i64 }
-    fn one_side(c: bool, s: Pair) {
+    fun one_side(c: bool, s: Pair) {
         var l: own i64
         var r: own i64
         if (c) {        # NG
@@ -1497,7 +1497,7 @@ ng(vasm{|
 |}, 'branch)
 ng(vasm{|
     struct Buf { data: own [u8], size: i64 }
-    fn read_moved(b: Buf) -> i64 {
+    fun read_moved(b: Buf) -> i64 {
         var a: own [u8]
         var d: own [u8]
         a = b.data
@@ -1510,7 +1510,7 @@ ng(vasm{|
 # a struct with own is not copied, and an own value is not put in two fields
 ng(vasm{|
     struct Buf { data: own [u8], size: i64 }
-    fn copied(b: Buf) {
+    fun copied(b: Buf) {
         var c: Buf
         var d: Buf
         c = b
@@ -1519,7 +1519,7 @@ ng(vasm{|
 |}, 'moved)
 ng(vasm{|
     struct Pair { left: own i64, right: own i64 }
-    fn two_owners() -> Pair {
+    fun two_owners() -> Pair {
         var l: own i64
         var s: Pair
         l = box(1)
@@ -1529,7 +1529,7 @@ ng(vasm{|
 |}, 'moved)
 # the contents are moved out in one branch only
 ng(vasm{|
-    fn one_branch(c: bool, p: own own i64) {
+    fun one_branch(c: bool, p: own own i64) {
         var q: own i64
         if (c) {           # NG
             q = *p
@@ -1540,7 +1540,7 @@ ng(vasm{|
 |}, 'branch)
 # swap writes its place, and only swap takes a place
 ng(vasm{|
-    fn swap_shared[r](b: &r own i64) {
+    fun swap_shared[r](b: &r own i64) {
         var x: own i64
         x = box(1)
         x = swap(*b, x)     # NG
@@ -1548,19 +1548,19 @@ ng(vasm{|
     }
 |}, 'borrowed)
 ng(vasm{|
-    fn place_arg(p: own own i64) {
+    fun place_arg(p: own own i64) {
         free(*p)    # NG
         free(p)
     }
 |}, 'type)
 ng(vasm{|
-    fn not_place(x: own i64, y: own i64) {
+    fun not_place(x: own i64, y: own i64) {
         x = swap(x, y)  # NG
         free(x)
     }
 |}, 'type)
 ng(vasm{|
-    fn swap_type(a: own [i64], b: bool) {
+    fun swap_type(a: own [i64], b: bool) {
         var v: i64
         v = swap(a[0], b)   # NG
         free(a)
@@ -1568,11 +1568,11 @@ ng(vasm{|
 |}, 'type)
 
 # === x = a as T converts an integer ===
-conv := arg(arg(vasm{| fn g() { x = a as u16 } |}, 0)[0], 5)[0]
+conv := arg(arg(vasm{| fun g() { x = a as u16 } |}, 0)[0], 5)[0]
 check(head(arg(conv, 2)), 'Conv)
 check(arg(arg(conv, 2), 2), U16{})
 ok(vasm{|
-    fn widen(a: u8, b: i8, c: i64) -> i64 {
+    fun widen(a: u8, b: i8, c: i64) -> i64 {
         var x: i64
         var y: u16
         var z: i32
@@ -1587,28 +1587,28 @@ ok(vasm{|
     }
 |})
 ng(vasm{|
-    fn conv_bool(f: bool) -> i64 {
+    fun conv_bool(f: bool) -> i64 {
         var x: i64
         x = f as i64    # NG
         return x
     }
 |}, 'type)
 ng(vasm{|
-    fn to_bool(a: i64) -> bool {
+    fun to_bool(a: i64) -> bool {
         var b: bool
         b = a as bool   # NG
         return b
     }
 |}, 'type)
 ng(vasm{|
-    fn conv_lit() -> u8 {
+    fun conv_lit() -> u8 {
         var w: u8
         w = 300 as u8   # NG
         return w
     }
 |}, 'type)
 ng(vasm{|
-    fn conv_width(a: u8) -> i64 {
+    fun conv_width(a: u8) -> i64 {
         var x: i64
         x = a as i32    # NG
         return x
@@ -1616,17 +1616,17 @@ ng(vasm{|
 |}, 'type)
 
 # === a literal is from -32768 to 32767, and a larger value is made with << and | ===
-check(map(s -> vasm_lit_value(s), ["32767", "-32768", "0x7FFF", "0b101", "0o17", "32768", "-32769", "2147483647"]),
+check(map(s -> vasm_literal_value(s), ["32767", "-32768", "0x7FFF", "0b101", "0o17", "32768", "-32769", "2147483647"]),
     [32767, -32768, 32767, 5, 15, Big{"32768"}, Big{"-32769"}, Big{"2147483647"}])
 ok(vasm{|
-    fn magic() -> u32 {
+    fun magic() -> u32 {
         var m: u32
         m = 0x7F45
         m = m << 16
         m = m | 0x4C46
         return m
     }
-    fn edges() {
+    fun edges() {
         var a: i16
         var b: i64
         var c: u64
@@ -1641,7 +1641,7 @@ ok(vasm{|
         d = d | 255
     }
     # 0xCBF29CE484222325 and 0xFFFFFFFF are made from bytes with << and |
-    fn hash_seed() -> u64 {
+    fun hash_seed() -> u64 {
         var h: u64
         h = 0xCB
         h = h << 8
@@ -1660,7 +1660,7 @@ ok(vasm{|
         h = h | 0x25
         return h
     }
-    fn mask32() -> u64 {
+    fun mask32() -> u64 {
         var m: u64
         m = 0xFF
         m = m << 8
@@ -1673,77 +1673,77 @@ ok(vasm{|
     }
 |})
 ng(vasm{|
-    fn mask_in_one_literal() -> u64 {
+    fun mask_in_one_literal() -> u64 {
         var m: u64
         m = 0xFFFFFFFF   # NG
         return m
     }
 |}, 'type)
 ng(vasm{|
-    fn big_i64() -> i64 {
+    fun big_i64() -> i64 {
         var b: i64
         b = 32768   # NG
         return b
     }
 |}, 'type)
 ng(vasm{|
-    fn small_i64() -> i64 {
+    fun small_i64() -> i64 {
         return -32769   # NG
     }
 |}, 'type)
 ng(vasm{|
-    fn wraps() -> u64 {
+    fun wraps() -> u64 {
         var c: u64
         c = 2147483647  # NG
         return c
     }
 |}, 'type)
 ng(vasm{|
-    fn elf_magic() -> u32 {
+    fun elf_magic() -> u32 {
         var c: u32
         c = 0x7F454C46  # NG
         return c
     }
 |}, 'type)
 ng(vasm{|
-    fn u16_literal() -> u16 {
+    fun u16_literal() -> u16 {
         var d: u16
         d = 40000   # NG
         return d
     }
 |}, 'type)
 ng(vasm{|
-    fn negative_u64() -> u64 {
+    fun negative_u64() -> u64 {
         var c: u64
         c = -1      # NG
         return c
     }
 |}, 'type)
 ng(vasm{|
-    fn big_arg(n: i32) -> i32 {
+    fun big_arg(n: i32) -> i32 {
         var r: i32
         r = big_arg(100000)     # NG
         return r
     }
 |}, 'type)
 # the message with the position of the literal
-big_at := error.line_col(this_src, string.index_of_str(this_src, "65536 }", string.index_of_str(this_src, "fn shown_big(", 0)))
-check(map((VasmErr{_, loc, msg}) -> f"{error.show_loc(loc)}: {msg}", vasm_check.errors(this_file, vasm{|
-    fn shown_big() { var c: u32; c = 65536 }
+big_at := error.line_col(this_src, string.index_of_string(this_src, "65536 }", string.index_of_string(this_src, "fun shown_big(", 0)))
+check(map((VasmError{_, loc, msg}) -> f"{error.show_loc(loc)}: {msg}", vasm_check.errors(this_file, vasm{|
+    fun shown_big() { var c: u32; c = 65536 }
 |})), [f"planck/tests/vasm.pk:{arg(big_at, 0)}:{arg(big_at, 1)}: 65536 is out of the range of a literal, -32768 to 32767; make it with << and |"])
 
 # === string literals ===
 
 # syntax: a literal is an operand with the bytes of the string; &static T is a type
-sbody := arg(arg(vasm{| fn g() { x = "a\tb"; f("c", 1) } |}, 0)[0], 5)
-check(map(head, append([arg(arg(sbody[0], 2), 0)], arg(sbody[1], 2))), ['Str, 'Str, 'Imm])
+sbody := arg(arg(vasm{| fun g() { x = "a\tb"; f("c", 1) } |}, 0)[0], 5)
+check(map(head, append([arg(arg(sbody[0], 2), 0)], arg(sbody[1], 2))), ['String, 'String, 'Imm])
 check(arg(arg(arg(sbody[0], 2), 0), 1), "a\tb")
-check(map((Param{_, x, t}) -> Tuple{x, t}, arg(arg(vasm{| fn g(s: &static [u8]) {} |}, 0)[0], 3)), [Tuple{'s, Ref{'shr, 'static, Arr{U8{}}}}])
-check(vasm_check.show_type(Ref{'shr, 'static, Arr{U8{}}}), "&static [u8]")
+check(map((Param{_, x, t}) -> Tuple{x, t}, arg(arg(vasm{| fun g(s: &static [u8]) {} |}, 0)[0], 3)), [Tuple{'s, Ref{'shr, 'static, Array{U8{}}}}])
+check(vasm_check.show_type(Ref{'shr, 'static, Array{U8{}}}), "&static [u8]")
 
 # a literal is a shared borrow of an array of u8 that lasts to the end of the program
 ok(vasm{|
-    fn literals() -> i64 {
+    fun literals() -> i64 {
         var n: i64
         n = write(1, "hello\n")
         n = len("abc")
@@ -1752,15 +1752,15 @@ ok(vasm{|
 |})
 # kept in a register of type &static, returned, and given where a borrow of any region is taken
 ok(vasm{|
-    fn name() -> &static [u8] {
+    fun name() -> &static [u8] {
         return "name"
     }
-    fn size[r](s: &r [u8]) -> i64 {
+    fun size[r](s: &r [u8]) -> i64 {
         var n: i64
         n = len(s)
         return n
     }
-    fn use_literals() -> i64 {
+    fun use_literals() -> i64 {
         var s: &static [u8]
         var n: i64
         var c: u8
@@ -1778,41 +1778,41 @@ ok(vasm{|
     }
 |})
 ng(vasm{|
-    fn not_a_number() -> i64 {
+    fun not_a_number() -> i64 {
         var n: i64
         n = "text"      # NG
         return n
     }
 |}, 'type)
 ng(vasm{|
-    fn not_mutable() {
+    fun not_mutable() {
         var s: &static [u8]
         s = "abc"
         s[0] = 65       # NG
     }
 |}, 'borrowed)
 ng(vasm{|
-    fn not_owned() {
+    fun not_owned() {
         var a: own [u8]
         a = "abc"       # NG
     }
 |}, 'type)
 ng(vasm{|
-    fn no_free() {
+    fun no_free() {
         free("abc")     # NG
     }
 |}, 'type)
 ng(vasm{|
-    fn no_own_of_borrow() {
+    fun no_own_of_borrow() {
         var p: own &static [u8]     # NG
     }
 |}, 'type)
 # a borrow of a region that ends is not a borrow of static
 ng(vasm{|
-    fn short_lived() -> &static [u8] {
+    fun short_lived() -> &static [u8] {
         var a: own [u8]
         var s: &static [u8]
-        a = alloc(3, 65)
+        a = allocate(3, 65)
         region r {
             var b: &r [u8]
             b = &r a
@@ -1823,29 +1823,29 @@ ng(vasm{|
     }
 |}, 'escape)
 
-# === val ===
+# === value ===
 ok(vasm{|
-    fn id(c: val, x: val) -> val {
+    fun id(c: value, x: value) -> value {
         return x
     }
-    fn use_all(a: val, n: i64) -> i64 {
-        var b: val
-        var c: val
+    fun use_all(a: value, n: i64) -> i64 {
+        var b: value
+        var c: value
         var t: bool
         var m: i64
         var s: own [u8]
         b = a
         c = a
-        c = val Pair(a, b)
-        c = fn id(a)
+        c = value Pair(a, b)
+        c = fun id(a)
         c = c(b)
         t = a == b
         t = is(a, 'Pair, 2)
-        c = n as val
+        c = n as value
         m = c as i64
-        c = "text" as val
+        c = "text" as value
         s = c as own [u8]
-        c = true as val
+        c = true as value
         t = c as bool
         c = array(n, 'none)
         c[0] = a
@@ -1857,49 +1857,49 @@ ok(vasm{|
     }
 |})
 ng(vasm{|
-    fn f(a: val) -> i64 {
+    fun f(a: value) -> i64 {
         var n: i64
         n = a            # NG
         return n
     }
 |}, 'type)
 ng(vasm{|
-    fn f(n: i64) -> val {
-        var a: val
+    fun f(n: i64) -> value {
+        var a: value
         a = n            # NG
         return a
     }
 |}, 'type)
 ng(vasm{|
-    fn f(n: i64) -> val {
-        var a: val
-        a = val Pair(n)  # NG
+    fun f(n: i64) -> value {
+        var a: value
+        a = value Pair(n)  # NG
         return a
     }
 |}, 'type)
 ng(vasm{|
-    fn g(n: i64) -> val {
+    fun g(n: i64) -> value {
         return 'none
     }
-    fn f(a: val) -> val {
-        var b: val
-        b = fn g()       # NG
+    fun f(a: value) -> value {
+        var b: value
+        b = fun g()       # NG
         return b
     }
 |}, 'type)
 ng(vasm{|
-    fn g(a: val) -> val {
+    fun g(a: value) -> value {
         return a
     }
-    fn f(a: val) -> val {
-        var b: val
-        b = fn g(a, a)   # NG
+    fun f(a: value) -> value {
+        var b: value
+        b = fun g(a, a)   # NG
         return b
     }
 |}, 'type)
 ng(vasm{|
-    fn f(a: val) -> val {
-        var b: val
+    fun f(a: value) -> value {
+        var b: value
         var n: i64
         n = 1
         b = a(n)         # NG
@@ -1907,20 +1907,20 @@ ng(vasm{|
     }
 |}, 'type)
 ng(vasm{|
-    fn f(a: val) -> val {
-        var b: val
+    fun f(a: value) -> value {
+        var b: value
         return b         # NG
     }
 |}, 'uninit)
 ng(vasm{|
-    fn f(a: val) -> val {
-        var b: own [val]
-        b = alloc(1, a)  # NG
+    fun f(a: value) -> value {
+        var b: own [value]
+        b = allocate(1, a)  # NG
         return a
     }
 |}, 'owner)
 ng(vasm{|
-    fn f(a: val) -> i64 {
+    fun f(a: value) -> i64 {
         var b: &static [u8]
         b = a as &static [u8]   # NG
         return 0
@@ -1929,14 +1929,14 @@ ng(vasm{|
 # the same literal is stored once
 use("vasm/ir")
 lowered := vasm_ir.lower(vasm{|
-    fn twice() {
+    fun twice() {
         write(1, "same")
         write(1, "other")
         write(1, "same")
     }
 |}, 8)
 check(vasm_ir.strings(), ["same", "other"])
-check(map((IRData{n, sec, _, b, _}) -> Tuple{n, sec, vector.to_list(b)}, map(vasm_ir.string_data, vasm_ir.strings())),
+check(map((IRData{n, section, _, b, _}) -> Tuple{n, section, vector.to_list(b)}, map(vasm_ir.string_data, vasm_ir.strings())),
     [Tuple{"__str:same", ".rodata", [4, 0, 0, 0, 0, 0, 0, 0, 115, 97, 109, 101]},
      Tuple{"__str:other", ".rodata", [5, 0, 0, 0, 0, 0, 0, 0, 111, 116, 104, 101, 114]}])
 

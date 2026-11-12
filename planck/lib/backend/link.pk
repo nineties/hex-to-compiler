@@ -1,18 +1,18 @@
-# link: joins relocatable objects (obj.pk) into the segments of an executable (elf.pk)
+# link: joins relocatable objects (object.pk) into the segments of an executable (elf.pk)
 # Copyright (C) 2026 nineties
 #
 # Sections of the same name are joined in the order of the objects. The sections .text and .rodata make the first segment,
 # which is read and executed and holds the headers of the file in front, and .data and .bss make the second, which is read and written.
-# link(objs, entry, base, hdr) is Image{entry, segs, syms}: the address of the symbol entry, the segments of elf.pk, and a table from
-# the global symbols to their addresses. base is the address where the file is loaded and hdr the size of the headers of the file for
-# two segments (elf.hdr_size(2)). A symbol that is used and not defined, or defined twice as global, stops the program.
+# link(objects, entry, base, header) is Image{entry, segs, symbols}: the address of the symbol entry, the segments of elf.pk, and a table from
+# the global symbols to their addresses. base is the address where the file is loaded and header the size of the headers of the file for
+# two segments (elf.header_size(2)). A symbol that is used and not defined, or defined twice as global, stops the program.
 
 use("base")
 use("list")
 use("table")
 use("vector")
 use("bytes")
-use("backend/obj")
+use("backend/object")
 use("backend/elf")
 
 module linker {
@@ -24,7 +24,7 @@ second := [".data", ".bss"]
 
 # the position of each piece: a table from Tuple{object index, section name} to its offset in the joined section,
 # and the joined sections: a table from the name to Tuple{buffer, alignment}
-link_join(objs, names, joined, pieces) := each(name -> {
+link_join(objects, names, joined, pieces) := each(name -> {
     out := bytes.new()
     al := 1
     k := 0
@@ -35,21 +35,21 @@ link_join(objs, names, joined, pieces) := each(name -> {
             if (a > al) al = a
             bytes.align(out, a)
             table.set(pieces, Tuple{k, name}, bytes.len(out))
-            bytes.append(out, obj.buf(s))
+            bytes.append(out, object.buf(s))
         }
         k = k + 1
-    }, objs)
+    }, objects)
     table.set(joined, name, Tuple{out, al})
 }, names)
 
-export link(objs, entry, base, hdr) := {
-    each(o -> each(s -> if (not member(arg(s, 0), append(first, second))) panic(f"link: the section {arg(s, 0)} of {obj.name(o)} is not supported"), obj.sections(o)), objs)
+export link(objects, entry, base, header) := {
+    each(o -> each(s -> if (not member(arg(s, 0), append(first, second))) panic(f"link: the section {arg(s, 0)} of {object.name(o)} is not supported"), object.sections(o)), objects)
     joined := table.new()
     pieces := table.new()
-    link_join(objs, append(first, second), joined, pieces)
+    link_join(objects, append(first, second), joined, pieces)
     # addresses of the joined sections
     addr := table.new()
-    cur := base + hdr
+    cur := base + header
     each(n -> {
         j := table.get(joined, n, none)
         cur = align(cur, arg(j, 1))
@@ -69,43 +69,43 @@ export link(objs, entry, base, hdr) := {
     end1 := cur
     # symbols
     globals := table.new()
-    locals := array(length(objs))
+    locals := array(length(objects))
     k := 0
     each(o -> {
         loc := table.new()
         array_set(locals, k, loc)
-        each((Sym{name, sec, off, global}) -> {
-            a := table.get(addr, sec, -1) + table.get(pieces, Tuple{k, sec}, 0) + off
-            if (table.get(addr, sec, -1) < 0) panic(f"link: {name} is in the section {sec}, which is not supported")
+        each((Symbol{name, section, off, global}) -> {
+            a := table.get(addr, section, -1) + table.get(pieces, Tuple{k, section}, 0) + off
+            if (table.get(addr, section, -1) < 0) panic(f"link: {name} is in the section {section}, which is not supported")
             if (global) {
                 if (table.has(globals, name)) panic(f"link: {name} is defined twice")
                 table.set(globals, name, a)
             } else table.set(loc, name, a)
-        }, obj.symbols(o))
+        }, object.symbols(o))
         k = k + 1
-    }, objs)
+    }, objects)
     # relocations
     k = 0
     each(o -> {
-        each((Rel{sec, off, kind, sym, addend}) -> {
-            s := table.get(array_get(locals, k), sym, table.get(globals, sym, none))
-            if (s == none) panic(f"link: {sym} is not defined (used in {obj.name(o)})")
-            at := table.get(pieces, Tuple{k, sec}, 0) + off
-            place := table.get(addr, sec, 0) + at
+        each((Rel{section, off, kind, symbol, addend}) -> {
+            s := table.get(array_get(locals, k), symbol, table.get(globals, symbol, none))
+            if (s == none) panic(f"link: {symbol} is not defined (used in {object.name(o)})")
+            at := table.get(pieces, Tuple{k, section}, 0) + off
+            place := table.get(addr, section, 0) + at
             v := match kind {
                 'Abs32 -> s + addend
               | 'Pc32 -> s + addend - place
               | _ -> panic(f"link: unknown kind of relocation {kind}")
             }
-            bytes.set_u32(arg(table.get(joined, sec, none), 0), at, v)
-        }, obj.relocs(o))
+            bytes.set_u32(arg(table.get(joined, section, none), 0), at, v)
+        }, object.relocs(o))
         k = k + 1
-    }, objs)
+    }, objects)
     e := table.get(globals, entry, none)
     if (e == none) panic(f"link: the entry {entry} is not defined")
     # segments
     seg0 := bytes.new()
-    bytes.zeros(seg0, hdr)
+    bytes.zeros(seg0, header)
     each(n -> {
         j := table.get(joined, n, none)
         bytes.zeros(seg0, table.get(addr, n, 0) - base - bytes.len(seg0))

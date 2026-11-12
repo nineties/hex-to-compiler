@@ -1,6 +1,6 @@
 # ctl: the instructions that change the control of planckvm, the environments, the Fusions and the continuations
 #
-# A frame is 7 words of the frame stack fs: 0 fn, 1 env, 2 alts, 3 next, 4 base, 5 pc, 6 ret. The pc is the index of the instruction from the
+# A frame is 7 words of the frame stack fs: 0 fun, 1 env, 2 alts, 3 next, 4 base, 5 pc, 6 ret. The pc is the index of the instruction from the
 # first instruction of the code (the code is the Code data, see code_arity). ret is the register (the low 16 bits), the mode (bits 16 and 17: 0 put the value in the register, 1 and 2 the
 # call was made by a condition instruction with k = mode - 1, 3 drop the value) and the kind (the bits from 18: 0 normal, 1 boundary, 2 transfer).
 # The control state of the loop is the top frame fp only: after an instruction of this unit the loop reads the code, the pc and the base again.
@@ -17,53 +17,53 @@ import mem
 import obj
 import builtin
 
-fn code_of[r](h: &r [u8], lam: i64) -> i64 {
+fun code_of[r](h: &r [u8], lam: i64) -> i64 {
     hg(h, (lam >> 3) + 2) >> 3
 }
 
 # A code is a data of the type Code (the word 16 of the heap): the word index code is the header, and the words after the identity and the type are the fields,
 # all values: 3 nregs and 4 arity (integers), 5 the u32 plain array of the instructions, 6 the array of the constants, 7 params (an integer, -1 if none),
 # 8 the u32 plain array of the position table, 9 the index in the constants of the string of the file name (an integer, -1 if none).
-fn code_arity[r](h: &r [u8], code: i64) -> i64 {
+fun code_arity[r](h: &r [u8], code: i64) -> i64 {
     hg(h, code + 4) >> 1
 }
 
-fn code_nregs[r](h: &r [u8], code: i64) -> i64 {
+fun code_nregs[r](h: &r [u8], code: i64) -> i64 {
     hg(h, code + 3) >> 1
 }
 
 # the byte position of the first instruction of the code, and the index of the first constant
-fn code_ib[r](h: &r [u8], code: i64) -> i64 {
+fun code_ib[r](h: &r [u8], code: i64) -> i64 {
     hg(h, code + 5) + 32
 }
 
-fn code_kb[r](h: &r [u8], code: i64) -> i64 {
+fun code_kb[r](h: &r [u8], code: i64) -> i64 {
     (hg(h, code + 6) >> 3) + 2
 }
 
-fn ret_word(a: i64, mode: i64, kind: i64) -> i64 {
+fun ret_word(a: i64, mode: i64, kind: i64) -> i64 {
     a + mode * 65536 + kind * 262144
 }
 
-fn is_func[r](h: &r [u8], f: i64) -> bool {
+fun is_func[r](h: &r [u8], f: i64) -> bool {
     if is_int(f) { return false }
     let k = kind_of(h, f)
     k == 8 or k == 9 or k == 10 or k == 11
 }
 
 # the alternatives of a function: the elements of a Fusion, or the function itself
-fn alt_count[r](h: &r [u8], f: i64) -> i64 {
+fun alt_count[r](h: &r [u8], f: i64) -> i64 {
     if kind_of(h, f) == 9 { return size_of(h, f) - 1 }
     1
 }
 
-fn alt_at[r](h: &r [u8], f: i64, i: i64) -> i64 {
+fun alt_at[r](h: &r [u8], f: i64, i: i64) -> i64 {
     if kind_of(h, f) == 9 { return hg(h, (f >> 3) + 2 + i) }
     f
 }
 
 # whether the alternative (a Lambda, a builtin or a continuation) takes c arguments
-fn alt_takes[r](h: &r [u8], f: i64, c: i64) -> bool {
+fun alt_takes[r](h: &r [u8], f: i64, c: i64) -> bool {
     let k = kind_of(h, f)
     if k == 8 { return code_arity(h, code_of(h, f)) == c }
     if k == 10 { return (hg(h, (f >> 3) + 3) >> 1) == c }
@@ -72,7 +72,7 @@ fn alt_takes[r](h: &r [u8], f: i64, c: i64) -> bool {
 }
 
 # deliver gives the value v to the frame q as the ret word rt says: into a register, or as the truth of the condition instruction
-fn deliver[r](h: &r [u8], rs: &mut r [i64], fs: &mut r [i64], q: i64, rt: i64, v: i64) {
+fun deliver[r](h: &r [u8], rs: &mutable r [i64], fs: &mutable r [i64], q: i64, rt: i64, v: i64) {
     let mode = (rt >> 16) & 3
     if mode == 0 {
         p(rs, g(fs, q + 4) + (rt & 65535), v)
@@ -86,14 +86,14 @@ fn deliver[r](h: &r [u8], rs: &mut r [i64], fs: &mut r [i64], q: i64, rt: i64, v
 }
 
 # do_return drops the frame fp and gives the value v to the frame below as the ret of the dropped frame says; the result is the frame below
-fn do_return[r](h: &r [u8], st: &r [i64], rs: &mut r [i64], fs: &mut r [i64], fp: i64, v: i64) -> i64 {
+fun do_return[r](h: &r [u8], st: &r [i64], rs: &mutable r [i64], fs: &mutable r [i64], fp: i64, v: i64) -> i64 {
     let q = fp - 7
     deliver(h, rs, fs, q, g(fs, fp + 6), v)
     q
 }
 
 # resume copies the frames and the registers of the continuation k to fs from fp and to rs from sl, with the argument at rs[nb]
-fn resume[r](h: &r [u8], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i64], fp: i64, k: i64, nb: i64, rt: i64, sl: i64) -> i64 {
+fun resume[r](h: &r [u8], st: &mutable r [i64], rs: &mutable r [i64], fs: &mutable r [i64], fp: i64, k: i64, nb: i64, rt: i64, sl: i64) -> i64 {
     let v = g(rs, nb)
     let kb = k >> 3
     let nf = hg(h, kb + 3)
@@ -118,7 +118,7 @@ fn resume[r](h: &r [u8], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i64], f
 
 # enter calls f with c arguments that are at rs[nb]. The new frame is at fp and its ret is rt. sl is the place where a continuation is copied.
 # The alternatives are tried from start.
-fn enter[r](h: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i64], fp: i64, f: i64, c: i64, nb: i64, rt: i64, sl: i64, start: i64) -> i64 {
+fun enter[r](h: &mutable r [u8], st: &mutable r [i64], rs: &mutable r [i64], fs: &mutable r [i64], fp: i64, f: i64, c: i64, nb: i64, rt: i64, sl: i64, start: i64) -> i64 {
     if not is_func(h, f) {
         fail(h, st, "not a function")
         return 3
@@ -180,7 +180,7 @@ fn enter[r](h: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i64]
 }
 
 # capture makes a continuation of the frames q to last, the registers s0 to rend-1, and the continuation prior (0 if none) after them
-fn capture[r](h: &mut r [u8], st: &mut r [i64], rs: &r [i64], fs: &r [i64], q: i64, last: i64, s0: i64, rend: i64, reg: i64, prior: i64) -> i64 {
+fun capture[r](h: &mutable r [u8], st: &mutable r [i64], rs: &r [i64], fs: &r [i64], q: i64, last: i64, s0: i64, rend: i64, reg: i64, prior: i64) -> i64 {
     let nfa = (last - q) / 7 + 1
     let nra = rend - s0
     var nfp: i64
@@ -222,7 +222,7 @@ fn capture[r](h: &mut r [u8], st: &mut r [i64], rs: &r [i64], fs: &r [i64], q: i
 }
 
 # the index of the nearest boundary frame at or below q, or -1
-fn find_boundary[r](fs: &r [i64], q0: i64) -> i64 {
+fun find_boundary[r](fs: &r [i64], q0: i64) -> i64 {
     var q: i64
     var go: i64
     q = q0
@@ -240,7 +240,7 @@ fn find_boundary[r](fs: &r [i64], q0: i64) -> i64 {
 }
 
 # prepare turns the boundary frame q into the transfer frame that calls its handler with the value v and the continuation k
-fn prepare[r](rs: &mut r [i64], fs: &mut r [i64], q: i64, v: i64, k: i64) {
+fun prepare[r](rs: &mutable r [i64], fs: &mutable r [i64], q: i64, v: i64, k: i64) {
     let fb = g(fs, q + 4)
     p(fs, q + 2, g(rs, fb - 1))
     p(fs, q + 3, 0)
@@ -251,24 +251,24 @@ fn prepare[r](rs: &mut r [i64], fs: &mut r [i64], q: i64, v: i64, k: i64) {
 }
 
 # whether the string s is "MatchingFailed" (14 bytes, packed from the low end of the words)
-fn is_mf_name[r](h: &r [u8], s: i64) -> bool {
+fun is_mf_name[r](h: &r [u8], s: i64) -> bool {
     if str_len(h, s) != 14 { return false }
     let b = (s >> 3) + 2
     hg(h, b) == 7453010330410836301 and hg(h, b + 1) == 110386773320006
 }
 
-fn is_mf[r](h: &r [u8], v: i64) -> bool {
+fun is_mf[r](h: &r [u8], v: i64) -> bool {
     if not is_mexpr(h, v) { return false }
     is_mf_name(h, hg(h, (mexpr_head(h, v) >> 3) + 1))
 }
 
 # no boundary takes the effect v: a MatchingFailed stops with matching failed, any other effect with unhandled effect
-fn no_handler[r](h: &r [u8], v: i64) {
+fun no_handler[r](h: &r [u8], v: i64) {
     if is_mf(h, v) { die("matching failed") }
     die("unhandled effect")
 }
 
-fn mf_symbol[r](h: &mut r [u8], st: &mut r [i64]) -> i64 {
+fun mf_symbol[r](h: &mutable r [u8], st: &mutable r [i64]) -> i64 {
     let s = new_string(h, st, 14)
     let b = (s >> 3) + 2
     hp(h, b, 7453010330410836301)
@@ -277,7 +277,7 @@ fn mf_symbol[r](h: &mut r [u8], st: &mut r [i64]) -> i64 {
 }
 
 # the symbol Loc ("Loc" is 3 bytes: 76, 111 and 99 from the low end of the word)
-fn loc_symbol[r](h: &mut r [u8], st: &mut r [i64]) -> i64 {
+fun loc_symbol[r](h: &mutable r [u8], st: &mutable r [i64]) -> i64 {
     let s = new_string(h, st, 3)
     hp(h, (s >> 3) + 2, 6516556)
     intern_sym(h, st, s)
@@ -285,7 +285,7 @@ fn loc_symbol[r](h: &mut r [u8], st: &mut r [i64]) -> i64 {
 
 # the Loc{file, line, column} of the call that the frame q is making, or none: the entry of the position table of the code of q for the word before the saved pc,
 # found by a binary search (the entries are in ascending order of pc). It is none when q < 0 or the code has no such entry.
-fn frame_loc[r](h: &mut r [u8], st: &mut r [i64], fs: &r [i64], q: i64) -> i64 {
+fun frame_loc[r](h: &mutable r [u8], st: &mutable r [i64], fs: &r [i64], q: i64) -> i64 {
     if q < 0 { return hg(h, 3) }
     let code = code_of(h, g(fs, q))
     let ls = hg(h, code + 8)
@@ -321,7 +321,7 @@ fn frame_loc[r](h: &mut r [u8], st: &mut r [i64], fs: &r [i64], q: i64) -> i64 {
 }
 
 # MatchingFailed{f, Tuple{the c arguments at rs[nb]}, loc}: loc is the position of the call, Loc{file, line, column}, or none
-fn mf_value[r](h: &mut r [u8], st: &mut r [i64], rs: &r [i64], f: i64, nb: i64, c: i64, loc: i64) -> i64 {
+fun mf_value[r](h: &mutable r [u8], st: &mutable r [i64], rs: &r [i64], f: i64, nb: i64, c: i64, loc: i64) -> i64 {
     let t = new_mexpr(h, st, hg(h, 4), c)
     for i in 0 as i64..c {
         set_arg(h, t, i, g(rs, nb + i))
@@ -336,13 +336,13 @@ fn mf_value[r](h: &mut r [u8], st: &mut r [i64], rs: &r [i64], f: i64, nb: i64, 
 }
 
 # the end of the registers of the frame q
-fn frame_end[r](h: &r [u8], fs: &r [i64], q: i64) -> i64 {
+fun frame_end[r](h: &r [u8], fs: &r [i64], q: i64) -> i64 {
     g(fs, q + 4) + code_nregs(h, code_of(h, g(fs, q)))
 }
 
 # fail_boundary performs the effect v for a call that did not match, made by the frame last; the value that the continuation gets is given to
 # last as the ret word rw says. The result is the boundary frame, made into the transfer frame; with no boundary the program stops.
-fn fail_boundary[r](h: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i64], last: i64, rw: i64, v: i64) -> i64 {
+fun fail_boundary[r](h: &mutable r [u8], st: &mutable r [i64], rs: &mutable r [i64], fs: &mutable r [i64], last: i64, rw: i64, v: i64) -> i64 {
     let q = find_boundary(fs, last)
     if q < 0 { die("matching failed") }
     let fb = g(fs, q + 4)
@@ -352,7 +352,7 @@ fn fail_boundary[r](h: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], fs: &mut
 }
 
 # match_failed: the frame cur ran out of alternatives. f is the function that was called. The call returns to the frame below cur with the value of the resumption.
-fn match_failed[r](h: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i64], cur: i64, f: i64) -> i64 {
+fun match_failed[r](h: &mutable r [u8], st: &mutable r [i64], rs: &mutable r [i64], fs: &mutable r [i64], cur: i64, f: i64) -> i64 {
     let rt = g(fs, cur + 6)
     if cur < 7 { die("matching failed") }
     if (rt >> 18) != 0 { die("matching failed") }
@@ -362,7 +362,7 @@ fn match_failed[r](h: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], fs: &mut 
 }
 
 # transfer: no alternative of the handler in the transfer frame t took the effect; the next boundary below gets it with a longer continuation
-fn transfer[r](h: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i64], t: i64) -> i64 {
+fun transfer[r](h: &mutable r [u8], st: &mutable r [i64], rs: &mutable r [i64], fs: &mutable r [i64], t: i64) -> i64 {
     let tb = g(fs, t + 4)
     let v = g(rs, tb)
     let k0 = g(rs, tb + 1)
@@ -375,7 +375,7 @@ fn transfer[r](h: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i
 }
 
 # next_alt tries the next alternatives of the function that was called for the frame fp; the transfer frame goes on to the outer boundary
-fn next_alt[r](h: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i64], fp: i64) -> i64 {
+fun next_alt[r](h: &mutable r [u8], st: &mutable r [i64], rs: &mutable r [i64], fs: &mutable r [i64], fp: i64) -> i64 {
     var cur: i64
     var status: i64
     cur = fp
@@ -404,10 +404,10 @@ fn next_alt[r](h: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i
 }
 
 # die_pending writes the pending message to the standard error and stops the program
-fn die_pending[r](h: &r [u8], st: &r [i64]) {
+fun die_pending[r](h: &r [u8], st: &r [i64]) {
     let s = g(st, 22)
     let n = str_len(h, s)
-    let buf = alloc(n + 1, 0 as u8)
+    let buf = allocate(n + 1, 0 as u8)
     for i in 0 as i64..n {
         buf[i] = str_byte(h, s, i) as u8
     }
@@ -423,7 +423,7 @@ fn die_pending[r](h: &r [u8], st: &r [i64]) {
 
 # raise_pending performs the effect Error{loc, message} for the pending runtime error, in the frame fp that is the top frame. The result of the
 # resumption is given to the frame as the ret word rw says. The result is the top frame after the effect.
-fn raise_pending[r](h: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i64], fp: i64, rw: i64) -> i64 {
+fun raise_pending[r](h: &mutable r [u8], st: &mutable r [i64], rs: &mutable r [i64], fs: &mutable r [i64], fp: i64, rw: i64) -> i64 {
     if find_boundary(fs, fp) < 0 { die_pending(h, st) }
     let msg = g(st, 22)
     p(st, 22, 0)
@@ -438,7 +438,7 @@ fn raise_pending[r](h: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], fs: &mut
     g(st, 3)
 }
 
-fn do_perform[r](h: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i64], fp: i64, a: i64, b: i64) -> i64 {
+fun do_perform[r](h: &mutable r [u8], st: &mutable r [i64], rs: &mutable r [i64], fs: &mutable r [i64], fp: i64, a: i64, b: i64) -> i64 {
     let base = g(fs, fp + 4)
     let v = g(rs, base + b)
     let q = find_boundary(fs, fp)
@@ -451,7 +451,7 @@ fn do_perform[r](h: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], fs: &mut r 
 }
 
 # call_failed: the call f of c arguments at rs[nb], made by the frame fp, was taken by no alternative; the call gets the value of the resumption as the ret word rw says
-fn call_failed[r](h: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i64], fp: i64, f: i64, nb: i64, c: i64, rw: i64) -> i64 {
+fun call_failed[r](h: &mutable r [u8], st: &mutable r [i64], rs: &mutable r [i64], fs: &mutable r [i64], fp: i64, f: i64, nb: i64, c: i64, rw: i64) -> i64 {
     let v = mf_value(h, st, rs, f, nb, c, frame_loc(h, st, fs, fp))
     let q = fail_boundary(h, st, rs, fs, fp, rw, v)
     let status = next_alt(h, st, rs, fs, q)
@@ -461,7 +461,7 @@ fn call_failed[r](h: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], fs: &mut r
 }
 
 # the instructions CALL TCALL RET NEXT HANDLE PERFORM; pc is the saved pc of the top frame fp. The result is the top frame after the instruction.
-fn exec_ctl[r](h: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i64], fp: i64, op: i64, w: i64, pc: i64) -> i64 {
+fun exec_ctl[r](h: &mutable r [u8], st: &mutable r [i64], rs: &mutable r [i64], fs: &mutable r [i64], fp: i64, op: i64, w: i64, pc: i64) -> i64 {
     let base = g(fs, fp + 4)
     let a = (w >> 8) & 255
     let b = (w >> 16) & 255
@@ -522,7 +522,7 @@ fn exec_ctl[r](h: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i
 }
 
 # NEWENV ENVGET ENVSET
-fn exec_env[r](h: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i64], fp: i64, op: i64, w: i64, base: i64) {
+fun exec_env[r](h: &mutable r [u8], st: &mutable r [i64], rs: &mutable r [i64], fs: &mutable r [i64], fp: i64, op: i64, w: i64, base: i64) {
     let a = (w >> 8) & 255
     let b = (w >> 16) & 255
     let c = w >> 24
@@ -551,7 +551,7 @@ fn exec_env[r](h: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], fs: &mut r [i
 
 # FUSION: R[A] := R[B] | R[C]
 # the result is -1, or -2 for a runtime error (the message is in st[22])
-fn exec_fusion[r](h: &mut r [u8], st: &mut r [i64], rs: &mut r [i64], w: i64, base: i64) -> i64 {
+fun exec_fusion[r](h: &mutable r [u8], st: &mutable r [i64], rs: &mutable r [i64], w: i64, base: i64) -> i64 {
     let a = (w >> 8) & 255
     let x = g(rs, base + ((w >> 16) & 255))
     let y = g(rs, base + (w >> 24))

@@ -1,4 +1,4 @@
-# vasm/rt: the runtime that programs of vasm/ir.pk need: the start of the program, the allocator, the ports to the arguments and the files,
+# vasm/runtime: the runtime that programs of vasm/ir.pk need: the start of the program, the allocator, the ports to the arguments and the files,
 # and 64-bit arithmetic that is a call
 # Copyright (C) 2026 nineties
 #
@@ -9,7 +9,7 @@
 # (brk), each with a header of 8 bytes that holds the size, and a freed block of up to 4080 bytes goes to the list of its size and is used again.
 # A larger block is not used again.
 # The 64-bit operations that 32-bit registers cannot do with a few instructions (a shift by a count in a register, division and remainder)
-# are functions of vasm that the lower of a target (backend/target.pk) may call; rt.helpers names them and rt.runtime holds them.
+# are functions of vasm that the lower of a target (backend/target.pk) may call; runtime.helpers names them and runtime.runtime holds them.
 
 use("base")
 use("list")
@@ -19,9 +19,9 @@ use("bytes")
 use("backend/ir")
 use("vasm/check")
 
-module rt {
+module runtime {
     # the width of a load or a store of an address, and the shift that multiplies by the word
-    rt_pw(w) := if (w == 8) 'w64 else 'w32
+    runtime_pw(w) := if (w == 8) 'w64 else 'w32
     shift(w) := if (w == 8) 3 else 2
 
     # the number of words that the arguments of a function take for a 64-bit value
@@ -44,27 +44,27 @@ module rt {
         b
     }, true}
 
-    # A value of val is the address of a block: the number of its holders (negative for a block that is never released), the kind, and then
+    # A value of value is the address of a block: the number of its holders (negative for a block that is never released), the kind, and then
     #   integer: the 64-bit value
     #   string, symbol: the number of bytes, 0 and the bytes, which is the layout of an array of u8
     #   constructed value: the head (a symbol), the number of arguments n and n values
     #   array: the number of elements n, 0 and n values
     #   function: the address of the code, the number of values kept in it n, the number of the other arguments and n values
     # The holders and the kind are 4 bytes each, a count is 4 bytes, and the head, the address of the code and the values are a word each. The offsets of the fields
-    # are rc, kind, int_at, arr_n, arr_elems, con_head, con_n(w), con_elems(w), fun_code, fun_n(w), fun_rest(w) and fun_elems(w) of the module,
-    # and the kinds are kind_int, kind_str, kind_sym, kind_con, kind_arr and kind_fun. The module shows the ones that vasm/ir.pk uses.
+    # are rc, kind, int_at, array_n, array_elems, con_head, con_n(w), con_elems(w), fun_code, fun_n(w), fun_rest(w) and fun_elems(w) of the module,
+    # and the kinds are kind_int, kind_string, kind_symbol, kind_con, kind_array and kind_fun. The module shows the ones that vasm/ir.pk uses.
     kind_int := 2
-    export kind_str := 3
-    export kind_sym := 4
+    export kind_string := 3
+    export kind_symbol := 4
     export kind_con := 5
-    kind_arr := 6
+    kind_array := 6
     export kind_fun := 7
 
     export rc := 0
     export kind := 4
     int_at := 8
-    arr_n := 8
-    arr_elems := 16
+    array_n := 8
+    array_elems := 16
     export con_head := 8
     export con_n(w) := 8 + w
     export con_elems(w) := 8 + 2 * w
@@ -77,10 +77,10 @@ module rt {
     export symbol_bytes(s) := {
         b := bytes.new()
         bytes.u32(b, -1)
-        bytes.u32(b, kind_sym)
+        bytes.u32(b, kind_symbol)
         bytes.u32(b, strlen(s))
         bytes.u32(b, 0)
-        bytes.str(b, s)
+        bytes.string(b, s)
         b
     }
 
@@ -90,12 +90,12 @@ module rt {
 
     export data(w) := append([heap_data(w), freelists_data(w), args_data(w)], map((Tuple{n, s}) -> IRData{n, ".rodata", 4, symbol_bytes(s), false}, names))
 
-    # fn(name, w, ptrs, wides, specs) is a function from a list of instructions whose registers and labels are named by symbols.
+    # fun(name, w, ptrs, wides, specs) is a function from a list of instructions whose registers and labels are named by symbols.
     # The registers named in ptrs have the width of an address, those in wides are 64-bit, and the others are 32-bit.
     fn(name, w, ptrs, wides, specs) := {
         f := ir.fn(name)
         regs := table.new()
-        labs := table.new()
+        labels := table.new()
         reg := s -> {
             r := table.get(regs, s, -1)
             if (r < 0) {
@@ -104,16 +104,16 @@ module rt {
             }
             r
         }
-        lab := s -> {
-            l := table.get(labs, s, -1)
+        label := s -> {
+            l := table.get(labels, s, -1)
             if (l < 0) {
                 l = ir.label(f)
-                table.set(labs, s, l)
+                table.set(labels, s, l)
             }
             l
         }
         each(i -> ir.emit(f, ir.map_regs(reg, I{ir.op(i), map(o -> match o {
-            L{s} -> L{lab(s)}
+            L{s} -> L{label(s)}
           | _ -> o
         }, ir.ops(i))})), specs)
         f
@@ -124,11 +124,11 @@ module rt {
     zx(w, d, s) := if (w == 4) Tuple{[], s} else Tuple{[I{'zext64, [D{d}, U{s}]}], d}
     tr(w, d, s) := if (w == 4) Tuple{[], s} else Tuple{[I{'trunc, [D{d}, U{s}]}], d}
 
-    export alloc_fn(w) := {
-        pw := rt_pw(w)
+    export allocate_fun(w) := {
+        pw := runtime_pw(w)
         cz := zx(w, 'cp, 'c4)
         tz := zx(w, 'tp, 't)
-        fn("__alloc", w, ['fl, 'slot, 'head, 'nxt, 'hp, 'cur, 'z, 'b, 'a, 'en, 'nc, 'want, 'r, 'res, 'cp, 'tp], [], list.concat([[
+        fn("__alloc", w, ['fl, 'slot, 'head, 'nxt, 'hp, 'cur, 'z, 'b, 'a, 'en, 'nc, 'want, 'r, 'result, 'cp, 'tp], [], list.concat([[
             I{'getarg, [D{'n}, K{0}]},
             I{'add, [D{'t}, U{'n}, K{23}]},
             I{'band, [D{'t}, U{'t}, K{-16}]},
@@ -172,12 +172,12 @@ module rt {
             I{'st, [W{pw}, M{U{'hp}, 0}, U{'nc}]},
             I{'st, [W{'w32}, M{U{'cur}, 0}, U{'t}]},
             I{'st, [W{'w32}, M{U{'cur}, 4}, K{0}]},
-            I{'add, [D{'res}, U{'cur}, K{8}]},
-            I{'ret, [Us{['res]}]}]]))
+            I{'add, [D{'result}, U{'cur}, K{8}]},
+            I{'ret, [Us{['result]}]}]]))
     }
 
-    export free_fn(w) := {
-        pw := rt_pw(w)
+    export free_fun(w) := {
+        pw := runtime_pw(w)
         cz := zx(w, 'cp, 'c4)
         fn("__free", w, ['p, 'h, 'fl, 'slot, 'head, 'cp], [], list.concat([[
             I{'getarg, [D{'p}, K{0}]},
@@ -200,8 +200,8 @@ module rt {
 
     # __argv(i) is the address of a new array (the layout of vasm/ir.pk) that holds the bytes of the i-th argument of the program; it is not freed.
     # An i that is not less than the number of arguments is trap.
-    argv_fn(w) := {
-        pw := rt_pw(w)
+    argv_fun(w) := {
+        pw := runtime_pw(w)
         iz := zx(w, 'ip, 'i)
         i4z := zx(w, 'i4p, 'i4)
         nt := tr(w, 'n32, 'n)
@@ -246,7 +246,7 @@ module rt {
 
     # __open(a) opens for reading the file whose name is the bytes of the array a (the layout of vasm/ir.pk) and gives the file, or a negative number,
     # and __create(a) opens it for writing
-    open_fn(w, name, service) := {
+    open_fun(w, name, service) := {
         nz := zx(w, 'np, 'n)
         fn(name, w, ['a, 'buf, 'np, 'k, 's, 'd, 'e], [], list.concat([[
             I{'getarg, [D{'a}, K{0}]},
@@ -272,17 +272,17 @@ module rt {
     }
 
     # the functions of the ports that the calls to the names called need
-    export ports(w, called) := list.concat([if (member("__argv", called)) [argv_fn(w)] else [],
-        if (member("__open", called)) [open_fn(w, "__open", 'open)] else [],
-        if (member("__create", called)) [open_fn(w, "__create", 'create)] else []])
+    export ports(w, called) := list.concat([if (member("__argv", called)) [argv_fun(w)] else [],
+        if (member("__open", called)) [open_fun(w, "__open", 'open)] else [],
+        if (member("__create", called)) [open_fun(w, "__create", 'create)] else []])
 
-    # === Values of val ===
+    # === Values of value ===
 
     # a jump to l unless the kind of the block p is the kind k
     need(p, k, t) := [I{'ld, [W{'w32}, D{'kind}, M{U{p}, kind}]}, I{'br, [Cc{'eq}, U{'kind}, K{k}, L{t}, L{'bad}]}, I{'label, [L{t}]}]
-    rt_bad := [I{'label, [L{'bad}]}, I{'trap, []}]
+    runtime_bad := [I{'label, [L{'bad}]}, I{'trap, []}]
 
-    val_inc_fn(w) := fn("__val_inc", w, ['p], [], [
+    value_inc_fun(w) := fn("__val_inc", w, ['p], [], [
         I{'getarg, [D{'p}, K{0}]},
         I{'br, [Cc{'eq}, U{'p}, K{0}, L{'out}, L{'go}]},
         I{'label, [L{'go}]},
@@ -295,8 +295,8 @@ module rt {
         I{'ret, [Us{[]}]}])
 
     # The last of the values in a block is released without a new call, so a long list does not use the stack.
-    val_drop_fn(w) := {
-        pw := rt_pw(w)
+    value_drop_fun(w) := {
+        pw := runtime_pw(w)
         i4z := zx(w, 'i4p, 'i4)
         n4z := zx(w, 'n4p, 'n4)
         fn("__val_drop", w, ['p, 'h, 'base, 'e, 'x, 'q, 'i4p, 'n4p], [], list.concat([[
@@ -316,7 +316,7 @@ module rt {
             I{'ld, [W{'w32}, D{'k}, M{U{'p}, kind}]},
             I{'br, [Cc{'eq}, U{'k}, K{kind_con}, L{'con}, L{'k2}]},
             I{'label, [L{'k2}]},
-            I{'br, [Cc{'eq}, U{'k}, K{kind_arr}, L{'arr}, L{'k3}]},
+            I{'br, [Cc{'eq}, U{'k}, K{kind_array}, L{'array}, L{'k3}]},
             I{'label, [L{'k3}]},
             I{'br, [Cc{'eq}, U{'k}, K{kind_fun}, L{'func}, L{'leaf}]},
             I{'label, [L{'con}]},
@@ -325,9 +325,9 @@ module rt {
             I{'ld, [W{'w32}, D{'n}, M{U{'p}, con_n(w)}]},
             I{'add, [D{'base}, U{'p}, K{con_elems(w)}]},
             I{'jmp, [L{'kids}]},
-            I{'label, [L{'arr}]},
-            I{'ld, [W{'w32}, D{'n}, M{U{'p}, arr_n}]},
-            I{'add, [D{'base}, U{'p}, K{arr_elems}]},
+            I{'label, [L{'array}]},
+            I{'ld, [W{'w32}, D{'n}, M{U{'p}, array_n}]},
+            I{'add, [D{'base}, U{'p}, K{array_elems}]},
             I{'jmp, [L{'kids}]},
             I{'label, [L{'func}]},
             I{'ld, [W{'w32}, D{'n}, M{U{'p}, fun_n(w)}]},
@@ -361,7 +361,7 @@ module rt {
     }
 
     # __val_int(v) is a new integer
-    val_int_fn(w) := fn("__val_int", w, ['p], ['v], [
+    value_int_fun(w) := fn("__val_int", w, ['p], ['v], [
         I{'getarg, [D{'v}, K{0}]},
         I{'li, [D{'sz}, K{int_at + 8}]},
         I{'call, [S{"__alloc", 0}, Us{['sz]}, Ds{['p]}]},
@@ -371,12 +371,12 @@ module rt {
         I{'ret, [Us{['p]}]}])
 
     # __val_unint(v) gives the 64-bit value of the integer v
-    val_unint_fn(w) := fn("__val_unint", w, ['p], ['v], append(append([I{'getarg, [D{'p}, K{0}]}], need('p, kind_int, 'ok)), append([
+    value_unint_fun(w) := fn("__val_unint", w, ['p], ['v], append(append([I{'getarg, [D{'p}, K{0}]}], need('p, kind_int, 'ok)), append([
         I{'ld, [W{'w64}, D{'v}, M{U{'p}, int_at}]},
-        I{'ret, [Us{['v]}]}], rt_bad)))
+        I{'ret, [Us{['v]}]}], runtime_bad)))
 
     # __val_bool(b) is the symbol true or false
-    val_bool_fn(w) := fn("__val_bool", w, ['r], [], [
+    value_bool_fun(w) := fn("__val_bool", w, ['r], [], [
         I{'getarg, [D{'b}, K{0}]},
         I{'br, [Cc{'ne}, U{'b}, K{0}, L{'t}, L{'f}]},
         I{'label, [L{'t}]},
@@ -387,7 +387,7 @@ module rt {
         I{'ret, [Us{['r]}]}])
 
     # __val_unbool(v) is 1 for the symbol true, 0 for the symbol false
-    val_unbool_fn(w) := fn("__val_unbool", w, ['v, 't, 'f], [], append([
+    value_unbool_fun(w) := fn("__val_unbool", w, ['v, 't, 'f], [], append([
         I{'getarg, [D{'v}, K{0}]},
         I{'la, [D{'t}, S{"__sym_true", 0}]},
         I{'call, [S{"__val_eq", 0}, Us{['v, 't]}, Ds{['r]}]},
@@ -401,10 +401,10 @@ module rt {
         I{'br, [Cc{'ne}, U{'r}, K{0}, L{'zero}, L{'bad}]},
         I{'label, [L{'zero}]},
         I{'li, [D{'z}, K{0}]},
-        I{'ret, [Us{['z]}]}], rt_bad))
+        I{'ret, [Us{['z]}]}], runtime_bad))
 
     # copy n bytes from the address s to the address d; the registers d, s and n have the width of an address
-    rt_copy(d, s, n) := [
+    runtime_copy(d, s, n) := [
         I{'li, [D{'k}, K{0}]},
         I{'label, [L{'copy}]},
         I{'br, [Cc{'ltu}, U{'k}, U{n}, L{'put}, L{'copied}]},
@@ -418,7 +418,7 @@ module rt {
         I{'label, [L{'copied}]}]
 
     # __val_str(a, kind) is a new string or symbol with the bytes of the array a
-    val_str_fn(w) := {
+    value_string_fun(w) := {
         nz := zx(w, 'np, 'n)
         fn("__val_str", w, ['a, 'p, 'np, 'src, 'dst, 'k, 'sa, 'da], [], list.concat([[
             I{'getarg, [D{'a}, K{0}]},
@@ -431,41 +431,41 @@ module rt {
             I{'st, [W{'w32}, M{U{'p}, 8}, U{'n}]},
             I{'st, [W{'w32}, M{U{'p}, 12}, K{0}]}], nz[0], [
             I{'add, [D{'src}, U{'a}, K{8}]},
-            I{'add, [D{'dst}, U{'p}, K{16}]}], rt_copy('dst, 'src, nz[1]), [
+            I{'add, [D{'dst}, U{'p}, K{16}]}], runtime_copy('dst, 'src, nz[1]), [
             I{'ret, [Us{['p]}]}]]))
     }
 
     # __val_bytes(v) is a new array of the bytes of the string v
-    val_bytes_fn(w) := {
+    value_bytes_fun(w) := {
         nz := zx(w, 'np, 'n)
-        fn("__val_bytes", w, ['v, 'a, 'np, 'src, 'dst, 'k, 'sa, 'da], [], list.concat([[I{'getarg, [D{'v}, K{0}]}], need('v, kind_str, 'ok), [
+        fn("__val_bytes", w, ['v, 'a, 'np, 'src, 'dst, 'k, 'sa, 'da], [], list.concat([[I{'getarg, [D{'v}, K{0}]}], need('v, kind_string, 'ok), [
             I{'ld, [W{'w32}, D{'n}, M{U{'v}, 8}]},
             I{'add, [D{'sz}, U{'n}, K{8}]},
             I{'call, [S{"__alloc", 0}, Us{['sz]}, Ds{['a]}]},
             I{'st, [W{'w32}, M{U{'a}, 0}, U{'n}]},
             I{'st, [W{'w32}, M{U{'a}, 4}, K{0}]}], nz[0], [
             I{'add, [D{'src}, U{'v}, K{16}]},
-            I{'add, [D{'dst}, U{'a}, K{8}]}], rt_copy('dst, 'src, nz[1]), [
-            I{'ret, [Us{['a]}]}], rt_bad]))
+            I{'add, [D{'dst}, U{'a}, K{8}]}], runtime_copy('dst, 'src, nz[1]), [
+            I{'ret, [Us{['a]}]}], runtime_bad]))
     }
 
     # __val_retag(v, kind) is a new string or symbol with the bytes of the string or symbol v
-    val_retag_fn(w) := fn("__val_retag", w, ['v, 'a, 'r], [], append([
+    value_retag_fun(w) := fn("__val_retag", w, ['v, 'a, 'r], [], append([
         I{'getarg, [D{'v}, K{0}]},
         I{'getarg, [D{'kd}, K{1}]},
         I{'ld, [W{'w32}, D{'k}, M{U{'v}, kind}]},
-        I{'br, [Cc{'eq}, U{'k}, K{kind_str}, L{'ok}, L{'k2}]},
+        I{'br, [Cc{'eq}, U{'k}, K{kind_string}, L{'ok}, L{'k2}]},
         I{'label, [L{'k2}]},
-        I{'br, [Cc{'eq}, U{'k}, K{kind_sym}, L{'ok}, L{'bad}]},
+        I{'br, [Cc{'eq}, U{'k}, K{kind_symbol}, L{'ok}, L{'bad}]},
         I{'label, [L{'ok}]},
         I{'add, [D{'a}, U{'v}, K{8}]},
         I{'call, [S{"__val_str", 0}, Us{['a, 'kd]}, Ds{['r]}]},
-        I{'ret, [Us{['r]}]}], rt_bad))
+        I{'ret, [Us{['r]}]}], runtime_bad))
 
     # __val_eq(a, b) is 1 when a == b of planck holds: the same kind and the same contents, and the same block for an array or a function.
     # The last argument of a constructed value is compared without a new call.
-    val_eq_fn(w) := {
-        pw := rt_pw(w)
+    value_eq_fun(w) := {
+        pw := runtime_pw(w)
         iz := zx(w, 'ip, 'i)
         i4z := zx(w, 'i4p, 'i4)
         n4z := zx(w, 'n4p, 'n4)
@@ -481,9 +481,9 @@ module rt {
             I{'label, [L{'same}]},
             I{'br, [Cc{'eq}, U{'ka}, K{kind_int}, L{'int}, L{'s1}]},
             I{'label, [L{'s1}]},
-            I{'br, [Cc{'eq}, U{'ka}, K{kind_str}, L{'bytes}, L{'s2}]},
+            I{'br, [Cc{'eq}, U{'ka}, K{kind_string}, L{'bytes}, L{'s2}]},
             I{'label, [L{'s2}]},
-            I{'br, [Cc{'eq}, U{'ka}, K{kind_sym}, L{'bytes}, L{'s3}]},
+            I{'br, [Cc{'eq}, U{'ka}, K{kind_symbol}, L{'bytes}, L{'s3}]},
             I{'label, [L{'s3}]},
             I{'br, [Cc{'eq}, U{'ka}, K{kind_con}, L{'con}, L{'no}]},
             I{'label, [L{'int}]},
@@ -550,8 +550,8 @@ module rt {
     }
 
     # __val_is(v, h, n) is 1 when v is a constructed value with the head h and n arguments
-    val_is_fn(w) := {
-        pw := rt_pw(w)
+    value_is_fun(w) := {
+        pw := runtime_pw(w)
         fn("__val_is", w, ['v, 'h, 'x], [], [
             I{'getarg, [D{'v}, K{0}]},
             I{'getarg, [D{'h}, K{1}]},
@@ -575,55 +575,55 @@ module rt {
         I{'ld, [W{'w32}, D{'k}, M{U{v}, kind}]},
         I{'br, [Cc{'eq}, U{'k}, K{kind_con}, L{'ec}, L{'e2}]},
         I{'label, [L{'e2}]},
-        I{'br, [Cc{'eq}, U{'k}, K{kind_arr}, L{'ea}, L{'bad}]},
+        I{'br, [Cc{'eq}, U{'k}, K{kind_array}, L{'ea}, L{'bad}]},
         I{'label, [L{'ec}]},
         I{'ld, [W{'w32}, D{'n}, M{U{v}, con_n(w)}]},
         I{'add, [D{'base}, U{v}, K{con_elems(w)}]},
         I{'jmp, [L{'ed}]},
         I{'label, [L{'ea}]},
-        I{'ld, [W{'w32}, D{'n}, M{U{v}, arr_n}]},
-        I{'add, [D{'base}, U{v}, K{arr_elems}]},
+        I{'ld, [W{'w32}, D{'n}, M{U{v}, array_n}]},
+        I{'add, [D{'base}, U{v}, K{array_elems}]},
         I{'jmp, [L{'ed}]},
         I{'label, [L{'ed}]}]
 
-    # the check that the 64-bit index ix is less than the 32-bit count n, and the 32-bit i4 that is the offset of the element in bytes
+    # the check that the 64-bit index index is less than the 32-bit count n, and the 32-bit i4 that is the offset of the element in bytes
     index(w, v) := [
         I{'zext64, [D{'nw}, U{'n}]},
-        I{'br, [Cc{'ltu}, U{'ix}, U{'nw}, L{'inrange}, L{'bad}]},
+        I{'br, [Cc{'ltu}, U{'index}, U{'nw}, L{'inrange}, L{'bad}]},
         I{'label, [L{'inrange}]},
-        I{'trunc, [D{'i32}, U{'ix}]},
+        I{'trunc, [D{'i32}, U{'index}]},
         I{'shl, [D{'i4}, U{'i32}, K{shift(w)}]}]
 
-    # __val_get(v, ix) is the element of the constructed value or the array v at the index, with a new holder
-    val_get_fn(w) := {
-        pw := rt_pw(w)
+    # __val_get(v, index) is the element of the constructed value or the array v at the index, with a new holder
+    value_get_fun(w) := {
+        pw := runtime_pw(w)
         i4z := zx(w, 'i4p, 'i4)
-        fn("__val_get", w, ['v, 'base, 'i4p, 'e, 'x], ['ix, 'nw], list.concat([[
+        fn("__val_get", w, ['v, 'base, 'i4p, 'e, 'x], ['index, 'nw], list.concat([[
             I{'getarg, [D{'v}, K{0}]},
-            I{'getarg, [D{'ix}, K{1}]}], elems(w, 'v), index(w, 'v), i4z[0], [
+            I{'getarg, [D{'index}, K{1}]}], elems(w, 'v), index(w, 'v), i4z[0], [
             I{'add, [D{'e}, U{'base}, U{i4z[1]}]},
             I{'ld, [W{pw}, D{'x}, M{U{'e}, 0}]},
             I{'call, [S{"__val_inc", 0}, Us{['x]}, Ds{[]}]},
-            I{'ret, [Us{['x]}]}], rt_bad]))
+            I{'ret, [Us{['x]}]}], runtime_bad]))
     }
 
-    # __val_set(v, ix, x) puts x in the array v at the index; the place holds x and what it held before has one holder less
-    val_set_fn(w) := {
-        pw := rt_pw(w)
+    # __val_set(v, index, x) puts x in the array v at the index; the place holds x and what it held before has one holder less
+    value_set_fun(w) := {
+        pw := runtime_pw(w)
         i4z := zx(w, 'i4p, 'i4)
-        fn("__val_set", w, ['v, 'x, 'i4p, 'e, 'old], ['ix, 'nw], list.concat([[
+        fn("__val_set", w, ['v, 'x, 'i4p, 'e, 'old], ['index, 'nw], list.concat([[
             I{'getarg, [D{'v}, K{0}]},
-            I{'getarg, [D{'ix}, K{1}]},
-            I{'getarg, [D{'x}, K{1 + w64words(w)}]}], need('v, kind_arr, 'isarr), [
-            I{'ld, [W{'w32}, D{'n}, M{U{'v}, arr_n}]}], index(w, 'v), i4z[0], [
+            I{'getarg, [D{'index}, K{1}]},
+            I{'getarg, [D{'x}, K{1 + w64words(w)}]}], need('v, kind_array, 'isarr), [
+            I{'ld, [W{'w32}, D{'n}, M{U{'v}, array_n}]}], index(w, 'v), i4z[0], [
             I{'add, [D{'e}, U{'v}, U{i4z[1]}]},
-            I{'ld, [W{pw}, D{'old}, M{U{'e}, arr_elems}]},
-            I{'st, [W{pw}, M{U{'e}, arr_elems}, U{'x}]},
+            I{'ld, [W{pw}, D{'old}, M{U{'e}, array_elems}]},
+            I{'st, [W{pw}, M{U{'e}, array_elems}, U{'x}]},
             I{'call, [S{"__val_drop", 0}, Us{['old]}, Ds{[]}]},
-            I{'ret, [Us{[]}]}], rt_bad]))
+            I{'ret, [Us{[]}]}], runtime_bad]))
     }
 
-    val_arity_fn(w) := fn("__val_arity", w, ['v], [], append([
+    value_arity_fun(w) := fn("__val_arity", w, ['v], [], append([
         I{'getarg, [D{'v}, K{0}]},
         I{'ld, [W{'w32}, D{'k}, M{U{'v}, kind}]},
         I{'br, [Cc{'eq}, U{'k}, K{kind_con}, L{'con}, L{'other}]},
@@ -631,17 +631,17 @@ module rt {
         I{'ld, [W{'w32}, D{'n}, M{U{'v}, con_n(w)}]},
         I{'ret, [Us{['n]}]},
         I{'label, [L{'other}]},
-        I{'br, [Cc{'geu}, U{'k}, K{kind_str}, L{'o2}, L{'bad}]},
+        I{'br, [Cc{'geu}, U{'k}, K{kind_string}, L{'o2}, L{'bad}]},
         I{'label, [L{'o2}]},
         I{'br, [Cc{'eq}, U{'k}, K{kind_fun}, L{'bad}, L{'o3}]},
         I{'label, [L{'o3}]},
         I{'ld, [W{'w32}, D{'n}, M{U{'v}, 8}]},
-        I{'ret, [Us{['n]}]}], rt_bad))
+        I{'ret, [Us{['n]}]}], runtime_bad))
 
-    val_head_fn(w) := fn("__val_head", w, ['v, 'h], [], append(append(append([I{'getarg, [D{'v}, K{0}]}], need('v, kind_con, 'ok)), [
-        I{'ld, [W{rt_pw(w)}, D{'h}, M{U{'v}, con_head}]},
+    value_head_fun(w) := fn("__val_head", w, ['v, 'h], [], append(append(append([I{'getarg, [D{'v}, K{0}]}], need('v, kind_con, 'ok)), [
+        I{'ld, [W{runtime_pw(w)}, D{'h}, M{U{'v}, con_head}]},
         I{'call, [S{"__val_inc", 0}, Us{['h]}, Ds{[]}]},
-        I{'ret, [Us{['h]}]}]), rt_bad))
+        I{'ret, [Us{['h]}]}]), runtime_bad))
 
     # one case of __val_typeof
     typeof_case(k, name, next) := [
@@ -651,33 +651,33 @@ module rt {
         I{'ret, [Us{['r]}]},
         I{'label, [L{next}]}]
 
-    val_typeof_fn(w) := fn("__val_typeof", w, ['v, 'r], [], list.concat([
+    value_typeof_fun(w) := fn("__val_typeof", w, ['v, 'r], [], list.concat([
         [I{'getarg, [D{'v}, K{0}]},
          I{'ld, [W{'w32}, D{'k}, M{U{'v}, kind}]}],
         typeof_case(kind_int, "__sym_int", 'n1),
-        typeof_case(kind_str, "__sym_string", 'n2),
-        typeof_case(kind_sym, "__sym_symbol", 'n3),
+        typeof_case(kind_string, "__sym_string", 'n2),
+        typeof_case(kind_symbol, "__sym_symbol", 'n3),
         typeof_case(kind_con, "__sym_mexpr", 'n4),
-        typeof_case(kind_arr, "__sym_array", 'n5),
+        typeof_case(kind_array, "__sym_array", 'n5),
         [I{'la, [D{'r}, S{"__sym_function", 0}]},
          I{'ret, [Us{['r]}]}]]))
 
-    # __val_array(ix, x) is a new array of that many elements x
-    val_array_fn(w) := {
-        pw := rt_pw(w)
+    # __val_array(index, x) is a new array of that many elements x
+    value_array_fun(w) := {
+        pw := runtime_pw(w)
         i4z := zx(w, 'i4p, 'i4)
-        fn("__val_array", w, ['x, 'p, 'e, 'i4p], ['ix], list.concat([[
-            I{'getarg, [D{'ix}, K{0}]},
+        fn("__val_array", w, ['x, 'p, 'e, 'i4p], ['index], list.concat([[
+            I{'getarg, [D{'index}, K{0}]},
             I{'getarg, [D{'x}, K{w64words(w)}]},
-            I{'br, [Cc{'ltu}, U{'ix}, K{134217728}, L{'fits}, L{'bad}]},
+            I{'br, [Cc{'ltu}, U{'index}, K{134217728}, L{'fits}, L{'bad}]},
             I{'label, [L{'fits}]},
-            I{'trunc, [D{'lo}, U{'ix}]},
+            I{'trunc, [D{'lo}, U{'index}]},
             I{'shl, [D{'bytes}, U{'lo}, K{shift(w)}]},
-            I{'add, [D{'sz}, U{'bytes}, K{arr_elems}]},
+            I{'add, [D{'sz}, U{'bytes}, K{array_elems}]},
             I{'call, [S{"__alloc", 0}, Us{['sz]}, Ds{['p]}]},
             I{'st, [W{'w32}, M{U{'p}, rc}, K{1}]},
-            I{'st, [W{'w32}, M{U{'p}, kind}, K{kind_arr}]},
-            I{'st, [W{'w32}, M{U{'p}, arr_n}, U{'lo}]},
+            I{'st, [W{'w32}, M{U{'p}, kind}, K{kind_array}]},
+            I{'st, [W{'w32}, M{U{'p}, array_n}, U{'lo}]},
             I{'st, [W{'w32}, M{U{'p}, 12}, K{0}]},
             I{'li, [D{'i}, K{0}]},
             I{'label, [L{'loop}]},
@@ -685,22 +685,22 @@ module rt {
             I{'label, [L{'one}]},
             I{'shl, [D{'i4}, U{'i}, K{shift(w)}]}], i4z[0], [
             I{'add, [D{'e}, U{'p}, U{i4z[1]}]},
-            I{'st, [W{pw}, M{U{'e}, arr_elems}, U{'x}]},
+            I{'st, [W{pw}, M{U{'e}, array_elems}, U{'x}]},
             I{'call, [S{"__val_inc", 0}, Us{['x]}, Ds{[]}]},
             I{'add, [D{'i}, U{'i}, K{1}]},
             I{'jmp, [L{'loop}]},
             I{'label, [L{'done}]},
-            I{'ret, [Us{['p]}]}], rt_bad]))
+            I{'ret, [Us{['p]}]}], runtime_bad]))
     }
 
     # __val_mexpr(h, a) is a new constructed value with the head h and the elements of the array a
-    val_mexpr_fn(w) := {
-        pw := rt_pw(w)
+    value_mexpr_fun(w) := {
+        pw := runtime_pw(w)
         i4z := zx(w, 'i4p, 'i4)
         fn("__val_mexpr", w, ['h, 'a, 'p, 'sa, 'da, 'x, 'i4p], [], list.concat([[
             I{'getarg, [D{'h}, K{0}]},
-            I{'getarg, [D{'a}, K{1}]}], need('a, kind_arr, 'isarr), [
-            I{'ld, [W{'w32}, D{'n}, M{U{'a}, arr_n}]},
+            I{'getarg, [D{'a}, K{1}]}], need('a, kind_array, 'isarr), [
+            I{'ld, [W{'w32}, D{'n}, M{U{'a}, array_n}]},
             I{'shl, [D{'bytes}, U{'n}, K{shift(w)}]},
             I{'add, [D{'sz}, U{'bytes}, K{con_elems(w)}]},
             I{'call, [S{"__alloc", 0}, Us{['sz]}, Ds{['p]}]},
@@ -715,46 +715,46 @@ module rt {
             I{'label, [L{'one}]},
             I{'shl, [D{'i4}, U{'i}, K{shift(w)}]}], i4z[0], [
             I{'add, [D{'sa}, U{'a}, U{i4z[1]}]},
-            I{'ld, [W{pw}, D{'x}, M{U{'sa}, arr_elems}]},
+            I{'ld, [W{pw}, D{'x}, M{U{'sa}, array_elems}]},
             I{'call, [S{"__val_inc", 0}, Us{['x]}, Ds{[]}]},
             I{'add, [D{'da}, U{'p}, U{i4z[1]}]},
             I{'st, [W{pw}, M{U{'da}, con_elems(w)}, U{'x}]},
             I{'add, [D{'i}, U{'i}, K{1}]},
             I{'jmp, [L{'loop}]},
             I{'label, [L{'done}]},
-            I{'ret, [Us{['p]}]}], rt_bad]))
+            I{'ret, [Us{['p]}]}], runtime_bad]))
     }
 
     # __val_code(f, n) is the address of the code of the function value f, which takes n arguments
-    val_code_fn(w) := fn("__val_code", w, ['f, 'c], [], append(append(append([
+    value_code_fun(w) := fn("__val_code", w, ['f, 'c], [], append(append(append([
         I{'getarg, [D{'f}, K{0}]},
         I{'getarg, [D{'n}, K{1}]}], need('f, kind_fun, 'isfun)), [
         I{'ld, [W{'w32}, D{'m}, M{U{'f}, fun_rest(w)}]},
         I{'br, [Cc{'eq}, U{'m}, U{'n}, L{'fine}, L{'bad}]},
         I{'label, [L{'fine}]},
-        I{'ld, [W{rt_pw(w)}, D{'c}, M{U{'f}, fun_code}]},
-        I{'ret, [Us{['c]}]}]), rt_bad))
+        I{'ld, [W{runtime_pw(w)}, D{'c}, M{U{'f}, fun_code}]},
+        I{'ret, [Us{['c]}]}]), runtime_bad))
 
-    # the functions on values of val that the code calls, with the functions that these call; each is a function of the word
-    val_makers := [Tuple{"__val_inc", val_inc_fn}, Tuple{"__val_drop", val_drop_fn}, Tuple{"__val_int", val_int_fn}, Tuple{"__val_unint", val_unint_fn},
-        Tuple{"__val_bool", val_bool_fn}, Tuple{"__val_unbool", val_unbool_fn}, Tuple{"__val_str", val_str_fn}, Tuple{"__val_bytes", val_bytes_fn},
-        Tuple{"__val_retag", val_retag_fn}, Tuple{"__val_eq", val_eq_fn}, Tuple{"__val_is", val_is_fn}, Tuple{"__val_get", val_get_fn}, Tuple{"__val_set", val_set_fn},
-        Tuple{"__val_arity", val_arity_fn}, Tuple{"__val_head", val_head_fn}, Tuple{"__val_typeof", val_typeof_fn}, Tuple{"__val_array", val_array_fn},
-        Tuple{"__val_mexpr", val_mexpr_fn}, Tuple{"__val_code", val_code_fn}]
+    # the functions on values of value that the code calls, with the functions that these call; each is a function of the word
+    value_makers := [Tuple{"__val_inc", value_inc_fun}, Tuple{"__val_drop", value_drop_fun}, Tuple{"__val_int", value_int_fun}, Tuple{"__val_unint", value_unint_fun},
+        Tuple{"__val_bool", value_bool_fun}, Tuple{"__val_unbool", value_unbool_fun}, Tuple{"__val_str", value_string_fun}, Tuple{"__val_bytes", value_bytes_fun},
+        Tuple{"__val_retag", value_retag_fun}, Tuple{"__val_eq", value_eq_fun}, Tuple{"__val_is", value_is_fun}, Tuple{"__val_get", value_get_fun}, Tuple{"__val_set", value_set_fun},
+        Tuple{"__val_arity", value_arity_fun}, Tuple{"__val_head", value_head_fun}, Tuple{"__val_typeof", value_typeof_fun}, Tuple{"__val_array", value_array_fun},
+        Tuple{"__val_mexpr", value_mexpr_fun}, Tuple{"__val_code", value_code_fun}]
 
     call_names(f) := concat_map(i -> match i {
         I{'call, [S{n, _}, _, _]} -> [n]
       | _ -> []
     }, ir.code(f))
 
-    export val_fns(w, called) := {
+    export value_funs(w, called) := {
         done := table.new()
         out := []
         work := called
         while (work != []) {
             n := work[0]
             work = list.drop(work, 1)
-            e := find(p -> arg(p, 0) == n, val_makers)
+            e := find(p -> arg(p, 0) == n, value_makers)
             if (e != none and not table.has(done, n)) {
                 table.set(done, n, true)
                 f := arg(e, 1)(w)
@@ -765,9 +765,9 @@ module rt {
         reverse(out)
     }
 
-    # start_fn(w, ret) is _start for a main that returns the type ret: its value (0 for no value) is the exit status.
+    # start_fun(w, ret) is _start for a main that returns the type ret: its value (0 for no value) is the exit status.
     # It keeps the arguments of the program (the service args) in __args first.
-    export start_fn(w, ret) := {
+    export start_fun(w, ret) := {
         f := ir.fn("_start")
         e := i -> ir.emit(f, i)
         st := ir.vreg(f, 32)
@@ -776,7 +776,7 @@ module rt {
         ap := ir.vreg(f, w * 8)
         e(I{'os, [N{'args}, Us{[]}, D{av}]})
         e(I{'la, [D{ap}, S{"__args", 0}]})
-        e(I{'st, [W{rt_pw(w)}, M{U{ap}, 0}, U{av}]})
+        e(I{'st, [W{runtime_pw(w)}, M{U{ap}, 0}, U{av}]})
         if (ret == Unit{}) e(I{'li, [D{st}, K{0}]})
         else if (ret == I64{} or ret == U64{}) {
             r := ir.vreg(f, 64)
@@ -802,25 +802,25 @@ module rt {
 
     # the functions of vasm that the 64-bit operations call
     export runtime := vasm{|
-        fn __shl64(x: u64, c: u64) -> u64 {
+        fun __shl64(x: u64, c: u64) -> u64 {
             var n: u64
             n = c & 63
             while (n > 0) { x = x << 1; n = n - 1 }
             return x
         }
-        fn __shr64(x: u64, c: u64) -> u64 {
+        fun __shr64(x: u64, c: u64) -> u64 {
             var n: u64
             n = c & 63
             while (n > 0) { x = x >> 1; n = n - 1 }
             return x
         }
-        fn __sar64(x: i64, c: i64) -> i64 {
+        fun __sar64(x: i64, c: i64) -> i64 {
             var n: i64
             n = c & 63
             while (n > 0) { x = x >> 1; n = n - 1 }
             return x
         }
-        fn __divmod64(a: u64, b: u64, want_rem: bool) -> u64 {
+        fun __divmod64(a: u64, b: u64, want_rem: bool) -> u64 {
             var q: u64
             var r: u64
             var bit: u64
@@ -847,17 +847,17 @@ module rt {
             if (want_rem) { return r }
             return q
         }
-        fn __divu64(a: u64, b: u64) -> u64 {
+        fun __divu64(a: u64, b: u64) -> u64 {
             var q: u64
             q = __divmod64(a, b, false)
             return q
         }
-        fn __remu64(a: u64, b: u64) -> u64 {
+        fun __remu64(a: u64, b: u64) -> u64 {
             var q: u64
             q = __divmod64(a, b, true)
             return q
         }
-        fn __divs64(a: i64, b: i64) -> i64 {
+        fun __divs64(a: i64, b: i64) -> i64 {
             var x: u64
             var y: u64
             var q: u64
@@ -877,7 +877,7 @@ module rt {
             r = q as i64
             return r
         }
-        fn __rems64(a: i64, b: i64) -> i64 {
+        fun __rems64(a: i64, b: i64) -> i64 {
             var x: u64
             var y: u64
             var q: u64
