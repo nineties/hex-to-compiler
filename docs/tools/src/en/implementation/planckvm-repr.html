@@ -16,7 +16,7 @@ header | size (58)/28 | kind (4)/2 | r (1)/1 | 1/1
 </ul>
 
 <h2>Contents of objects</h2>
-<p>"Word" is the position counted from 0 at the word after the header. Environments, cells and codes are never passed to a program as values.</p>
+<p>"Word" is the position counted from 0 at the word after the header. Environments are never passed to a program as values.</p>
 <table>
 <tr><th>kind</th><th>Object (head)</th><th>Contents</th></tr>
 <tr><td>0</td><td>big integer (<code>Int</code>)</td><td>sign (raw; 0 for 0 or more, 1 for negative), number of digits n (raw), then n digits (one word each) in base 2<sup>64</sup> from the lowest. The top digit is not 0</td></tr>
@@ -32,10 +32,23 @@ header | size (58)/28 | kind (4)/2 | r (1)/1 | 1/1
 <tr><td>11</td><td>continuation (<code>Function</code>)</td><td>identity number (raw), the <code>reg</code> of <code>PERFORM</code> (raw), number of frames f (raw), the slice of frames (f of them, with the fields in <a href="planckvm-internals.html">internals</a>), the slice of registers. The GC follows <code>fn</code>, <code>env</code> and <code>alts</code> of the frames and all the registers</td></tr>
 <tr><td>12</td><td>environment</td><td>the parent environment (<code>none</code> if none), then the slots</td></tr>
 <tr><td>13</td><td>cell</td><td>the value of the global variable, the name (a symbol), the generation (an immediate integer). Only the cell of generation 0 holds a builtin</td></tr>
-<tr><td>14</td><td>code</td><td>everything from word 0 of the <a href="planckvm-isa.html#format">format</a> to the position table. The GC follows only the constant table and skips the instructions and the position table</td></tr>
-<tr><td>15</td><td>user data (a value of a type made by <code>_record_new</code>)</td><td>identity number (raw), the reference to the value of the type, the fields</td></tr>
+<tr><td>15</td><td>user data (a value of a type made by <code>_record_new</code>, and a code, of the type <code>Code</code>)</td><td>identity number (raw), the reference to the value of the type, the fields</td></tr>
 </table>
 <p>The <code>head</code> of an immediate integer is also <code>Int</code>. The identity number of an array, a plain array, a lambda, a Fusion, a builtin, a continuation and a user data is 0 until the first <code>HASH</code> assigns a number of 1 or more, and it never changes after that.</p>
+
+<h3>Code</h3>
+<p>A code is a user data of the type <code>Code</code> (the word 16 of the roots of the heap), and all its fields are values. The instructions, the constants and the position table are separate objects that the code refers to. The GC follows it as it does any other user data.</p>
+<table>
+<tr><th>field</th><th>contents</th></tr>
+<tr><td><code>nregs</code></td><td>the number of registers of the window (an immediate integer)</td></tr>
+<tr><td><code>arity</code></td><td>the number of arguments (an immediate integer)</td></tr>
+<tr><td><code>instrs</code></td><td>a <code>u32</code> plain array of the instructions. The i-th instruction is its element i</td></tr>
+<tr><td><code>consts</code></td><td>an array, the constant table</td></tr>
+<tr><td><code>params</code></td><td>the index in the constant table of the tree of the parameter patterns (an immediate integer; -1 for a top-level expression)</td></tr>
+<tr><td><code>locs</code></td><td>a <code>u32</code> plain array, the position table. Three elements, <code>pc</code>, <code>line</code> and <code>column</code>, are an entry</td></tr>
+<tr><td><code>file</code></td><td>the index in the constant table of the string of the file name of the position table (an immediate integer; -1 when there is none)</td></tr>
+</table>
+<p>The fields of a code and the arrays that they refer to are read-only. The result of writing them with <code>array_set</code> or <code>plain_set</code> is undefined.</p>
 
 <h3>Elements of a plain array</h3>
 <p>The type numbers are 0 for <code>'bool</code>, 1 to 4 for <code>'i8</code> to <code>'i64</code>, 5 to 8 for <code>'u8</code> to <code>'u64</code>, 9 to 11 for <code>'f16</code>, <code>'f32</code> and <code>'f64</code>, and 12 and 13 for <code>'c64</code> and <code>'c128</code>. The size of an element is 1 byte for <code>'bool</code> and the number of bits in the name for the others.</p>

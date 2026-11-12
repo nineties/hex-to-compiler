@@ -503,7 +503,7 @@ fn walk_cells[r](h: &mut r [u8], st: &r [i64], out: i64) -> i64 {
     var at: i64
     var top: i64
     cnt = 0
-    at = 16
+    at = 17
     top = g(st, 8)
     while at < top {
         let hd = hg(h, at)
@@ -570,8 +570,9 @@ fn do_cell_set[r](h: &mut r [u8], st: &mut r [i64], rs: &r [i64], a: i64) -> i64
     v
 }
 
-# _code_new(arity, nregs, instrs, consts, file, locs): a code. instrs is a u32 plain array of the instruction words and consts an array of values.
-# file is the index in consts of the string of the file name, or -1. locs is a u32 plain array of the entries (pc, line, column) of the position table.
+# _code_new(arity, nregs, instrs, consts, file, locs): a code, a data of the type Code (the word 16 of the heap). instrs is a u32 plain array of the instruction words
+# and consts an array of values. file is the index in consts of the string of the file name, or -1. locs is a u32 plain array of the entries (pc, line, column) of
+# the position table. The code keeps the arrays that are given (it does not copy them). See code_arity in ctl.native for the fields.
 fn do_code_new[r](h: &mut r [u8], st: &mut r [i64], rs: &r [i64], a: i64) -> i64 {
     let ar = arg_int(h, st, rs, a, 0, "_code_new: not an integer")
     let nr = arg_int(h, st, rs, a, 1, "_code_new: not an integer")
@@ -590,28 +591,20 @@ fn do_code_new[r](h: &mut r [u8], st: &mut r [i64], rs: &r [i64], a: i64) -> i64
     if hg(h, (ins >> 3) + 2) != 7 { return fail(h, st, "_code_new: the instructions are not a u32 plain array") }
     if is_int(ks) { return fail(h, st, "_code_new: the constants are not an array") }
     if kind_of(h, ks) != 6 { return fail(h, st, "_code_new: the constants are not an array") }
-    let n = hg(h, (ins >> 3) + 3)
     let m = size_of(h, ks) - 1
     let nw = hg(h, (ls >> 3) + 3)
     if nw % 3 != 0 { return fail(h, st, "_code_new: the positions are not a u32 plain array") }
     if fi < -1 or fi >= m { return fail(h, st, "_code_new: out of range") }
-    let c = alloc_obj(h, st, 14, 6 + n + m + nw)
+    let c = alloc_obj(h, st, 15, 9)
     let cb = c >> 3
-    hp(h, cb + 1, nr * 65536 + ar * 256)
-    hp(h, cb + 2, n)
-    hp(h, cb + 3, m)
-    hp(h, cb + 4, -1)
-    hp(h, cb + 5, nw / 3)
-    if fi < 0 { hp(h, cb + 6, -1) } else { hp(h, cb + 6, fi) }
-    for i in 0 as i64..n {
-        hp(h, cb + 7 + i, raw(h, (ins >> 3) + 4, 7, i))
-    }
-    for j in 0 as i64..m {
-        hp(h, cb + 7 + n + j, hg(h, (ks >> 3) + 2 + j))
-    }
-    for q in 0 as i64..nw {
-        hp(h, cb + 7 + n + m + q, raw(h, (ls >> 3) + 4, 7, q))
-    }
+    hp(h, cb + 2, hg(h, 16))
+    hp(h, cb + 3, nr * 2 + 1)
+    hp(h, cb + 4, ar * 2 + 1)
+    hp(h, cb + 5, ins)
+    hp(h, cb + 6, ks)
+    hp(h, cb + 7, -1)
+    hp(h, cb + 8, ls)
+    hp(h, cb + 9, fi * 2 + 1)
     c
 }
 
@@ -619,7 +612,8 @@ fn do_code_new[r](h: &mut r [u8], st: &mut r [i64], rs: &r [i64], a: i64) -> i64
 fn do_lambda[r](h: &mut r [u8], st: &mut r [i64], rs: &r [i64], a: i64) -> i64 {
     let c = g(rs, a)
     if is_int(c) { return fail(h, st, "_lambda: not a code") }
-    if kind_of(h, c) != 14 { return fail(h, st, "_lambda: not a code") }
+    if kind_of(h, c) != 15 { return fail(h, st, "_lambda: not a code") }
+    if hg(h, (c >> 3) + 2) != hg(h, 16) { return fail(h, st, "_lambda: not a code") }
     let lam = alloc_obj(h, st, 8, 3)
     hp(h, (lam >> 3) + 2, c)
     hp(h, (lam >> 3) + 3, hg(h, 3))

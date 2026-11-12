@@ -42,28 +42,14 @@
 <p class="lead">An instruction is one word, and only high-frequency operations are instructions. Everything else is a builtin function. The code generator keeps the code correct, and the evaluator does not check it. This page defines the bytecode format, the instructions, the builtins and the instructions for each feature of planck. The machine and the values are in <a href="planckvm.html">planckvm: execution model and values</a>, and the design inside an implementation is in <a href="planckvm-internals.html">planckvm internals</a>.</p>
 
 <h2 id="format">Bytecode format</h2>
-<p>The basic unit is a 64-bit word, and bits are numbered from 0 at the least significant bit. An instruction is 32 bits, and one instruction lies in the low 32 bits of a word (the upper 32 bits are 0). The figure of the code draws a 64-bit word in a width of 32. One lambda or one top-level expression is one code. The code of a nested function lies in the constant table of the outer code.</p>
-<table class="bits">
-<colgroup><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col></colgroup>
-<tr class="ruler"><td>3<br>1</td><td>3<br>0</td><td>2<br>9</td><td>2<br>8</td><td>2<br>7</td><td>2<br>6</td><td>2<br>5</td><td>2<br>4</td><td>2<br>3</td><td>2<br>2</td><td>2<br>1</td><td>2<br>0</td><td>1<br>9</td><td>1<br>8</td><td>1<br>7</td><td>1<br>6</td><td>1<br>5</td><td>1<br>4</td><td>1<br>3</td><td>1<br>2</td><td>1<br>1</td><td>1<br>0</td><td><br>9</td><td><br>8</td><td><br>7</td><td><br>6</td><td><br>5</td><td><br>4</td><td><br>3</td><td><br>2</td><td><br>1</td><td><br>0</td></tr>
-<tr class="lab"><td colspan="32">word 0</td></tr>
-<tr class="fld"><td colspan="16">0 (32)</td><td colspan="8">nregs (16)</td><td colspan="4">arity (8)</td><td colspan="4">0 (8)</td></tr>
-<tr class="lab"><td colspan="32">word 1</td></tr>
-<tr class="fld"><td colspan="32">ninstrs (64)</td></tr>
-<tr class="lab"><td colspan="32">word 2</td></tr>
-<tr class="fld"><td colspan="32">nconsts (64)</td></tr>
-<tr class="lab"><td colspan="32">word 3</td></tr>
-<tr class="fld"><td colspan="32">params (64)</td></tr>
-<tr class="lab"><td colspan="32">word 4</td></tr>
-<tr class="fld"><td colspan="32">nlocs (64)</td></tr>
-<tr class="lab"><td colspan="32">word 5</td></tr>
-<tr class="fld"><td colspan="32">file (64)</td></tr>
-<tr class="fld"><td colspan="32">instructions (ninstrs words)</td></tr>
-<tr class="fld"><td colspan="32">constant table (nconsts words)</td></tr>
-<tr class="fld"><td colspan="32">position table (nlocs x 3 words)</td></tr>
-</table>
-<p><code>nregs</code> is the number of registers of the window, and every register number in the code is smaller than it. <code>ninstrs</code> and <code>nconsts</code> are the numbers of words of the instructions and of the constant table. <code>params</code> is the index of the tree of the parameter patterns in the constant table. It is used to print a function and in the message of a matching failure (-1 for a top-level expression).</p>
-<p>The position table gives the <code>loc</code> of <code>MatchingFailed</code> from the position of a call. An entry is the three words <code>pc</code>, <code>line</code> and <code>column</code>, and <code>nlocs</code> is the number of entries. <code>pc</code> is the index, from the start of the instructions, of a <code>CALL</code> or a <code>TCALL</code> (the instruction after the <code>EXT</code> when one precedes it), and the entries are in ascending order of <code>pc</code>. <code>file</code> is the index in the constant table of the string of the file name that all entries share (-1 when there is no file name). Only a call wrapped in <code>At</code> has an entry.</p>
+<p>The basic unit is a 64-bit word, and bits are numbered from 0 at the least significant bit. An instruction is 32 bits, and one instruction is an element of <code>instrs</code> (a <code>u32</code> plain array) of the code. One lambda or one top-level expression is one code. The code of a nested function lies in the constant table of the outer code. A code is a user data of the type <code>Code</code>, and its shape as an object is in <a href="planckvm-repr.html">Internal representation</a>.</p>
+<ul>
+<li><code>nregs</code> is the number of registers of the window, and every register number in the code is smaller than it.</li>
+<li><code>instrs</code> is a <code>u32</code> plain array of the instructions, and <code>consts</code> is an array, the constant table.</li>
+<li><code>params</code> is the index of the tree of the parameter patterns in the constant table. It is used to print a function and in the message of a matching failure (-1 for a top-level expression).</li>
+<li><code>locs</code> is a <code>u32</code> plain array, the position table. It gives the <code>loc</code> of <code>MatchingFailed</code> from the position of a call. An entry is the three elements <code>pc</code>, <code>line</code> and <code>column</code>. <code>pc</code> is the index, from the start of the instructions, of a <code>CALL</code> or a <code>TCALL</code> (the instruction after the <code>EXT</code> when one precedes it), and the entries are in ascending order of <code>pc</code>. Only a call wrapped in <code>At</code> has an entry.</li>
+<li><code>file</code> is the index in the constant table of the string of the file name that all entries share (-1 when there is no file name).</li>
+</ul>
 
 <h3>Instruction formats</h3>
 <p>An instruction is 32 bits (two instructions with a preceding <code>EXT</code>), and the low 8 bits are the opcode.</p>
@@ -183,7 +169,7 @@
 <li><code>eval(e)</code>: compile the M-expression e in the current global environment and run it. A compile error stops like a runtime error, and its <code>loc</code> is the position of the innermost <code>At</code> around the expression that failed to compile, or <code>none</code> when there is none. The inner frames are ordinary frames, so they can be copied when a <code>PERFORM</code> happens inside <code>eval</code>.</li>
 <li><code>_set_file(path)</code>: make path the file being loaded and return the previous value. It is used to decide where a global variable is defined.</li>
 <li>The system builtins: <code>_sys_open(path)</code> opens a file for reading and gives its descriptor, or a negative number. <code>_sys_read(fd, buf, n)</code> reads at most n bytes into the start of the <code>u8</code> plain array buf and gives the number of bytes, 0 at the end. <code>_sys_write(fd, buf, n)</code> writes the first n bytes of buf and gives the number written. <code>_sys_close(fd)</code> closes a descriptor. <code>_sys_argc()</code> and <code>_sys_argv(i)</code> give the number and the strings of the command line of the machine, whose first is the machine and second the image.</li>
-<li>The code that is made while the program runs: <code>_code_new(arity, nregs, instrs, consts, file, locs)</code> is a code of the words in the <code>u32</code> plain array instrs and the values in the array consts, laid out as in the format of this page. <code>file</code> is the index in consts of the string of the file name, or -1, and the <code>u32</code> plain array locs holds the entries <code>pc</code>, <code>line</code> and <code>column</code> of the position table. <code>_lambda(code)</code> is the Lambda of a code with no environment. <code>_cells()</code> is an array of all the cells of the global variables. <code>_cell_new(sym, g)</code> makes a cell of the generation g with the value <code>none</code>. <code>_cell_field(c, i)</code> is the value (i = 0), the name symbol (1) or the generation (2) of the cell c, and <code>_cell_set(c, v)</code> writes the value.</li>
+<li>The code that is made while the program runs: <code>_code_new(arity, nregs, instrs, consts, file, locs)</code> is a code of the <code>u32</code> plain array instrs and the array consts, as in the format of this page. The code keeps instrs, consts and locs as they are, without copying them. <code>file</code> is the index in consts of the string of the file name, or -1, and the <code>u32</code> plain array locs holds the entries <code>pc</code>, <code>line</code> and <code>column</code> of the position table. <code>_lambda(code)</code> is the Lambda of a code with no environment. <code>_cells()</code> is an array of all the cells of the global variables. <code>_cell_new(sym, g)</code> makes a cell of the generation g with the value <code>none</code>. <code>_cell_field(c, i)</code> is the value (i = 0), the name symbol (1) or the generation (2) of the cell c, and <code>_cell_set(c, v)</code> writes the value.</li>
 <li>Bit operations treat negative numbers as infinite two's complement.</li>
 </ul>
 

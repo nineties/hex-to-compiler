@@ -42,7 +42,7 @@
 <p class="lead">planckvm は planck の全機能を実行するレジスタマシンのバイトコードです。変数はコンパイル時にセル・環境・レジスタへ解決され、実行時に名前は引きません。呼び出しは呼び出し元のレジスタに窓を重ね、引数をコピーしません。外部仕様はこの頁と<a href="planckvm-isa.html">命令</a>、実装の設計は<a href="planckvm-internals.html">内部仕様</a>です。</p>
 
 <h2>実行モデル</h2>
-<p>命令は現在のフレームのレジスタ <code>R[0]</code> 〜 <code>R[nregs-1]</code> を読み書きします。コード（命令列と定数表）は不変で、1つの Lambda かトップレベルの式が1つのコードです（<a href="planckvm-isa.html#format">フォーマット</a>）。環境は変数を置くヒープ上の領域で、セルは大域変数1つを表します。</p>
+<p>命令は現在のフレームのレジスタ <code>R[0]</code> 〜 <code>R[nregs-1]</code> を読み書きします。コード（命令列と定数表）は作成後に書き換えず（書き換えた結果は未定義です）、1つの Lambda かトップレベルの式が1つのコードです（<a href="planckvm-isa.html#format">フォーマット</a>）。環境は変数を置くヒープ上の領域で、セルは大域変数1つを表します。</p>
 
 <h3>レジスタの窓</h3>
 <p>フレームのレジスタは1本のレジスタスタックの上にあり、その範囲を窓と呼びます。<code>CALL A B C</code> で呼ばれた Lambda の窓は呼び出し元の <code>R[B+1]</code> から始まるので、引数 <code>R[B+1]</code> 〜 <code>R[B+C]</code> が呼ばれた側の <code>R[0]</code> 〜 <code>R[C-1]</code> になります。</p>
@@ -81,7 +81,7 @@
 <p>実行時エラーは、起こしたフレームでエフェクト <code>Error{loc, メッセージ}</code> を <code>Perform</code> します。<code>loc</code> は <code>MatchingFailed</code> の <code>loc</code> と同じ位置の表から引きます。フレームが、項のある <code>CALL</code> か <code>TCALL</code> を実行していたときはその呼び出しの位置で、ほかの命令のエラーでは <code>none</code> です。<code>Error</code> のハンドラが捕まえると、その継続は、失敗した命令が書くレジスタに値を渡します。ハンドラが無ければ、メッセージを標準エラー出力に書いて終了状態 1 で終了します。命令のエラー、関数でないものの呼び出し、組み込み <code>put</code>・<code>substr</code>・<code>_strcat</code>・<code>mexpr</code>・<code>intern</code>・<code>symname</code>・<code>exit</code> とシステムの組み込みのエラーがこのエフェクトです。ほかの実行時エラーは、メッセージを書いて終了状態 1 で終了します。トップレベルの式1つが arity 0 のコード1つで、式ごとに <code>parse</code> と <code>eval</code> のセルを読んで呼ぶループは評価器の入口にあります。入口のコードは <code>CALL R0 R0 n</code> と <code>HALT R0</code> の2語です。</p>
 
 <h2>値</h2>
-<p>値の <code>type</code> は <code>Int</code>・<code>Float</code>・<code>Complex</code>・<code>String</code>・<code>Symbol</code>・<code>Expr</code>・<code>Array</code>・<code>Plain</code>・<code>Function</code> で、どれも型 <code>Type</code> の値です。同じ名前の大域変数がそれを持ちます。整数は多倍長、浮動小数点数と複素数は binary64 で不変、文字列は 0 バイトも含められる不変のバイト列、シンボルは名前ごとに一意、M式は immutable です。配列は値の、plain 配列は1つの型の要素の、書き換え可能な列です。関数は Lambda・Fusion・組み込み・継続です。</p>
+<p>値の <code>type</code> は <code>Int</code>・<code>Float</code>・<code>Complex</code>・<code>String</code>・<code>Symbol</code>・<code>Expr</code>・<code>Array</code>・<code>Plain</code>・<code>Function</code>・<code>Code</code> で、どれも型 <code>Type</code> の値です。同じ名前の大域変数がそれを持ちます。整数は多倍長、浮動小数点数と複素数は binary64 で不変、文字列は 0 バイトも含められる不変のバイト列、シンボルは名前ごとに一意、M式は immutable です。配列は値の、plain 配列は1つの型の要素の、書き換え可能な列です。関数は Lambda・Fusion・組み込み・継続です。</p>
 <ul>
 <li>シンボル <code>false</code> だけが偽で、それ以外はすべて真です。</li>
 <li><code>EQ</code> は、数は値で、文字列は中身で、M式とシンボルは同一性で比べます（M式は intern するので、頭と引数が同じ M式は同じオブジェクトです）。配列と plain 配列は、同一のオブジェクトなら等しく、そうでなければ要素ごとに比べます（plain 配列は読み出した値で比べるので、型が違っても要素が等しければ等しくなります）。関数とユーザーデータは同一のオブジェクトだけが等しくなります。等しい値の <code>HASH</code> は同じです（<a href="planckvm-types.html">データ型</a>）。</li>
