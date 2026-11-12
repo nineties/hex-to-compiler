@@ -42,28 +42,14 @@
 <p class="lead">1命令は 32 ビットで、高頻度の操作だけを命令にします。他は組み込み関数です。コードの正しさは生成する側が守り、評価器は検査しません。この頁はフォーマット、命令、組み込み、planck の各機能に対応する命令を定めます。機械と値は<a href="planckvm.html">実行モデルと値</a>に、実装の設計は<a href="planckvm-internals.html">内部仕様</a>にあります。</p>
 
 <h2 id="format">バイトコードのフォーマット</h2>
-<p>基本単位は 64 ビットの語で、ビットの番号は最下位を 0 とします。命令は 32 ビットで、1 命令を語の下位 32 ビットに置きます（上位 32 ビットは 0）。コードの図は 64 ビットの語を 32 の幅に縮めて描いています。1つの Lambda かトップレベルの式が1つのコードで、入れ子の関数のコードは外側の定数表に入ります。</p>
-<table class="bits">
-<colgroup><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col><col></colgroup>
-<tr class="ruler"><td>3<br>1</td><td>3<br>0</td><td>2<br>9</td><td>2<br>8</td><td>2<br>7</td><td>2<br>6</td><td>2<br>5</td><td>2<br>4</td><td>2<br>3</td><td>2<br>2</td><td>2<br>1</td><td>2<br>0</td><td>1<br>9</td><td>1<br>8</td><td>1<br>7</td><td>1<br>6</td><td>1<br>5</td><td>1<br>4</td><td>1<br>3</td><td>1<br>2</td><td>1<br>1</td><td>1<br>0</td><td><br>9</td><td><br>8</td><td><br>7</td><td><br>6</td><td><br>5</td><td><br>4</td><td><br>3</td><td><br>2</td><td><br>1</td><td><br>0</td></tr>
-<tr class="lab"><td colspan="32">語0</td></tr>
-<tr class="fld"><td colspan="16">0 (32)</td><td colspan="8">nregs (16)</td><td colspan="4">arity (8)</td><td colspan="4">0 (8)</td></tr>
-<tr class="lab"><td colspan="32">語1</td></tr>
-<tr class="fld"><td colspan="32">ninstrs (64)</td></tr>
-<tr class="lab"><td colspan="32">語2</td></tr>
-<tr class="fld"><td colspan="32">nconsts (64)</td></tr>
-<tr class="lab"><td colspan="32">語3</td></tr>
-<tr class="fld"><td colspan="32">params (64)</td></tr>
-<tr class="lab"><td colspan="32">語4</td></tr>
-<tr class="fld"><td colspan="32">nlocs (64)</td></tr>
-<tr class="lab"><td colspan="32">語5</td></tr>
-<tr class="fld"><td colspan="32">file (64)</td></tr>
-<tr class="fld"><td colspan="32">命令列 (ninstrs 語)</td></tr>
-<tr class="fld"><td colspan="32">定数表 (nconsts 語)</td></tr>
-<tr class="fld"><td colspan="32">位置の表 (nlocs × 3 語)</td></tr>
-</table>
-<p><code>nregs</code> は窓のレジスタの個数で、コードの中のレジスタ番号はすべてこれより小さい値です。<code>ninstrs</code> と <code>nconsts</code> は命令列と定数表の語数です。<code>params</code> は引数のパターンの木の定数表の添字で、関数の表示と照合失敗のメッセージに使います（トップレベルの式では -1）。</p>
-<p>位置の表は、呼び出しの位置から <code>MatchingFailed</code> の <code>loc</code> を引くために使います。1項目は <code>pc</code>・<code>line</code>・<code>column</code> の3語で、<code>nlocs</code> はその項目数です。<code>pc</code> は <code>CALL</code> か <code>TCALL</code> の、命令列の先頭からの添字で（<code>EXT</code> が前にあれば <code>EXT</code> の次の命令）、項目は <code>pc</code> の昇順に並びます。<code>file</code> は表の全項目に共通のファイル名の文字列の、定数表の添字です（ファイル名がなければ -1）。<code>At</code> が包む呼び出しだけが項目を持ちます。</p>
+<p>基本単位は 64 ビットの語で、ビットの番号は最下位を 0 とします。命令は 32 ビットで、コードの <code>instrs</code>（<code>u32</code> の plain array）の1要素に置きます。1つの Lambda かトップレベルの式が1つのコードで、入れ子の関数のコードは外側の定数表に入ります。コードは型 <code>Code</code> のユーザーデータで、オブジェクトの形は<a href="planckvm-repr.html">内部表現</a>にあります。</p>
+<ul>
+<li><code>nregs</code> は窓のレジスタの個数で、コードの中のレジスタ番号はすべてこれより小さい値です。</li>
+<li><code>instrs</code> は命令を並べた <code>u32</code> の plain array、<code>consts</code> は定数表の array です。</li>
+<li><code>params</code> は引数のパターンの木の定数表の添字で、関数の表示と照合失敗のメッセージに使います（トップレベルの式では -1）。</li>
+<li><code>locs</code> は位置の表の <code>u32</code> の plain array です。呼び出しの位置から <code>MatchingFailed</code> の <code>loc</code> を引くために使います。1項目は <code>pc</code>・<code>line</code>・<code>column</code> の3要素です。<code>pc</code> は <code>CALL</code> か <code>TCALL</code> の、命令列の先頭からの添字で（<code>EXT</code> が前にあれば <code>EXT</code> の次の命令）、項目は <code>pc</code> の昇順に並びます。<code>At</code> が包む呼び出しだけが項目を持ちます。</li>
+<li><code>file</code> は表の全項目に共通のファイル名の文字列の、定数表の添字です（ファイル名がなければ -1）。</li>
+</ul>
 
 <h3>命令の形式</h3>
 <p>1命令は 32 ビット（<code>EXT</code> を前に置くと2命令）で、下位 8 ビットがオペコードです。</p>
@@ -183,7 +169,7 @@
 <li><code>eval(e)</code>: M式 e を現在の大域環境でコードに変換して実行します。コンパイルエラーは実行時エラーと同じく止まり、その <code>loc</code> は、コンパイルに失敗した式を囲む一番内側の <code>At</code> の位置です。<code>At</code> が無ければ <code>none</code> です。内側のフレームは通常のフレームなので、<code>eval</code> の中の <code>PERFORM</code> でも複製できます。</li>
 <li><code>_set_file(path)</code>: 読み込み中のファイルを path にし、前の値を返します。大域変数の定義元の判定に使います。</li>
 <li>システムの組み込み: <code>_sys_open(path)</code> は読み込み用にファイルを開き、記述子か負の数を返します。<code>_sys_read(fd, buf, n)</code> は <code>u8</code> の plain array buf の先頭へ最大 n バイトを読み、読んだバイト数を返します（終わりでは 0）。<code>_sys_write(fd, buf, n)</code> は buf の先頭 n バイトを書き、書いたバイト数を返します。<code>_sys_close(fd)</code> は記述子を閉じます。<code>_sys_argc()</code> と <code>_sys_argv(i)</code> は機械のコマンドラインの個数と文字列で、先頭が機械、2番目がイメージです。</li>
-<li>実行中にコードを作る組み込み: <code>_code_new(arity, nregs, instrs, consts, file, locs)</code> は、<code>u32</code> の plain array instrs の語と array consts の値から、この頁のフォーマットどおりのコードを作ります。<code>file</code> はファイル名の文字列の consts での添字（無ければ -1）で、<code>u32</code> の plain array locs は位置の表の項 <code>pc</code>・<code>line</code>・<code>column</code> を並べたものです。<code>_lambda(code)</code> はコードの環境なしの Lambda です。<code>_cells()</code> は大域変数のセルすべての array です。<code>_cell_new(sym, g)</code> は世代 g で値が <code>none</code> のセルを作ります。<code>_cell_field(c, i)</code> はセル c の値（i が 0）・名前の symbol（1）・世代（2）で、<code>_cell_set(c, v)</code> は値を書きます。</li>
+<li>実行中にコードを作る組み込み: <code>_code_new(arity, nregs, instrs, consts, file, locs)</code> は、<code>u32</code> の plain array instrs と array consts から、この頁のフォーマットどおりのコードを作ります。instrs・consts・locs は写さず、コードがそのまま持ちます。<code>file</code> はファイル名の文字列の consts での添字（無ければ -1）で、<code>u32</code> の plain array locs は位置の表の項 <code>pc</code>・<code>line</code>・<code>column</code> を並べたものです。<code>_lambda(code)</code> はコードの環境なしの Lambda です。<code>_cells()</code> は大域変数のセルすべての array です。<code>_cell_new(sym, g)</code> は世代 g で値が <code>none</code> のセルを作ります。<code>_cell_field(c, i)</code> はセル c の値（i が 0）・名前の symbol（1）・世代（2）で、<code>_cell_set(c, v)</code> は値を書きます。</li>
 <li>ビット演算は負の数も含めて無限桁の 2 の補数として扱います。</li>
 </ul>
 

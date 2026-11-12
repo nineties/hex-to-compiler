@@ -2,9 +2,10 @@
 # Copyright (C) 2026 nineties
 #
 # The image is the initial heap of planckvm as 64-bit little-endian words; the word index in the file is the heap index.
-# Words 0 to 15 are the roots: 0 is the Lambda that is run first, 1 false, 2 true, 3 none, 4 Tuple, 5 Cons, 6 Nil, and 7 to 15 the symbols
-# the types of the values (Int String Symbol Expr Function Array Plain Float Complex). The objects follow.
-# The global variables of the cells Int, String, Symbol, Expr, Function, Array, Plain, Float, Complex and Type have the types as the values.
+# Words 0 to 16 are the roots: 0 is the Lambda that is run first, 1 false, 2 true, 3 none, 4 Tuple, 5 Cons, 6 Nil, and 7 to 16 the symbols
+# the types of the values (Int String Symbol Expr Function Array Plain Float Complex Code). The objects follow.
+# The global variables of the cells Int, String, Symbol, Expr, Function, Array, Plain, Float, Complex, Code and Type have the types as the values.
+# A code is a data of the type Code: Code{nregs, arity, instrs, consts, params, locs, file} (see planckvm-repr). instrs and locs are u32 plain arrays and consts an array.
 #
 # pvm_image.build(codes, entry) is the buffer of bytes of the image (bytes.pk). codes is a list of
 # Code{name, arity, nregs, instrs, consts}. entry is the name of the code that is run first; its arity is 0.
@@ -65,7 +66,7 @@ module pvm_image {
         ["_cells", 51, 0], ["_cell_new", 52, 2], ["_cell_field", 53, 2], ["_cell_set", 54, 2], ["_code_new", 55, 6], ["_lambda", 56, 1], ["_quo", 57, 2]
     ]
 
-    export type_names := ["Int", "String", "Symbol", "Expr", "Function", "Array", "Plain", "Float", "Complex"]
+    export type_names := ["Int", "String", "Symbol", "Expr", "Function", "Array", "Plain", "Float", "Complex", "Code"]
 
     export find_op(name) := {
         r := list.find(e -> e[0] == name, isa)
@@ -125,11 +126,11 @@ module pvm_image {
         else [e[1], byte(j), byte(bit_sar(j, 8)), byte(bit_sar(j, 16))]
     }
 
-    # lays the objects out after the 8 root words and writes them
+    # lays the objects out after the 17 root words and writes them
     layout(objs, roots) := {
         n := vector.len(objs)
         addr := array(n)
-        at := 16
+        at := 17
         i := 0
         while (i < n) {
             array_set(addr, i, at)
@@ -190,11 +191,14 @@ module pvm_image {
         nil_ := symbol("Nil")
         # the types: the type Type is the type of every type, so it is made first and refers to itself
         empty_ := add(['mexpr, "Tuple", []], Obj{5, [R{tuple_}]})
+        # the fields of the type Code
+        code_fields := add(['mexpr, "Tuple", "Code"], Obj{5, R{tuple_} :: map(s -> R{symbol(s)}, ["nregs", "arity", "instrs", "consts", "params", "locs", "file"])})
         type_obj := table.new()
         make_type(n) := {
             name := symbol(n)
+            fields := if (n == "Code") code_fields else empty_
             id := vector.len(objs)
-            add(['type, n], Obj{13, [W{0}, R{name}, R{empty_}, R{table.get(type_obj, "Type", id)}]})
+            add(['type, n], Obj{13, [W{0}, R{name}, R{fields}, R{table.get(type_obj, "Type", id)}]})
         }
         table.set(type_obj, "Type", make_type("Type"))
         each(n -> table.set(type_obj, n, make_type(n)), type_names)
@@ -211,7 +215,30 @@ module pvm_image {
         })
         cell(s) := cell_g(s, 0)
         # reserve the code objects so that they can refer to each other
-        each(c -> add(['code, c[0]], Obj{14, []}), codes)
+        each(c -> add(['code, c[0]], Obj{15, []}), codes)
+        code_type := table.get(type_obj, "Code", none)
+        # a u32 plain array of the elements bs (each is the list of the 4 bytes of an element); two elements are in a word, and the last word of an odd number is filled with zeros
+        u32_plain(bs) := {
+            n := length(bs)
+            nw := (n + 1) // 2
+            arr := array(nw * 8)
+            k := 0
+            each(b -> each(x -> {
+                array_set(arr, k, x)
+                k = k + 1
+            }, b), bs)
+            while (k < nw * 8) {
+                array_set(arr, k, 0)
+                k = k + 1
+            }
+            items := []
+            j := nw - 1
+            while (j >= 0) {
+                items = B{map(t -> array_get(arr, j * 8 + t), [0, 1, 2, 3, 4, 5, 6, 7])} :: items
+                j = j - 1
+            }
+            add(['plain, vector.len(objs)], Obj{7, append([W{0}, W{7}, W{n}], items)})
+        }
         value_of(x) := match x {
             K{n} -> R{table.get(names, ['code, n], none)}
           | I{n} -> V{n}
@@ -234,7 +261,7 @@ module pvm_image {
         }
         each(c -> {
             labels := label_table(c[3])
-            words := []
+            ins := []
             locs := []
             file := none
             pc := 0
@@ -242,16 +269,18 @@ module pvm_image {
             each(i -> if (not is_label(i)) {
                 if (head(i) == 'At) {
                     l := arg(i, 0)
-                    locs = W{arg(l, 2)} :: W{arg(l, 1)} :: W{pc} :: locs
+                    locs = u32_bytes(arg(l, 2)) :: u32_bytes(arg(l, 1)) :: u32_bytes(pc) :: locs
                     file = arg(l, 0)
-                    words = B{append(encode(labels, pc + 1, arg(i, 1)), [0, 0, 0, 0])} :: words
-                } else words = B{append(encode(labels, pc + 1, i), [0, 0, 0, 0])} :: words
+                    ins = encode(labels, pc + 1, arg(i, 1)) :: ins
+                } else ins = encode(labels, pc + 1, i) :: ins
                 pc = pc + 1
             }, c[3])
             consts := append(map(value_of, c[4]), if (file == none) [] else [value_of(S{file})])
             fidx := if (file == none) -1 else length(consts) - 1
-            hdr := [W{bit_shl(c[2], 16) + bit_shl(c[1], 8)}, W{pc}, W{length(consts)}, W{-1}, W{length(locs) // 3}, W{fidx}]
-            vector.set(objs, table.get(names, ['code, c[0]], none), Obj{14, append(hdr, append(reverse(words), append(consts, reverse(locs))))})
+            iarr := u32_plain(reverse(ins))
+            carr := add(['consts, c[0]], Obj{6, W{0} :: consts})
+            larr := u32_plain(reverse(locs))
+            vector.set(objs, table.get(names, ['code, c[0]], none), Obj{15, [W{0}, R{code_type}, V{c[2]}, V{c[1]}, R{iarr}, R{carr}, V{-1}, R{larr}, V{fidx}]})
         }, codes)
         lam := add(['lambda], Obj{8, [W{0}, R{table.get(names, ['code, entry], none)}, R{n_}]})
         layout(objs, append([lam, f_, t_, n_, tuple_, cons_, nil_], types))

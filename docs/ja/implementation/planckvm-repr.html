@@ -60,7 +60,7 @@
 </ul>
 
 <h2>オブジェクトの中身</h2>
-<p>「word」はヘッダの次を 0 とした位置です。環境・セル・コードは、値としてプログラムに渡りません。</p>
+<p>「word」はヘッダの次を 0 とした位置です。環境は、値としてプログラムに渡りません。</p>
 <table>
 <tr><th>kind</th><th>オブジェクト（head）</th><th>中身</th></tr>
 <tr><td>0</td><td>多倍長整数（<code>Int</code>）</td><td>符号（生。0 は 0 以上、1 は負）、桁数 n（生）、n 個の桁（1 桁が 1 word）。桁は底 2<sup>64</sup> で下位から並べ、最上位の桁は 0 でない</td></tr>
@@ -76,10 +76,23 @@
 <tr><td>11</td><td>継続（<code>Function</code>）</td><td>identity の番号（生）、<code>PERFORM</code> の <code>reg</code>（生）、フレーム数 f（生）、フレームの切片（f 個。欄は<a href="planckvm-internals.html">内部仕様</a>のとおり）、レジスタの切片。GC はフレームの <code>fn</code> <code>env</code> <code>alts</code> とレジスタの切片をたどる</td></tr>
 <tr><td>12</td><td>環境</td><td>親の環境（無ければ <code>none</code>）、スロット</td></tr>
 <tr><td>13</td><td>セル</td><td>大域変数の値、名前（symbol）、世代（整数の即値）。組み込みの値を持つのは世代 0 のセルだけ</td></tr>
-<tr><td>14</td><td>コード</td><td><a href="planckvm-isa.html#format">フォーマット</a>の word 0 から位置の表まで。GC は定数表だけをたどり、命令列と位置の表は読み飛ばす</td></tr>
-<tr><td>15</td><td>ユーザーデータ（<code>_record_new</code> の型ごとの値）</td><td>identity の番号（生）、型の値への参照、フィールド</td></tr>
+<tr><td>15</td><td>ユーザーデータ（<code>_record_new</code> の型ごとの値と、型 <code>Code</code> のコード）</td><td>identity の番号（生）、型の値への参照、フィールド</td></tr>
 </table>
 <p>整数の即値の <code>head</code> も <code>Int</code> です。array・plain array・Lambda・Fusion・組み込み・継続・ユーザーデータの identity の番号は、最初の <code>HASH</code> が 1 以上の番号を割り当てるまで 0 で、そのあとは変わりません。</p>
+
+<h3>コード</h3>
+<p>コードは型 <code>Code</code>（ヒープの根の word 16）のユーザーデータで、フィールドはすべて値です。命令と定数と位置の表は別のオブジェクトで、コードはそれらを指します。GC は他のユーザーデータと同じようにたどります。</p>
+<table>
+<tr><th>フィールド</th><th>中身</th></tr>
+<tr><td><code>nregs</code></td><td>窓のレジスタの個数（整数の即値）</td></tr>
+<tr><td><code>arity</code></td><td>引数の個数（整数の即値）</td></tr>
+<tr><td><code>instrs</code></td><td>命令の <code>u32</code> の plain array。i 番目の命令がその要素 i です</td></tr>
+<tr><td><code>consts</code></td><td>定数表の array</td></tr>
+<tr><td><code>params</code></td><td>引数のパターンの木の定数表の添字（整数の即値。トップレベルの式では -1）</td></tr>
+<tr><td><code>locs</code></td><td>位置の表の <code>u32</code> の plain array。<code>pc</code>・<code>line</code>・<code>column</code> の3要素が1項目です</td></tr>
+<tr><td><code>file</code></td><td>位置の表のファイル名の文字列の、定数表の添字（整数の即値。無ければ -1）</td></tr>
+</table>
+<p>コードのフィールドと、それが指す配列は読むだけです。<code>array_set</code> や <code>plain_set</code> で書き換えた結果は未定義です。</p>
 
 <h3>plain array の要素</h3>
 <p>型の番号は、<code>'bool</code> が 0、<code>'i8</code> 〜 <code>'i64</code> が 1〜4、<code>'u8</code> 〜 <code>'u64</code> が 5〜8、<code>'f16</code> <code>'f32</code> <code>'f64</code> が 9〜11、<code>'c64</code> <code>'c128</code> が 12〜13 です。要素の大きさは、<code>'bool</code> が 1 バイトで、ほかは型名のビット数です。</p>

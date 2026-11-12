@@ -1,7 +1,7 @@
 # ctl: the instructions that change the control of planckvm, the environments, the Fusions and the continuations
 #
 # A frame is 7 words of the frame stack fs: 0 fn, 1 env, 2 alts, 3 next, 4 base, 5 pc, 6 ret. The pc is the index of the instruction from the
-# first instruction of the code. ret is the register (the low 16 bits), the mode (bits 16 and 17: 0 put the value in the register, 1 and 2 the
+# first instruction of the code (the code is the Code data, see code_arity). ret is the register (the low 16 bits), the mode (bits 16 and 17: 0 put the value in the register, 1 and 2 the
 # call was made by a condition instruction with k = mode - 1, 3 drop the value) and the kind (the bits from 18: 0 normal, 1 boundary, 2 transfer).
 # The control state of the loop is the top frame fp only: after an instruction of this unit the loop reads the code, the pc and the base again.
 #
@@ -21,12 +21,24 @@ fn code_of[r](h: &r [u8], lam: i64) -> i64 {
     hg(h, (lam >> 3) + 2) >> 3
 }
 
+# A code is a data of the type Code (the word 16 of the heap): the word index code is the header, and the words after the identity and the type are the fields,
+# all values: 3 nregs and 4 arity (integers), 5 the u32 plain array of the instructions, 6 the array of the constants, 7 params (an integer, -1 if none),
+# 8 the u32 plain array of the position table, 9 the index in the constants of the string of the file name (an integer, -1 if none).
 fn code_arity[r](h: &r [u8], code: i64) -> i64 {
-    (hg(h, code + 1) >> 8) & 255
+    hg(h, code + 4) >> 1
 }
 
 fn code_nregs[r](h: &r [u8], code: i64) -> i64 {
-    (hg(h, code + 1) >> 16) & 65535
+    hg(h, code + 3) >> 1
+}
+
+# the byte position of the first instruction of the code, and the index of the first constant
+fn code_ib[r](h: &r [u8], code: i64) -> i64 {
+    hg(h, code + 5) + 32
+}
+
+fn code_kb[r](h: &r [u8], code: i64) -> i64 {
+    (hg(h, code + 6) >> 3) + 2
 }
 
 fn ret_word(a: i64, mode: i64, kind: i64) -> i64 {
@@ -276,12 +288,12 @@ fn loc_symbol[r](h: &mut r [u8], st: &mut r [i64]) -> i64 {
 fn frame_loc[r](h: &mut r [u8], st: &mut r [i64], fs: &r [i64], q: i64) -> i64 {
     if q < 0 { return hg(h, 3) }
     let code = code_of(h, g(fs, q))
-    let nl = hg(h, code + 5)
-    let fi = hg(h, code + 6)
+    let ls = hg(h, code + 8)
+    let nl = hg(h, (ls >> 3) + 3) / 3
+    let fi = hg(h, code + 9) >> 1
     if nl == 0 or fi == -1 { return hg(h, 3) }
     let pc = g(fs, q + 5) - 1
-    let ni = hg(h, code + 2)
-    let lb = code + 7 + ni + hg(h, code + 3)
+    let lb = ls + 32
     var lo: i64
     var hi: i64
     var at: i64
@@ -290,7 +302,7 @@ fn frame_loc[r](h: &mut r [u8], st: &mut r [i64], fs: &r [i64], q: i64) -> i64 {
     at = -1
     while lo <= hi and at < 0 {
         let mid = (lo + hi) / 2
-        let e = hg(h, lb + 3 * mid)
+        let e = ld_u32(h, lb + 12 * mid)
         if e == pc {
             at = mid
         } else if e < pc {
@@ -302,9 +314,9 @@ fn frame_loc[r](h: &mut r [u8], st: &mut r [i64], fs: &r [i64], q: i64) -> i64 {
     if at < 0 { return hg(h, 3) }
     let sym = loc_symbol(h, st)
     let m = new_mexpr(h, st, sym, 3)
-    set_arg(h, m, 0, hg(h, code + 7 + ni + fi))
-    set_arg(h, m, 1, hg(h, lb + 3 * at + 1) * 2 + 1)
-    set_arg(h, m, 2, hg(h, lb + 3 * at + 2) * 2 + 1)
+    set_arg(h, m, 0, hg(h, code_kb(h, code) + fi))
+    set_arg(h, m, 1, ld_u32(h, lb + 12 * at + 4) * 2 + 1)
+    set_arg(h, m, 2, ld_u32(h, lb + 12 * at + 8) * 2 + 1)
     fin_mexpr(h, st, m)
 }
 
