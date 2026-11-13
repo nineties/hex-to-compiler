@@ -1,0 +1,201 @@
+# wasmenc: writes the binary format of WebAssembly: LEB128 integers, names, sections and the opcodes of the instructions
+# Copyright (C) 2026 nineties
+#
+# A buffer is one of bytes.pk. Integers of planck0 have 31 bits, so a 64-bit integer is given as four parts of 16 bits, the greatest first
+# (the operands of li64 of ir.pk), and a 32-bit value as the integer that has the same low 32 bits as a signed value.
+# op(b, name) writes the opcode of the instruction name, a string that is the name of the text format with _ for .: "i32_add", "i64_load8_u",
+# "i32_wrap_i64", "i64_trunc_sat_f64_s". The immediates that follow are written by the caller (uleb for an index, sleb for i32.const,
+# memarg for a load or a store).
+
+use("base")
+use("list")
+use("table")
+use("vector")
+use("bytes")
+
+module wasmenc {
+
+# the types of values and the kinds of the module
+export t_i32 := 127
+export t_i64 := 126
+export t_f32 := 125
+export t_f64 := 124
+export t_funcref := 112
+export t_func := 96
+export block_void := 64
+
+# the ids of the sections
+export sec_type := 1
+export sec_import := 2
+export sec_function := 3
+export sec_table := 4
+export sec_memory := 5
+export sec_global := 6
+export sec_export := 7
+export sec_element := 9
+export sec_code := 10
+export sec_data := 11
+
+# the kinds of imports and exports
+export kind_func := 0
+export kind_table := 1
+export kind_memory := 2
+export kind_global := 3
+
+# uleb(b, n) writes the integer n >= 0 as unsigned LEB128
+export uleb(b, n) := {
+    go := true
+    while (go) {
+        byte := bit_and(n, 127)
+        n = bit_sar(n, 7)
+        if (n != 0) byte = byte + 128 else go = false
+        bytes.u8(b, byte)
+    }
+}
+
+# sleb(b, n) writes the integer n as signed LEB128; it is the same for an i32 and an i64 of the value n
+export sleb(b, n) := {
+    go := true
+    while (go) {
+        byte := bit_and(n, 127)
+        n = bit_sar(n, 7)
+        last := (n == 0 and bit_and(byte, 64) == 0) or (n == -1 and bit_and(byte, 64) != 0)
+        if (last) go = false else byte = byte + 128
+        bytes.u8(b, byte)
+    }
+}
+
+# sleb64(b, p3, p2, p1, p0) writes the 64-bit integer p3 * 2^48 + p2 * 2^32 + p1 * 2^16 + p0 (each part from 0 to 65535) as signed LEB128
+export sleb64(b, p3, p2, p1, p0) := {
+    bits := array(64)
+    k := 0
+    each(p -> {
+        j := 0
+        while (j < 16) {
+            bits[k] = bit_and(bit_sar(p, j), 1)
+            k = k + 1
+            j = j + 1
+        }
+    }, [p0, p1, p2, p3])
+    sign := bits[63]
+    pos := 0
+    go := true
+    while (go) {
+        byte := 0
+        j := 0
+        while (j < 7) {
+            bit := if (pos + j < 64) bits[pos + j] else sign
+            byte = byte + bit_shl(bit, j)
+            j = j + 1
+        }
+        pos = pos + 7
+        rest := pos
+        same := true
+        while (rest < 64) {
+            if (bits[rest] != sign) same = false
+            rest = rest + 1
+        }
+        last := same and bit_and(bit_sar(byte, 6), 1) == sign
+        if (last) go = false else byte = byte + 128
+        bytes.u8(b, byte)
+    }
+}
+
+# name(b, s) writes the string s as a name: its length and its bytes
+export name(b, s) := {
+    uleb(b, strlen(s))
+    bytes.string(b, s)
+}
+
+# section(out, id, content) writes the section id that holds the bytes of the buffer content
+export section(out, id, content) := {
+    bytes.u8(out, id)
+    uleb(out, bytes.len(content))
+    bytes.append(out, content)
+}
+
+# vec(b, xs, f) writes the number of the elements of the list xs and then each element by f(b, x)
+export vec(b, xs, f) := {
+    uleb(b, length(xs))
+    each(x -> f(b, x), xs)
+}
+
+# the magic number and the version of the format
+export header(b) := {
+    bytes.u8(b, 0)
+    bytes.string(b, "asm")
+    bytes.u32(b, 1)
+}
+
+# a function type: the types of the parameters and of the results
+export func_type(b, params, results) := {
+    bytes.u8(b, t_func)
+    vec(b, params, bytes.u8)
+    vec(b, results, bytes.u8)
+}
+
+# the immediate of a load or a store: the alignment as a power of 2 and the offset
+export memarg(b, align, offset) := {
+    uleb(b, align)
+    uleb(b, offset)
+}
+
+# the IEEE 754 bits of a double, given as four parts of 16 bits, the greatest first
+export f64_bits(b, p3, p2, p1, p0) := {
+    bytes.u16(b, p0)
+    bytes.u16(b, p1)
+    bytes.u16(b, p2)
+    bytes.u16(b, p3)
+}
+
+# the opcodes, in groups (a list of the program has at most 64 elements)
+opcodes := list.concat([[
+    Tuple{"unreachable", [0]}, Tuple{"nop", [1]}, Tuple{"block", [2]}, Tuple{"loop", [3]}, Tuple{"if", [4]}, Tuple{"else", [5]}, Tuple{"end", [11]}, Tuple{"br", [12]},
+    Tuple{"br_if", [13]}, Tuple{"br_table", [14]}, Tuple{"return", [15]}, Tuple{"call", [16]}, Tuple{"call_indirect", [17]}, Tuple{"drop", [26]}, Tuple{"select", [27]}, Tuple{"local_get", [32]},
+    Tuple{"local_set", [33]}, Tuple{"local_tee", [34]}, Tuple{"global_get", [35]}, Tuple{"global_set", [36]}, Tuple{"i32_load", [40]}, Tuple{"i64_load", [41]}, Tuple{"f32_load", [42]}, Tuple{"f64_load", [43]},
+    Tuple{"i32_load8_s", [44]}, Tuple{"i32_load8_u", [45]}, Tuple{"i32_load16_s", [46]}, Tuple{"i32_load16_u", [47]}, Tuple{"i64_load8_s", [48]}, Tuple{"i64_load8_u", [49]}, Tuple{"i64_load16_s", [50]}, Tuple{"i64_load16_u", [51]},
+    Tuple{"i64_load32_s", [52]}, Tuple{"i64_load32_u", [53]}, Tuple{"i32_store", [54]}, Tuple{"i64_store", [55]}, Tuple{"f32_store", [56]}, Tuple{"f64_store", [57]}, Tuple{"i32_store8", [58]}, Tuple{"i32_store16", [59]},
+    Tuple{"i64_store8", [60]}, Tuple{"i64_store16", [61]}, Tuple{"i64_store32", [62]}, Tuple{"memory_size", [63, 0]}, Tuple{"memory_grow", [64, 0]}, Tuple{"i32_const", [65]}, Tuple{"i64_const", [66]}, Tuple{"f32_const", [67]}], [
+    Tuple{"f64_const", [68]}, Tuple{"i32_eqz", [69]}, Tuple{"i32_eq", [70]}, Tuple{"i32_ne", [71]}, Tuple{"i32_lt_s", [72]}, Tuple{"i32_lt_u", [73]}, Tuple{"i32_gt_s", [74]}, Tuple{"i32_gt_u", [75]},
+    Tuple{"i32_le_s", [76]}, Tuple{"i32_le_u", [77]}, Tuple{"i32_ge_s", [78]}, Tuple{"i32_ge_u", [79]}, Tuple{"i64_eqz", [80]}, Tuple{"i64_eq", [81]}, Tuple{"i64_ne", [82]}, Tuple{"i64_lt_s", [83]},
+    Tuple{"i64_lt_u", [84]}, Tuple{"i64_gt_s", [85]}, Tuple{"i64_gt_u", [86]}, Tuple{"i64_le_s", [87]}, Tuple{"i64_le_u", [88]}, Tuple{"i64_ge_s", [89]}, Tuple{"i64_ge_u", [90]}, Tuple{"f32_eq", [91]},
+    Tuple{"f32_ne", [92]}, Tuple{"f32_lt", [93]}, Tuple{"f32_gt", [94]}, Tuple{"f32_le", [95]}, Tuple{"f32_ge", [96]}, Tuple{"f64_eq", [97]}, Tuple{"f64_ne", [98]}, Tuple{"f64_lt", [99]},
+    Tuple{"f64_gt", [100]}, Tuple{"f64_le", [101]}, Tuple{"f64_ge", [102]}, Tuple{"i32_add", [106]}, Tuple{"i32_sub", [107]}, Tuple{"i32_mul", [108]}, Tuple{"i32_div_s", [109]}, Tuple{"i32_div_u", [110]},
+    Tuple{"i32_rem_s", [111]}, Tuple{"i32_rem_u", [112]}, Tuple{"i32_and", [113]}, Tuple{"i32_or", [114]}, Tuple{"i32_xor", [115]}, Tuple{"i32_shl", [116]}, Tuple{"i32_shr_s", [117]}, Tuple{"i32_shr_u", [118]}], [
+    Tuple{"i64_add", [124]}, Tuple{"i64_sub", [125]}, Tuple{"i64_mul", [126]}, Tuple{"i64_div_s", [127]}, Tuple{"i64_div_u", [128]}, Tuple{"i64_rem_s", [129]}, Tuple{"i64_rem_u", [130]}, Tuple{"i64_and", [131]},
+    Tuple{"i64_or", [132]}, Tuple{"i64_xor", [133]}, Tuple{"i64_shl", [134]}, Tuple{"i64_shr_s", [135]}, Tuple{"i64_shr_u", [136]}, Tuple{"f32_sqrt", [145]}, Tuple{"f32_add", [146]}, Tuple{"f32_sub", [147]},
+    Tuple{"f32_mul", [148]}, Tuple{"f32_div", [149]}, Tuple{"f64_sqrt", [159]}, Tuple{"f64_add", [160]}, Tuple{"f64_sub", [161]}, Tuple{"f64_mul", [162]}, Tuple{"f64_div", [163]}, Tuple{"i32_wrap_i64", [167]},
+    Tuple{"i64_extend_i32_s", [172]}, Tuple{"i64_extend_i32_u", [173]}, Tuple{"f32_convert_i64_s", [180]}, Tuple{"f32_demote_f64", [182]}, Tuple{"f64_convert_i64_s", [185]}, Tuple{"f64_promote_f32", [187]}, Tuple{"i32_reinterpret_f32", [188]}, Tuple{"i64_reinterpret_f64", [189]},
+    Tuple{"f32_reinterpret_i32", [190]}, Tuple{"f64_reinterpret_i64", [191]}, Tuple{"i32_extend8_s", [192]}, Tuple{"i32_extend16_s", [193]}, Tuple{"i64_extend8_s", [194]}, Tuple{"i64_extend16_s", [195]}, Tuple{"i64_trunc_sat_f32_s", [252, 4]}, Tuple{"i64_trunc_sat_f64_s", [252, 6]}]])
+
+codes := {
+    t := table.new()
+    each((Tuple{n, c}) -> table.set(t, n, c), opcodes)
+    t
+}
+
+# op(b, name) writes the opcode of the instruction name
+export op(b, name) := {
+    c := table.get(codes, name, none)
+    if (c == none) panic(f"wasmenc.op: unknown instruction {name}")
+    each(x -> bytes.u8(b, x), c)
+}
+
+test {
+    enc := f -> {
+        b := bytes.new()
+        f(b)
+        vector.to_list(b)
+    }
+    assert(enc(b -> uleb(b, 624485)) == [229, 142, 38], "uleb")
+    assert(enc(b -> uleb(b, 0)) == [0], "uleb of 0")
+    assert(enc(b -> sleb(b, -123456)) == [192, 187, 120], "sleb")
+    assert(enc(b -> sleb(b, 64)) == [192, 0], "sleb of 64")
+    assert(enc(b -> sleb(b, -64)) == [64], "sleb of -64")
+    assert(enc(b -> sleb64(b, 0, 0, 9, 34464)) == enc(b -> sleb(b, 624288)), "sleb64 of a small integer")
+    assert(enc(b -> sleb64(b, 65535, 65535, 65535, 65535)) == [127], "sleb64 of -1")
+    assert(enc(b -> sleb64(b, 32768, 0, 0, 0)) == [128, 128, 128, 128, 128, 128, 128, 128, 128, 127], "sleb64 of the least integer")
+    assert(enc(b -> op(b, "i64_trunc_sat_f64_s")) == [252, 6], "a prefixed opcode")
+}
+
+}

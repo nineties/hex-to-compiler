@@ -1,0 +1,867 @@
+# wasm: the wasm32 target of the code generator: the functions of ir.pk to one module of WebAssembly
+# Copyright (C) 2026 nineties
+#
+# The word is 4 bytes. An address is a 32-bit value and an offset in the linear memory, which is laid out as
+#   0 to stack_top      the stack of the frames, which grows down from stack_top (a frame below stack_limit stops the program)
+#   data_base and up    the data of the objects (.rodata, .data, then .bss), and then the area that the service grow gives
+# Every virtual register of a function is a local of the type i32 (32 bits) or i64 (64 bits).
+# The calling convention: every function has the type [] -> []. The caller writes the words of the arguments (4 bytes for a 32-bit register and 8 for
+# a 64-bit one, in order) at the bottom of its frame, which is the value of the global sp during the call; getarg of the callee reads them there.
+# The results are in the globals r0 and r1 (i64), and the callee gives sp back as it was. A frame holds the area of the arguments of the calls
+# the function makes and then the stack slots.
+# The address of a function, which la gives and call takes in a register, is its index in the table of the module (from 1, so that 0 is no function).
+# The control of a function: the code is cut at every label into pieces numbered from 0, and the pieces are put in this order in a loop of
+# nested blocks, each piece after the end of its block. A jump forward leaves the blocks up to the piece; a jump back sets the number of the
+# piece in a local and goes to the start of the loop, where br_table goes to it.
+# The services of the system (backend/os.pk) are functions that the module imports from the module "os" (write, read, open, create, close, exit, args and abort),
+# except grow, which the module does with memory.grow. The module exports its memory as "memory", _start, and sbrk(n), which gives n bytes of the
+# area of grow to the host (for the arguments of the program).
+
+use("base")
+use("list")
+use("table")
+use("vector")
+use("bytes")
+use("backend/ir")
+use("backend/wasmenc")
+
+module wasm {
+
+# === The memory ===
+export stack_top := 2097152
+stack_limit := 65536
+data_base := 2097152
+page := 65536
+max_pages := 32768
+
+# the globals
+g_sp := 0
+g_r0 := 1
+g_r1 := 2
+g_brk := 3
+
+# the types of functions: [] -> [], [i32] -> [i32], [i32 i32 i32] -> [i32], [] -> [i32] and [i32] -> []
+ty_void := 0
+ty_i := 1
+ty_iii := 2
+ty_to_i := 3
+ty_i_void := 4
+
+# the services that the module imports, in the order of their indices
+services := [Tuple{"write", ty_iii}, Tuple{"read", ty_iii}, Tuple{"open", ty_i}, Tuple{"create", ty_i}, Tuple{"close", ty_i},
+    Tuple{"exit", ty_i_void}, Tuple{"args", ty_to_i}, Tuple{"abort", ty_void}]
+nservices := 8
+service_index(name) := list.index_of(name, map(s -> arg(s, 0), services))
+
+# the functions that the module defines before those of the code: grow and sbrk
+f_grow := nservices
+f_sbrk := nservices + 1
+nown := 2
+
+wasm_align(n, a) := (n + a - 1) / a * a
+
+
+# 0xFFFFFFFF, the low half of a 64-bit integer
+low_mask(b) := {
+    wasmenc.op(b, "i64_const")
+    wasmenc.sleb64(b, 0, 0, 65535, 65535)
+}
+
+# === Functions ===
+
+# the area of the arguments of a call: the bytes of the registers rs
+arg_bytes(f, rs) := foldl((n, r) -> n + ir.width(f, r) / 8, 0, rs)
+
+# the pieces of the code: a list of lists of instructions, cut before every label, and a table from the labels to the numbers of the pieces
+pieces(code) := {
+    out := vector.new()
+    cur := []
+    labels := table.new()
+    each(i -> {
+        if (ir.op(i) == 'label) {
+            vector.push(out, reverse(cur))
+            cur = []
+            table.set(labels, ir.label_id(i), vector.len(out))
+        } else cur = i :: cur
+    }, code)
+    vector.push(out, reverse(cur))
+    Tuple{vector.to_list(out), labels}
+}
+
+# the conditions of cmp and br, and of fcmp
+int_cc := [Tuple{'eq, "eq"}, Tuple{'ne, "ne"}, Tuple{'lt, "lt_s"}, Tuple{'le, "le_s"}, Tuple{'gt, "gt_s"}, Tuple{'ge, "ge_s"},
+    Tuple{'ltu, "lt_u"}, Tuple{'leu, "le_u"}, Tuple{'gtu, "gt_u"}, Tuple{'geu, "ge_u"}]
+float_cc := [Tuple{'eq, "eq"}, Tuple{'ne, "ne"}, Tuple{'lt, "lt"}, Tuple{'le, "le"}, Tuple{'gt, "gt"}, Tuple{'ge, "ge"}]
+cc_name(ccs, c) := {
+    e := find(e -> arg(e, 0) == c, ccs)
+    if (e == none) panic(f"wasm: unknown condition {symname(c)}")
+    arg(e, 1)
+}
+
+# the operations of two operands
+binops := [Tuple{'add, "add"}, Tuple{'sub, "sub"}, Tuple{'mul, "mul"}, Tuple{'band, "and"}, Tuple{'bor, "or"}, Tuple{'bxor, "xor"},
+    Tuple{'shl, "shl"}, Tuple{'shr, "shr_u"}, Tuple{'sar, "shr_s"}, Tuple{'divs, "div_s"}, Tuple{'divu, "div_u"}, Tuple{'rems, "rem_s"}, Tuple{'remu, "rem_u"}]
+fops := [Tuple{'fadd, "add"}, Tuple{'fsub, "sub"}, Tuple{'fmul, "mul"}, Tuple{'fdiv, "div"}]
+
+# the loads into a register of 32 and of 64 bits
+loads32 := [Tuple{'u8, "i32_load8_u"}, Tuple{'s8, "i32_load8_s"}, Tuple{'u16, "i32_load16_u"}, Tuple{'s16, "i32_load16_s"}, Tuple{'w32, "i32_load"}]
+loads64 := [Tuple{'u8, "i64_load8_u"}, Tuple{'s8, "i64_load8_s"}, Tuple{'u16, "i64_load16_u"}, Tuple{'s16, "i64_load16_s"}, Tuple{'w32, "i64_load32_u"}, Tuple{'w64, "i64_load"}]
+
+wasm_lookup(xs, k) := {
+    e := find(e -> arg(e, 0) == k, xs)
+    if (e == none) none else arg(e, 1)
+}
+
+# The state of the translation of a function is Fn{f, buf, env, slots, labels, n, frame, base, cur}: the function, the buffer of the body,
+# the environment Env{functions, table, data} (the tables from the names to the indices of the functions, to their indices in the table and to the
+# addresses of the data), a table from the stack slots to their offsets in the frame, a table from the labels to the numbers of the pieces,
+# the number of the pieces, the size of the frame, the first local after the registers, and an array that holds the number of the piece being written.
+# The locals after the registers are the number of the piece to go to, the address of the arguments, the bottom of the frame, a 32-bit temporary and
+# nt64 64-bit temporaries.
+nt64 := 5
+
+fn_f(Fn{f, _, _, _, _, _, _, _, _}) := f
+fn_buf(Fn{_, b, _, _, _, _, _, _, _}) := b
+fn_env(Fn{_, _, e, _, _, _, _, _, _}) := e
+fn_slot(Fn{_, _, _, s, _, _, _, _, _}, k) := table.get(s, k, 0)
+fn_n(Fn{_, _, _, _, _, n, _, _, _}) := n
+fn_frame(Fn{_, _, _, _, _, _, fr, _, _}) := fr
+fn_cur(Fn{_, _, _, _, _, _, _, _, cur}) := cur[0]
+l_piece(Fn{_, _, _, _, _, _, _, base, _}) := base
+l_ap(Fn{_, _, _, _, _, _, _, base, _}) := base + 1
+l_low(Fn{_, _, _, _, _, _, _, base, _}) := base + 2
+l_t32(Fn{_, _, _, _, _, _, _, base, _}) := base + 3
+l_t64(Fn{_, _, _, _, _, _, _, base, _}, k) := base + 4 + k
+
+fn_piece(Fn{f, _, _, _, labels, _, _, _, _}, l) := {
+    p := table.get(labels, l, none)
+    if (p == none) panic(f"wasm: the label L{l} is not in {ir.name(f)}")
+    p
+}
+
+wasm_local(c, r) := {
+    if (not ir.is_vreg(r)) panic(f"wasm: the physical register {r} in {ir.name(fn_f(c))}")
+    r - 32
+}
+wasm_width(c, r) := ir.width(fn_f(c), r)
+
+wasm_op(c, name) := wasmenc.op(fn_buf(c), name)
+wasm_uleb(c, n) := wasmenc.uleb(fn_buf(c), n)
+wasm_lget(c, l) := {
+    wasm_op(c, "local_get")
+    wasm_uleb(c, l)
+}
+wasm_lset(c, l) := {
+    wasm_op(c, "local_set")
+    wasm_uleb(c, l)
+}
+wasm_gget(c, g) := {
+    wasm_op(c, "global_get")
+    wasm_uleb(c, g)
+}
+wasm_gset(c, g) := {
+    wasm_op(c, "global_set")
+    wasm_uleb(c, g)
+}
+wasm_const(c, w, v) := {
+    wasm_op(c, if (w == 64) "i64_const" else "i32_const")
+    wasmenc.sleb(fn_buf(c), v)
+}
+wasm_call(c, i) := {
+    wasm_op(c, "call")
+    wasm_uleb(c, i)
+}
+wasm_typed(c, w, name) := wasm_op(c, f"i{w}_{name}")
+wasm_open_block(c, kind) := {
+    wasm_op(c, kind)
+    bytes.u8(fn_buf(c), wasmenc.block_void)
+}
+
+# a value of the width have on the stack as the width want: a 32-bit value is zero extended
+wasm_conv(c, have, want) := if (have == 32 and want == 64) wasm_op(c, "i64_extend_i32_u") else if (have == 64 and want == 32) wasm_op(c, "i32_wrap_i64")
+wasm_get(c, r, w) := {
+    wasm_lget(c, wasm_local(c, r))
+    wasm_conv(c, wasm_width(c, r), w)
+}
+wasm_put(c, r, w) := {
+    wasm_conv(c, w, wasm_width(c, r))
+    wasm_lset(c, wasm_local(c, r))
+}
+wasm_operand(c, U{r}, w) := wasm_get(c, r, w)
+wasm_operand(c, K{v}, w) := wasm_const(c, w, v)
+wasm_operand(c, x, w) := panic(f"wasm: an operand {ir.show_op(x)} in {ir.name(fn_f(c))}")
+
+# wasm_address(c, m) puts the address of the memory operand m on the stack; the result is the offset of the load or the store
+wasm_address(c, M{U{base}, d}) := {
+    wasm_get(c, base, 32)
+    if (d >= 0) d else {
+        wasm_const(c, 32, d)
+        wasm_op(c, "i32_add")
+        0
+    }
+}
+wasm_address(c, MG{name, d}) := {
+    a := table.get(arg(fn_env(c), 2), name, none)
+    if (a == none) panic(f"wasm: the data {name} is not defined (used in {ir.name(fn_f(c))})")
+    wasm_const(c, 32, a + d)
+    0
+}
+wasm_address(c, MF{'slot, s, d}) := {
+    wasm_lget(c, l_low(c))
+    fn_slot(c, s) + d
+}
+wasm_address(c, m) := panic(f"wasm: a memory operand {ir.show_op(m)} in {ir.name(fn_f(c))}")
+
+wasm_mem(c, name, offset) := {
+    wasm_op(c, name)
+    wasmenc.memarg(fn_buf(c), 0, offset)
+}
+
+# a jump to the piece p; inner is the number of the blocks entered in the piece
+wasm_goto(c, p, inner) := {
+    cur := fn_cur(c)
+    if (p > cur) {
+        wasm_op(c, "br")
+        wasm_uleb(c, p - cur - 1 + inner)
+    } else {
+        wasm_const(c, 32, p)
+        wasm_lset(c, l_piece(c))
+        wasm_op(c, "br")
+        wasm_uleb(c, fn_n(c) - 1 - cur + inner)
+    }
+}
+
+wasm_stop(c) := {
+    wasm_call(c, service_index("abort"))
+    wasm_op(c, "unreachable")
+}
+
+wasm_epilogue(c) := if (fn_frame(c) > 0) {
+    wasm_lget(c, l_ap(c))
+    wasm_gset(c, g_sp)
+}
+
+# a float operation works on the bits of the numbers in registers of the width w
+wasm_fl(w) := if (w == 64) "f64" else "f32"
+wasm_from_bits(c, w) := wasm_op(c, f"{wasm_fl(w)}_reinterpret_i{w}")
+wasm_to_bits(c, w) := wasm_op(c, f"i{w}_reinterpret_{wasm_fl(w)}")
+wasm_fw(z) := if (z == 'w64) 64 else 32
+
+# the low or the high half of the 64-bit local l
+wasm_half(c, l, high) := {
+    wasm_lget(c, l)
+    if (high) {
+        wasm_const(c, 64, 32)
+        wasm_op(c, "i64_shr_u")
+    } else {
+        low_mask(fn_buf(c))
+        wasm_op(c, "i64_and")
+    }
+}
+
+# d = the high 64 bits of the unsigned product of x and y, from the products of the 32-bit halves
+wasm_mulhu(c, d, x, y) := {
+    ta := l_t64(c, 0)
+    tb := l_t64(c, 1)
+    t01 := l_t64(c, 2)
+    t10 := l_t64(c, 3)
+    tm := l_t64(c, 4)
+    wasm_get(c, x, 64)
+    wasm_lset(c, ta)
+    wasm_operand(c, y, 64)
+    wasm_lset(c, tb)
+    # t01 = low(a) high(b) and t10 = high(a) low(b)
+    wasm_half(c, ta, false)
+    wasm_half(c, tb, true)
+    wasm_op(c, "i64_mul")
+    wasm_lset(c, t01)
+    wasm_half(c, ta, true)
+    wasm_half(c, tb, false)
+    wasm_op(c, "i64_mul")
+    wasm_lset(c, t10)
+    # the middle: high(low(a) low(b)) + low(t01) + low(t10), whose high half is the carry
+    wasm_half(c, ta, false)
+    wasm_half(c, tb, false)
+    wasm_op(c, "i64_mul")
+    wasm_const(c, 64, 32)
+    wasm_op(c, "i64_shr_u")
+    wasm_half(c, t01, false)
+    wasm_op(c, "i64_add")
+    wasm_half(c, t10, false)
+    wasm_op(c, "i64_add")
+    wasm_lset(c, tm)
+    wasm_half(c, ta, true)
+    wasm_half(c, tb, true)
+    wasm_op(c, "i64_mul")
+    wasm_half(c, t01, true)
+    wasm_op(c, "i64_add")
+    wasm_half(c, t10, true)
+    wasm_op(c, "i64_add")
+    wasm_half(c, tm, true)
+    wasm_op(c, "i64_add")
+    wasm_put(c, d, 64)
+}
+
+# the bound of the conversion of a float of the width w to a 64-bit integer: x >= -2^63, or x < 2^63
+wasm_cvt_bound(c, w, tl, negative) := {
+    wasm_lget(c, tl)
+    wasm_from_bits(c, w)
+    if (w == 64) {
+        wasm_op(c, "f64_const")
+        wasmenc.f64_bits(fn_buf(c), if (negative) 50144 else 17376, 0, 0, 0)
+    } else {
+        wasm_op(c, "f32_const")
+        bytes.u16(fn_buf(c), 0)
+        bytes.u16(fn_buf(c), if (negative) 57088 else 24320)
+    }
+    wasm_op(c, if (negative) f"{wasm_fl(w)}_ge" else f"{wasm_fl(w)}_lt")
+}
+
+# d = x toward zero; a NaN and a number out of the range give the least 64-bit integer, as x86 does
+wasm_cvtf2i(c, z, d, x) := {
+    w := wasm_fw(z)
+    tl := if (w == 64) l_t64(c, 0) else l_t32(c)
+    wasm_get(c, x, w)
+    wasm_lset(c, tl)
+    wasm_lget(c, tl)
+    wasm_from_bits(c, w)
+    wasm_op(c, f"i64_trunc_sat_{wasm_fl(w)}_s")
+    wasm_op(c, "i64_const")
+    wasmenc.sleb64(fn_buf(c), 32768, 0, 0, 0)
+    wasm_cvt_bound(c, w, tl, true)
+    wasm_cvt_bound(c, w, tl, false)
+    wasm_op(c, "i32_and")
+    wasm_op(c, "select")
+    wasm_put(c, d, 64)
+}
+
+wasm_cvtf2f(c, z, d, x) := if (z == 'w64) {
+    wasm_get(c, x, 64)
+    wasm_op(c, "f64_reinterpret_i64")
+    wasm_op(c, "f32_demote_f64")
+    wasm_op(c, "i32_reinterpret_f32")
+    wasm_put(c, d, 32)
+} else {
+    wasm_get(c, x, 32)
+    wasm_op(c, "f32_reinterpret_i32")
+    wasm_op(c, "f64_promote_f32")
+    wasm_op(c, "i64_reinterpret_f64")
+    wasm_put(c, d, 64)
+}
+
+wasm_load(c, z, d, m) := {
+    at := wasm_address(c, m)
+    if (wasm_width(c, d) == 64) {
+        wasm_mem(c, wasm_lookup(loads64, z), at)
+        wasm_put(c, d, 64)
+    } else if (z == 'w64) {
+        wasm_mem(c, "i64_load", at)
+        wasm_put(c, d, 64)
+    } else {
+        wasm_mem(c, wasm_lookup(loads32, z), at)
+        wasm_put(c, d, 32)
+    }
+}
+
+wasm_store(c, z, m, v) := {
+    at := wasm_address(c, m)
+    vw := match v {
+        U{r} -> wasm_width(c, r)
+      | _ -> if (z == 'w64) 64 else 32
+    }
+    sw := if (z == 'w64) 64 else vw
+    narrow := if (z == 'w8) "8" else if (z == 'w16) "16" else if (z == 'w32 and sw == 64) "32" else ""
+    wasm_operand(c, v, sw)
+    wasm_mem(c, f"i{sw}_store{narrow}", at)
+}
+
+wasm_call_to(c, callee, args, rets) := {
+    at := 0
+    each(a -> {
+        wasm_lget(c, l_low(c))
+        wasm_get(c, a, wasm_width(c, a))
+        wasm_mem(c, if (wasm_width(c, a) == 64) "i64_store" else "i32_store", at)
+        at = at + wasm_width(c, a) / 8
+    }, args)
+    match callee {
+        S{name, _} -> {
+            fi := table.get(arg(fn_env(c), 0), name, none)
+            if (fi == none) panic(f"wasm: the function {name} is not defined (called in {ir.name(fn_f(c))})")
+            wasm_call(c, fi)
+        }
+      | U{r} -> {
+            wasm_get(c, r, 32)
+            wasm_op(c, "call_indirect")
+            wasm_uleb(c, ty_void)
+            wasm_uleb(c, 0)
+        }
+    }
+    if (rets != []) {
+        wasm_gget(c, g_r0)
+        wasm_put(c, rets[0], 64)
+    }
+    if (length(rets) > 1) {
+        wasm_gget(c, g_r1)
+        wasm_put(c, rets[1], 64)
+    }
+}
+
+wasm_service(c, name, args, res) := {
+    each(a -> wasm_get(c, a, 32), args)
+    if (name == 'grow) wasm_call(c, f_grow)
+    else if (name == 'abort) wasm_stop(c)
+    else wasm_call(c, service_index(symname(name)))
+    if (name == 'exit) wasm_op(c, "unreachable")
+    else if (name != 'abort) match res {
+        D{d} -> wasm_put(c, d, 32)
+      | _ -> wasm_op(c, "drop")
+    }
+}
+
+wasm_branch(c, cc, x, y, yes, no) := {
+    w := wasm_width(c, x)
+    wasm_get(c, x, w)
+    wasm_operand(c, y, w)
+    wasm_typed(c, w, cc_name(int_cc, cc))
+    p := fn_piece(c, yes)
+    if (p > fn_cur(c)) {
+        wasm_op(c, "br_if")
+        wasm_uleb(c, p - fn_cur(c) - 1)
+    } else {
+        wasm_open_block(c, "if")
+        wasm_goto(c, p, 1)
+        wasm_op(c, "end")
+    }
+    wasm_goto(c, fn_piece(c, no), 0)
+}
+
+# the instruction of ir.pk
+wasm_one(c, I{'mov, [D{d}, s]}) := {
+    wasm_operand(c, s, wasm_width(c, d))
+    wasm_put(c, d, wasm_width(c, d))
+}
+wasm_one(c, I{'li, [D{d}, K{v}]}) := {
+    wasm_const(c, wasm_width(c, d), v)
+    wasm_put(c, d, wasm_width(c, d))
+}
+wasm_one(c, I{'li64, [D{d}, K{p3}, K{p2}, K{p1}, K{p0}]}) := {
+    wasm_op(c, "i64_const")
+    wasmenc.sleb64(fn_buf(c), p3, p2, p1, p0)
+    wasm_put(c, d, 64)
+}
+wasm_one(c, I{'la, [D{d}, S{name, off}]}) := {
+    ti := table.get(arg(fn_env(c), 1), name, none)
+    a := if (ti != none) ti else table.get(arg(fn_env(c), 2), name, none)
+    if (a == none) panic(f"wasm: {name} is not defined (used in {ir.name(fn_f(c))})")
+    wasm_const(c, 32, a + off)
+    wasm_put(c, d, 32)
+}
+wasm_one(c, I{'slota, [D{d}, K{s}]}) := {
+    wasm_lget(c, l_low(c))
+    wasm_const(c, 32, fn_slot(c, s))
+    wasm_op(c, "i32_add")
+    wasm_put(c, d, 32)
+}
+wasm_one(c, I{'mulhu, [D{d}, U{x}, y]}) := wasm_mulhu(c, d, x, y)
+wasm_one(c, I{name, [D{d}, U{x}, y]}) if wasm_lookup(binops, name) != none := {
+    w := wasm_width(c, d)
+    wasm_get(c, x, w)
+    wasm_operand(c, y, w)
+    wasm_typed(c, w, wasm_lookup(binops, name))
+    wasm_put(c, d, w)
+}
+wasm_one(c, I{'neg, [D{d}, U{x}]}) := {
+    w := wasm_width(c, d)
+    wasm_const(c, w, 0)
+    wasm_get(c, x, w)
+    wasm_typed(c, w, "sub")
+    wasm_put(c, d, w)
+}
+wasm_one(c, I{'not, [D{d}, U{x}]}) := {
+    w := wasm_width(c, d)
+    wasm_get(c, x, w)
+    wasm_const(c, w, -1)
+    wasm_typed(c, w, "xor")
+    wasm_put(c, d, w)
+}
+wasm_one(c, I{name, [D{d}, U{x}]}) if name == 'zx8 or name == 'zx16 := {
+    w := wasm_width(c, d)
+    wasm_get(c, x, w)
+    wasm_const(c, w, if (name == 'zx8) 255 else 65535)
+    wasm_typed(c, w, "and")
+    wasm_put(c, d, w)
+}
+wasm_one(c, I{name, [D{d}, U{x}]}) if name == 'sx8 or name == 'sx16 := {
+    w := wasm_width(c, d)
+    wasm_get(c, x, w)
+    wasm_typed(c, w, if (name == 'sx8) "extend8_s" else "extend16_s")
+    wasm_put(c, d, w)
+}
+wasm_one(c, I{'zext64, [D{d}, U{x}]}) := {
+    wasm_get(c, x, 32)
+    wasm_op(c, "i64_extend_i32_u")
+    wasm_put(c, d, 64)
+}
+wasm_one(c, I{'sext64, [D{d}, U{x}]}) := {
+    wasm_get(c, x, 32)
+    wasm_op(c, "i64_extend_i32_s")
+    wasm_put(c, d, 64)
+}
+wasm_one(c, I{'trunc, [D{d}, U{x}]}) := {
+    wasm_get(c, x, 64)
+    wasm_op(c, "i32_wrap_i64")
+    wasm_put(c, d, 32)
+}
+wasm_one(c, I{'cmp, [Cc{cc}, D{d}, U{x}, y]}) := {
+    w := wasm_width(c, x)
+    wasm_get(c, x, w)
+    wasm_operand(c, y, w)
+    wasm_typed(c, w, cc_name(int_cc, cc))
+    wasm_put(c, d, 32)
+}
+wasm_one(c, I{'ld, [W{z}, D{d}, m]}) := wasm_load(c, z, d, m)
+wasm_one(c, I{'st, [W{z}, m, v]}) := wasm_store(c, z, m, v)
+wasm_one(c, I{name, [W{z}, D{d}, U{x}, U{y}]}) if wasm_lookup(fops, name) != none := {
+    w := wasm_fw(z)
+    wasm_get(c, x, w)
+    wasm_from_bits(c, w)
+    wasm_get(c, y, w)
+    wasm_from_bits(c, w)
+    wasm_op(c, f"{wasm_fl(w)}_{wasm_lookup(fops, name)}")
+    wasm_to_bits(c, w)
+    wasm_put(c, d, w)
+}
+wasm_one(c, I{'fsqrt, [W{z}, D{d}, U{x}]}) := {
+    w := wasm_fw(z)
+    wasm_get(c, x, w)
+    wasm_from_bits(c, w)
+    wasm_op(c, f"{wasm_fl(w)}_sqrt")
+    wasm_to_bits(c, w)
+    wasm_put(c, d, w)
+}
+wasm_one(c, I{'fcmp, [Cc{cc}, W{z}, D{d}, U{x}, U{y}]}) := {
+    w := wasm_fw(z)
+    wasm_get(c, x, w)
+    wasm_from_bits(c, w)
+    wasm_get(c, y, w)
+    wasm_from_bits(c, w)
+    wasm_op(c, f"{wasm_fl(w)}_{cc_name(float_cc, cc)}")
+    wasm_put(c, d, 32)
+}
+wasm_one(c, I{'cvti2f, [W{z}, D{d}, U{x}]}) := {
+    w := wasm_fw(z)
+    wasm_get(c, x, 64)
+    wasm_op(c, f"{wasm_fl(w)}_convert_i64_s")
+    wasm_to_bits(c, w)
+    wasm_put(c, d, w)
+}
+wasm_one(c, I{'cvtf2i, [W{z}, D{d}, U{x}]}) := wasm_cvtf2i(c, z, d, x)
+wasm_one(c, I{'cvtf2f, [W{z}, D{d}, U{x}]}) := wasm_cvtf2f(c, z, d, x)
+wasm_one(c, I{'getarg, [D{d}, K{k}]}) := {
+    wasm_lget(c, l_ap(c))
+    wasm_mem(c, if (wasm_width(c, d) == 64) "i64_load" else "i32_load", 4 * k)
+    wasm_put(c, d, wasm_width(c, d))
+}
+wasm_one(c, I{'call, [callee, Us{args}, Ds{rets}]}) := wasm_call_to(c, callee, args, rets)
+wasm_one(c, I{'os, [N{name}, Us{args}, res]}) := wasm_service(c, name, args, res)
+wasm_one(c, I{'ret, [Us{values}]}) := {
+    if (values != []) {
+        wasm_get(c, values[0], 64)
+        wasm_gset(c, g_r0)
+    }
+    if (length(values) > 1) {
+        wasm_get(c, values[1], 64)
+        wasm_gset(c, g_r1)
+    }
+    wasm_epilogue(c)
+    wasm_op(c, "return")
+}
+wasm_one(c, I{'jmp, [L{l}]}) := wasm_goto(c, fn_piece(c, l), 0)
+wasm_one(c, I{'br, [Cc{cc}, U{x}, y, L{yes}, L{no}]}) := wasm_branch(c, cc, x, y, yes, no)
+wasm_one(c, I{'trap, []}) := wasm_stop(c)
+wasm_one(c, i) := panic(f"wasm: cannot translate {ir.show(i)} in {ir.name(fn_f(c))}")
+
+# the offsets of the stack slots of f in a frame whose area of arguments has the size outgoing: Tuple{table, size of the frame}
+frame_of(f, outgoing) := {
+    slot_at := table.new()
+    off := outgoing
+    k := 0
+    each((Tuple{size, al}) -> {
+        off = wasm_align(off, al)
+        table.set(slot_at, k, off)
+        off = off + size
+        k = k + 1
+    }, vector.to_list(table.get(ir.meta(f), 'slots, none)))
+    Tuple{slot_at, wasm_align(off, 16)}
+}
+
+# the locals of f after the registers, as runs of the same type for the code section
+write_locals(b, f) := {
+    types := vector.new()
+    r := 32
+    while (r < ir.nregs(f)) {
+        vector.push(types, if (ir.width(f, r) == 64) wasmenc.t_i64 else wasmenc.t_i32)
+        r = r + 1
+    }
+    each(_ -> vector.push(types, wasmenc.t_i32), range(0, 4))
+    each(_ -> vector.push(types, wasmenc.t_i64), range(0, nt64))
+    runs := vector.new()
+    each(ty -> {
+        last := vector.len(runs) - 1
+        if (last >= 0 and arg(vector.get(runs, last), 0) == ty) vector.set(runs, last, Tuple{ty, arg(vector.get(runs, last), 1) + 1})
+        else vector.push(runs, Tuple{ty, 1})
+    }, vector.to_list(types))
+    wasmenc.vec(b, vector.to_list(runs), (b, Tuple{ty, k}) -> {
+        wasmenc.uleb(b, k)
+        bytes.u8(b, ty)
+    })
+}
+
+# the start of the function: the address of the arguments, and the frame, which stops the program when it is below stack_limit
+wasm_prologue(c) := {
+    wasm_gget(c, g_sp)
+    wasm_lset(c, l_ap(c))
+    if (fn_frame(c) > 0) {
+        wasm_lget(c, l_ap(c))
+        wasm_const(c, 32, fn_frame(c))
+        wasm_op(c, "i32_sub")
+        wasm_op(c, "local_tee")
+        wasm_uleb(c, l_low(c))
+        wasm_gset(c, g_sp)
+        wasm_lget(c, l_low(c))
+        wasm_const(c, 32, stack_limit)
+        wasm_op(c, "i32_lt_u")
+        wasm_open_block(c, "if")
+        wasm_stop(c)
+        wasm_op(c, "end")
+    }
+}
+
+# fun_body(f, env) is the body of the function f (ir.fun) for the code section
+fun_body(f, env) := {
+    code := ir.code(f)
+    outgoing := wasm_align(foldl((n, i) -> match i {
+        I{'call, [_, Us{rs}, _]} -> if (arg_bytes(f, rs) > n) arg_bytes(f, rs) else n
+      | _ -> n
+    }, 0, code), 8)
+    fr := frame_of(f, outgoing)
+    cut := pieces(code)
+    ps := arg(cut, 0)
+    n := length(ps)
+    cur := array(1)
+    cur[0] = 0
+    b := bytes.new()
+    c := Fn{f, b, env, arg(fr, 0), arg(cut, 1), n, arg(fr, 1), ir.nregs(f) - 32, cur}
+    write_locals(b, f)
+    wasm_prologue(c)
+    # the loop, the blocks and the jump to the piece
+    wasm_open_block(c, "loop")
+    each(_ -> wasm_open_block(c, "block"), range(0, n))
+    wasm_lget(c, l_piece(c))
+    wasm_op(c, "br_table")
+    wasmenc.vec(b, range(0, n), wasmenc.uleb)
+    wasm_uleb(c, 0)
+    each(p -> {
+        wasm_op(c, "end")
+        each(i -> wasm_one(c, i), p)
+        cur[0] = cur[0] + 1
+    }, ps)
+    wasm_op(c, "end")
+    wasm_epilogue(c)
+    wasm_op(c, "end")
+    b
+}
+
+# === The functions that the module defines itself ===
+
+# grow(a): the service grow of backend/os.pk; the memory grows by pages up to a
+grow_body() := {
+    b := bytes.new()
+    wasmenc.vec(b, [], (b, x) -> none)
+    arg0 := () -> {
+        wasmenc.op(b, "local_get")
+        wasmenc.uleb(b, 0)
+    }
+    brk := () -> {
+        wasmenc.op(b, "global_get")
+        wasmenc.uleb(b, g_brk)
+    }
+    size := () -> {
+        wasmenc.op(b, "memory_size")
+        wasmenc.op(b, "i32_const")
+        wasmenc.sleb(b, 16)
+        wasmenc.op(b, "i32_shl")
+    }
+    # grow(0) is the end as it is
+    arg0()
+    wasmenc.op(b, "i32_eqz")
+    wasmenc.op(b, "if")
+    bytes.u8(b, wasmenc.block_void)
+    brk()
+    wasmenc.op(b, "return")
+    wasmenc.op(b, "end")
+    arg0()
+    size()
+    wasmenc.op(b, "i32_gt_u")
+    wasmenc.op(b, "if")
+    bytes.u8(b, wasmenc.block_void)
+    arg0()
+    size()
+    wasmenc.op(b, "i32_sub")
+    wasmenc.op(b, "i32_const")
+    wasmenc.sleb(b, page - 1)
+    wasmenc.op(b, "i32_add")
+    wasmenc.op(b, "i32_const")
+    wasmenc.sleb(b, 16)
+    wasmenc.op(b, "i32_shr_u")
+    wasmenc.op(b, "memory_grow")
+    wasmenc.op(b, "i32_const")
+    wasmenc.sleb(b, -1)
+    wasmenc.op(b, "i32_eq")
+    wasmenc.op(b, "if")
+    bytes.u8(b, wasmenc.block_void)
+    brk()
+    wasmenc.op(b, "return")
+    wasmenc.op(b, "end")
+    wasmenc.op(b, "end")
+    arg0()
+    wasmenc.op(b, "global_set")
+    wasmenc.uleb(b, g_brk)
+    arg0()
+    wasmenc.op(b, "end")
+    b
+}
+
+# sbrk(n): the old end of the area of grow, which grows by n bytes
+sbrk_body() := {
+    b := bytes.new()
+    wasmenc.vec(b, [], (b, x) -> none)
+    wasmenc.op(b, "global_get")
+    wasmenc.uleb(b, g_brk)
+    wasmenc.op(b, "global_get")
+    wasmenc.uleb(b, g_brk)
+    wasmenc.op(b, "local_get")
+    wasmenc.uleb(b, 0)
+    wasmenc.op(b, "i32_add")
+    wasmenc.op(b, "call")
+    wasmenc.uleb(b, f_grow)
+    wasmenc.op(b, "drop")
+    wasmenc.op(b, "end")
+    b
+}
+
+# === The module ===
+
+export lower(f, helpers) := f
+
+# compile(name, funs, datas) keeps the functions and the data; they are joined by executable
+export compile(name, funs, datas) := WasmObject{funs, datas}
+
+# the bytes of the data and the addresses: Tuple{buffer from data_base, the end of the data, table from the names to the addresses}
+layout(datas) := {
+    b := bytes.new()
+    addrs := table.new()
+    cur := data_base
+    place := (IRData{name, secname, al, content, _}) -> {
+        cur = wasm_align(cur, al)
+        if (table.has(addrs, name)) panic(f"wasm: {name} is defined twice")
+        table.set(addrs, name, cur)
+        if (secname != ".bss") {
+            bytes.zeros(b, cur - data_base - bytes.len(b))
+            bytes.append(b, content)
+        }
+        cur = cur + bytes.len(content)
+    }
+    each(d -> if (arg(d, 1) != ".bss") place(d), datas)
+    each(d -> if (arg(d, 1) == ".bss") place(d), datas)
+    Tuple{b, wasm_align(cur, 16), addrs}
+}
+
+# executable(objects) is the module of the functions and the data of the objects as a buffer of bytes
+export executable(objects) := {
+    funs := concat_map(o -> arg(o, 0), objects)
+    datas := concat_map(o -> arg(o, 1), objects)
+    laid := layout(datas)
+    data_end := arg(laid, 1)
+    findex := table.new()
+    tindex := table.new()
+    k := 0
+    each(f -> {
+        if (table.has(findex, ir.name(f))) panic(f"wasm: the function {ir.name(f)} is defined twice")
+        table.set(findex, ir.name(f), nservices + nown + k)
+        table.set(tindex, ir.name(f), k + 1)
+        k = k + 1
+    }, funs)
+    nfuns := length(funs)
+    start := table.get(findex, "_start", none)
+    if (start == none) panic("wasm: the entry _start is not defined")
+    env := Env{findex, tindex, arg(laid, 2)}
+    m := bytes.new()
+    wasmenc.header(m)
+    sec := (id, f) -> {
+        c := bytes.new()
+        f(c)
+        wasmenc.section(m, id, c)
+    }
+    i32 := wasmenc.t_i32
+    i64 := wasmenc.t_i64
+    sec(wasmenc.sec_type, b -> wasmenc.vec(b, [Tuple{[], []}, Tuple{[i32], [i32]}, Tuple{[i32, i32, i32], [i32]}, Tuple{[], [i32]}, Tuple{[i32], []}],
+        (b, Tuple{ps, rs}) -> wasmenc.func_type(b, ps, rs)))
+    sec(wasmenc.sec_import, b -> wasmenc.vec(b, services, (b, Tuple{name, ty}) -> {
+        wasmenc.name(b, "os")
+        wasmenc.name(b, name)
+        bytes.u8(b, wasmenc.kind_func)
+        wasmenc.uleb(b, ty)
+    }))
+    sec(wasmenc.sec_function, b -> wasmenc.vec(b, append([ty_i, ty_i], map(f -> ty_void, funs)), wasmenc.uleb))
+    sec(wasmenc.sec_table, b -> {
+        wasmenc.uleb(b, 1)
+        bytes.u8(b, wasmenc.t_funcref)
+        bytes.u8(b, 1)
+        wasmenc.uleb(b, nfuns + 1)
+        wasmenc.uleb(b, nfuns + 1)
+    })
+    sec(wasmenc.sec_memory, b -> {
+        wasmenc.uleb(b, 1)
+        bytes.u8(b, 1)
+        wasmenc.uleb(b, data_end / page + 1)
+        wasmenc.uleb(b, max_pages)
+    })
+    sec(wasmenc.sec_global, b -> wasmenc.vec(b, [Tuple{i32, stack_top}, Tuple{i64, 0}, Tuple{i64, 0}, Tuple{i32, data_end}], (b, Tuple{ty, v}) -> {
+        bytes.u8(b, ty)
+        bytes.u8(b, 1)
+        wasmenc.op(b, if (ty == i32) "i32_const" else "i64_const")
+        wasmenc.sleb(b, v)
+        wasmenc.op(b, "end")
+    }))
+    sec(wasmenc.sec_export, b -> wasmenc.vec(b, [Tuple{"memory", wasmenc.kind_memory, 0}, Tuple{"_start", wasmenc.kind_func, start},
+        Tuple{"sbrk", wasmenc.kind_func, f_sbrk}], (b, Tuple{name, kind, index}) -> {
+        wasmenc.name(b, name)
+        bytes.u8(b, kind)
+        wasmenc.uleb(b, index)
+    }))
+    sec(wasmenc.sec_element, b -> {
+        wasmenc.uleb(b, 1)
+        wasmenc.uleb(b, 0)
+        wasmenc.op(b, "i32_const")
+        wasmenc.sleb(b, 1)
+        wasmenc.op(b, "end")
+        wasmenc.vec(b, range(0, nfuns), (b, i) -> wasmenc.uleb(b, nservices + nown + i))
+    })
+    sec(wasmenc.sec_code, b -> wasmenc.vec(b, append([grow_body(), sbrk_body()], map(f -> fun_body(f, env), funs)), (b, body) -> {
+        wasmenc.uleb(b, bytes.len(body))
+        bytes.append(b, body)
+    }))
+    sec(wasmenc.sec_data, b -> {
+        wasmenc.uleb(b, 1)
+        wasmenc.uleb(b, 0)
+        wasmenc.op(b, "i32_const")
+        wasmenc.sleb(b, data_base)
+        wasmenc.op(b, "end")
+        wasmenc.uleb(b, bytes.len(arg(laid, 0)))
+        bytes.append(b, arg(laid, 0))
+    })
+    m
+}
+
+}
