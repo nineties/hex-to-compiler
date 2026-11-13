@@ -1,0 +1,90 @@
+# playground_run: the program of the image of the playground (docs/tools/playground.pk)
+# Copyright (C) 2026 nineties
+#
+# playground.run() reads the standard input. The first line is the mode and the rest is the text of a program.
+#   run    evaluates the expressions of the text in order, and writes only what the program writes
+#   repl   writes the session at the prompt of the REPL: each expression after "> " (the lines of it that go on after "... "), then its value,
+#          except for none and for definitions, which write no value
+# A syntax error or a runtime error (the effect Error) is written and stops the evaluation.
+# It needs the libraries of planck/lib/io.pk, planck/lib/string.pk and planck/lib/pvm/link.pk, and the grammar of planck/syntax.pk, in the image.
+
+module playground {
+    is_def(e) := type(e) == Expr and (head(e) == 'Def or head(e) == 'Set or head(e) == 'Declare or
+        (head(e) == 'Apply and arg(e, 0) == '_define_rule) or
+        (head(e) == 'Do and arity(e) > 0 and is_def(arg(e, arity(e) - 1))))
+    # the message of an error of the compiler of the image without the name of its module
+    message(msg) := if (strlen(msg) >= 13 and substr(msg, 0, 13) == "pvm_compile: ") substr(msg, 13, strlen(msg)) else msg
+    is_use(e) := type(e) == Expr and head(e) == 'Apply and arity(e) == 2 and arg(e, 0) == 'use
+
+    # show(text) writes the text of an expression after the prompt
+    show(text) := {
+        n := strlen(text)
+        i := 0
+        while (i < n and (ord(text, i) == 10 or ord(text, i) == 32)) i = i + 1
+        while (n > i and (ord(text, n - 1) == 10 or ord(text, n - 1) == 32)) n = n - 1
+        k := i
+        first := true
+        while (k <= n) {
+            j := k
+            while (j < n and ord(text, j) != 10) j = j + 1
+            put(if (first) "> " else "... ")
+            put(substr(text, k, j))
+            put("\n")
+            first = false
+            k = j + 1
+        }
+    }
+
+    # eval_text(s, session) evaluates every expression of the text s
+    export eval_text(s, session) := {
+        line := 1
+        col := 1
+        go := true
+        while (go) {
+            r := parse_at(s, Loc{"<playground>", line, col})
+            e := arg(r, 0)
+            if (type(e) == Expr and head(e) == 'Eof) go = false
+            else if (type(e) == Expr and head(e) == 'SyntaxError) {
+                put(peg_error_text(e))
+                put("\n")
+                go = false
+            } else {
+                rest := arg(r, 1)
+                n := strlen(s) - strlen(rest)
+                if (session) show(substr(s, 0, n))
+                k := 0
+                while (k < n) {
+                    if (ord(s, k) == 10) {
+                        line = line + 1
+                        col = 1
+                    } else col = col + 1
+                    k = k + 1
+                }
+                s = rest
+                if (not is_use(e)) {
+                    failed := false
+                    v := handle eval(e) with (Error{loc, msg}, k) -> {
+                        put(message(msg))
+                        put("\n")
+                        failed = true
+                        none
+                    }
+                    if (failed) go = false
+                    else if (session and v != none and not is_def(e)) println(v)
+                }
+            }
+        }
+    }
+
+    export run() := {
+        mode := read_line()
+        b := strbuf.new()
+        line := read_line()
+        while (line != none) {
+            strbuf.add(b, line)
+            strbuf.add(b, "\n")
+            line = read_line()
+        }
+        eval_text(strbuf.string(b), mode == "repl")
+    }
+}
