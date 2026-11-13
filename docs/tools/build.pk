@@ -24,6 +24,8 @@
 #   [[F A]]            a link to the item A of the source F ([[F A .. B]] is the same).
 #                      A and B must each match exactly one line, or the build stops
 #                      (write fun f, not (fun f, which starts with a parenthesis)
+# The blocks of ex and repl in the pages of the tutorial get a button that runs the code in the browser (assets/planck-run.js), and src/LANG/playground.html is
+# the page of an editor to run code.
 # The code of planck is written as HTML with spans of the classes by highlight.html (planck/lib/highlight.pk).
 # docs/index.html is the entrance that chooses a language, and the pages at the old URLs such as docs/tutorial/
 # only move to docs/ja/.
@@ -587,6 +589,13 @@ repl_block(name) := {
     f"<pre class=\"repl\">{rstrip_nl(strbuf.string(b))}</pre>"
 }
 
+# the pages of the tutorial run their examples (see planck-run.js). An example with the file examples/NAME.norun does not
+RUN_BUTTONS := false
+
+# the attributes of an example that planck-run.js gives a button to run: the mode and the code, which is examples/NAME.EXT
+run_attrs(mode, name, ext) := if (not RUN_BUTTONS or try_read_file(f"{EX}/{name}.norun") != none) ""
+    else f" data-run=\"{mode}\" data-src=\"{html_escape(rstrip_nl(ex_file(name, ext)))}\""
+
 # === Excerpts of the source files ===
 
 blank_line(l) := lead(l) == strlen(l)
@@ -760,9 +769,9 @@ expand(body) := {
         e := str_find(s, "-->", j)
         if (e < 0) none else (e + 3, bits(substr(s, j, e)))
     })
-    body = by_name(body, "ex", name -> f"<div class=\"example\">\n{code_block(name)}\n{out_block(name)}\n</div>")
+    body = by_name(body, "ex", name -> f"<div class=\"example\"{run_attrs("run", name, "pk")}>\n{code_block(name)}\n{out_block(name)}\n</div>")
     body = by_name(body, "src", name -> f"<div class=\"example\">\n{code_block(name)}\n</div>")
-    body = by_name(body, "repl", name -> f"<div class=\"example\">\n{repl_block(name)}\n</div>")
+    body = by_name(body, "repl", name -> f"<div class=\"example\"{run_attrs("repl", name, "repl")}>\n{repl_block(name)}\n</div>")
     body = by_name(body, "out", name -> f"<div class=\"example\">\n{out_block(name)}\n</div>")
     body = by_name(body, "text", name -> f"<pre>{html_escape(rstrip_nl(ex_file(name, "txt")))}</pre>")
     body = expand_file(body)
@@ -790,7 +799,7 @@ nav(cur_sec) := {
 
 # the path to the same page in the other language
 other_lang_href(cur_sec, cur_page) := {
-    path := if (cur_sec != none) f"{cur_sec}/{cur_page}.html" else "index.html"
+    path := if (cur_sec != none) f"{cur_sec}/{cur_page}.html" else if (cur_page != none) f"{cur_page}.html" else "index.html"
     other_code := if (LANG == "ja") "en" else "ja"
     _strcat(_strcat(if (cur_sec != none) "../" else "", f"../{other_code}/"), path)
 }
@@ -814,6 +823,7 @@ page(cur_sec, cur_page, title, body, toc_pages, sec_label) := {
         pager = f"<nav class=\"pager\">{a}{b}</nav>"
     }
     up := if (cur_sec != none) "../../" else "../"
+    runner := if (str_find(body, " data-run=", 0) >= 0 or str_find(body, "id=\"playground\"", 0) >= 0) f"\n<script src=\"{up}assets/planck-run.js\"></script>" else ""
     other := other_lang_href(cur_sec, cur_page)
     other_code := if (LANG == "ja") "en" else "ja"
     full_title := if (title != SITE) f"{title} | {SITE}" else title
@@ -845,7 +855,7 @@ page(cur_sec, cur_page, title, body, toc_pages, sec_label) := {
         "</main>",
         "</div>",
         f"<footer><div class=\"inner\"><a href=\"{REPO}\">github.com/nineties/hex-to-compiler</a></div></footer>",
-        f"<script src=\"{up}assets/page.js\"></script>",
+        f"<script src=\"{up}assets/page.js\"></script>{runner}",
         "</body>",
         "</html>",
         ""])
@@ -867,10 +877,14 @@ build_lang(lang) := {
     n := 1
     tb := read_src(f"{src}/index.html")
     write_file(f"{out}/index.html", page(none, none, arg(tb, 0), expand(arg(tb, 1)), [], ""))
+    tb = read_src(f"{src}/playground.html")
+    write_file(f"{out}/playground.html", page(none, "playground", arg(tb, 0), expand(arg(tb, 1)), [], ""))
+    n = n + 1
     for (s in sections(lang)) {
         section := arg(s, 0)
         for (p in arg(s, 2)) {
             tb = read_src(f"{src}/{section}/{arg(p, 0)}.html")
+            RUN_BUTTONS = section == "tutorial"
             write_file(f"{out}/{section}/{arg(p, 0)}.html", page(section, arg(p, 0), arg(tb, 0), expand(arg(tb, 1)), arg(s, 2), arg(s, 1)))
             n = n + 1
         }

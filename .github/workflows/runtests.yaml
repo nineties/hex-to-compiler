@@ -44,7 +44,7 @@ jobs:
                   echo "tests run: $heavy"
     # The required check. It reports whether the tests passed, or were not needed, as one result named runtests.
     runtests:
-        needs: [changes, test]
+        needs: [changes, test, playground]
         if: ${{ always() }}
         runs-on: ubuntu-latest
         steps:
@@ -53,14 +53,24 @@ jobs:
                   CHANGES: ${{ needs.changes.result }}
                   HEAVY: ${{ needs.changes.outputs.heavy }}
                   TEST: ${{ needs.test.result }}
+                  PLAYGROUND: ${{ needs.playground.result }}
               run: |
-                  echo "changes: $CHANGES, heavy: $HEAVY, test: $TEST"
+                  echo "changes: $CHANGES, heavy: $HEAVY, test: $TEST, playground: $PLAYGROUND"
                   [ "$CHANGES" = success ] || exit 1
+                  [ "$PLAYGROUND" = success ] || exit 1
                   if [ "$HEAVY" = true ]; then
                       [ "$TEST" = success ]
                   else
                       [ "$TEST" = skipped ]
                   fi
+    # The examples of the tutorial run in the PlanckVM of the browser (docs/assets/vm.wasm and planck.img), and the output is the recorded one.
+    playground:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - name: run the examples of the tutorial in node
+              run:
+                  node docs/tools/test_playground.js
     test:
         needs: changes
         if: needs.changes.outputs.heavy == 'true'

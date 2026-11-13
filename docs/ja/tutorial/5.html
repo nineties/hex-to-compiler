@@ -41,7 +41,13 @@
 <p class="lead"><code>perform v</code> は、一番近い <code>handle</code> のハンドラを <code>h(v, k)</code> で呼びます。<code>k</code> は <code>perform</code> の継続で、何度でも呼べるので、例外・生成器・非決定計算が同じ仕組みで書けます。</p>
 
 <h2>例外</h2>
-<div class="example">
+<div class="example" data-run="run" data-src="safe_div(a, b) := if (b == 0) perform Raise{&quot;division by zero&quot;} else a / b
+
+try(f) := handle Ok{f()} with (Raise{msg}, k) -&gt; Error{msg}
+
+println(try(() -&gt; safe_div(10, 2)))
+println(try(() -&gt; safe_div(10, 0)))
+println(try(() -&gt; { put(&quot;before\n&quot;); safe_div(1, 0); put(&quot;after\n&quot;) }))">
 <p class="file">t5_exception.pk</p>
 <pre class="pk"><span class="tok-name">safe_div</span><span class="tok-op">(</span><span class="tok-name">a</span><span class="tok-op">,</span> <span class="tok-name">b</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-kw">if</span> <span class="tok-op">(</span><span class="tok-name">b</span> <span class="tok-op">==</span> <span class="tok-num">0</span><span class="tok-op">)</span> <span class="tok-kw">perform</span> <span class="tok-name">Raise</span><span class="tok-op">{</span><span class="tok-str">"division by zero"</span><span class="tok-op">}</span> <span class="tok-kw">else</span> <span class="tok-name">a</span> <span class="tok-op">/</span> <span class="tok-name">b</span>
 
@@ -59,7 +65,17 @@ Error{&quot;division by zero&quot;}</pre>
 <p>ハンドラの値が <code>handle</code> 式の値です。<code>k</code> を呼ばなければ残りの計算は捨てられます。</p>
 
 <h2>再開と生成器</h2>
-<div class="example">
+<div class="example" data-run="run" data-src="fun walk
+walk = (Leaf{}) -&gt; none
+      | (Node{l, v, r}) -&gt; { walk(l); perform Yield{v}; walk(r) }
+
+tree := Node{Node{Leaf{}, 1, Leaf{}}, 2, Node{Leaf{}, 3, Leaf{}}}
+
+handle walk(tree) with (Yield{v}, k) -&gt; { put(f&quot;yield {v}\n&quot;); k(none) }
+
+to_list(t) := handle { walk(t); [] } with (Yield{v}, k) -&gt; v :: k(none)
+use(&quot;pretty&quot;)
+put(f&quot;{to_list(tree)}\n&quot;)">
 <p class="file">t5_generator.pk</p>
 <pre class="pk"><span class="tok-kw">fun</span> <span class="tok-name">walk</span>
 <span class="tok-name">walk</span> <span class="tok-op">=</span> <span class="tok-op">(</span><span class="tok-name">Leaf</span><span class="tok-op">{</span><span class="tok-op">}</span><span class="tok-op">)</span> <span class="tok-op">-&gt;</span> <span class="tok-name">none</span>
@@ -81,7 +97,13 @@ yield 3
 <p><code>k(x)</code> は <code>perform</code> が <code>x</code> を返したものとして計算を再開します。同じ <code>walk</code> でも、ハンドラが値の使い方を決めます。</p>
 
 <h2>多重再開</h2>
-<div class="example">
+<div class="example" data-run="run" data-src="use(&quot;list&quot;)
+use(&quot;pretty&quot;)
+choose(xs) := perform Choose{xs}
+
+all_results(f) := handle [f()] with (Choose{xs}, k) -&gt; concat_map(x -&gt; k(x), xs)
+
+put(f&quot;{all_results(() -&gt; (choose([1, 2]), choose([&quot;a&quot;, &quot;b&quot;])))}\n&quot;)">
 <p class="file">t5_choose.pk</p>
 <pre class="pk"><span class="tok-name">use</span><span class="tok-op">(</span><span class="tok-str">"list"</span><span class="tok-op">)</span>
 <span class="tok-name">use</span><span class="tok-op">(</span><span class="tok-str">"pretty"</span><span class="tok-op">)</span>
@@ -100,5 +122,6 @@ yield 3
 </div>
 <footer><div class="inner"><a href="https://github.com/nineties/hex-to-compiler">github.com/nineties/hex-to-compiler</a></div></footer>
 <script src="../../assets/page.js"></script>
+<script src="../../assets/planck-run.js"></script>
 </body>
 </html>

@@ -41,7 +41,13 @@
 <p class="lead"><code>perform v</code> calls the nearest handler of a <code>handle</code> as <code>h(v, k)</code>. <code>k</code> is the continuation of the <code>perform</code> and can be called any number of times, so exceptions, generators and nondeterminism use the same mechanism.</p>
 
 <h2>Exceptions</h2>
-<div class="example">
+<div class="example" data-run="run" data-src="safe_div(a, b) := if (b == 0) perform Raise{&quot;division by zero&quot;} else a / b
+
+try(f) := handle Ok{f()} with (Raise{msg}, k) -&gt; Error{msg}
+
+println(try(() -&gt; safe_div(10, 2)))
+println(try(() -&gt; safe_div(10, 0)))
+println(try(() -&gt; { put(&quot;before\n&quot;); safe_div(1, 0); put(&quot;after\n&quot;) }))">
 <p class="file">t5_exception.pk</p>
 <pre class="pk"><span class="tok-name">safe_div</span><span class="tok-op">(</span><span class="tok-name">a</span><span class="tok-op">,</span> <span class="tok-name">b</span><span class="tok-op">)</span> <span class="tok-op">:=</span> <span class="tok-kw">if</span> <span class="tok-op">(</span><span class="tok-name">b</span> <span class="tok-op">==</span> <span class="tok-num">0</span><span class="tok-op">)</span> <span class="tok-kw">perform</span> <span class="tok-name">Raise</span><span class="tok-op">{</span><span class="tok-str">"division by zero"</span><span class="tok-op">}</span> <span class="tok-kw">else</span> <span class="tok-name">a</span> <span class="tok-op">/</span> <span class="tok-name">b</span>
 
@@ -59,7 +65,17 @@ Error{&quot;division by zero&quot;}</pre>
 <p>The value of the handler is the value of the <code>handle</code> expression. When the handler does not call <code>k</code>, the rest of the computation is discarded.</p>
 
 <h2>Resumption and generators</h2>
-<div class="example">
+<div class="example" data-run="run" data-src="fun walk
+walk = (Leaf{}) -&gt; none
+      | (Node{l, v, r}) -&gt; { walk(l); perform Yield{v}; walk(r) }
+
+tree := Node{Node{Leaf{}, 1, Leaf{}}, 2, Node{Leaf{}, 3, Leaf{}}}
+
+handle walk(tree) with (Yield{v}, k) -&gt; { put(f&quot;yield {v}\n&quot;); k(none) }
+
+to_list(t) := handle { walk(t); [] } with (Yield{v}, k) -&gt; v :: k(none)
+use(&quot;pretty&quot;)
+put(f&quot;{to_list(tree)}\n&quot;)">
 <p class="file">t5_generator.pk</p>
 <pre class="pk"><span class="tok-kw">fun</span> <span class="tok-name">walk</span>
 <span class="tok-name">walk</span> <span class="tok-op">=</span> <span class="tok-op">(</span><span class="tok-name">Leaf</span><span class="tok-op">{</span><span class="tok-op">}</span><span class="tok-op">)</span> <span class="tok-op">-&gt;</span> <span class="tok-name">none</span>
@@ -81,7 +97,13 @@ yield 3
 <p><code>k(x)</code> resumes the computation as if the <code>perform</code> returned <code>x</code>. For the same <code>walk</code>, the handler decides how the values are used.</p>
 
 <h2>Multiple resumption</h2>
-<div class="example">
+<div class="example" data-run="run" data-src="use(&quot;list&quot;)
+use(&quot;pretty&quot;)
+choose(xs) := perform Choose{xs}
+
+all_results(f) := handle [f()] with (Choose{xs}, k) -&gt; concat_map(x -&gt; k(x), xs)
+
+put(f&quot;{all_results(() -&gt; (choose([1, 2]), choose([&quot;a&quot;, &quot;b&quot;])))}\n&quot;)">
 <p class="file">t5_choose.pk</p>
 <pre class="pk"><span class="tok-name">use</span><span class="tok-op">(</span><span class="tok-str">"list"</span><span class="tok-op">)</span>
 <span class="tok-name">use</span><span class="tok-op">(</span><span class="tok-str">"pretty"</span><span class="tok-op">)</span>
@@ -100,5 +122,6 @@ yield 3
 </div>
 <footer><div class="inner"><a href="https://github.com/nineties/hex-to-compiler">github.com/nineties/hex-to-compiler</a></div></footer>
 <script src="../../assets/page.js"></script>
+<script src="../../assets/planck-run.js"></script>
 </body>
 </html>
