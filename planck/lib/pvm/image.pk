@@ -60,7 +60,7 @@ module pvm_image {
         ["bit_and", 25, 2], ["bit_or", 26, 2], ["bit_xor", 27, 2], ["bit_shl", 28, 2], ["bit_sar", 29, 2],
         ["array", 30, 1], ["plain_array", 31, 2], ["plain_len", 32, 1], ["plain_kind", 33, 1], ["array_get", 34, 2], ["array_set", 35, 3],
         ["array_len", 36, 1], ["plain_get", 37, 2], ["plain_set", 38, 3],
-        ["str_to_bytes", 39, 1], ["bytes_to_str", 40, 1], ["bit_not", 41, 1], ["bit_shr", 42, 2],
+        ["string_to_bytes", 39, 1], ["bytes_to_string", 40, 1], ["bit_not", 41, 1], ["bit_shr", 42, 2],
         ["_record_new", 43, 2],
         ["_sys_open", 45, 1], ["_sys_read", 46, 3], ["_sys_write", 47, 3], ["_sys_close", 48, 1], ["_sys_argc", 49, 0], ["_sys_argv", 50, 1],
         ["_cells", 51, 0], ["_cell_new", 52, 2], ["_cell_field", 53, 2], ["_cell_set", 54, 2], ["_code_new", 55, 6], ["_lambda", 56, 1], ["_quo", 57, 2]
@@ -127,14 +127,14 @@ module pvm_image {
     }
 
     # lays the objects out after the 17 root words and writes them
-    layout(objs, roots) := {
-        n := vector.len(objs)
+    layout(objects, roots) := {
+        n := vector.len(objects)
         addr := array(n)
         at := 17
         i := 0
         while (i < n) {
             array_set(addr, i, at)
-            at = at + 1 + length(vector.get(objs, i)[1])
+            at = at + 1 + length(vector.get(objects, i)[1])
             i = i + 1
         }
         out := bytes.new()
@@ -142,7 +142,7 @@ module pvm_image {
         each(r -> bytes.u64(out, value(r)), roots)
         i = 0
         while (i < n) {
-            o := vector.get(objs, i)
+            o := vector.get(objects, i)
             kind := arg(o, 0)
             items := arg(o, 1)
             bytes.u64(out, length(items) * 64 + kind * 4 + 1)
@@ -157,18 +157,18 @@ module pvm_image {
         out
     }
 
-    # an object is Obj{kind, items}; an item is W{n} (a word, a small integer in the low 30 bits), B{[b0, ..., b7]} (the 8 bytes of a word), R{id} (a reference), V{n} (a small integer value)
+    # an object is Object{kind, items}; an item is W{n} (a word, a small integer in the low 30 bits), B{[b0, ..., b7]} (the 8 bytes of a word), R{id} (a reference), V{n} (a small integer value)
     export build(codes, entry) := {
-        objs := vector.new()
+        objects := vector.new()
         names := table.new()
         add(key, o) := {
-            id := vector.len(objs)
-            vector.push(objs, o)
+            id := vector.len(objects)
+            vector.push(objects, o)
             table.set(names, key, id)
             id
         }
-        once(key, mk) := if (table.has(names, key)) table.get(names, key, none) else mk()
-        string_obj(s) := once(['str, s], () -> {
+        once(key, make) := if (table.has(names, key)) table.get(names, key, none) else make()
+        string_object(s) := once(['string, s], () -> {
             n := strlen(s)
             words := []
             i := 0
@@ -176,11 +176,11 @@ module pvm_image {
                 words = map(k -> if (i + k < n) ord(s, i + k) else 0, [0, 1, 2, 3, 4, 5, 6, 7]) :: words
                 i = i + 8
             }
-            add(['str, s], Obj{3, W{n} :: map(w -> B{w}, reverse(words))})
+            add(['string, s], Object{3, W{n} :: map(w -> B{w}, reverse(words))})
         })
-        symbol(s) := once(['sym, s], () -> {
-            str := string_obj(s)
-            add(['sym, s], Obj{4, [R{str}, V{0}]})
+        symbol(s) := once(['symbol, s], () -> {
+            string := string_object(s)
+            add(['symbol, s], Object{4, [R{string}, V{0}]})
         })
         # the roots first: false, true, none; they are symbols
         f_ := symbol("false")
@@ -190,33 +190,33 @@ module pvm_image {
         cons_ := symbol("Cons")
         nil_ := symbol("Nil")
         # the types: the type Type is the type of every type, so it is made first and refers to itself
-        empty_ := add(['mexpr, "Tuple", []], Obj{5, [R{tuple_}]})
+        empty_ := add(['mexpr, "Tuple", []], Object{5, [R{tuple_}]})
         # the fields of the type Code
-        code_fields := add(['mexpr, "Tuple", "Code"], Obj{5, R{tuple_} :: map(s -> R{symbol(s)}, ["nregs", "arity", "instrs", "consts", "params", "locs", "file"])})
-        type_obj := table.new()
+        code_fields := add(['mexpr, "Tuple", "Code"], Object{5, R{tuple_} :: map(s -> R{symbol(s)}, ["nregs", "arity", "instrs", "consts", "params", "locs", "file"])})
+        type_object := table.new()
         make_type(n) := {
             name := symbol(n)
             fields := if (n == "Code") code_fields else empty_
-            id := vector.len(objs)
-            add(['type, n], Obj{13, [W{0}, R{name}, R{fields}, R{table.get(type_obj, "Type", id)}]})
+            id := vector.len(objects)
+            add(['type, n], Object{13, [W{0}, R{name}, R{fields}, R{table.get(type_object, "Type", id)}]})
         }
-        table.set(type_obj, "Type", make_type("Type"))
-        each(n -> table.set(type_obj, n, make_type(n)), type_names)
-        types := map(n -> table.get(type_obj, n, none), type_names)
-        builtin_obj(e) := once(['builtin, e[0]], () -> {
-            add(['builtin, e[0]], Obj{10, [W{0}, V{e[1]}, V{e[2]}, R{symbol(e[0])}]})
+        table.set(type_object, "Type", make_type("Type"))
+        each(n -> table.set(type_object, n, make_type(n)), type_names)
+        types := map(n -> table.get(type_object, n, none), type_names)
+        builtin_object(e) := once(['builtin, e[0]], () -> {
+            add(['builtin, e[0]], Object{10, [W{0}, V{e[1]}, V{e[2]}, R{symbol(e[0])}]})
         })
         # the cell of generation g of a global variable: a Def makes the next one. Only generation 0 holds the builtin of the name.
         cell_g(s, g) := once(['cell, s, g], () -> {
             sym := symbol(s)
             b := if (g == 0) list.find(e -> e[0] == s, builtins) else none
-            val := if (g == 0 and table.has(type_obj, s)) R{table.get(type_obj, s, none)} else if (b == none) R{n_} else R{builtin_obj(b)}
-            add(['cell, s, g], Obj{13, [val, R{sym}, V{g}]})
+            value := if (g == 0 and table.has(type_object, s)) R{table.get(type_object, s, none)} else if (b == none) R{n_} else R{builtin_object(b)}
+            add(['cell, s, g], Object{13, [value, R{sym}, V{g}]})
         })
         cell(s) := cell_g(s, 0)
         # reserve the code objects so that they can refer to each other
-        each(c -> add(['code, c[0]], Obj{15, []}), codes)
-        code_type := table.get(type_obj, "Code", none)
+        each(c -> add(['code, c[0]], Object{15, []}), codes)
+        code_type := table.get(type_object, "Code", none)
         # a u32 plain array of the elements bs (each is the list of the 4 bytes of an element); two elements are in a word, and the last word of an odd number is filled with zeros
         u32_plain(bs) := {
             n := length(bs)
@@ -237,12 +237,12 @@ module pvm_image {
                 items = B{map(t -> array_get(arr, j * 8 + t), [0, 1, 2, 3, 4, 5, 6, 7])} :: items
                 j = j - 1
             }
-            add(['plain, vector.len(objs)], Obj{7, append([W{0}, W{7}, W{n}], items)})
+            add(['plain, vector.len(objects)], Object{7, append([W{0}, W{7}, W{n}], items)})
         }
         value_of(x) := match x {
             K{n} -> R{table.get(names, ['code, n], none)}
           | I{n} -> V{n}
-          | S{s} -> R{string_obj(s)}
+          | S{s} -> R{string_object(s)}
           | Y{s} -> R{symbol(s)}
           | C{s} -> R{cell(s)}
           | Cg{s, g} -> R{cell_g(s, g)}
@@ -250,13 +250,13 @@ module pvm_image {
           | F{} -> R{f_}
           | N{} -> R{n_}
           | Fl{hi, lo} -> {
-                add(['float, hi, lo, vector.len(objs)], Obj{1, [B{append(u32_bytes(lo), u32_bytes(hi))}]})
-                R{vector.len(objs) - 1}
+                add(['float, hi, lo, vector.len(objects)], Object{1, [B{append(u32_bytes(lo), u32_bytes(hi))}]})
+                R{vector.len(objects) - 1}
             }
           | M{h, xs} -> R{once(['mexpr, h, xs], () -> {
                 hs := symbol(h)
                 args := map(value_of, xs)
-                add(['mexpr, h, xs], Obj{5, R{hs} :: args})
+                add(['mexpr, h, xs], Object{5, R{hs} :: args})
             })}
         }
         each(c -> {
@@ -278,11 +278,11 @@ module pvm_image {
             consts := append(map(value_of, c[4]), if (file == none) [] else [value_of(S{file})])
             fidx := if (file == none) -1 else length(consts) - 1
             iarr := u32_plain(reverse(ins))
-            carr := add(['consts, c[0]], Obj{6, W{0} :: consts})
+            carr := add(['consts, c[0]], Object{6, W{0} :: consts})
             larr := u32_plain(reverse(locs))
-            vector.set(objs, table.get(names, ['code, c[0]], none), Obj{15, [W{0}, R{code_type}, V{c[2]}, V{c[1]}, R{iarr}, R{carr}, V{-1}, R{larr}, V{fidx}]})
+            vector.set(objects, table.get(names, ['code, c[0]], none), Object{15, [W{0}, R{code_type}, V{c[2]}, V{c[1]}, R{iarr}, R{carr}, V{-1}, R{larr}, V{fidx}]})
         }, codes)
-        lam := add(['lambda], Obj{8, [W{0}, R{table.get(names, ['code, entry], none)}, R{n_}]})
-        layout(objs, append([lam, f_, t_, n_, tuple_, cons_, nil_], types))
+        lambda := add(['lambda], Object{8, [W{0}, R{table.get(names, ['code, entry], none)}, R{n_}]})
+        layout(objects, append([lambda, f_, t_, n_, tuple_, cons_, nil_], types))
     }
 }

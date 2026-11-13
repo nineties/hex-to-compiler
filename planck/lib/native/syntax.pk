@@ -1,8 +1,8 @@
 # native/syntax: the syntax of native, the systems language of planck
 # Copyright (C) 2026 nineties
 #
-# native{| import u ... struct ... fn ... |} reads the imports, the structs and the functions of the language and is
-# PModule{[PImport{at, u}, ..., Struct{...}, PFn{...}, ...]}.
+# native{| import u ... struct ... fun ... |} reads the imports, the structs and the functions of the language and is
+# PModule{[PImport{at, u}, ..., Struct{...}, PFun{...}, ...]}.
 # The types, the structs and the parameters are those of vasm (vasm/check). The bodies are written with nested expressions,
 # let, for, compound assignments, the short-circuit and / or, integer literals of any size and floating point literals (1.5, -0.25, 1.0e-3).
 # native_compile.compile (native/compile) turns the tree into the Module of vasm.
@@ -41,11 +41,11 @@ native_mul ::= a:native_mul same at:vasm_here op:native_mulop b:native_cast { EB
 native_cast ::= a:native_cast at:vasm_here 'as t:vasm_type { ECast{at, a, t} } | native_unary
 
 native_unary ::= at:vasm_here x:float { EFlt{at, x} }
-    | at:vasm_here n:vasm_int_lit { ELit{at, n} }
+    | at:vasm_here n:vasm_int_literal { ELiteral{at, n} }
     | at:vasm_here "-" e:native_unary { ENeg{at, e} }
     | at:vasm_here 'not e:native_unary { ENot{at, e} }
     | at:vasm_here "*" p:native_name { EDeref{at, p} }
-    | at:vasm_here "&" 'mut r:native_name y:native_name { EBorrow{at, 'mut, r, y} }
+    | at:vasm_here "&" 'mutable r:native_name y:native_name { EBorrow{at, 'mutable, r, y} }
     | at:vasm_here "&" r:native_name y:native_name { EBorrow{at, 'shr, r, y} }
     | native_post
 
@@ -63,11 +63,11 @@ native_inits ::= i:native_init r:native_more_init* { i :: vasm_tlist(r) }
 
 native_primary ::= at:vasm_here 'true { EBool{at, true} }
     | at:vasm_here 'false { EBool{at, false} }
-    | at:vasm_here s:string { EStr{at, s} }
-    | at:vasm_here "'" s:ident { ESym{at, s} }
-    | at:vasm_here 'val h:ident "(" args:native_args? ")" { ECon{at, h, vasm_opt_list(args)} }
-    | at:vasm_here 'fn f:native_name "(" args:native_args? ")" { EClo{at, f, vasm_opt_list(args)} }
-    | at:vasm_here f:native_name "(" args:native_args? ")" { ECall{at, f, vasm_opt_list(args)} }
+    | at:vasm_here s:string { EString{at, s} }
+    | at:vasm_here "'" s:ident { ESymbol{at, s} }
+    | at:vasm_here 'value h:ident "(" args:native_args? ")" { ECon{at, h, vasm_option_list(args)} }
+    | at:vasm_here 'fun f:native_name "(" args:native_args? ")" { EClosure{at, f, vasm_option_list(args)} }
+    | at:vasm_here f:native_name "(" args:native_args? ")" { ECall{at, f, vasm_option_list(args)} }
     | at:vasm_here s:native_name "{" &(native_name ":") is:native_inits ","? "}" { EMake{at, s, is} }
     | at:vasm_here x:native_name { EVar{at, x} }
     | "(" e:native_expr ")" { e }
@@ -80,7 +80,7 @@ native_asgop ::= "<<=" { 'shl } | ">>=" { 'shr } | "+=" { 'add } | "-=" { 'sub }
 native_ann ::= ":" t:vasm_type { t }
 
 native_else ::= 'else s:native_if { [s] } | 'else b:native_block { b }
-native_if ::= at:vasm_here 'if c:native_expr a:native_block b:native_else? { SIf{at, c, a, vasm_opt_list(b)} }
+native_if ::= at:vasm_here 'if c:native_expr a:native_block b:native_else? { SIf{at, c, a, vasm_option_list(b)} }
 
 native_stmt ::= at:vasm_here 'let x:native_name t:native_ann? "=" e:native_expr { SLet{at, x, if (arity(t) == 0) none else arg(t, 0), e} }
     | at:vasm_here 'var x:native_name ":" t:vasm_type { SVar{at, x, t} }
@@ -95,14 +95,14 @@ native_stmt ::= at:vasm_here 'let x:native_name t:native_ann? "=" e:native_expr 
 
 native_more_stmt ::= vasm_sep s:native_stmt { s }
 native_stmts ::= s:native_stmt r:native_more_stmt* { s :: vasm_tlist(r) }
-native_block ::= "{" ss:native_stmts? ";"? "}" { vasm_opt_list(ss) }
+native_block ::= "{" ss:native_stmts? ";"? "}" { vasm_option_list(ss) }
 
 # === Items ===
 
-native_fn ::= at:vasm_here 'fn f:native_name rs:vasm_rparams? "(" ps:vasm_params? ")" rt:vasm_ret? body:native_block { PFn{at, f, vasm_opt_list(rs), vasm_opt_list(ps), if (arity(rt) == 0) Unit{} else arg(rt, 0), body} }
+native_fun ::= at:vasm_here 'fun f:native_name rs:vasm_rparams? "(" ps:vasm_params? ")" return_type:vasm_ret? body:native_block { PFun{at, f, vasm_option_list(rs), vasm_option_list(ps), if (arity(return_type) == 0) Unit{} else arg(return_type, 0), body} }
 
 # import u names the unit u, whose structs and functions the file uses. The imports come first in the file.
 native_import ::= at:vasm_here 'import u:native_name { PImport{at, u} }
 
-native_item ::= vasm_struct | native_fn
+native_item ::= vasm_struct | native_fun
 native ::= is:native_import* fs:native_item* { PModule{append(vasm_tlist(is), vasm_tlist(fs))} }

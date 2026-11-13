@@ -40,7 +40,7 @@ use("backend/ir")
 use("backend/cfg")
 use("backend/sched")
 use("backend/regalloc")
-use("backend/obj")
+use("backend/object")
 use("backend/x86enc")
 use("backend/x64enc")
 use("backend/os")
@@ -238,10 +238,10 @@ select_one(f, emit, i) = {
             if (length(rets) > 1) mov(rets[1], 2)
         }
       | I{'os, [N{name}, Us{args}, D{d}]} -> os.select_x64(os_emit, name, args, d)
-      | I{'ret, [Us{vals}]} -> {
-            if (vals != []) mov(0, vals[0])
-            if (length(vals) > 1) mov(2, vals[1])
-            emit(I{'ret, map(r -> IU{r}, list.take([0, 2], length(vals)))})
+      | I{'ret, [Us{values}]} -> {
+            if (values != []) mov(0, values[0])
+            if (length(values) > 1) mov(2, values[1])
+            emit(I{'ret, map(r -> IU{r}, list.take([0, 2], length(values)))})
         }
       | I{'jmp, _} -> emit(i)
       | I{'br, [Cc{c}, U{a}, b, L{t}, L{e}]} -> {
@@ -317,21 +317,21 @@ frame(f, code) := {
 }
 
 # === Functions and modules ===
-compile_fn(f, em) := {
+compile_fun(f, em) := {
     code := select(f, ir.code(f))
     code = sched.code(code, sched_model)
     g := ir.set_code(f, code)
     code = regalloc.allocate(g, ra)
     code = frame(g, code)
-    obj.define(arg(em, 0), ir.name(f), ".text", x86enc.pos(em), true)
+    object.define(arg(em, 0), ir.name(f), ".text", x86enc.pos(em), true)
     x64enc.emit_code(em, code)
 }
 
-# compile(name, fns, datas) is an object of the functions (ir.fn) and the data (see obj.add_data of obj.pk)
-export compile(name, fns, datas) := {
-    o := obj.new(name)
-    each(f -> compile_fn(f, x86enc.new(o, ".text")), fns)
-    obj.add_data(o, datas)
+# compile(name, funs, datas) is an object of the functions (ir.fun) and the data (see object.add_data of object.pk)
+export compile(name, funs, datas) := {
+    o := object.new(name)
+    each(f -> compile_fun(f, x86enc.new(o, ".text")), funs)
+    object.add_data(o, datas)
     o
 }
 
@@ -377,26 +377,26 @@ test {
     ld3 := I{'mov, [W{'w64}, D{42}, M{U{36}, 0}]}
     assert(sched.code([ld1, st1, ld3], sched_model) == [ld1, st1, ld3], "a store stays between loads")
     # the label and the terminator stay at the ends of a block
-    blk := [I{'label, [L{3}]}, ld1, ad1, ld2, ad2, I{'ret, [IU{0}]}]
-    assert(sched.code(blk, sched_model) == [I{'label, [L{3}]}, ld1, ld2, ad1, ad2, I{'ret, [IU{0}]}], "the label and the terminator stay")
+    block := [I{'label, [L{3}]}, ld1, ad1, ld2, ad2, I{'ret, [IU{0}]}]
+    assert(sched.code(block, sched_model) == [I{'label, [L{3}]}, ld1, ld2, ad1, ad2, I{'ret, [IU{0}]}], "the label and the terminator stay")
 }
 
-# a straight line code is run to see that the allocation keeps the result: values on the stack are in mem
+# a straight line code is run to see that the allocation keeps the result: values on the stack are in memory
 test {
     run(code) := {
         regs := table.new()
-        mem := table.new()
-        val := o -> match o {
+        memory := table.new()
+        value := o -> match o {
             K{n} -> n
           | U{r} -> table.get(regs, r, 0)
-          | MF{k, n, d} -> table.get(mem, Tuple{k, n, d}, 0)
+          | MF{k, n, d} -> table.get(memory, Tuple{k, n, d}, 0)
         }
         each(i -> match i {
-            I{'mov, [D{d}, s]} -> table.set(regs, d, val(s))
-          | I{'mov, [MF{k, n, d}, s]} -> table.set(mem, Tuple{k, n, d}, val(s))
-          | I{'mov, [W{_}, D{d}, s]} -> table.set(regs, d, val(s))
-          | I{'mov, [W{_}, MF{k, n, d}, s]} -> table.set(mem, Tuple{k, n, d}, val(s))
-          | I{'add, [DU{d}, s, _]} -> table.set(regs, d, table.get(regs, d, 0) + val(s))
+            I{'mov, [D{d}, s]} -> table.set(regs, d, value(s))
+          | I{'mov, [MF{k, n, d}, s]} -> table.set(memory, Tuple{k, n, d}, value(s))
+          | I{'mov, [W{_}, D{d}, s]} -> table.set(regs, d, value(s))
+          | I{'mov, [W{_}, MF{k, n, d}, s]} -> table.set(memory, Tuple{k, n, d}, value(s))
+          | I{'add, [DU{d}, s, _]} -> table.set(regs, d, table.get(regs, d, 0) + value(s))
           | I{'ret, _} -> none
         }, code)
         table.get(regs, 0, 0)

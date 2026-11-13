@@ -16,7 +16,7 @@ module vasm_text {
         n := strlen(s)
         while (i < n) {
             c := ord(s, i)
-            out = _strcat(out, if (c == 0) "\\0" else if (c == 10) "\\n" else if (c == 9) "\\t" else if (c == 34) "\\\"" else if (c == 92) "\\\\" else string.chr(c))
+            out = _strcat(out, if (c == 0) "\\0" else if (c == 10) "\\n" else if (c == 9) "\\t" else if (c == 34) "\\\"" else if (c == 92) "\\\\" else string.char(c))
             i = i + 1
         }
         out
@@ -28,8 +28,8 @@ module vasm_text {
 
     operand(Imm{_, n}) := if (n == true) "true" else if (n == false) "false" else if (type(n) == Int) f"{n}" else arg(n, 0)
     operand(FImm{_, x}) := x
-    operand(Str{_, s}) := f"\"{escape(s)}\""
-    operand(Sym{_, s}) := f"'{symname(s)}"
+    operand(String{_, s}) := f"\"{escape(s)}\""
+    operand(Symbol{_, s}) := f"'{symname(s)}"
     operand(Reg{_, x}) := symname(x)
     operand(Load{_, p}) := f"*{symname(p)}"
     operand(Index{_, a, i}) := f"{symname(a)}[{operand(i)}]"
@@ -45,11 +45,11 @@ module vasm_text {
     rhs(Conv{_, a, t}) := f"{operand(a)} as {vasm_check.show_type(t)}"
     rhs(Make{_, s, inits}) := f"{symname(s)}{{{join(", ", map((Init{_, f, a}) -> f"{symname(f)}: {operand(a)}", inits))}}}"
     rhs(Call{_, f, as}) := f"{symname(f)}({args(as)})"
-    rhs(Con{_, h, as}) := f"val {symname(h)}({args(as)})"
-    rhs(Clo{_, f, as}) := f"fn {symname(f)}({args(as)})"
-    rhs(Borrow{_, k, rg, y}) := if (k == 'mut) f"&mut {symname(rg)} {symname(y)}" else f"&{symname(rg)} {symname(y)}"
+    rhs(Con{_, h, as}) := f"value {symname(h)}({args(as)})"
+    rhs(Closure{_, f, as}) := f"fun {symname(f)}({args(as)})"
+    rhs(Borrow{_, k, rg, y}) := if (k == 'mutable) f"&mutable {symname(rg)} {symname(y)}" else f"&{symname(rg)} {symname(y)}"
 
-    indent(n) := string.str_repeat("    ", n)
+    indent(n) := string.string_repeat("    ", n)
 
     fun block
 
@@ -75,10 +75,10 @@ module vasm_text {
 
     param(Param{_, x, t}) := f"{symname(x)}: {vasm_check.show_type(t)}"
 
-    item(Fn{_, f, rs, ps, ret, body}) := {
+    item(Fun{_, f, rs, ps, ret, body}) := {
         regions := if (rs == []) "" else f"[{join(", ", map(symname, rs))}]"
         result := if (ret == Unit{}) "" else f" -> {vasm_check.show_type(ret)}"
-        join("\n", append(append([f"fn {symname(f)}{regions}({join(", ", map(param, ps))}){result} {{"], block(body, 1)), ["}"]))
+        join("\n", append(append([f"fun {symname(f)}{regions}({join(", ", map(param, ps))}){result} {{"], block(body, 1)), ["}"]))
     }
     item(Struct{_, s, fs}) := join("\n", append(append([f"struct {symname(s)} {{"], map((Field{_, x, t}) -> f"    {symname(x)}: {vasm_check.show_type(t)}", fs)), ["}"]))
 

@@ -18,92 +18,92 @@ struct DD {
 }
 
 # --- the format of f64
-fn expo(x: f64) -> i64 {
+fun expo(x: f64) -> i64 {
     ((f64_bits(x) >> 52) & 2047) as i64
 }
 
-fn fabs(x: f64) -> f64 {
+fun fabs(x: f64) -> f64 {
     f64_from_bits(f64_bits(x) & 9223372036854775807)
 }
 
-fn is_neg(x: f64) -> bool {
+fun is_neg(x: f64) -> bool {
     (f64_bits(x) >> 63) == 1
 }
 
 # 2^k for k in -1022 to 1023
-fn two_pow(k: i64) -> f64 {
+fun two_pow(k: i64) -> f64 {
     f64_from_bits(((k + 1023) as u64) << 52)
 }
 
-fn inf() -> f64 {
+fun inf() -> f64 {
     1.0 / 0.0
 }
 
-fn nan() -> f64 {
+fun nan() -> f64 {
     0.0 / 0.0
 }
 
-fn round_i(x: f64) -> i64 {
+fun round_i(x: f64) -> i64 {
     if x < 0.0 { return (x - 0.5) as i64 }
     (x + 0.5) as i64
 }
 
 # y * 2^k for k in -1150 to 1150: the two factors are exact, so only the last product rounds
-fn scale(y: f64, k: i64) -> f64 {
+fun scale(y: f64, k: i64) -> f64 {
     let a = k / 2
     y * two_pow(a) * two_pow(k - a)
 }
 
 # --- double-double arithmetic
-fn two_sum(a: f64, b: f64) -> DD {
+fun two_sum(a: f64, b: f64) -> DD {
     let s = a + b
     let t = s - a
     DD { hi: s, lo: (a - (s - t)) + (b - t) }
 }
 
 # when |a| >= |b|
-fn fast_two_sum(a: f64, b: f64) -> DD {
+fun fast_two_sum(a: f64, b: f64) -> DD {
     let s = a + b
     DD { hi: s, lo: b - (s - a) }
 }
 
 # a = hi + lo with 26 bits in hi, for |a| < 2^996
-fn split(a: f64) -> DD {
+fun split(a: f64) -> DD {
     let c = 134217729.0 * a
     let hi = c - (c - a)
     DD { hi: hi, lo: a - hi }
 }
 
-fn two_prod(a: f64, b: f64) -> DD {
+fun two_prod(a: f64, b: f64) -> DD {
     let p = a * b
     let x = split(a)
     let y = split(b)
     DD { hi: p, lo: (((x.hi * y.hi - p) + x.hi * y.lo) + x.lo * y.hi) + x.lo * y.lo }
 }
 
-fn dd_add(a: DD, b: DD) -> DD {
+fun dd_add(a: DD, b: DD) -> DD {
     let s = two_sum(a.hi, b.hi)
     let t = two_sum(a.lo, b.lo)
     let v = fast_two_sum(s.hi, s.lo + t.hi)
     fast_two_sum(v.hi, t.lo + v.lo)
 }
 
-fn dd_neg(a: DD) -> DD {
+fun dd_neg(a: DD) -> DD {
     DD { hi: -a.hi, lo: -a.lo }
 }
 
-fn dd_mul(a: DD, b: DD) -> DD {
+fun dd_mul(a: DD, b: DD) -> DD {
     let p = two_prod(a.hi, b.hi)
     fast_two_sum(p.hi, p.lo + (a.hi * b.lo + a.lo * b.hi))
 }
 
-fn dd_mul_f(a: DD, b: f64) -> DD {
+fun dd_mul_f(a: DD, b: f64) -> DD {
     let p = two_prod(a.hi, b)
     fast_two_sum(p.hi, p.lo + a.lo * b)
 }
 
 # a / b: each step takes the next 53 bits of the quotient from the remainder
-fn dd_div(a: DD, b: DD) -> DD {
+fun dd_div(a: DD, b: DD) -> DD {
     let q1 = a.hi / b.hi
     let r1 = dd_add(a, dd_neg(dd_mul_f(b, q1)))
     let q2 = r1.hi / b.hi
@@ -114,14 +114,14 @@ fn dd_div(a: DD, b: DD) -> DD {
 
 # --- exp
 # exp(r) for the part r = hi + lo of x - k ln 2 (|r| <= ln 2 / 2 + 2^-50)
-fn exp_kernel(hi: f64, lo: f64) -> f64 {
+fun exp_kernel(hi: f64, lo: f64) -> f64 {
     let t = dd_mul_f(two_prod(hi, hi), exp_q(hi))
     let y = dd_add(DD { hi: 1.0, lo: 0.0 }, dd_add(DD { hi: hi, lo: 0.0 }, t))
     let z = fast_two_sum(y.hi, y.lo + y.hi * lo)
     z.hi
 }
 
-fn fm_exp(x: f64) -> f64 {
+fun fm_exp(x: f64) -> f64 {
     if x != x { return x }
     if x > 800.0 { return inf() }
     if x < -800.0 { return 0.0 }
@@ -138,7 +138,7 @@ struct Frexp {
     k: i64
 }
 
-fn frexp(x: f64) -> Frexp {
+fun frexp(x: f64) -> Frexp {
     var y: f64
     y = x
     var k: i64
@@ -157,7 +157,7 @@ fn frexp(x: f64) -> Frexp {
     Frexp { m: m, k: k }
 }
 
-fn fm_log(x: f64) -> f64 {
+fun fm_log(x: f64) -> f64 {
     if x != x { return x }
     if x < 0.0 { return nan() }
     if x == 0.0 { return -inf() }
@@ -173,7 +173,7 @@ fn fm_log(x: f64) -> f64 {
 }
 
 # log(m) for m in [sqrt(2)/2, sqrt(2)] as a double-double: 2 s (1 + z R(z)) with the coefficients of R in two floats
-fn log_dd_mantissa(m: f64) -> DD {
+fun log_dd_mantissa(m: f64) -> DD {
     let f = m - 1.0
     let s = dd_div(DD { hi: f, lo: 0.0 }, two_sum(2.0, f))
     let z = dd_mul(s, s)
@@ -188,7 +188,7 @@ fn log_dd_mantissa(m: f64) -> DD {
 }
 
 # log(x) for a positive finite x as a double-double
-fn log_dd(x: f64) -> DD {
+fun log_dd(x: f64) -> DD {
     let e = frexp(x)
     let lm = log_dd_mantissa(e.m)
     let kf = e.k as f64
@@ -198,7 +198,7 @@ fn log_dd(x: f64) -> DD {
 
 # --- pow
 # 0 when y is not an integer, 1 when it is odd, 2 when it is even
-fn int_kind(y: f64) -> i64 {
+fun int_kind(y: f64) -> i64 {
     if fabs(y) >= 9007199254740992.0 { return 2 }
     let t = y as i64
     if (t as f64) != y { return 0 }
@@ -208,14 +208,14 @@ fn int_kind(y: f64) -> i64 {
 
 # true for the x and y of the cases of the standard that the formula does not cover: x or y is zero, infinite or not a number, or x is
 # negative and y is not an integer
-fn pow_is_special(x: f64, y: f64) -> bool {
+fun pow_is_special(x: f64, y: f64) -> bool {
     if y == 0.0 or x == 1.0 or x != x or y != y { return true }
     if x == 0.0 or fabs(x) == inf() or fabs(y) == inf() { return true }
     is_neg(x) and int_kind(y) == 0
 }
 
 # the signed zero or infinity of x^y when x is 0 or infinite, by the sign of y: a zero or an infinity to an odd integer power keeps its sign
-fn pow_extreme(x: f64, y: f64, small: bool) -> f64 {
+fun pow_extreme(x: f64, y: f64, small: bool) -> f64 {
     var r: f64
     r = 0.0
     if small {
@@ -227,7 +227,7 @@ fn pow_extreme(x: f64, y: f64, small: bool) -> f64 {
     r
 }
 
-fn pow_special(x: f64, y: f64) -> f64 {
+fun pow_special(x: f64, y: f64) -> f64 {
     if y == 0.0 or x == 1.0 { return 1.0 }
     if x != x or y != y { return nan() }
     let ax = fabs(x)
@@ -246,7 +246,7 @@ fn pow_special(x: f64, y: f64) -> f64 {
 }
 
 # exp of the double-double t
-fn exp_dd(t: DD) -> f64 {
+fun exp_dd(t: DD) -> f64 {
     if t.hi > 800.0 { return inf() }
     if t.hi < -800.0 { return 0.0 }
     let k = round_i(t.hi * inv_ln2())
@@ -256,7 +256,7 @@ fn exp_dd(t: DD) -> f64 {
     scale(exp_kernel(r.hi, r.lo), k)
 }
 
-fn fm_pow(x: f64, y: f64) -> f64 {
+fun fm_pow(x: f64, y: f64) -> f64 {
     if pow_is_special(x, y) { return pow_special(x, y) }
     let r = exp_dd(dd_mul_f(log_dd(fabs(x)), y))
     if is_neg(x) and int_kind(y) == 1 { return -r }
@@ -271,7 +271,7 @@ struct Red {
 }
 
 # x - n pi/2 for |x| < 2^20 pi/2: n times each of the first three parts of pi/2 is exact
-fn reduce_small(x: f64) -> Red {
+fun reduce_small(x: f64) -> Red {
     let n = round_i(x * inv_pio2())
     let k = n as f64
     let a = x - k * pio2_1()
@@ -287,7 +287,7 @@ struct Cols {
     n: i64
 }
 
-fn collect_cols[r](col: &mut r [i64], c0: i64, nc: i64, e: i64) -> Cols {
+fun collect_cols[r](col: &mutable r [i64], c0: i64, nc: i64, e: i64) -> Cols {
     var frac: DD
     frac = DD { hi: 0.0, lo: 0.0 }
     var n: i64
@@ -313,7 +313,7 @@ fn collect_cols[r](col: &mut r [i64], c0: i64, nc: i64, e: i64) -> Cols {
 
 # x - n pi/2 for a large positive x, from the digits of 2/pi (Payne and Hanek): x = m 2^e with m of 53 bits, and x (2/pi) mod 4 is
 # the sum of d_j m_i 2^(e - 24 (j - i)) over the digits d_j of 2/pi and the 24-bit pieces m_i of m. The terms with a weight 4 or more are dropped.
-fn reduce_big(x: f64) -> Red {
+fun reduce_big(x: f64) -> Red {
     let bits = f64_bits(x)
     let e = expo(x) - 1075
     let m = (bits & 4503599627370495) | 4503599627370496
@@ -325,7 +325,7 @@ fn reduce_big(x: f64) -> Red {
     while e - 24 * c0 > 1 { c0 += 1 }
     let nc: i64 = 7
     var col: own [i64]
-    col = alloc(8, 0 as i64)
+    col = allocate(8, 0 as i64)
     var c: i64
     c = 0
     while c < nc {
@@ -349,8 +349,8 @@ fn reduce_big(x: f64) -> Red {
     }
     var out: Cols
     region q {
-        var cm: &mut q [i64]
-        cm = &mut q col
+        var cm: &mutable q [i64]
+        cm = &mutable q col
         out = collect_cols(cm, c0, nc, e)
     }
     var n: i64
@@ -365,13 +365,13 @@ fn reduce_big(x: f64) -> Red {
     Red { hi: r.hi, lo: r.lo, n: n }
 }
 
-fn reduce(x: f64) -> Red {
+fun reduce(x: f64) -> Red {
     if x < 1.0e6 { return reduce_small(x) }
     reduce_big(x)
 }
 
 # sin(hi + lo) and cos(hi + lo) for |hi| <= pi/4
-fn sin_kernel(hi: f64, lo: f64) -> f64 {
+fun sin_kernel(hi: f64, lo: f64) -> f64 {
     let zz = two_prod(hi, hi)
     let t = dd_mul_f(dd_mul_f(zz, hi), sin_s(zz.hi))
     let s = dd_add(DD { hi: hi, lo: 0.0 }, t)
@@ -379,7 +379,7 @@ fn sin_kernel(hi: f64, lo: f64) -> f64 {
     z.hi
 }
 
-fn cos_kernel(hi: f64, lo: f64) -> f64 {
+fun cos_kernel(hi: f64, lo: f64) -> f64 {
     let zz = two_prod(hi, hi)
     let h = DD { hi: 0.5 * zz.hi, lo: 0.5 * zz.lo }
     let q = dd_add(h, dd_neg(dd_mul_f(dd_mul(zz, zz), cos_c(zz.hi))))
@@ -389,7 +389,7 @@ fn cos_kernel(hi: f64, lo: f64) -> f64 {
 }
 
 # sin of |x| (x finite) by the quadrant of the reduction
-fn sin_pos(x: f64) -> f64 {
+fun sin_pos(x: f64) -> f64 {
     if x < 0.78 { return sin_kernel(x, 0.0) }
     let r = reduce(x)
     let q = r.n & 3
@@ -399,7 +399,7 @@ fn sin_pos(x: f64) -> f64 {
     -cos_kernel(r.hi, r.lo)
 }
 
-fn cos_pos(x: f64) -> f64 {
+fun cos_pos(x: f64) -> f64 {
     if x < 0.78 { return cos_kernel(x, 0.0) }
     let r = reduce(x)
     let q = r.n & 3
@@ -409,20 +409,20 @@ fn cos_pos(x: f64) -> f64 {
     sin_kernel(r.hi, r.lo)
 }
 
-fn fm_sin(x: f64) -> f64 {
+fun fm_sin(x: f64) -> f64 {
     if x != x or fabs(x) == inf() { return nan() }
     if is_neg(x) { return -sin_pos(fabs(x)) }
     sin_pos(x)
 }
 
-fn fm_cos(x: f64) -> f64 {
+fun fm_cos(x: f64) -> f64 {
     if x != x or fabs(x) == inf() { return nan() }
     cos_pos(fabs(x))
 }
 
 # --- atan2
 # atan(a) for a >= 0 (or infinite): a above 4.125 goes to pi/2 - atan(1/a), then the table of atan(j/4) with the series of the rest
-fn atan_pos(a: f64) -> f64 {
+fun atan_pos(a: f64) -> f64 {
     var t: f64
     t = a
     var inverse: bool
@@ -441,7 +441,7 @@ fn atan_pos(a: f64) -> f64 {
 }
 
 # the angle of the point (x, y) from the x axis, in -pi to pi
-fn fm_atan2(y: f64, x: f64) -> f64 {
+fun fm_atan2(y: f64, x: f64) -> f64 {
     if x != x or y != y { return nan() }
     let ax = fabs(x)
     let ay = fabs(y)

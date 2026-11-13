@@ -259,7 +259,7 @@ const_kind(e, i, n, text, prev) :=
     else if (i == 0 and n > 1 and strlen(text) > 0 and not string.is_ident_char(ord(text, 0))) 'prefix
     else 'plain
 
-# ConstItem{text, kind} or ValItem{label, element}, or Bad{} when an element cannot be run backwards
+# ConstItem{text, kind} or ValueItem{label, element}, or Bad{} when an element cannot be run backwards
 make_items(elems, labels, holes) := {
     n := length(elems)
     fun go
@@ -269,14 +269,14 @@ make_items(elems, labels, holes) := {
                     c := const_text(e, 0)
                     if (is_bad(c)) bad else ConstItem{c, const_kind(e, i, n, c, prev)}
                 } else if (e == 'here) ConstItem{"", 'tight}
-                else if (member(l, holes)) ValItem{l, e}
+                else if (member(l, holes)) ValueItem{l, e}
                 else bad
             rest := go(es, ls, i + 1, e)
             if (is_bad(it) or is_bad(rest)) bad else it :: rest
         }
     items := go(elems, labels, 0, none)
     if (is_bad(items)) bad
-    else if (list.all(h -> list.any(it -> head(it) == 'ValItem and arg(it, 0) == h, items), holes)) items
+    else if (list.all(h -> list.any(it -> head(it) == 'ValueItem and arg(it, 0) == h, items), holes)) items
     else bad
 }
 
@@ -286,7 +286,7 @@ token_rule(r) := type(table.get(peg_sources, r, none)) == Function
 # runs on to the right as far as that rule does.
 tail_of(items) :=
     if (items == []) none
-    else if (head(list.last(items)) == 'ValItem and type(arg(list.last(items), 1)) == Symbol and not token_rule(arg(list.last(items), 1))) arg(list.last(items), 1)
+    else if (head(list.last(items)) == 'ValueItem and type(arg(list.last(items), 1)) == Symbol and not token_rule(arg(list.last(items), 1))) arg(list.last(items), 1)
     else none
 
 # Alt{owner, order, template, items, tail}
@@ -318,7 +318,7 @@ find_paren(owner, a) := {
 
 flat(src) := if (is_mx(src) and head(src) == 'Choice) concat_map(flat, pretty.args_of(src)) else [src]
 
-tok_types := {
+token_types := {
     t := table.new()
     table.set(t, 'ident, Symbol)
     table.set(t, 'integer, Int)
@@ -355,8 +355,8 @@ un_build() := {
                 if (type(a) == Symbol) {
                     target := table.get(peg_sources, a, none)
                     if (type(target) == Function) {
-                        ty := table.get(tok_types, a, none)
-                        if (ty != none) alts = Alt{r, order, Tok{a, ty}, [], none} :: alts
+                        ty := table.get(token_types, a, none)
+                        if (ty != none) alts = Alt{r, order, Token{a, ty}, [], none} :: alts
                     } else if (target != none) table.set(links, r, a :: table.get(links, r, []))
                 } else if (is_mx(a) and head(a) == 'Act) {
                     x := extract_act(r, order, arg(a, 0), arg(a, 1))
@@ -385,11 +385,11 @@ alt_order(a) := arg(a, 1)
 alt_tmpl(a) := arg(a, 2)
 alt_items(a) := arg(a, 3)
 alt_tail(a) := arg(a, 4)
-is_tok(tm) := is_mx(tm) and head(tm) == 'Tok
+is_token(tm) := is_mx(tm) and head(tm) == 'Token
 
 is_custom(tm) := is_mx(tm) and head(tm) == 'Custom
 
-alt_spec(a) := if (is_tok(alt_tmpl(a))) 1 else if (is_custom(alt_tmpl(a))) arg(alt_tmpl(a), 0) else un_spec(alt_tmpl(a))
+alt_spec(a) := if (is_token(alt_tmpl(a))) 1 else if (is_custom(alt_tmpl(a))) arg(alt_tmpl(a), 0) else un_spec(alt_tmpl(a))
 
 reach_add(seen, r) := if (not set.has(seen, r)) {
     set.add(seen, r)
@@ -432,9 +432,9 @@ cands(r) := {
             if (set.has(rr, o) and (not is_open(a) or set.has(rr, alt_tail(a)))) out = Cand{(sp * 2 + 1) * 100000 - alt_order(a), a, false} :: out
             else if (wrap_ok and sp > 0 and set.has(uni, o)) out = Cand{sp * 2 * 100000 - alt_order(a), a, paren} :: out
         }, ug_alts)
-        res := list.sort((x, y) -> arg(x, 0) > arg(y, 0), out)
-        table.set(ug_cands, r, res)
-        res
+        result := list.sort((x, y) -> arg(x, 0) > arg(y, 0), out)
+        table.set(ug_cands, r, result)
+        result
     }
 }
 
@@ -450,11 +450,11 @@ ident_ok(name) := {
     ok
 }
 
-print_tok(rule, t) :=
+print_token(rule, t) :=
     if (rule == 'ident) (if (ident_ok(symname(t))) symname(t) else none)
-    else if (rule == 'integer) string.int_to_str(t)
+    else if (rule == 'integer) string.int_to_string(t)
     else if (rule == 'float) t
-    else pretty.quote_str(t)
+    else pretty.quote_string(t)
 
 # pieces are strings, T{s} (sticks to the left) and P{s} (sticks to the right)
 piece_text := (T{s}) -> s
@@ -507,8 +507,8 @@ is_list_rule(r) := {
     is_mx(src) and (head(src) == 'Delimited or head(src) == 'Delimited1 or head(src) == 'Many)
 }
 
-val_pieces(elem, v) :=
-    if (type(elem) == Symbol and is_list_rule(elem)) val_pieces(table.get(peg_sources, elem, none), v)
+value_pieces(elem, v) :=
+    if (type(elem) == Symbol and is_list_rule(elem)) value_pieces(table.get(peg_sources, elem, none), v)
     else if (type(elem) == Symbol) {
         s := pp(elem, v)
         if (s == none) none else [s]
@@ -521,14 +521,14 @@ val_pieces(elem, v) :=
         else list_pieces(inner, sep, v)
     } else if (head(elem) == 'Option and type(arg(elem, 0)) == Symbol and is_mx(v) and head(v) == 'Tuple) {
         if (arity(v) == 0) []
-        else if (arity(v) == 1) val_pieces(arg(elem, 0), arg(v, 0))
+        else if (arity(v) == 1) value_pieces(arg(elem, 0), arg(v, 0))
         else none
     } else none
 
 item_pieces := (ConstItem{text, kind}, env) -> {
                    if (text == "") [] else if (kind == 'tight) [T{text}] else if (kind == 'prefix) [P{text}] else [text]
                }
-             | (ValItem{label, elem}, env) -> val_pieces(elem, table.get(env, label, none))
+             | (ValueItem{label, elem}, env) -> value_pieces(elem, table.get(env, label, none))
 
 fun items_pieces
 items_pieces = (Nil{}, env) -> []
@@ -561,8 +561,8 @@ fits(p, t) := {
 try_fit(a, wrapped, t) := {
     env := table.new()
     tm := alt_tmpl(a)
-    if (is_tok(tm)) {
-        if (type(t) == arg(tm, 1)) print_tok(arg(tm, 0), t) else none
+    if (is_token(tm)) {
+        if (type(t) == arg(tm, 1)) print_token(arg(tm, 0), t) else none
     } else if (is_custom(tm)) {
         txt := arg(tm, 1)(t)
         if (txt == none) none
@@ -577,7 +577,7 @@ try_fit(a, wrapped, t) := {
 }
 
 try_alt(a, wrapped, t) :=
-    if (is_tok(alt_tmpl(a)) or is_custom(alt_tmpl(a)) or fits(alt_tmpl(a), t)) try_fit(a, wrapped, t) else none
+    if (is_token(alt_tmpl(a)) or is_custom(alt_tmpl(a)) or fits(alt_tmpl(a), t)) try_fit(a, wrapped, t) else none
 
 fun try_cands
 try_cands = (Nil{}, t) -> none
@@ -589,15 +589,15 @@ try_cands = (Nil{}, t) -> none
 # pp(rule, t) is the text of t as the rule, or none
 pp(r, t) =
     if (type(table.get(peg_sources, r, none)) == Function) {
-        ty := table.get(tok_types, r, none)
-        if (ty != none and type(t) == ty) print_tok(r, t) else none
+        ty := table.get(token_types, r, none)
+        if (ty != none and type(t) == ty) print_token(r, t) else none
     } else if (list.any(e -> arg(e, 0) == r and arg(e, 1) == t, ug_stack)) none
     else {
         # a rule that passes its tree on to itself (identity actions) would go round forever
         ug_stack = Tuple{r, t} :: ug_stack
-        res := try_cands(cands(r), t)
+        result := try_cands(cands(r), t)
         ug_stack = list.drop(ug_stack, 1)
-        res
+        result
     }
 
 # unparse.try_as(rule, t) is a text that the rule parses to t, or none when t has no such text
@@ -691,7 +691,7 @@ custom('primary, 3, 'arrow, print_if)
 # f"...{e}...": _strcat("a", _to_text(e)) and so on, in the shape that peg_interp makes
 is_call2(t, f) := is_mx(t) and head(t) == 'Apply and arity(t) == 2 and arg(t, 0) == f and is_mx(arg(t, 1)) and head(arg(t, 1)) == 'Tuple
 is_text_hole(x) := is_call2(x, '_to_text) and arity(arg(x, 1)) == 1
-is_text_lit(x) := type(x) == String and strlen(x) > 0
+is_text_literal(x) := type(x) == String and strlen(x) > 0
 
 # the pieces of an f-string as a list of S{text} and E{tree}, or none
 fstr_segs(t) :=
@@ -699,24 +699,24 @@ fstr_segs(t) :=
         l := fstr_segs(arg(arg(t, 1), 0))
         x := arg(arg(t, 1), 1)
         if (l == none) none
-        else if (is_text_lit(x) and head(list.last(l)) != 'S) append(l, [S{x}])
+        else if (is_text_literal(x) and head(list.last(l)) != 'S) append(l, [S{x}])
         else if (is_text_hole(x)) append(l, [E{arg(arg(x, 1), 0)}])
         else none
     } else if (is_text_hole(t)) [E{arg(arg(t, 1), 0)}]
-    else if (is_text_lit(t)) [S{t}]
+    else if (is_text_literal(t)) [S{t}]
     else none
 
 # the text of s in f"..." : the escapes of a string, and {{ }} for the braces
 fstr_escape(s) := {
-    q := pretty.quote_str(s)
+    q := pretty.quote_string(s)
     b := strbuf.new()
     i := 1
     while (i < strlen(q) - 1) {
         c := ord(q, i)
-        strbuf.add(b, if (c == 123) "{{" else if (c == 125) "}}" else string.chr(c))
+        strbuf.add(b, if (c == 123) "{{" else if (c == 125) "}}" else string.char(c))
         i = i + 1
     }
-    strbuf.str(b)
+    strbuf.string(b)
 }
 
 print_fstr(t) := {

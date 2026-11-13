@@ -1,10 +1,10 @@
-# ld_u16 ld_s16 ld_u32 ld_s32 ld_64 st_16 st_32 st_64 read and write 2, 4 and 8 bytes (little-endian) at a byte position; the status is the number of wrong results
-fn check(got: i64, want: i64) -> i64 {
+# load_u16 ld_s16 ld_u32 ld_s32 ld_64 store_16 st_32 st_64 read and write 2, 4 and 8 bytes (little-endian) at a byte position; the status is the number of wrong results
+fun check(got: i64, want: i64) -> i64 {
     if got != want { return 1 }
     0
 }
 
-fn fill[r](a: &mut r [u8]) {
+fun fill[r](a: &mutable r [u8]) {
     var i: i64
     i = 0
     while i < len(a) {
@@ -14,19 +14,19 @@ fn fill[r](a: &mut r [u8]) {
 }
 
 # the bytes of a are 11 48 85 122 159 196 233 14 51 88 ... (37 i + 11 mod 256) and a has 32 bytes
-fn small[r](a: &mut r [u8]) -> i64 {
+fun small[r](a: &mutable r [u8]) -> i64 {
     var bad: i64
     bad = 0
-    bad += check(ld_u16(a, 0), 48 * 256 + 11)
+    bad += check(load_u16(a, 0), 48 * 256 + 11)
     bad += check(ld_s16(a, 0), 48 * 256 + 11)
-    bad += check(ld_u16(a, 3), 159 * 256 + 122)
+    bad += check(load_u16(a, 3), 159 * 256 + 122)
     bad += check(ld_s16(a, 3), 159 * 256 + 122 - 65536)
     bad += check(ld_u32(a, 1), 48 + 85 * 256 + 122 * 65536 + 159 * 16777216)
     bad += check(ld_s32(a, 1), 48 + 85 * 256 + 122 * 65536 + 159 * 16777216 - 4294967296)
     st_32(a, 8, 4294967295)
     bad += check(ld_u32(a, 8), 4294967295)
     bad += check(ld_s32(a, 8), -1)
-    bad += check(ld_u16(a, 10), 65535)
+    bad += check(load_u16(a, 10), 65535)
     bad += check(ld_s16(a, 10), -1)
     st_32(a, 8, 2147483648)
     bad += check(ld_s32(a, 8), -2147483648)
@@ -41,17 +41,17 @@ fn small[r](a: &mut r [u8]) -> i64 {
     bad += check(a[16] as i64, 240)
     bad += check(a[23] as i64, 18)
     # a store writes only its bytes
-    st_16(a, 24, 65535 + 65536 * 3)
-    bad += check(ld_u16(a, 24), 65535)
+    store_16(a, 24, 65535 + 65536 * 3)
+    bad += check(load_u16(a, 24), 65535)
     bad += check(a[26] as i64, 37 * 26 % 256 + 11)
     # the last bytes of the array
     st_64(a, 24, 81985529216486895)
     bad += check(ld_64(a, 24), 81985529216486895)
-    bad += check(ld_u16(a, 30), 291)
+    bad += check(load_u16(a, 30), 291)
     bad
 }
 
-fn big[r](h: &mut r [u8]) -> i64 {
+fun big[r](h: &mutable r [u8]) -> i64 {
     var bad: i64
     bad = 0
     st_64(h, 268435448, 9223372036854775807)
@@ -62,24 +62,24 @@ fn big[r](h: &mut r [u8]) -> i64 {
     bad
 }
 
-fn main() -> i64 {
+fun main() -> i64 {
     var bad: i64
     bad = 0
     var a: own [u8]
-    a = alloc(32, 0 as u8)
+    a = allocate(32, 0 as u8)
     region r {
-        var m: &mut r [u8]
-        m = &mut r a
+        var m: &mutable r [u8]
+        m = &mutable r a
         fill(m)
         bad += small(m)
     }
     free(a)
     # a byte array of 256 MiB
     var h: own [u8]
-    h = alloc(268435456, 0 as u8)
+    h = allocate(268435456, 0 as u8)
     region q {
-        var m: &mut q [u8]
-        m = &mut q h
+        var m: &mutable q [u8]
+        m = &mutable q h
         bad += big(m)
     }
     free(h)

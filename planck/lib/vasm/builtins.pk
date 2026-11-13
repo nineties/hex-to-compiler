@@ -4,7 +4,7 @@
 # vasm_planck.builtins is Module{[...]} of these functions. A program that is translated to vasm calls them where the planck program calls
 # the built-in function of the same name, with a value that is known only when the program runs.
 #   strlen(s) is the number of bytes of the array s
-#   println_str(s) writes the bytes of s between two double quotes, and a new line, to the output (the form println gives a string,
+#   println_string(s) writes the bytes of s between two double quotes, and a new line, to the output (the form println gives a string,
 #       without escapes)
 #   println_int(n) writes the decimal digits of n and a new line to the output
 #   read_file(path) is the array of the bytes of the file whose name is path; a file that cannot be opened ends the program with the status 1
@@ -17,20 +17,20 @@ use("vasm/check")
 
 module vasm_planck {
     export builtins := vasm{|
-        fn strlen[r](s: &r [u8]) -> i32 {
+        fun strlen[r](s: &r [u8]) -> i32 {
             var n: i64
             var m: i32
             n = len(s)
             m = n as i32
             return m
         }
-        fn println_str[r](s: &r [u8]) {
+        fun println_string[r](s: &r [u8]) {
             var n: i64
             n = write(1, "\"")
             n = write(1, s)
             n = write(1, "\"\n")
         }
-        fn println_int(v: i64) {
+        fun println_int(v: i64) {
             var buf: own [u8]
             var out: own [u8]
             var i: i64
@@ -41,7 +41,7 @@ module vasm_planck {
             var d: i64
             var c: u8
             var neg: bool
-            buf = alloc(24, 0)
+            buf = allocate(24, 0)
             i = 23
             buf[i] = 10
             x = v
@@ -58,7 +58,7 @@ module vasm_planck {
             }
             if (neg) { i = i - 1; buf[i] = 45 }
             n = 24 - i
-            out = alloc(n, 0)
+            out = allocate(n, 0)
             j = 0
             while (j < n) {
                 k = i + j
@@ -72,7 +72,7 @@ module vasm_planck {
                 n = write(1, b)
             }
         }
-        fn read_file[r](path: &r [u8]) -> own [u8] {
+        fun read_file[r](path: &r [u8]) -> own [u8] {
             var fd: i64
             var acc: own [u8]
             var chunk: own [u8]
@@ -86,19 +86,19 @@ module vasm_planck {
             var more: bool
             fd = open(path)
             if (fd < 0) { exit(1) }
-            acc = alloc(0, 0)
-            chunk = alloc(4096, 0)
+            acc = allocate(0, 0)
+            chunk = allocate(4096, 0)
             n = 0
             more = true
             while (more) {
                 region g {
-                    var m: &mut g [u8]
-                    m = &mut g chunk
+                    var m: &mutable g [u8]
+                    m = &mutable g chunk
                     got = read(fd, m)
                 }
                 if (got > 0) {
                     total = n + got
-                    next = alloc(total, 0)
+                    next = allocate(total, 0)
                     i = 0
                     while (i < n) {
                         c = acc[i]
@@ -121,11 +121,11 @@ module vasm_planck {
             close(fd)
             return acc
         }
-        fn v_write[r](fd: i64, s: &r [u8]) {
+        fun v_write[r](fd: i64, s: &r [u8]) {
             var n: i64
             n = write(fd, s)
         }
-        fn v_bytes_write(fd: i64, v: val) {
+        fun v_bytes_write(fd: i64, v: value) {
             var b: own [u8]
             b = v as own [u8]
             region g {
@@ -134,7 +134,7 @@ module vasm_planck {
                 v_write(fd, s)
             }
         }
-        fn v_digits(v: i64) -> val {
+        fun v_digits(v: i64) -> value {
             var buf: own [u8]
             var out: own [u8]
             var i: i64
@@ -145,8 +145,8 @@ module vasm_planck {
             var d: i64
             var c: u8
             var neg: bool
-            var r: val
-            buf = alloc(24, 0)
+            var r: value
+            buf = allocate(24, 0)
             i = 24
             x = v
             neg = x < 0
@@ -162,7 +162,7 @@ module vasm_planck {
             }
             if (neg) { i = i - 1; buf[i] = 45 }
             n = 24 - i
-            out = alloc(n, 0)
+            out = allocate(n, 0)
             j = 0
             while (j < n) {
                 k = i + j
@@ -173,16 +173,16 @@ module vasm_planck {
             region g {
                 var s: &g [u8]
                 s = &g out
-                r = s as val
+                r = s as value
             }
             return r
         }
-        fn v_print(v: val) -> val {
-            var t: val
+        fun v_print(v: value) -> value {
+            var t: value
             var b: bool
             var n: i64
             var i: i64
-            var x: val
+            var x: value
             t = typeof(v)
             b = t == 'int
             if (b) {
@@ -229,41 +229,41 @@ module vasm_planck {
             v_write(1, "<function>")
             return 'none
         }
-        fn v_println(v: val) -> val {
-            var x: val
+        fun v_println(v: value) -> value {
+            var x: value
             x = v_print(v)
             v_write(1, "\n")
             return 'none
         }
-        fn v_put(v: val) -> val {
+        fun v_put(v: value) -> value {
             v_bytes_write(1, v)
             return 'none
         }
-        fn v_stop[r](msg: &r [u8]) {
+        fun v_stop[r](msg: &r [u8]) {
             v_write(2, msg)
             v_write(2, "\n")
             exit(1)
         }
-        fn v_exit(v: val) -> val {
+        fun v_exit(v: value) -> value {
             var n: i64
             n = v as i64
             exit(n)
             return 'none
         }
-        fn v_strlen(v: val) -> val {
+        fun v_strlen(v: value) -> value {
             var n: i64
-            var r: val
+            var r: value
             n = arity(v)
-            r = n as val
+            r = n as value
             return r
         }
-        fn v_ord(v: val, iv: val) -> val {
+        fun v_ord(v: value, iv: value) -> value {
             var b: own [u8]
             var i: i64
             var n: i64
             var c: u8
             var d: i64
-            var r: val
+            var r: value
             var ok: bool
             i = iv as i64
             b = v as own [u8]
@@ -277,10 +277,10 @@ module vasm_planck {
                     d = c as i64
                 }
             }
-            r = d as val
+            r = d as value
             return r
         }
-        fn v_substr(v: val, iv: val, jv: val) -> val {
+        fun v_substr(v: value, iv: value, jv: value) -> value {
             var b: own [u8]
             var out: own [u8]
             var i: i64
@@ -289,12 +289,12 @@ module vasm_planck {
             var k: i64
             var at: i64
             var c: u8
-            var r: val
+            var r: value
             i = iv as i64
             j = jv as i64
             b = v as own [u8]
             n = j - i
-            out = alloc(n, 0)
+            out = allocate(n, 0)
             k = 0
             while (k < n) {
                 at = i + k
@@ -305,11 +305,11 @@ module vasm_planck {
             region g {
                 var s: &g [u8]
                 s = &g out
-                r = s as val
+                r = s as value
             }
             return r
         }
-        fn v_strcat(x: val, y: val) -> val {
+        fun v_strcat(x: value, y: value) -> value {
             var a: own [u8]
             var b: own [u8]
             var out: own [u8]
@@ -319,13 +319,13 @@ module vasm_planck {
             var at: i64
             var c: u8
             var total: i64
-            var r: val
+            var r: value
             a = x as own [u8]
             b = y as own [u8]
             n = arity(x)
             m = arity(y)
             total = n + m
-            out = alloc(total, 0)
+            out = allocate(total, 0)
             k = 0
             while (k < n) {
                 c = a[k]
@@ -342,15 +342,15 @@ module vasm_planck {
             region g {
                 var s: &g [u8]
                 s = &g out
-                r = s as val
+                r = s as value
             }
             return r
         }
-        fn v_to_text(v: val) -> val {
-            var t: val
+        fun v_to_text(v: value) -> value {
+            var t: value
             var b: bool
             var n: i64
-            var x: val
+            var x: value
             t = typeof(v)
             b = t == 'string
             if (b) { return v }
@@ -368,87 +368,87 @@ module vasm_planck {
             v_stop("_to_text of a value other than a string, an integer or a symbol is not left in vasm")
             return 'none
         }
-        fn v_head(v: val) -> val {
-            var r: val
+        fun v_head(v: value) -> value {
+            var r: value
             r = head(v)
             return r
         }
-        fn v_arity(v: val) -> val {
+        fun v_arity(v: value) -> value {
             var n: i64
-            var r: val
+            var r: value
             n = arity(v)
-            r = n as val
+            r = n as value
             return r
         }
-        fn v_arg(v: val, iv: val) -> val {
+        fun v_arg(v: value, iv: value) -> value {
             var i: i64
-            var r: val
+            var r: value
             i = iv as i64
             r = v[i]
             return r
         }
-        fn v_typeof(v: val) -> val {
-            var r: val
+        fun v_typeof(v: value) -> value {
+            var r: value
             r = typeof(v)
             return r
         }
-        fn v_intern(v: val) -> val {
-            var r: val
+        fun v_intern(v: value) -> value {
+            var r: value
             r = intern(v)
             return r
         }
-        fn v_symname(v: val) -> val {
-            var r: val
+        fun v_symname(v: value) -> value {
+            var r: value
             r = symname(v)
             return r
         }
-        fn v_array(nv: val) -> val {
+        fun v_array(nv: value) -> value {
             var n: i64
-            var r: val
+            var r: value
             n = nv as i64
             r = array(n, 'none)
             return r
         }
-        fn v_plain_array(nv: val) -> val {
+        fun v_plain_array(nv: value) -> value {
             var n: i64
-            var r: val
-            var z: val
+            var r: value
+            var z: value
             n = nv as i64
-            z = 0 as val
+            z = 0 as value
             r = array(n, z)
             return r
         }
-        fn v_argv() -> val {
+        fun v_argv() -> value {
             var n: i64
             var i: i64
-            var a: val
+            var a: value
             var s: &static [u8]
-            var e: val
+            var e: value
             n = argc()
             a = array(n, 'none)
             i = 0
             while (i < n) {
                 s = argv(i)
-                e = s as val
+                e = s as value
                 a[i] = e
                 i = i + 1
             }
             return a
         }
-        fn v_array_set(a: val, iv: val, x: val) -> val {
+        fun v_array_set(a: value, iv: value, x: value) -> value {
             var i: i64
             i = iv as i64
             a[i] = x
             return x
         }
-        fn v_push(v: val, x: val) -> val {
+        fun v_push(v: value, x: value) -> value {
             var n: i64
             var m: i64
             var i: i64
-            var a: val
-            var e: val
-            var h: val
-            var r: val
+            var a: value
+            var e: value
+            var h: value
+            var r: value
             n = arity(v)
             m = n + 1
             a = array(m, 'none)
@@ -463,12 +463,12 @@ module vasm_planck {
             r = mexpr(h, a)
             return r
         }
-        fn v_mexpr(h: val, t: val) -> val {
+        fun v_mexpr(h: value, t: value) -> value {
             var n: i64
             var i: i64
-            var a: val
-            var e: val
-            var r: val
+            var a: value
+            var e: value
+            var r: value
             n = arity(t)
             a = array(n, 'none)
             i = 0
@@ -480,18 +480,18 @@ module vasm_planck {
             r = mexpr(h, a)
             return r
         }
-        fn v_index_get(a: val, iv: val) -> val {
-            var t: val
+        fun v_index_get(a: value, iv: value) -> value {
+            var t: value
             var b: bool
             var i: i64
-            var r: val
-            var j: val
+            var r: value
+            var j: value
             t = typeof(a)
             b = t == 'string
             if (b) {
                 i = iv as i64
                 i = i + 1
-                r = i as val
+                r = i as value
                 j = v_substr(a, iv, r)
                 return j
             }
@@ -509,22 +509,22 @@ module vasm_planck {
             r = a[i]
             return r
         }
-        fn v_index_set(a: val, iv: val, x: val) -> val {
+        fun v_index_set(a: value, iv: value, x: value) -> value {
             var i: i64
             i = iv as i64
             a[i] = x
             return x
         }
-        fn v_hash(v: val) -> val {
-            var t: val
+        fun v_hash(v: value) -> value {
+            var t: value
             var b: bool
             var n: i64
             var h: i64
             var i: i64
             var c: u8
             var d: i64
-            var e: val
-            var r: val
+            var e: value
+            var r: value
             h = 7
             t = typeof(v)
             b = t == 'int
@@ -568,13 +568,13 @@ module vasm_planck {
                     i = i + 1
                 }
             }
-            r = h as val
+            r = h as value
             return r
         }
-        fn v_read_file(path: val) -> val {
+        fun v_read_file(path: value) -> value {
             var b: own [u8]
             var p: own [u8]
-            var r: val
+            var r: value
             p = path as own [u8]
             region g {
                 var ps: &g [u8]
@@ -584,14 +584,14 @@ module vasm_planck {
             region h {
                 var s: &h [u8]
                 s = &h b
-                r = s as val
+                r = s as value
             }
             return r
         }
-        fn v_try_read_file(path: val) -> val {
+        fun v_try_read_file(path: value) -> value {
             var p: own [u8]
             var fd: i64
-            var r: val
+            var r: value
             var bad: bool
             p = path as own [u8]
             region g {
@@ -605,40 +605,40 @@ module vasm_planck {
             r = v_read_file(path)
             return r
         }
-        fn v_read_bytes(path: val) -> val {
-            var s: val
-            var a: val
+        fun v_read_bytes(path: value) -> value {
+            var s: value
+            var a: value
             var b: own [u8]
             var n: i64
             var i: i64
             var c: u8
             var d: i64
-            var e: val
-            var z: val
+            var e: value
+            var z: value
             s = v_read_file(path)
             b = s as own [u8]
             n = arity(s)
-            z = 0 as val
+            z = 0 as value
             a = array(n, z)
             i = 0
             while (i < n) {
                 c = b[i]
                 d = c as i64
-                e = d as val
+                e = d as value
                 a[i] = e
                 i = i + 1
             }
             return a
         }
-        fn v_write_file(path: val, x: val) -> val {
+        fun v_write_file(path: value, x: value) -> value {
             var p: own [u8]
             var b: own [u8]
-            var t: val
+            var t: value
             var isarr: bool
             var fd: i64
             var n: i64
             var i: i64
-            var e: val
+            var e: value
             var d: i64
             var c: u8
             var bad: bool
@@ -646,7 +646,7 @@ module vasm_planck {
             isarr = t == 'array
             if (isarr) {
                 n = arity(x)
-                b = alloc(n, 0)
+                b = allocate(n, 0)
                 i = 0
                 while (i < n) {
                     e = x[i]

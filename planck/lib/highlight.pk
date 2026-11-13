@@ -2,13 +2,13 @@
 # Copyright (C) 2026 nineties
 #
 # highlight.html(src) parses src with the current grammar (planck/peg.pk, planck/syntax.pk)
-# and returns src with HTML escapes where each token is in <span class="tok-...">.
+# and returns src with HTML escapes where each token is in <span class="token-...">.
 # The grammar has no marks for colors. The classes come from what the parser matches:
 #   kw    a text in a rule that is a word (Key{"if"}, "in"), and a 'word of a grammar
 #   op    a text in a rule that is not a word ("(", ":=", "|>")
 #   name  ident
 #   num   integer and float
-#   str   string and the parts of a string with values
+#   string   string and the parts of a string with values
 #   com   a comment (the blanks and comments that the parser skips)
 # A rule declaration (name ::= ...) in src is defined while src is read, so that the
 # syntax it adds colors the rest of src. Its actions are left out, because they may use
@@ -55,12 +55,12 @@ note(p, q, cls) := {
 }
 
 # the parser's functions, called through these while reading
-orig_lit := peg_lit
+orig_literal := peg_literal
 orig_key := peg_px_key
 orig_call := peg_call_rule
 
-lit(s, p) := {
-    q := orig_lit(s, p)
+literal(s, p) := {
+    q := orig_literal(s, p)
     if (q >= 0 and strlen(s) > 0) {
         note(q - strlen(s), q, if (string.is_alpha(ord(s, 0))) "kw" else "op")
     }
@@ -82,7 +82,7 @@ call(r, p) := {
     q
 }
 
-esc(s) := {
+escape(s) := {
     b := strbuf.new()
     n := strlen(s)
     start := 0
@@ -98,10 +98,10 @@ esc(s) := {
         i = i + 1
     }
     strbuf.add(b, substr(s, start, n))
-    strbuf.str(b)
+    strbuf.string(b)
 }
 
-span(cls, s) := _strcat(_strcat(_strcat("<span class=\"tok-", cls), "\">"), _strcat(esc(s), "</span>"))
+span(cls, s) := _strcat(_strcat(_strcat("<span class=\"tok-", cls), "\">"), _strcat(escape(s), "</span>"))
 
 # s[a:z] is outside the tokens: blanks and comments
 gap(b, s, a, z) := {
@@ -111,7 +111,7 @@ gap(b, s, a, z) := {
         if (ord(s, i) == 35) {
             j := i
             while (j < z and ord(s, j) != 10) j = j + 1
-            strbuf.add(b, esc(substr(s, start, i)))
+            strbuf.add(b, escape(substr(s, start, i)))
             strbuf.add(b, span("com", substr(s, i, j)))
             start = j
             i = j
@@ -119,7 +119,7 @@ gap(b, s, a, z) := {
             i = i + 1
         }
     }
-    strbuf.add(b, esc(substr(s, start, z)))
+    strbuf.add(b, escape(substr(s, start, z)))
 }
 
 render(s) := {
@@ -139,7 +139,7 @@ render(s) := {
         }
     }
     gap(b, s, cur, n)
-    strbuf.str(b)
+    strbuf.string(b)
 }
 
 is_syntax_error(t) := type(t) == Expr and head(t) == 'SyntaxError
@@ -172,7 +172,7 @@ export html(src) := {
     classes_at = array(n + 1)
     saved := Tuple{}
     version := peg_version
-    peg_lit = lit
+    peg_literal = literal
     peg_px_key = key
     peg_call_rule = call
     pos := 0
@@ -195,7 +195,7 @@ export html(src) := {
             pos = n - strlen(arg(r, 1))
         }
     }
-    peg_lit = orig_lit
+    peg_literal = orig_literal
     peg_px_key = orig_key
     peg_call_rule = orig_call
     i := arity(saved) - 1

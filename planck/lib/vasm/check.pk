@@ -1,8 +1,8 @@
 # vasm/check: a language with types, ownership and named regions, written in .pk files
 # Copyright (C) 2026 nineties
 #
-# vasm{| struct ... fn ... |} reads structs and functions of the language and is Module{[Struct{...}, Fn{...}, ...]}.
-# vasm_check.check(m) is the list of VasmErr{kind, Pos{d}, msg}, one for each struct or function with an error,
+# vasm{| struct ... fun ... |} reads structs and functions of the language and is Module{[Struct{...}, Fun{...}, ...]}.
+# vasm_check.check(m) is the list of VasmError{kind, Pos{d}, msg}, one for each struct or function with an error,
 # and vasm_check.errors(file, m) gives the positions as Loc{file, line, column} of the file.
 # The declarations of the syntax are written outside the module, at the top level, and the functions of the checker are in the module vasm_check.
 
@@ -25,7 +25,7 @@ vasm_tlist(t) := {
 }
 
 # the list in the value Tuple{} or Tuple{xs} of e?
-vasm_opt_list(t) := if (arity(t) == 0) [] else arg(t, 0)
+vasm_option_list(t) := if (arity(t) == 0) [] else arg(t, 0)
 
 # vasm_here reads nothing and is Pos{d}, where d is the number of characters from the next token to the end of the text.
 # The text parsed is the rest of the file, so d also counts to the end of the file.
@@ -36,12 +36,12 @@ _define_rule('vasm_here, p -> {
 _define_rule('vasm_same, 'Same{})
 _define_rule('vasm_newline, 'Not{Same{}})
 
-vasm_kw ::= ('fn | 'struct | 'var | 'region | 'own | 'mut | 'i8 | 'i16 | 'i32 | 'i64 | 'u8 | 'u16 | 'u32 | 'u64 | 'f32 | 'f64 | 'bool | 'val | 'true | 'false | 'if | 'else | 'while | 'return | 'as | 'static)
+vasm_kw ::= ('fun | 'struct | 'var | 'region | 'own | 'mutable | 'i8 | 'i16 | 'i32 | 'i64 | 'u8 | 'u16 | 'u32 | 'u64 | 'f32 | 'f64 | 'bool | 'value | 'true | 'false | 'if | 'else | 'while | 'return | 'as | 'static)
 vasm_name ::= !vasm_kw x:ident { x }
 
 # the value of the text s of an integer literal, or Big{s} if it is out of -32768 to 32767.
 # The value is not computed past the range, so that it does not wrap around as an integer of planck.
-vasm_lit_value(s) := {
+vasm_literal_value(s) := {
     n := strlen(s)
     i := 0
     sign := 1
@@ -68,11 +68,11 @@ vasm_lit_value(s) := {
     if (big or v > 32767) Big{s} else v
 }
 
-# an integer literal as integer reads it, with the value of vasm_lit_value
-_define_rule('vasm_int_lit, p -> {
+# an integer literal as integer reads it, with the value of vasm_literal_value
+_define_rule('vasm_int_literal, p -> {
     s := peg_skip_ws(p)
-    q := peg_tok_int(p)
-    if (q >= 0) peg_pv = vasm_lit_value(substr(peg_src, s, q))
+    q := peg_token_int(p)
+    if (q >= 0) peg_pv = vasm_literal_value(substr(peg_src, s, q))
     q
 })
 
@@ -80,19 +80,19 @@ vasm_type ::= 'i8 { I8{} } | 'i16 { I16{} } | 'i32 { I32{} } | 'i64 { I64{} }
     | 'u8 { U8{} } | 'u16 { U16{} } | 'u32 { U32{} } | 'u64 { U64{} }
     | 'f32 { F32{} } | 'f64 { F64{} }
     | 'bool { Bool{} }
-    | 'val { Val{} }
+    | 'value { Value{} }
     | 'own t:vasm_type { Own{t} }
     | "&" 'static t:vasm_type { Ref{'shr, 'static, t} }
-    | "&" 'mut r:vasm_name t:vasm_type { Ref{'mut, r, t} }
+    | "&" 'mutable r:vasm_name t:vasm_type { Ref{'mutable, r, t} }
     | "&" r:vasm_name t:vasm_type { Ref{'shr, r, t} }
-    | "[" t:vasm_type "]" { Arr{t} }
+    | "[" t:vasm_type "]" { Array{t} }
     | s:vasm_name { Named{s} }
 
 # a floating point literal 1.5, -0.25 or 1.0e-3: FImm{at, its text}
 vasm_operand ::= at:vasm_here x:float { FImm{at, x} }
-    | at:vasm_here n:vasm_int_lit { Imm{at, n} }
-    | at:vasm_here s:string { Str{at, s} }
-    | at:vasm_here "'" s:ident { Sym{at, s} }
+    | at:vasm_here n:vasm_int_literal { Imm{at, n} }
+    | at:vasm_here s:string { String{at, s} }
+    | at:vasm_here "'" s:ident { Symbol{at, s} }
     | at:vasm_here 'true { Imm{at, true} }
     | at:vasm_here 'false { Imm{at, false} }
     | at:vasm_here x:vasm_name { Reg{at, x} }
@@ -115,13 +115,13 @@ vasm_init ::= at:vasm_here f:vasm_name ":" a:vasm_operand { Init{at, f, a} }
 vasm_more_init ::= vasm_fsep i:vasm_init { i }
 vasm_inits ::= i:vasm_init r:vasm_more_init* { i :: vasm_tlist(r) }
 
-vasm_rhs ::= at:vasm_here "&" 'mut r:vasm_name y:vasm_name { Borrow{at, 'mut, r, y} }
+vasm_rhs ::= at:vasm_here "&" 'mutable r:vasm_name y:vasm_name { Borrow{at, 'mutable, r, y} }
     | at:vasm_here "&" r:vasm_name y:vasm_name { Borrow{at, 'shr, r, y} }
     | at:vasm_here "*" p:vasm_name { Load{at, p} }
-    | at:vasm_here 'val h:ident "(" args:vasm_args? ")" { Con{at, h, vasm_opt_list(args)} }
-    | at:vasm_here 'fn f:vasm_name "(" args:vasm_args? ")" { Clo{at, f, vasm_opt_list(args)} }
-    | at:vasm_here f:vasm_name "(" args:vasm_args? ")" { Call{at, f, vasm_opt_list(args)} }
-    | at:vasm_here s:vasm_name "{" is:vasm_inits? ","? "}" { Make{at, s, vasm_opt_list(is)} }
+    | at:vasm_here 'value h:ident "(" args:vasm_args? ")" { Con{at, h, vasm_option_list(args)} }
+    | at:vasm_here 'fun f:vasm_name "(" args:vasm_args? ")" { Closure{at, f, vasm_option_list(args)} }
+    | at:vasm_here f:vasm_name "(" args:vasm_args? ")" { Call{at, f, vasm_option_list(args)} }
+    | at:vasm_here s:vasm_name "{" is:vasm_inits? ","? "}" { Make{at, s, vasm_option_list(is)} }
     | at:vasm_here a:vasm_name "[" i:vasm_operand "]" { Index{at, a, i} }
     | at:vasm_here a:vasm_name "." f:vasm_name { Get{at, a, f} }
     | at:vasm_here a:vasm_operand vasm_same 'as t:vasm_type { Conv{at, a, t} }
@@ -141,12 +141,12 @@ vasm_stmt ::= at:vasm_here 'var x:vasm_name ":" t:vasm_type { Decl{at, x, t} }
     | at:vasm_here p:vasm_name "[" i:vasm_operand "]" "=" a:vasm_operand { IStore{at, p, i, a} }
     | at:vasm_here p:vasm_name "." f:vasm_name "=" a:vasm_operand { FStore{at, p, f, a} }
     | at:vasm_here x:vasm_name "=" r:vasm_rhs { Assign{at, x, r} }
-    | at:vasm_here f:vasm_name "(" args:vasm_args? ")" { CallS{at, f, vasm_opt_list(args)} }
+    | at:vasm_here f:vasm_name "(" args:vasm_args? ")" { CallS{at, f, vasm_option_list(args)} }
 
 vasm_sep ::= ";" | vasm_newline
 vasm_more_stmt ::= vasm_sep s:vasm_stmt { s }
 vasm_stmts ::= s:vasm_stmt r:vasm_more_stmt* { s :: vasm_tlist(r) }
-vasm_block ::= "{" ss:vasm_stmts? ";"? "}" { vasm_opt_list(ss) }
+vasm_block ::= "{" ss:vasm_stmts? ";"? "}" { vasm_option_list(ss) }
 
 vasm_param ::= at:vasm_here x:vasm_name ":" t:vasm_type { Param{at, x, t} }
 vasm_more_param ::= "," p:vasm_param { p }
@@ -154,14 +154,14 @@ vasm_params ::= p:vasm_param r:vasm_more_param* { p :: vasm_tlist(r) }
 vasm_more_name ::= "," x:vasm_name { x }
 vasm_rparams ::= "[" x:vasm_name r:vasm_more_name* "]" { x :: vasm_tlist(r) }
 vasm_ret ::= "->" t:vasm_type { t }
-vasm_fn ::= at:vasm_here 'fn f:vasm_name rs:vasm_rparams? "(" ps:vasm_params? ")" rt:vasm_ret? body:vasm_block { Fn{at, f, vasm_opt_list(rs), vasm_opt_list(ps), if (arity(rt) == 0) Unit{} else arg(rt, 0), body} }
+vasm_fun ::= at:vasm_here 'fun f:vasm_name rs:vasm_rparams? "(" ps:vasm_params? ")" return_type:vasm_ret? body:vasm_block { Fun{at, f, vasm_option_list(rs), vasm_option_list(ps), if (arity(return_type) == 0) Unit{} else arg(return_type, 0), body} }
 
 vasm_field ::= at:vasm_here x:vasm_name ":" t:vasm_type { Field{at, x, t} }
 vasm_more_field ::= vasm_fsep f:vasm_field { f }
 vasm_fields ::= f:vasm_field r:vasm_more_field* { f :: vasm_tlist(r) }
-vasm_struct ::= at:vasm_here 'struct s:vasm_name "{" fs:vasm_fields? ","? "}" { Struct{at, s, vasm_opt_list(fs)} }
+vasm_struct ::= at:vasm_here 'struct s:vasm_name "{" fs:vasm_fields? ","? "}" { Struct{at, s, vasm_option_list(fs)} }
 
-vasm_item ::= vasm_struct | vasm_fn
+vasm_item ::= vasm_struct | vasm_fun
 vasm ::= fs:vasm_item* { Module{vasm_tlist(fs)} }
 
 module vasm_check {
@@ -182,19 +182,19 @@ export flt(t) := t == F32{} or t == F64{}
 
 # A literal is from -32768 to 32767. A type of 16 bits or more holds all of them but the negative ones
 # for an unsigned type, so these are the bounds of a literal of the type e of ints.
-lit_lo(e) := if (not arg(e, 3)) 0 else if (arg(e, 2) == 8) -128 else -32768
-lit_hi(e) := if (arg(e, 2) != 8) 32767 else if (arg(e, 3)) 127 else 255
+literal_lo(e) := if (not arg(e, 3)) 0 else if (arg(e, 2) == 8) -128 else -32768
+literal_hi(e) := if (arg(e, 2) != 8) 32767 else if (arg(e, 3)) 127 else 255
 
 export show_type(Bool{}) := "bool"
 show_type(F32{}) := "f32"
 show_type(F64{}) := "f64"
-show_type(FLit{}) := "float"
-show_type(Val{}) := "val"
+show_type(FLiteral{}) := "float"
+show_type(Value{}) := "value"
 show_type(Unit{}) := "()"
-show_type(Lit{_}) := "integer"
+show_type(Literal{_}) := "integer"
 show_type(Own{u}) := _strcat("own ", show_type(u))
-show_type(Ref{k, r, u}) := _strcat(if (k == 'mut) f"&mut {symname(r)} " else f"&{symname(r)} ", show_type(u))
-show_type(Arr{u}) := f"[{show_type(u)}]"
+show_type(Ref{k, r, u}) := _strcat(if (k == 'mutable) f"&mutable {symname(r)} " else f"&{symname(r)} ", show_type(u))
+show_type(Array{u}) := f"[{show_type(u)}]"
 show_type(Named{s}) := symname(s)
 show_type(TVar{n}) := symname(n)
 show_type(Place{u}) := _strcat("a place of ", show_type(u))
@@ -211,16 +211,16 @@ sigs := table.new()
 structs := table.new()
 vasm_info := table.new()
 regions := []
-fn_regions := []
+fun_regions := []
 ret_type := Unit{}
 
-# t owns a value: t is own or val, or a struct with a field that owns, or an array of them.
-# A val in a register is copied (linear); a val in a struct, in a box or in an array of own is what own is there.
+# t owns a value: t is own or value, or a struct with a field that owns, or an array of them.
+# A value in a register is copied (linear); a value in a struct, in a box or in an array of own is what own is there.
 fun owning_in
 owning(t) := owning_in(t, [])
 owning_in(Own{_}, seen) := true
-owning_in(Val{}, seen) := true
-owning_in(Arr{u}, seen) := owning_in(u, seen)
+owning_in(Value{}, seen) := true
+owning_in(Array{u}, seen) := owning_in(u, seen)
 owning_in(Named{s}, seen) := {
     sd := table.get(structs, s, none)
     if (sd == none or member(s, seen)) false
@@ -231,12 +231,12 @@ owning_in(_, seen) := false
 # the fields of the struct s that own, in the order of the struct
 own_fields(s) := map((Field{_, x, _}) -> x, filter((Field{_, _, u}) -> owning(u), arg(table.get(structs, s, none), 2)))
 
-# An integer literal is Lit{n} until it meets an integer type; Lit{none} is the result of an operation on literals.
+# An integer literal is Literal{n} until it meets an integer type; Literal{none} is the result of an operation on literals.
 # Integers, bool and structs without own are copied. own and a struct with own are linear: they are moved
-# by a use and must be moved or freed once. &mut is moved by a use, except for an argument of a call
+# by a use and must be moved or freed once. &mutable is moved by a use, except for an argument of a call
 # (call). & is copied.
 linear(t) := head(t) == 'Own or (head(t) == 'Named and owning(t))
-moves(t) := linear(t) or (head(t) == 'Ref and arg(t, 0) == 'mut)
+moves(t) := linear(t) or (head(t) == 'Ref and arg(t, 0) == 'mutable)
 
 # the built-in functions, given as types with the type variable T.
 # free also marks its argument as freed (call). The contents of own are checked by type_ok.
@@ -244,21 +244,21 @@ moves(t) := linear(t) or (head(t) == 'Ref and arg(t, 0) == 'mut)
 export builtins := table.new()
 table.set(builtins, 'box, Sig{[], [TVar{'T}], Own{TVar{'T}}})
 table.set(builtins, 'free, Sig{[], [Own{TVar{'T}}], Unit{}})
-table.set(builtins, 'alloc, Sig{[], [I64{}, TVar{'T}], Own{Arr{TVar{'T}}}})
-table.set(builtins, 'len, Sig{['r], [Ref{'shr, 'r, Arr{TVar{'T}}}], I64{}})
+table.set(builtins, 'allocate, Sig{[], [I64{}, TVar{'T}], Own{Array{TVar{'T}}}})
+table.set(builtins, 'len, Sig{['r], [Ref{'shr, 'r, Array{TVar{'T}}}], I64{}})
 # mulhi(a, b) is the upper 64 bits of the product of the unsigned 64-bit integers a and b
 table.set(builtins, 'mulhi, Sig{[], [U64{}, U64{}], U64{}})
-# Reads and writes of a number at a byte position of a byte array. ld_u16, ld_s16, ld_u32 and ld_s32 read 2 or 4 bytes at the position off
-# (little-endian) and extend them to i64 by zero or by sign; ld_64 reads 8 bytes. st_16, st_32 and st_64 write the lower 2, 4 or 8 bytes of v.
+# Reads and writes of a number at a byte position of a byte array. load_u16, ld_s16, ld_u32 and ld_s32 read 2 or 4 bytes at the position off
+# (little-endian) and extend them to i64 by zero or by sign; ld_64 reads 8 bytes. store_16, st_32 and st_64 write the lower 2, 4 or 8 bytes of v.
 # The position need not be a multiple of the width. A position with off < 0 or off + width > len(a) stops the program.
-table.set(builtins, 'ld_u16, Sig{['r], [Ref{'shr, 'r, Arr{U8{}}}, I64{}], I64{}})
-table.set(builtins, 'ld_s16, Sig{['r], [Ref{'shr, 'r, Arr{U8{}}}, I64{}], I64{}})
-table.set(builtins, 'ld_u32, Sig{['r], [Ref{'shr, 'r, Arr{U8{}}}, I64{}], I64{}})
-table.set(builtins, 'ld_s32, Sig{['r], [Ref{'shr, 'r, Arr{U8{}}}, I64{}], I64{}})
-table.set(builtins, 'ld_64, Sig{['r], [Ref{'shr, 'r, Arr{U8{}}}, I64{}], I64{}})
-table.set(builtins, 'st_16, Sig{['r], [Ref{'mut, 'r, Arr{U8{}}}, I64{}, I64{}], Unit{}})
-table.set(builtins, 'st_32, Sig{['r], [Ref{'mut, 'r, Arr{U8{}}}, I64{}, I64{}], Unit{}})
-table.set(builtins, 'st_64, Sig{['r], [Ref{'mut, 'r, Arr{U8{}}}, I64{}, I64{}], Unit{}})
+table.set(builtins, 'load_u16, Sig{['r], [Ref{'shr, 'r, Array{U8{}}}, I64{}], I64{}})
+table.set(builtins, 'ld_s16, Sig{['r], [Ref{'shr, 'r, Array{U8{}}}, I64{}], I64{}})
+table.set(builtins, 'ld_u32, Sig{['r], [Ref{'shr, 'r, Array{U8{}}}, I64{}], I64{}})
+table.set(builtins, 'ld_s32, Sig{['r], [Ref{'shr, 'r, Array{U8{}}}, I64{}], I64{}})
+table.set(builtins, 'ld_64, Sig{['r], [Ref{'shr, 'r, Array{U8{}}}, I64{}], I64{}})
+table.set(builtins, 'store_16, Sig{['r], [Ref{'mutable, 'r, Array{U8{}}}, I64{}, I64{}], Unit{}})
+table.set(builtins, 'st_32, Sig{['r], [Ref{'mutable, 'r, Array{U8{}}}, I64{}, I64{}], Unit{}})
+table.set(builtins, 'st_64, Sig{['r], [Ref{'mutable, 'r, Array{U8{}}}, I64{}, I64{}], Unit{}})
 table.set(builtins, 'swap, Sig{[], [Place{TVar{'T}}, TVar{'T}], TVar{'T}})
 
 # Floating point. f64_sqrt(x) and f32_sqrt(x) are the square roots. The bits of a number are read and made again by f64_bits, f64_from_bits,
@@ -331,12 +331,12 @@ key(t, s) := if (not linear(t)) s == 'init else if (not owns(t, s)) 'none else m
 }
 
 no_loans(at, st, x, what) := if (loans(st, x) != []) fail(at, 'borrowed, f"{symname(x)} is borrowed and cannot be {what}")
-no_mut_loan(at, st, x, what) := if (list.any(l -> arg(l, 1) == 'mut, loans(st, x))) fail(at, 'borrowed, f"{symname(x)} is borrowed as mut and cannot be {what}")
+no_mutable_loan(at, st, x, what) := if (list.any(l -> arg(l, 1) == 'mutable, loans(st, x))) fail(at, 'borrowed, f"{symname(x)} is borrowed as mutable and cannot be {what}")
 
 # the contents of own and of a borrow: an integer, bool, a struct or own, or an array of them
 fun type_ok
 contents_ok(at, t, u) := {
-    e := if (head(u) == 'Arr) arg(u, 0) else u
+    e := if (head(u) == 'Array) arg(u, 0) else u
     if (head(e) == 'Ref) fail(at, 'type, f"{show_type(t)}: the contents do not borrow")
     type_ok(at, e)
 }
@@ -347,7 +347,7 @@ type_ok(at, t) := match t {
         if (r != 'static and not member(r, regions)) fail(at, 'region, f"region {symname(r)} is not in scope")
         contents_ok(at, t, u)
     }
-  | Arr{_} -> fail(at, 'type, f"{show_type(t)}: an array is held by own or a borrow")
+  | Array{_} -> fail(at, 'type, f"{show_type(t)}: an array is held by own or a borrow")
   | Named{s} -> if (table.get(structs, s, none) == none) fail(at, 'undefined, f"struct {symname(s)} is not defined")
   | _ -> none
 }
@@ -363,36 +363,36 @@ declare(at, st, x, t, init) := {
 
 # q outlives r: q is r, or q is static (the region of the string literals, which lasts to the end of the program),
 # or r is a region opened in the function and q was opened before it. The regions of the function are not ordered.
-outlives(q, r) := q == r or q == 'static or (r != 'static and not member(r, fn_regions) and list.index_of(q, regions) > list.index_of(r, regions))
+outlives(q, r) := q == r or q == 'static or (r != 'static and not member(r, fun_regions) and list.index_of(q, regions) > list.index_of(r, regions))
 
-lit_range(at, n, t) := if (n != none) {
+literal_range(at, n, t) := if (n != none) {
     e := int_entry(t)
-    if (n < lit_lo(e) or n > lit_hi(e)) fail(at, 'type, f"{n} is out of the range of {arg(e, 1)}")
+    if (n < literal_lo(e) or n > literal_hi(e)) fail(at, 'type, f"{n} is out of the range of {arg(e, 1)}")
 }
 
 # a value of type t can be put where e is expected: an integer literal in the range of e,
 # or a borrow of a region that outlives the region of e
-fits(at, e, t) := if (head(t) == 'Lit and int(e)) {
-    lit_range(at, arg(t, 0), e)
+fits(at, e, t) := if (head(t) == 'Literal and int(e)) {
+    literal_range(at, arg(t, 0), e)
     true
-} else if (t == FLit{} and flt(e)) true
+} else if (t == FLiteral{} and flt(e)) true
 else if (head(e) == 'Own and head(t) == 'Own) fits(at, arg(e, 0), arg(t, 0))
-else if (head(e) == 'Arr and head(t) == 'Arr) fits(at, arg(e, 0), arg(t, 0))
+else if (head(e) == 'Array and head(t) == 'Array) fits(at, arg(e, 0), arg(t, 0))
 else if (head(e) == 'Ref and head(t) == 'Ref) arg(e, 0) == arg(t, 0) and outlives(arg(t, 1), arg(e, 1)) and fits(at, arg(e, 2), arg(t, 2))
 else e == t
 
 # a borrow that does not fit only because its region is opened inside the function and does not outlive the expected one
-escapes(e, t) := head(e) == 'Ref and head(t) == 'Ref and arg(e, 0) == arg(t, 0) and arg(e, 2) == arg(t, 2) and not member(arg(t, 1), fn_regions)
+escapes(e, t) := head(e) == 'Ref and head(t) == 'Ref and arg(e, 0) == arg(t, 0) and arg(e, 2) == arg(t, 2) and not member(arg(t, 1), fun_regions)
 
 export mentions(Ref{_, q, u}, r) := q == r or mentions(u, r)
 mentions(Own{u}, r) := mentions(u, r)
-mentions(Arr{u}, r) := mentions(u, r)
+mentions(Array{u}, r) := mentions(u, r)
 mentions(_, r) := false
 
 export subst(t, rmap, tsub) := match t {
     Ref{k, r, u} -> Ref{k, table.get(rmap, r, r), subst(u, rmap, tsub)}
   | Own{u} -> Own{subst(u, rmap, tsub)}
-  | Arr{u} -> Arr{subst(u, rmap, tsub)}
+  | Array{u} -> Array{subst(u, rmap, tsub)}
   | TVar{n} -> table.get(tsub, n, t)
   | _ -> t
 }
@@ -403,12 +403,12 @@ export pos(Bin{_, a, _}) := arg(a, 0)
 pos(Mov{a}) := arg(a, 0)
 pos(o) := arg(o, 0)
 
-# the type of the operand o, which is read. own and &mut are moved.
-vasm_use(st, Imm{at, n}) := if (type(n) == Int) Lit{n} else if (n == true or n == false) Bool{}
+# the type of the operand o, which is read. own and &mutable are moved.
+vasm_use(st, Imm{at, n}) := if (type(n) == Int) Literal{n} else if (n == true or n == false) Bool{}
     else fail(at, 'type, f"{arg(n, 0)} is out of the range of a literal, -32768 to 32767; make it with << and |")
-vasm_use(st, FImm{_, _}) := FLit{}
-vasm_use(st, Str{_, _}) := Ref{'shr, 'static, Arr{U8{}}}
-vasm_use(st, Sym{_, _}) := Val{}
+vasm_use(st, FImm{_, _}) := FLiteral{}
+vasm_use(st, String{_, _}) := Ref{'shr, 'static, Array{U8{}}}
+vasm_use(st, Symbol{_, _}) := Value{}
 vasm_use(st, Reg{at, x}) := {
     t := type_of(at, x)
     need_init(at, st, x)
@@ -425,11 +425,11 @@ ptr(at, st, p, write) := {
     need_init(at, st, p)
     match t {
         Own{u} -> {
-            if (write) no_loans(at, st, p, "written") else no_mut_loan(at, st, p, "read")
+            if (write) no_loans(at, st, p, "written") else no_mutable_loan(at, st, p, "read")
             u
         }
       | Ref{k, _, u} -> {
-            if (write and k != 'mut) fail(at, 'borrowed, f"{symname(p)} is a shared borrow and cannot be written")
+            if (write and k != 'mutable) fail(at, 'borrowed, f"{symname(p)} is a shared borrow and cannot be written")
             u
         }
       | _ -> fail(at, 'type, f"{symname(p)} is {show_type(t)}, not a pointer")
@@ -439,17 +439,17 @@ ptr(at, st, p, write) := {
 # the contents of p, which must not be an array (a whole array is not read or written at once)
 cell(at, st, p, write) := {
     u := ptr(at, st, p, write)
-    if (head(u) == 'Arr) fail(at, 'type, f"{symname(p)} points to an array; use an element {symname(p)}[i]")
+    if (head(u) == 'Array) fail(at, 'type, f"{symname(p)} points to an array; use an element {symname(p)}[i]")
     u
 }
 
 # the element type of the array p at the index operand i. The range of i is checked when the program runs.
-# For a val p the kind of the value is checked when the program runs too.
+# For a value p the kind of the value is checked when the program runs too.
 elem(at, st, p, i, write) := {
-    isval := type_of(at, p) == Val{}
+    isval := type_of(at, p) == Value{}
     if (isval) need_init(at, st, p)
-    u := if (isval) Arr{Val{}} else ptr(at, st, p, write)
-    if (head(u) != 'Arr) fail(at, 'type, f"{symname(p)} points to {show_type(u)}, not an array")
+    u := if (isval) Array{Value{}} else ptr(at, st, p, write)
+    if (head(u) != 'Array) fail(at, 'type, f"{symname(p)} points to {show_type(u)}, not an array")
     ti := vasm_use(st, i)
     if (not fits(arg(i, 0), I64{}, ti)) fail(arg(i, 0), 'type, f"the index is {show_type(ti)}, not i64")
     arg(u, 0)
@@ -506,7 +506,7 @@ get(at, st, p, f) := {
 # the type of the place a (*p, p[i] or p.f) of swap, which is read and written
 place(st, Load{at, p}) := cell(at, st, p, true)
 place(st, Index{at, p, i}) := {
-    if (type_of(at, p) == Val{}) fail(at, 'type, f"{symname(p)} is val; write {symname(p)}[i] = v")
+    if (type_of(at, p) == Value{}) fail(at, 'type, f"{symname(p)} is value; write {symname(p)}[i] = v")
     elem(at, st, p, i, true)
 }
 place(st, Get{at, p, f}) := {
@@ -521,24 +521,24 @@ is_place(a) := member(head(a), ['Load, 'Index, 'Get])
 
 # a parameter type pt of a function matches an argument type t.
 # rs are the regions of the function; rsub gets the regions given to each, tsub the type of T.
-# &mut is given to &.
+# &mutable is given to &.
 vasm_match(at, pt, t, rs, rsub, tsub) := if (head(pt) == 'Place) vasm_match(at, arg(pt, 0), t, rs, rsub, tsub)
 else if (head(pt) == 'TVar) {
     b := table.get(tsub, arg(pt, 0), none)
-    if (b == none or (head(b) == 'Lit and int(t))) {
+    if (b == none or (head(b) == 'Literal and int(t))) {
         table.set(tsub, arg(pt, 0), t)
         true
     } else fits(at, b, t)
 } else if (head(pt) == 'Ref and head(t) == 'Ref) {
     r := arg(pt, 1)
-    if (arg(pt, 0) != arg(t, 0) and not (arg(pt, 0) == 'shr and arg(t, 0) == 'mut)) false
+    if (arg(pt, 0) != arg(t, 0) and not (arg(pt, 0) == 'shr and arg(t, 0) == 'mutable)) false
     else if (not vasm_match(at, arg(pt, 2), arg(t, 2), rs, rsub, tsub)) false
     else if (member(r, rs)) {
         table.set(rsub, r, arg(t, 1) :: table.get(rsub, r, []))
         true
     } else outlives(arg(t, 1), r)
 } else if (head(pt) == 'Own and head(t) == 'Own) vasm_match(at, arg(pt, 0), arg(t, 0), rs, rsub, tsub)
-else if (head(pt) == 'Arr and head(t) == 'Arr) vasm_match(at, arg(pt, 0), arg(t, 0), rs, rsub, tsub)
+else if (head(pt) == 'Array and head(t) == 'Array) vasm_match(at, arg(pt, 0), arg(t, 0), rs, rsub, tsub)
 else fits(at, pt, t)
 
 # the region given to r: the innermost of the regions qs of the arguments, which all outlive it
@@ -549,41 +549,41 @@ pick_region(at, f, r, qs) := {
     arg(inner, 0)
 }
 
-# An &mut register given to a borrow parameter is borrowed again for the call and is not moved,
+# An &mutable register given to a borrow parameter is borrowed again for the call and is not moved,
 # unless the result has the region of the parameter. It is given once in the call.
-mut_reg(a) := if (head(a) == 'Reg) {
+mutable_reg(a) := if (head(a) == 'Reg) {
     t := type_of(arg(a, 0), arg(a, 1))
-    head(t) == 'Ref and arg(t, 0) == 'mut
+    head(t) == 'Ref and arg(t, 0) == 'mutable
 } else false
-reborrows(p, a, ret) := head(p) == 'Ref and not mentions(ret, arg(p, 1)) and mut_reg(a)
+reborrows(p, a, ret) := head(p) == 'Ref and not mentions(ret, arg(p, 1)) and mutable_reg(a)
 
-val_operand(st, a) := {
-    if (is_place(a)) fail(arg(a, 0), 'type, "the value of a val is a register or a literal, not a place")
+value_operand(st, a) := {
+    if (is_place(a)) fail(arg(a, 0), 'type, "the value of a value is a register or a literal, not a place")
     t := vasm_use(st, a)
-    if (t != Val{}) fail(arg(a, 0), 'type, f"the value is {show_type(t)}, not val")
+    if (t != Value{}) fail(arg(a, 0), 'type, f"the value is {show_type(t)}, not value")
 }
 
-# v(a, ...) for a register v of val: the arguments and the result are val. That v is a function that takes as many arguments is checked when the program runs.
-is_val_reg(f) := {
+# v(a, ...) for a register v of value: the arguments and the result are value. That v is a function that takes as many arguments is checked when the program runs.
+is_value_reg(f) := {
     i := table.get(vasm_info, f, none)
-    i != none and arg(i, 0) == Val{}
+    i != none and arg(i, 0) == Value{}
 }
 
-# x = fn f(a, ...): the arguments are the first arguments of f, and all that f takes and gives is val
+# x = fun f(a, ...): the arguments are the first arguments of f, and all that f takes and gives is value
 closure(at, st, f, args) := {
     sig := table.get(sigs, f, none)
     if (sig == none) fail(at, 'undefined, f"function {symname(f)} is not defined")
-    if (arg(sig, 0) != [] or arg(sig, 2) != Val{} or list.any(p -> p != Val{}, arg(sig, 1))) fail(at, 'type, f"{symname(f)} is made a value of val, so all that it takes and gives is val")
+    if (arg(sig, 0) != [] or arg(sig, 2) != Value{} or list.any(p -> p != Value{}, arg(sig, 1))) fail(at, 'type, f"{symname(f)} is made a value of value, so all that it takes and gives is value")
     if (length(args) > length(arg(sig, 1))) fail(at, 'type, f"{symname(f)} takes {length(arg(sig, 1))} arguments but {length(args)} are given")
-    each(a -> val_operand(st, a), args)
-    Val{}
+    each(a -> value_operand(st, a), args)
+    Value{}
 }
 
 fun call_named
-call(at, st, f, args) := if (is_val_reg(f)) {
+call(at, st, f, args) := if (is_value_reg(f)) {
     need_init(at, st, f)
-    each(a -> val_operand(st, a), args)
-    Val{}
+    each(a -> value_operand(st, a), args)
+    Value{}
 } else call_named(at, st, f, args)
 
 call_named(at, st, f, args) = {
@@ -610,7 +610,7 @@ call_named(at, st, f, args) = {
     each(pa -> {
         p := arg(pa, 0)
         a := arg(pa, 1)
-        if (head(a) == 'Reg and member(arg(a, 1), lent)) fail(arg(a, 0), 'borrowed, f"{symname(arg(a, 1))} is borrowed as mut by another argument of the call")
+        if (head(a) == 'Reg and member(arg(a, 1), lent)) fail(arg(a, 0), 'borrowed, f"{symname(arg(a, 1))} is borrowed as mutable by another argument of the call")
         t := if (head(p) == 'Place) place(st, a)
         else if (is_place(a)) fail(arg(a, 0), 'type, f"{symname(f)} takes a value, not a place; read it into a register")
         else if (reborrows(p, a, ret)) {
@@ -624,7 +624,7 @@ call_named(at, st, f, args) = {
         # what is left in the value is freed with it
         set_status(st, arg(args[0], 1), Freed{at})
     }
-    if (user == none and f == 'alloc and owning(table.get(tsub, 'T, I64{}))) fail(at, 'owner, "alloc copies its value to every element, so the value does not own")
+    if (user == none and f == 'allocate and owning(table.get(tsub, 'T, I64{}))) fail(at, 'owner, "allocate copies its value to every element, so the value does not own")
     rmap := table.new()
     each(r -> {
         qs := table.get(rsub, r, [])
@@ -635,7 +635,7 @@ call_named(at, st, f, args) = {
     t
 }
 
-int_operand(o, t) := if (not (int(t) or head(t) == 'Lit)) fail(arg(o, 0), 'type, f"the operand is {show_type(t)}, not an integer")
+int_operand(o, t) := if (not (int(t) or head(t) == 'Literal)) fail(arg(o, 0), 'type, f"the operand is {show_type(t)}, not an integer")
 
 # the type of the right-hand side r
 rhs(st, r) := match r {
@@ -643,56 +643,56 @@ rhs(st, r) := match r {
   | Bin{op, a, b} -> {
         ta := vasm_use(st, a)
         tb := vasm_use(st, b)
-        if (head(ta) == 'Lit and int(tb)) {
-            lit_range(arg(a, 0), arg(ta, 0), tb)
+        if (head(ta) == 'Literal and int(tb)) {
+            literal_range(arg(a, 0), arg(ta, 0), tb)
             ta = tb
         }
-        if (head(tb) == 'Lit and int(ta)) {
-            lit_range(arg(b, 0), arg(tb, 0), ta)
+        if (head(tb) == 'Literal and int(ta)) {
+            literal_range(arg(b, 0), arg(tb, 0), ta)
             tb = ta
         }
-        if (ta == FLit{} and flt(tb)) ta = tb
-        if (tb == FLit{} and flt(ta)) tb = ta
-        if ((op == 'eq or op == 'ne) and ((ta == Bool{} and tb == Bool{}) or (ta == Val{} and tb == Val{}))) Bool{}
-        else if (flt(ta) or flt(tb) or ta == FLit{} or tb == FLit{}) {
+        if (ta == FLiteral{} and flt(tb)) ta = tb
+        if (tb == FLiteral{} and flt(ta)) tb = ta
+        if ((op == 'eq or op == 'ne) and ((ta == Bool{} and tb == Bool{}) or (ta == Value{} and tb == Value{}))) Bool{}
+        else if (flt(ta) or flt(tb) or ta == FLiteral{} or tb == FLiteral{}) {
             if (ta != tb) fail(arg(b, 0), 'type, f"the operands are {show_type(ta)} and {show_type(tb)}")
             if (not member(op, ['add, 'sub, 'mul, 'div, 'lt, 'le, 'gt, 'ge, 'eq, 'ne])) fail(arg(a, 0), 'type, f"the operator is not for {show_type(ta)}; a floating point number has + - * / and the comparisons")
             if (member(op, ['lt, 'le, 'gt, 'ge, 'eq, 'ne])) Bool{} else ta
         } else {
             int_operand(a, ta)
             int_operand(b, tb)
-            lits := head(ta) == 'Lit and head(tb) == 'Lit
-            if (not lits and ta != tb) fail(arg(b, 0), 'type, f"the operands are {show_type(ta)} and {show_type(tb)}")
-            if (member(op, ['lt, 'le, 'gt, 'ge, 'eq, 'ne])) Bool{} else if (lits) Lit{none} else ta
+            literals := head(ta) == 'Literal and head(tb) == 'Literal
+            if (not literals and ta != tb) fail(arg(b, 0), 'type, f"the operands are {show_type(ta)} and {show_type(tb)}")
+            if (member(op, ['lt, 'le, 'gt, 'ge, 'eq, 'ne])) Bool{} else if (literals) Literal{none} else ta
         }
     }
   | Load{at, p} -> vasm_load(at, st, p)
   | Index{at, p, i} -> {
         u := elem(at, st, p, i, false)
-        if (owning(u) and type_of(at, p) != Val{}) fail(at, 'owner, f"the elements of {symname(p)} own values and are not copied; use swap({symname(p)}[i], v)")
+        if (owning(u) and type_of(at, p) != Value{}) fail(at, 'owner, f"the elements of {symname(p)} own values and are not copied; use swap({symname(p)}[i], v)")
         u
     }
   | Get{at, p, f} -> get(at, st, p, f)
   | Conv{at, a, t} -> {
         ta := vasm_use(st, a)
-        if (t == Val{}) {
-            if (not (int(ta) or head(ta) == 'Lit or ta == Bool{} or ta == Val{} or (head(ta) == 'Ref and arg(ta, 2) == Arr{U8{}}))) fail(at, 'type, f"{show_type(ta)} is not made a val")
-        } else if (ta == Val{}) {
-            if (not (int(t) or t == Bool{} or t == Own{Arr{U8{}}})) fail(at, 'type, f"a val is not converted to {show_type(t)}")
+        if (t == Value{}) {
+            if (not (int(ta) or head(ta) == 'Literal or ta == Bool{} or ta == Value{} or (head(ta) == 'Ref and arg(ta, 2) == Array{U8{}}))) fail(at, 'type, f"{show_type(ta)} is not made a value")
+        } else if (ta == Value{}) {
+            if (not (int(t) or t == Bool{} or t == Own{Array{U8{}}})) fail(at, 'type, f"a value is not converted to {show_type(t)}")
         } else {
             if (not (int(t) or flt(t))) fail(at, 'type, f"the value is converted to {show_type(t)}, not a number type")
-            if (head(ta) == 'Lit and int(t)) lit_range(at, arg(ta, 0), t)
-            else if (flt(ta) or ta == FLit{}) none
+            if (head(ta) == 'Literal and int(t)) literal_range(at, arg(ta, 0), t)
+            else if (flt(ta) or ta == FLiteral{}) none
             else if (int(t)) int_operand(a, ta)
-            else if (not (int(ta) or head(ta) == 'Lit)) fail(arg(a, 0), 'type, f"the operand is {show_type(ta)}, not a number")
+            else if (not (int(ta) or head(ta) == 'Literal)) fail(arg(a, 0), 'type, f"the operand is {show_type(ta)}, not a number")
         }
         t
     }
   | Con{at, _, args} -> {
-        each(a -> val_operand(st, a), args)
-        Val{}
+        each(a -> value_operand(st, a), args)
+        Value{}
     }
-  | Clo{at, f, args} -> closure(at, st, f, args)
+  | Closure{at, f, args} -> closure(at, st, f, args)
   | Make{at, s, inits} -> {
         sd := table.get(structs, s, none)
         if (sd == none) fail(at, 'undefined, f"struct {symname(s)} is not defined")
@@ -719,7 +719,7 @@ rhs(st, r) := match r {
         if (not member(r, regions)) fail(at, 'region, f"region {symname(r)} is not in scope")
         if (member(r, arg(info, 1))) fail(at, 'region, f"{symname(y)} is declared in region {symname(r)} and does not live to its end")
         need_init(at, st, y)
-        if (k == 'mut) no_loans(at, st, y, "borrowed as mut") else no_mut_loan(at, st, y, "borrowed")
+        if (k == 'mutable) no_loans(at, st, y, "borrowed as mutable") else no_mutable_loan(at, st, y, "borrowed")
         set_loans(st, y, Loan{r, k} :: loans(st, y))
         Ref{k, r, arg(yt, 0)}
     }
@@ -768,7 +768,7 @@ replace(st, m) := {
     table.set(st, ".dead", dead(m))
 }
 
-# a loop must give back the own and &mut values it moves
+# a loop must give back the own and &mutable values it moves
 loop_same(at, a, b) := each(x -> {
     t := arg(table.get(vasm_info, x, none), 0)
     if (moves(t) and key(t, status(a, x)) != key(t, status(b, x))) fail(at, 'loop, f"{symname(x)} is moved or freed in the loop and not given a value again")
@@ -875,7 +875,7 @@ block(ss, st) := {
 # The services of the system are built-in functions too: they take values of vasm and no address, and are checked like any other call.
 # write(fd, a) writes the bytes of the array a, which is only borrowed, to the file fd, and gives the number of bytes written, or
 # a negative number for an error. exit(status) ends the program with the status (the low 8 bits are seen by the system).
-table.set(builtins, 'write, Sig{['r], [I64{}, Ref{'shr, 'r, Arr{U8{}}}], I64{}})
+table.set(builtins, 'write, Sig{['r], [I64{}, Ref{'shr, 'r, Array{U8{}}}], I64{}})
 table.set(builtins, 'exit, Sig{[], [I64{}], Unit{}})
 
 # The ports to the files and the arguments of the program take and give values of vasm too.
@@ -885,33 +885,33 @@ table.set(builtins, 'exit, Sig{[], [I64{}], Unit{}})
 # read(fd, a) reads the bytes of the file fd into the array a, as many as it holds at most, and gives the number read (0 at the end of the file),
 # or a negative number for an error. close(fd) closes the file.
 table.set(builtins, 'argc, Sig{[], [], I64{}})
-table.set(builtins, 'argv, Sig{[], [I64{}], Ref{'shr, 'static, Arr{U8{}}}})
-table.set(builtins, 'open, Sig{['r], [Ref{'shr, 'r, Arr{U8{}}}], I64{}})
-table.set(builtins, 'read, Sig{['r], [I64{}, Ref{'mut, 'r, Arr{U8{}}}], I64{}})
+table.set(builtins, 'argv, Sig{[], [I64{}], Ref{'shr, 'static, Array{U8{}}}})
+table.set(builtins, 'open, Sig{['r], [Ref{'shr, 'r, Array{U8{}}}], I64{}})
+table.set(builtins, 'read, Sig{['r], [I64{}, Ref{'mutable, 'r, Array{U8{}}}], I64{}})
 table.set(builtins, 'close, Sig{[], [I64{}], Unit{}})
 
 # create(path) opens the file whose name is the bytes of the array path for writing, emptied or made new, and gives the file or a negative number.
-table.set(builtins, 'create, Sig{['r], [Ref{'shr, 'r, Arr{U8{}}}], I64{}})
+table.set(builtins, 'create, Sig{['r], [Ref{'shr, 'r, Array{U8{}}}], I64{}})
 
-# The functions on values of val. A value that is not of the kind a function takes ends the program as failed, as an index out of range does.
+# The functions on values of value. A value that is not of the kind a function takes ends the program as failed, as an index out of range does.
 # is(v, h, n): v is a constructed value with the head h and n arguments. typeof(v): the same symbol as typeof of planck.
 # head(v): the head of a constructed value. arity(v): the number of the arguments, the elements or the bytes (a constructed value, an array, a string or symbol).
 # array(n, v): a new array of n elements v. mexpr(h, a): a constructed value with the head h, and the elements of the array a as its arguments.
 # intern(s): the symbol named by the string s. symname(s): the name of the symbol s as a string.
-table.set(builtins, 'is, Sig{[], [Val{}, Val{}, I64{}], Bool{}})
-table.set(builtins, 'typeof, Sig{[], [Val{}], Val{}})
-table.set(builtins, 'head, Sig{[], [Val{}], Val{}})
-table.set(builtins, 'arity, Sig{[], [Val{}], I64{}})
-table.set(builtins, 'array, Sig{[], [I64{}, Val{}], Val{}})
-table.set(builtins, 'mexpr, Sig{[], [Val{}, Val{}], Val{}})
-table.set(builtins, 'intern, Sig{[], [Val{}], Val{}})
-table.set(builtins, 'symname, Sig{[], [Val{}], Val{}})
+table.set(builtins, 'is, Sig{[], [Value{}, Value{}, I64{}], Bool{}})
+table.set(builtins, 'typeof, Sig{[], [Value{}], Value{}})
+table.set(builtins, 'head, Sig{[], [Value{}], Value{}})
+table.set(builtins, 'arity, Sig{[], [Value{}], I64{}})
+table.set(builtins, 'array, Sig{[], [I64{}, Value{}], Value{}})
+table.set(builtins, 'mexpr, Sig{[], [Value{}, Value{}], Value{}})
+table.set(builtins, 'intern, Sig{[], [Value{}], Value{}})
+table.set(builtins, 'symname, Sig{[], [Value{}], Value{}})
 
-check_fn(Fn{at, f, rs, ps, ret, body}) := {
+check_fun(Fun{at, f, rs, ps, ret, body}) := {
     if (table.get(builtins, f, none) != none) fail(at, 'type, f"{symname(f)} is a built-in function")
     vasm_info = table.new()
     regions = rs
-    fn_regions = rs
+    fun_regions = rs
     ret_type = ret
     each(r -> {
         given := list.any(p -> head(arg(p, 2)) == 'Ref and arg(arg(p, 2), 1) == r, ps)
@@ -938,7 +938,7 @@ reaches(target, s, seen) := list.any((Field{_, _, t}) -> if (head(t) == 'Named) 
 check_struct(Struct{at, s, fs}) := {
     if (arg(table.get(structs, s, none), 0) != at) fail(at, 'type, f"struct {symname(s)} is already defined")
     regions = []
-    fn_regions = []
+    fun_regions = []
     names := []
     each((Field{fat, x, t}) -> {
         if (member(x, names)) fail(fat, 'type, f"field {symname(x)} is declared twice")
@@ -956,42 +956,42 @@ export check_with(m, imports) := {
     sigs = table.new()
     structs = table.new()
     each(d -> match d {
-        Fn{_, f, rs, ps, ret, _} -> table.set(sigs, f, Sig{rs, map(p -> arg(p, 2), ps), ret})
+        Fun{_, f, rs, ps, ret, _} -> table.set(sigs, f, Sig{rs, map(p -> arg(p, 2), ps), ret})
       | Struct{_, s, _} -> if (table.get(structs, s, none) == none) table.set(structs, s, d)
     }, append(imports, items))
-    errs := []
+    errors := []
     each(d -> {
         r := handle {
-            if (head(d) == 'Struct) check_struct(d) else check_fn(d)
+            if (head(d) == 'Struct) check_struct(d) else check_fun(d)
             none
-        } with (VasmFail{at, kind, msg}, k) -> VasmErr{kind, at, msg}
-        if (r != none) errs = r :: errs
+        } with (VasmFail{at, kind, msg}, k) -> VasmError{kind, at, msg}
+        if (r != none) errors = r :: errors
     }, items)
-    reverse(errs)
+    reverse(errors)
 }
 
-# the errors of the module m: [VasmErr{kind, Pos{d}, msg}, ...], the first error of each struct and function
+# the errors of the module m: [VasmError{kind, Pos{d}, msg}, ...], the first error of each struct and function
 export check(m) := check_with(m, [])
 
-# check with the positions in the file: [VasmErr{kind, Loc{file, line, column}, msg}, ...]
+# check with the positions in the file: [VasmError{kind, Loc{file, line, column}, msg}, ...]
 export errors(file, m) := {
     src := read_file(file)
     n := strlen(src)
-    map((VasmErr{kind, Pos{d}, msg}) -> VasmErr{kind, error.loc_at(file, src, n - d), msg}, check(m))
+    map((VasmError{kind, Pos{d}, msg}) -> VasmError{kind, error.loc_at(file, src, n - d), msg}, check(m))
 }
 
 # errors_with(file, m, imports) is errors for a module that may use the items of imports (see check_with)
 export errors_with(file, m, imports) := {
     src := read_file(file)
     n := strlen(src)
-    map((VasmErr{kind, Pos{d}, msg}) -> VasmErr{kind, error.loc_at(file, src, n - d), msg}, check_with(m, imports))
+    map((VasmError{kind, Pos{d}, msg}) -> VasmError{kind, error.loc_at(file, src, n - d), msg}, check_with(m, imports))
 }
 
 # print the errors as file:line:column: message, or "ok"
 export report(file, m) := {
     es := errors(file, m)
     if (es == []) put("ok\n")
-    each((VasmErr{_, loc, msg}) -> put(f"{error.show_loc(loc)}: {msg}\n"), es)
+    each((VasmError{_, loc, msg}) -> put(f"{error.show_loc(loc)}: {msg}\n"), es)
 }
 
 }

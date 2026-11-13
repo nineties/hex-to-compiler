@@ -42,7 +42,7 @@ module pvm_compile {
     X_SIZE := 18
 
     V_NAME := 0
-    V_CTX := 1
+    V_CONTEXT := 1
     V_CAP := 2
     V_SET := 3
     V_PAT := 4
@@ -52,7 +52,7 @@ module pvm_compile {
     V_SLOT := 8
     V_SIZE := 9
 
-    ctxs := vector.new()
+    contexts := vector.new()
     vars := vector.new()
     gl := table.new()
     img := none
@@ -61,14 +61,14 @@ module pvm_compile {
     cur_loc := none
 
     # a compile error is the effect Error{loc, message}, which the program that compiles at run time can catch. loc is cur_loc.
-    err(msg, e) := {
+    error(msg, e) := {
         m := _strcat("pvm_compile: ", msg)
         perform Error{cur_loc, if (type(e) == Symbol) _strcat(m, _strcat(": ", symname(e))) else m}
     }
 
-    new_ctx(parent, top, arity, notail) := {
+    new_context(parent, top, arity, notail) := {
         c := array(X_SIZE)
-        id := vector.len(ctxs)
+        id := vector.len(contexts)
         c[X_ID] = id
         c[X_PARENT] = parent
         c[X_TOP] = top
@@ -87,7 +87,7 @@ module pvm_compile {
         c[X_HASENV] = false
         c[X_NSLOTS] = 0
         c[X_TBASE] = 0
-        vector.push(ctxs, c)
+        vector.push(contexts, c)
         c
     }
 
@@ -117,7 +117,7 @@ module pvm_compile {
         v := array(V_SIZE)
         id := vector.len(vars)
         v[V_NAME] = name
-        v[V_CTX] = c[X_ID]
+        v[V_CONTEXT] = c[X_ID]
         v[V_CAP] = false
         v[V_SET] = false
         v[V_PAT] = pat
@@ -143,7 +143,7 @@ module pvm_compile {
     # touch(c, vid) notes that the variable is used from c
     touch(c, vid) := {
         v := vector.get(vars, vid)
-        if (v[V_CTX] != c[X_ID]) {
+        if (v[V_CONTEXT] != c[X_ID]) {
             v[V_CAP] = true
         }
     }
@@ -163,7 +163,7 @@ module pvm_compile {
         g := table.get(gl, name, none)
         if (g != none) g
         else if (list.member(name, builtin_names) or list.member(name, pvm_image.type_names)) 0
-        else err("undefined variable", x)
+        else error("undefined variable", x)
     }
 
     is_global(c) := c[X_TOP] and c[X_BLOCK] == 0
@@ -191,7 +191,7 @@ module pvm_compile {
     constval(v) := {
         ty := type(v)
         if (ty == Int) {
-            if (v >= 536870912 or v <= -536870912) err("an integer beyond 29 bits is not supported", v)
+            if (v >= 536870912 or v <= -536870912) error("an integer beyond 29 bits is not supported", v)
             I{v}
         } else if (ty == String) S{v}
         else if (ty == Symbol) {
@@ -200,11 +200,11 @@ module pvm_compile {
             else if (v == 'none) N{}
             else Y{symname(v)}
         } else if (ty == Expr) M{symname(head(v)), map(constval, list_of_args(v))}
-        else err("cannot be a constant", v)
+        else error("cannot be a constant", v)
     }
 
-    # mk(h, xs) is the m-expression with the head h and the arguments of the list xs
-    mk(h, xs) := {
+    # make(h, xs) is the m-expression with the head h and the arguments of the list xs
+    make(h, xs) := {
         m := mexpr(h, Tuple{})
         each(x -> { m = push(m, x) }, xs)
         m
@@ -255,7 +255,7 @@ module pvm_compile {
                 emit_pro(c, NEXT{})
             } else if (h == '_TypeOf) {
                 ty2 := arg(p, 1)
-                if (type(ty2) != Symbol or is_literal(ty2)) err("the type of _TypeOf must be a variable", p)
+                if (type(ty2) != Symbol or is_literal(ty2)) error("the type of _TypeOf must be a variable", p)
                 tv := new_var(c, none, true, -1)
                 tvid := lookup(c, ty2)
                 if (tvid != none) {
@@ -265,7 +265,7 @@ module pvm_compile {
                 emit_pro(c, MATCHTYPE{r, V{tv}})
                 emit_pro(c, NEXT{})
                 bind_to(c, arg(p, 0), r)
-            } else if (h == '_Rest) err("a rest pattern is not supported by planckvm", p)
+            } else if (h == '_Rest) error("a rest pattern is not supported by planckvm", p)
             else {
                 n := arity(p)
                 emit_pro(c, MATCHHEAD{r, kidx(c, Y{symname(h)}), n})
@@ -276,7 +276,7 @@ module pvm_compile {
                     j = j + 1
                 }
             }
-        } else err("invalid pattern", p)
+        } else error("invalid pattern", p)
     }
 
     # === Expressions ===
@@ -318,15 +318,15 @@ module pvm_compile {
             a := arg(args, 0)
             b := arg(args, 1)
             op := if (f == '_gt) '_lt else '_ge
-            if (simple(a) or simple(b)) mk('Apply, [op, mk('Tuple, [b, a])])
+            if (simple(a) or simple(b)) make('Apply, [op, make('Tuple, [b, a])])
             else {
                 nlabel = nlabel + 1
                 x := intern(f"%g{nlabel}")
                 y := intern(f"%h{nlabel}")
-                mk('Do, [mk('Def, [x, a]), mk('Def, [y, b]), mk('Apply, [op, mk('Tuple, [y, x])])])
+                make('Do, [make('Def, [x, a]), make('Def, [y, b]), make('Apply, [op, make('Tuple, [y, x])])])
             }
         } else if (f == '_not and lookup(c, f) == none and head(args) == 'Tuple and arity(args) == 1) {
-            mk('If, [arg(args, 0), 'false, 'true])
+            make('If, [arg(args, 0), 'false, 'true])
         } else e
     }
 
@@ -335,7 +335,7 @@ module pvm_compile {
         else if (n >= 536870912 or n <= -536870912) {
             # beyond 29 bits: built with the multiplication, which gives a big integer at run time
             q := n / 32768 - (if (n % 32768 < 0) 1 else 0)
-            cx(c, mk('Apply, ['_add, mk('Tuple, [mk('Apply, ['_mul, mk('Tuple, [q, 32768])]), n - q * 32768])]), d)
+            cx(c, make('Apply, ['_add, make('Tuple, [make('Apply, ['_mul, make('Tuple, [q, 32768])]), n - q * 32768])]), d)
         } else emit(c, LOADK{t(c, d), kidx(c, constval(n))})
     }
 
@@ -363,7 +363,7 @@ module pvm_compile {
     }
 
     # at_instr(loc, i) is the instruction i that has the entry loc (Loc{file, line, column}) in the position table of the code, or i when loc is none
-    at_instr(loc, i) := if (loc == none) i else mk('At, [loc, i])
+    at_instr(loc, i) := if (loc == none) i else make('At, [loc, i])
 
     # call_in(c, e, d, tail, loc) emits the call. It is true when the code ends there (a tail call), and false when the value is in the temporary d.
     # loc is the position of the call, or none.
@@ -378,7 +378,7 @@ module pvm_compile {
         if (o != none) {
             a := arg(args, 0)
             cx(c, a, d)
-            if (o[2] == 1) emit(c, mk(o[1], [t(c, d), t(c, d)]))
+            if (o[2] == 1) emit(c, make(o[1], [t(c, d), t(c, d)]))
             else {
                 b := arg(args, 1)
                 if (o[1] == 'ADD and type(b) == Int and b >= -128 and b < 128) emit(c, ADDI{t(c, d), t(c, d), b})
@@ -386,12 +386,12 @@ module pvm_compile {
                 else if (o[1] == 'AGET and type(b) == Int and b >= 0 and b < 256) emit(c, AGETI{t(c, d), t(c, d), b})
                 else {
                     cx(c, b, d + 1)
-                    emit(c, mk(o[1], [t(c, d), t(c, d), t(c, d + 1)]))
+                    emit(c, make(o[1], [t(c, d), t(c, d), t(c, d + 1)]))
                 }
             }
             false
         } else {
-            if (head(args) != 'Tuple) err("malformed Apply", e)
+            if (head(args) != 'Tuple) error("malformed Apply", e)
             cx(c, arg(e, 0), d)
             n := cx_args(c, args, d)
             c[X_CALL] = true
@@ -418,7 +418,7 @@ module pvm_compile {
         x := arg(e, 0)
         # true, false and none are values of the image; Def{true, Quote{true}} of init.pk only gives the value
         if (type(x) == Symbol and is_literal(x) and arity(e) == 2 and type(arg(e, 1)) == Expr and head(arg(e, 1)) == 'Quote and arg(arg(e, 1), 0) == x) return cx(c, arg(e, 1), d)
-        if (type(x) != Symbol or is_literal(x)) err("malformed Def", e)
+        if (type(x) != Symbol or is_literal(x)) error("malformed Def", e)
         cx(c, arg(e, 1), d)
         if (is_global(c)) {
             g := table.get(gl, symname(x), 0) + 1
@@ -433,7 +433,7 @@ module pvm_compile {
 
     cx_declare(c, e, d) := {
         x := arg(e, 0)
-        if (type(x) != Symbol or is_literal(x)) err("malformed Declare", e)
+        if (type(x) != Symbol or is_literal(x)) error("malformed Declare", e)
         emit(c, LOADNONE{t(c, d), 1})
         if (is_global(c)) {
             g := table.get(gl, symname(x), none)
@@ -447,7 +447,7 @@ module pvm_compile {
             }
         } else {
             vid := lookup(c, x)
-            if (vid == none or vector.get(vars, vid)[V_CTX] != c[X_ID]) {
+            if (vid == none or vector.get(vars, vid)[V_CONTEXT] != c[X_ID]) {
                 nv := new_var(c, x, false, -1)
                 bind(c, x, nv)
                 emit(c, SetVar{nv, t(c, d)})
@@ -457,7 +457,7 @@ module pvm_compile {
 
     cx_set(c, e, d) := {
         x := arg(e, 0)
-        if (type(x) != Symbol or is_literal(x)) err("malformed Set", e)
+        if (type(x) != Symbol or is_literal(x)) error("malformed Set", e)
         cx(c, arg(e, 1), d)
         vid := lookup(c, x)
         if (vid != none) {
@@ -502,10 +502,10 @@ module pvm_compile {
     }
 
     # the code of a function: params is Tuple{patterns}
-    compile_fn(c, params, body, notail) := {
-        if (head(params) != 'Tuple) err("malformed Lambda", params)
+    compile_fun(c, params, body, notail) := {
+        if (head(params) != 'Tuple) error("malformed Lambda", params)
         n := arity(params)
-        ch := new_ctx(c, false, n, notail)
+        ch := new_context(c, false, n, notail)
         i := 0
         while (i < n) {
             bind_to(ch, arg(params, i), P{i})
@@ -516,13 +516,13 @@ module pvm_compile {
     }
 
     cx_lambda(c, e, d) := {
-        if (arity(e) != 2) err("malformed Lambda", e)
-        name := compile_fn(c, arg(e, 0), arg(e, 1), false)
+        if (arity(e) != 2) error("malformed Lambda", e)
+        name := compile_fun(c, arg(e, 0), arg(e, 1), false)
         emit(c, CLOSURE{t(c, d), kidx(c, K{name})})
     }
 
     cx_handle(c, e, d) := {
-        name := compile_fn(c, Tuple{}, arg(e, 0), true)
+        name := compile_fun(c, Tuple{}, arg(e, 0), true)
         emit(c, CLOSURE{t(c, d), kidx(c, K{name})})
         cx(c, arg(e, 1), d + 1)
         c[X_CALL] = true
@@ -591,44 +591,44 @@ module pvm_compile {
             else cx(c, x, d)
             none
         } else if (h == 'Apply) {
-            if (n != 2) err("malformed Apply", e)
+            if (n != 2) error("malformed Apply", e)
             call(c, e, d, false, none)
             none
         } else if (h == 'Def) {
-            if (n != 2) err("malformed Def", e)
+            if (n != 2) error("malformed Def", e)
             cx_def(c, e, d)
         } else if (h == 'Declare) {
-            if (n != 1) err("malformed Declare", e)
+            if (n != 1) error("malformed Declare", e)
             cx_declare(c, e, d)
         } else if (h == 'Set) {
-            if (n != 2) err("malformed Set", e)
+            if (n != 2) error("malformed Set", e)
             cx_set(c, e, d)
         } else if (h == 'Do) cx_do(c, e, d)
         else if (h == 'If) {
-            if (n != 3) err("malformed If", e)
+            if (n != 3) error("malformed If", e)
             cx_if(c, e, d)
         } else if (h == 'While) {
-            if (n != 2) err("malformed While", e)
+            if (n != 2) error("malformed While", e)
             cx_while(c, e, d)
         } else if (h == 'Lambda) cx_lambda(c, e, d)
         else if (h == 'Fusion) {
-            if (n != 2) err("malformed Fusion", e)
+            if (n != 2) error("malformed Fusion", e)
             cx(c, arg(e, 0), d)
             cx(c, arg(e, 1), d + 1)
             emit(c, FUSION{t(c, d), t(c, d), t(c, d + 1)})
         } else if (h == 'Quote) {
-            if (n != 1) err("malformed Quote", e)
+            if (n != 1) error("malformed Quote", e)
             emit(c, LOADK{t(c, d), kidx(c, constval(arg(e, 0)))})
         } else if (h == 'QuasiQuote) {
-            if (n != 1) err("malformed QuasiQuote", e)
+            if (n != 1) error("malformed QuasiQuote", e)
             qq(c, arg(e, 0), 0, d)
-        } else if (h == 'UnQuote) err("UnQuote outside of QuasiQuote", e)
-        else if (h == '_Rest) err("a rest pattern is not supported by planckvm", e)
+        } else if (h == 'UnQuote) error("UnQuote outside of QuasiQuote", e)
+        else if (h == '_Rest) error("a rest pattern is not supported by planckvm", e)
         else if (h == 'Handle) {
-            if (n != 2) err("malformed Handle", e)
+            if (n != 2) error("malformed Handle", e)
             cx_handle(c, e, d)
         } else if (h == 'Perform) {
-            if (n != 1) err("malformed Perform", e)
+            if (n != 1) error("malformed Perform", e)
             cx(c, arg(e, 0), d)
             c[X_CALL] = true
             emit(c, PERFORM{t(c, d), t(c, d)})
@@ -641,7 +641,7 @@ module pvm_compile {
         else if (ty == String) emit(c, LOADK{t(c, d), kidx(c, S{e})})
         else if (ty == Symbol) cx_var(c, e, d)
         else if (ty == Expr) cx_mexpr(c, e, d)
-        else err("cannot compile", e)
+        else error("cannot compile", e)
     }
 
     cxt(c, e, d) = {
@@ -742,12 +742,12 @@ module pvm_compile {
                 kb := const_operand(b)
                 if (type(b) == Int and b >= -128 and b < 128) {
                     kk := if (cm[0] == '_ne) 1 - k else k
-                    emit(c, mk(cm[2], [t(c, d), b, kk]))
+                    emit(c, make(cm[2], [t(c, d), b, kk]))
                 } else if (kb != none and (cm[0] == '_eq or cm[0] == '_ne) and kidx(c, kb) < 256) {
-                    emit(c, mk(if (cm[0] == '_eq) 'TEQK else 'TNEK, [t(c, d), kidx(c, kb), k]))
+                    emit(c, make(if (cm[0] == '_eq) 'TEQK else 'TNEK, [t(c, d), kidx(c, kb), k]))
                 } else {
                     cx(c, b, d + 1)
-                    emit(c, mk(cm[1], [t(c, d), t(c, d + 1), k]))
+                    emit(c, make(cm[1], [t(c, d), t(c, d + 1), k]))
                 }
                 emit(c, JMP{l})
                 done = true
@@ -792,11 +792,11 @@ module pvm_compile {
     hops(c, v) := {
         x := c
         n := 0
-        while (x[X_ID] != v[V_CTX]) {
+        while (x[X_ID] != v[V_CONTEXT]) {
             if (x[X_HASENV]) n = n + 1
             x = x[X_PARENT]
         }
-        if (in_pro and c[X_HASENV] and v[V_CTX] != c[X_ID]) n - 1 else n
+        if (in_pro and c[X_HASENV] and v[V_CONTEXT] != c[X_ID]) n - 1 else n
     }
 
     reg_of(c, o) := {
@@ -841,7 +841,7 @@ module pvm_compile {
             # the entry of the position table belongs to the last word that the instruction makes
             finish(c, out, arg(i, 1))
             k := vector.len(out) - 1
-            vector.set(out, k, mk('At, [arg(i, 0), vector.get(out, k)]))
+            vector.set(out, k, make('At, [arg(i, 0), vector.get(out, k)]))
         } else if (h == 'GetVar) {
             v := vector.get(vars, arg(i, 1))
             dst := reg_of(c, arg(i, 0))
@@ -852,7 +852,7 @@ module pvm_compile {
             src := reg_of(c, arg(i, 1))
             if (v[V_ENV]) finish_plain(c, out, ENVSET{src, hops(c, v), v[V_SLOT]})
             else if (v[V_REG] != src) finish_plain(c, out, MOVE{v[V_REG], src})
-        } else finish_plain(c, out, mk(h, map(o -> reg_of(c, o), list_of_args(i))))
+        } else finish_plain(c, out, make(h, map(o -> reg_of(c, o), list_of_args(i))))
     }
 
     finish_plain(c, out, i) := {
@@ -894,12 +894,12 @@ module pvm_compile {
     }
 
     compile_in(exprs) = {
-        ctxs = vector.new()
+        contexts = vector.new()
         vars = vector.new()
         nlabel = 0
-        main := new_ctx(none, true, 0, false)
+        main := new_context(none, true, 0, false)
         names := map(e -> {
-            c := new_ctx(none, true, 0, false)
+            c := new_context(none, true, 0, false)
             cxt(c, e, 0)
             c[X_NAME]
         }, exprs)
@@ -910,7 +910,7 @@ module pvm_compile {
         }, names)
         if (length(names) == 0) emit(main, LOADNONE{t(main, 0), 1})
         emit(main, RET{t(main, 0)})
-        cs := vector.to_list(ctxs)
+        cs := vector.to_list(contexts)
         each(place, cs)
         map(code_of, cs)
     }

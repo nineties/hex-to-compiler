@@ -1,0 +1,55 @@
+# object: relocatable objects, which hold named sections, symbols and relocations
+# Copyright (C) 2026 nineties
+#
+# An object is Object{name, sections, order, symbols, rels}: sections is a table from the name of a section to Section{name, kind, align, buf},
+# order the names in the order they were made, symbols a vector of Symbol{name, section, off, global}, and rels a vector of Rel{section, off, kind, symbol, addend}.
+# kind of a section is 'code, 'data or 'bss. buf is a buffer of bytes.pk; a 'bss section holds zeros that the linker does not copy.
+# A relocation writes a 32-bit value at off of the section: for 'Abs32 the address of symbol plus addend,
+# and for 'Pc32 the address of symbol plus addend minus the address of the place that is written.
+# A symbol that has a relocation and no definition in any object is left to the linker.
+
+use("base")
+use("list")
+use("table")
+use("vector")
+use("bytes")
+
+module object {
+
+export new(name) := Object{name, table.new(), vector.new(), vector.new(), vector.new()}
+
+export name(Object{n, _, _, _, _}) := n
+
+# section(o, name, kind, align) is the section name of o, which is made when o has none
+export section(Object{_, sections, order, _, _}, name, kind, align) := {
+    s := table.get(sections, name, none)
+    if (s == none) {
+        s = Section{name, kind, align, bytes.new()}
+        table.set(sections, name, s)
+        vector.push(order, name)
+    }
+    s
+}
+
+export buf(Section{_, _, _, b}) := b
+
+export sections(Object{_, sections, order, _, _}) := map(n -> table.get(sections, n, none), vector.to_list(order))
+
+export define(Object{_, _, _, symbols, _}, name, section, off, global) := vector.push(symbols, Symbol{name, section, off, global})
+
+export reloc(Object{_, _, _, _, rels}, section, off, kind, symbol, addend) := vector.push(rels, Rel{section, off, kind, symbol, addend})
+
+export symbols(Object{_, _, _, symbols, _}) := vector.to_list(symbols)
+export relocs(Object{_, _, _, _, rels}) := vector.to_list(rels)
+
+# add_data(o, datas) adds the data IRData{name, section, align, content, global} to the object o, where section is ".data", ".rodata" or ".bss"
+# and content a buffer (the size of a .bss object is the length of its buffer of zeros)
+export add_data(o, datas) := each((IRData{n, secname, al, content, global}) -> {
+    s := section(o, secname, if (secname == ".bss") 'bss else 'data, 16)
+    b := buf(s)
+    bytes.align(b, al)
+    define(o, n, secname, bytes.len(b), global)
+    bytes.append(b, content)
+}, datas)
+
+}
