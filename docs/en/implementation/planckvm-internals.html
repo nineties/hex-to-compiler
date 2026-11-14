@@ -44,7 +44,7 @@
 <h2>Policy</h2>
 <ul>
 <li>The evaluator is a bytecode interpreter that translates an expression into instructions and runs them in an instruction loop. The loop never calls itself, and host effects and continuations are not used.</li>
-<li>The instructions are not written after they are made (the result of writing them is undefined), and pattern matching lies in the code of the callee.</li>
+<li>A code is checked once, when it is made and when an image is loaded; no instruction checks its operands. Pattern matching lies in the code of the callee.</li>
 </ul>
 
 <h2>Stacks</h2>
@@ -78,6 +78,17 @@
 <li>It drops what is above F, makes a frame with <code>kind = 2</code> at the position of F, puts the sent value and the continuation in <code>R[0]</code> and <code>R[1]</code>, and chooses a handler. When none matches, it makes a new continuation from the slice up to the next boundary G with the original slice appended, and repeats this for G.</li>
 <li>Resuming copies the slices above the window of the caller, adds that position to the <code>base</code> of each frame, makes the last frame current and goes on from the saved <code>pc</code>. The <code>ret</code> of the first frame (the boundary) is decided as for a frame that <code>CALL</code> pushes.</li>
 </ol>
+
+<h2>Checks of codes and images</h2>
+<p>The conditions of a code are in "Constant table and a correct code" of <a href="planckvm-isa.html">the instructions</a>. <code>_code_new</code> copies <code>instrs</code>, <code>consts</code> and <code>locs</code>, and checks the code that refers to the copies.</p>
+<p>An image is checked as follows before its codes are, and the program stops with <code>invalid image</code> when a check fails.</p>
+<ul>
+<li>The size of the file is a multiple of 8, and one object or more follow the 17 root words.</li>
+<li>From the word 17, the file is a sequence of objects whose headers are valid, whose kinds are 0 to 10, 13 or 15, and whose sizes end within the file.</li>
+<li>The roots are references: the word 0 is a Lambda, the words 1 to 6 are symbols, and the words 7 to 16 are types.</li>
+<li>A word that holds a value is an integer, or a reference to the start of an object.</li>
+<li>The words of each kind are as in <a href="planckvm-repr.html">internal representation</a>. The length of a string, the count of a plain array and the number of digits of a big integer fit the size; the name of a symbol is a string, the head of a M-expression is a symbol, the code of a Lambda is a code, and the number and the arity of a builtin are those of the table of builtins. A type has the size 4 and a cell has the size 3.</li>
+</ul>
 
 <h2>Heap and garbage collection</h2>
 <p>The words of values and the contents of objects are in <a href="planckvm-repr.html">planckvm internal representation</a>. The GC is a copying collector of two generations, young and old, written in native as a part of the evaluator. Allocation is from the young generation, and only an object that does not fit goes directly to the old one.</p>

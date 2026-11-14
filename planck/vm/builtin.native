@@ -13,6 +13,7 @@ import dec
 import num
 import nb
 import arr
+import verify
 
 fun out_lit(m: &static [u8]) {
     write(1, m)
@@ -572,7 +573,7 @@ fun do_cell_set[r](h: &mutable r [u8], st: &mutable r [i64], rs: &r [i64], a: i6
 
 # _code_new(arity, nregs, instrs, consts, file, locs): a code, a data of the type Code (the word 16 of the heap). instrs is a u32 plain array of the instruction words
 # and consts an array of values. file is the index in consts of the string of the file name, or -1. locs is a u32 plain array of the entries (pc, line, column) of
-# the position table. The code keeps the arrays that are given (it does not copy them). See code_arity in ctl.native for the fields.
+# the position table. The code keeps copies of the three arrays, so that the program cannot change them after the check. The code is checked (verify.native) and the program stops when it is not valid. See code_arity in ctl.native for the fields.
 fun do_code_new[r](h: &mutable r [u8], st: &mutable r [i64], rs: &r [i64], a: i64) -> i64 {
     let ar = arg_int(h, st, rs, a, 0, "_code_new: not an integer")
     let nr = arg_int(h, st, rs, a, 1, "_code_new: not an integer")
@@ -595,16 +596,30 @@ fun do_code_new[r](h: &mutable r [u8], st: &mutable r [i64], rs: &r [i64], a: i6
     let nw = hg(h, (ls >> 3) + 3)
     if nw % 3 != 0 { return fail(h, st, "_code_new: the positions are not a u32 plain array") }
     if fi < -1 or fi >= m { return fail(h, st, "_code_new: out of range") }
+    let ni = hg(h, (ins >> 3) + 3)
+    let ins2 = new_plain(h, st, 7, ni)
+    for k in 0 as i64..(ni * 4 + 7) / 8 {
+        hp(h, (ins2 >> 3) + 4 + k, hg(h, (ins >> 3) + 4 + k))
+    }
+    let ks2 = new_array(h, st, m)
+    for k in 0 as i64..m {
+        hp(h, (ks2 >> 3) + 2 + k, hg(h, (ks >> 3) + 2 + k))
+    }
+    let ls2 = new_plain(h, st, 7, nw)
+    for k in 0 as i64..(nw * 4 + 7) / 8 {
+        hp(h, (ls2 >> 3) + 4 + k, hg(h, (ls >> 3) + 4 + k))
+    }
     let c = alloc_obj(h, st, 15, 9)
     let cb = c >> 3
     hp(h, cb + 2, hg(h, 16))
     hp(h, cb + 3, nr * 2 + 1)
     hp(h, cb + 4, ar * 2 + 1)
-    hp(h, cb + 5, ins)
-    hp(h, cb + 6, ks)
+    hp(h, cb + 5, ins2)
+    hp(h, cb + 6, ks2)
     hp(h, cb + 7, -1)
-    hp(h, cb + 8, ls)
+    hp(h, cb + 8, ls2)
     hp(h, cb + 9, fi * 2 + 1)
+    check_code(h, c)
     c
 }
 

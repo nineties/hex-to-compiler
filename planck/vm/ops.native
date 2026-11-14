@@ -161,7 +161,10 @@ fun exec_obj[r](h: &mutable r [u8], st: &mutable r [i64], rs: &mutable r [i64], 
         }
         p(rs, base + a, fin_mexpr(h, st, m))
     } else if op == 30 {
-        p(rs, base + a, mexpr_arg(h, g(rs, base + b), c))
+        let m = g(rs, base + b)
+        if not is_mexpr(h, m) { die("invalid bytecode: FIELD: not a m-expr") }
+        if c >= mexpr_arity(h, m) { die("invalid bytecode: FIELD: the index is out of range") }
+        p(rs, base + a, mexpr_arg(h, m, c))
     } else if op == 59 {
         p(rs, base + a, small(hash_value(h, st, g(rs, base + b))))
     } else if op == 51 {
@@ -217,6 +220,10 @@ fun exec_read[r](h: &mutable r [u8], st: &mutable r [i64], rs: &mutable r [i64],
             p(rs, base + a, mk_int(char_at(h, v, b)))
         }
     } else if is_data(h, v) {
+        if (op == 49 or op == 50) and type_of(h, v) == hg(h, 16) {
+            fail(h, st, "ARG: a code has no field that a program can read")
+            return -2
+        }
         if op == 48 {
             p(rs, base + a, mk_int(data_arity(h, v)))
         } else if op == 49 {

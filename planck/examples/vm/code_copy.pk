@@ -1,0 +1,30 @@
+# A code that is made while the program runs is checked and keeps its own copies of the instructions and the constants: changing the arrays after _code_new
+# does not change the code, and the fields of a code cannot be read.
+use("pvm/compile")
+use("bytes")
+
+prog := [
+    # LOADI R0 42; RET R0
+    `(ins := plain_array('u32, 2)),
+    `(plain_set(ins, 0, 2752513)),
+    `(plain_set(ins, 1, 22)),
+    `(code := _code_new(0, 1, ins, array(0), -1, plain_array('u32, 0))),
+    `(f := _lambda(code)),
+    # an instruction word that no instruction has, written after the check
+    `(plain_set(ins, 0, 62)),
+    `(println(f())),
+    # GETGLOBAL R0 K0; RET R0, and the constant is changed from a cell to an integer after the check
+    `(cell := _cell_new('copied_var, 1)),
+    `(_cell_set(cell, 77)),
+    `(ins2 := plain_array('u32, 2)),
+    `(plain_set(ins2, 0, 4)),
+    `(plain_set(ins2, 1, 22)),
+    `(ks := array(1)),
+    `(array_set(ks, 0, cell)),
+    `(g := _lambda(_code_new(0, 2, ins2, ks, -1, plain_array('u32, 0)))),
+    `(array_set(ks, 0, 5)),
+    `(println(g())),
+    `(println(handle arg(code, 2) with (Error{loc, msg}, k) -> msg))
+]
+
+write_file(array_get(argv(), 1), bytes.to_u8(pvm_compile.image(prog)))
