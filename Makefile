@@ -54,7 +54,7 @@ VM_ALL_EXAMPLES := $(wildcard planck/examples/vm/*.pk)
 VM0_EXAMPLES := $(filter-out planck/examples/vm/float.pk planck/examples/vm/plain_float.pk planck/examples/vm/trans.pk planck/examples/vm/bits.pk planck/examples/vm/equality.pk planck/examples/vm/plain_int.pk,$(wildcard planck/examples/vm/*.pk))
 BACKEND_EXAMPLES := $(wildcard planck/examples/backend/*.pk)
 
-.PHONY: clean test test-planck0 test-all test-vm0 test-vm test-udiv test-fm preprocess
+.PHONY: clean test test-planck0 test-all test-vm0 test-vm test-vm-invalid test-udiv test-fm preprocess
 clean:
 	rm -f planck/lib/*.pkm planck/lib/*/*.pkm
 	rm -f pforth
@@ -90,7 +90,7 @@ test-planck0: planck0
 # planck/vm is built as units. tmp-vm is VM0, the planckvm without floating point: its flt, dec and trans are those of planck/vm0, which stop on a float.
 # tmp-vmf is the planckvm with floating point: it has the flt, dec and trans of planck/vm, and fm with the coefficients that VM0 made (fmk).
 # The other units are the same in both, so they are compiled once. The standard input of an example is the file of the same name with .in, or empty.
-VM_UNITS := mem gc udiv big flt dec num obj bit trans nb arr eq builtin hsh ctl ops vm
+VM_UNITS := mem gc udiv big flt dec num obj bit trans nb arr eq verify builtin hsh ctl ops vm
 VM_BUILD := tmp-vm-build
 VM_UNIT_FILES := $(addprefix $(VM_BUILD)/,$(addsuffix .unit,$(VM_UNITS)))
 # everything that a unit depends on besides its source: the compiler, which is planck/vasmc.pk and the libraries that it uses
@@ -150,6 +150,23 @@ test-vm: tmp-vmf
 		echo "$$f: ok"; \
 	done; rm -f tmp-vmf.img tmp-vmf.out
 
+# the images that planckvm must stop on (planck/tests/vm_invalid.pk makes an image for each case and the file cases.txt of the lines name|message):
+# each stops with the status 1, the message on the standard error and nothing on the standard output
+test-vm-invalid: tmp-vmf planck0
+	rm -rf tmp-vm-invalid && mkdir tmp-vm-invalid
+	./planck0 planck/tests/vm_invalid.pk tmp-vm-invalid
+	@while IFS='|' read -r name msg; do \
+		./tmp-vmf tmp-vm-invalid/$$name.img > tmp-vm-invalid/out 2> tmp-vm-invalid/err < /dev/null; s=$$?; \
+		if [ $$s -ne 1 ]; then echo "$$name: exit status $$s, not 1"; exit 1; fi; \
+		if [ "$$(cat tmp-vm-invalid/err)" != "$$msg" ]; then echo "$$name: the message is"; cat tmp-vm-invalid/err; exit 1; fi; \
+		if [ -s tmp-vm-invalid/out ]; then echo "$$name: it wrote to the standard output"; exit 1; fi; \
+		echo "$$name: stops"; \
+	done < tmp-vm-invalid/cases.txt
+	@./tmp-vmf tmp-vm-invalid/missing.img > /dev/null 2> tmp-vm-invalid/err; s=$$?; \
+		if [ $$s -ne 1 ] || [ "$$(cat tmp-vm-invalid/err)" != "cannot open the image" ]; then echo "a missing image: exit status $$s"; exit 1; fi; \
+		echo "a missing image: stops"
+	rm -rf tmp-vm-invalid
+
 test-vm0: tmp-vm
 	@for f in $(VM0_EXAMPLES); do \
 		./planck0 $$f tmp-vm.img || exit 1; \
@@ -180,6 +197,7 @@ test-all: test-planck0
 	$(MAKE) test-udiv
 	$(MAKE) test-vm0
 	$(MAKE) test-vm
+	$(MAKE) test-vm-invalid
 	$(MAKE) test-fm
 	@for f in $(PLANCK_EXAMPLES); do \
 		./planck0 $$f > tmp-example.out || exit 1; \

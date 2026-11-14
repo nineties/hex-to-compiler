@@ -3,7 +3,7 @@
 #   make -f docs/tools/wasm.mk
 # The units of planck/vm are compiled for the word of 4 bytes. The coefficients of fm are those that VM0 made (tmp-vm-build/fmk.native).
 B := tmp-wasm-build
-UNITS := mem gc udiv big flt dec num obj bit trans nb arr eq builtin hsh ctl ops vm
+UNITS := mem gc udiv big flt dec num obj bit trans nb arr eq verify builtin hsh ctl ops vm
 VASMC_SOURCES := planck/vasmc.pk planck/init.pk planck/peg.pk planck/syntax.pk $(shell find planck/lib -name "*.pk")
 imports = $(addprefix $(B)/,$(addsuffix .unit,$(shell sed -n 's/^import \([A-Za-z0-9_]*\).*/\1/p' planck/vm/$(1).native)))
 define RULE

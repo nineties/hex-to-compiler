@@ -1,6 +1,6 @@
 <!--title planckvm の命令-->
 <h1>planckvm の命令</h1>
-<p class="lead">1命令は 32 ビットで、高頻度の操作だけを命令にします。他は組み込み関数です。コードの正しさは生成する側が守り、評価器は検査しません。この頁はフォーマット、命令、組み込み、planck の各機能に対応する命令を定めます。機械と値は<a href="planckvm.html">実行モデルと値</a>に、実装の設計は<a href="planckvm-internals.html">内部仕様</a>にあります。</p>
+<p class="lead">1命令は 32 ビットで、高頻度の操作だけを命令にします。他は組み込み関数です。この頁はフォーマット、命令、組み込み、planck の各機能に対応する命令を定めます。機械と値は<a href="planckvm.html">実行モデルと値</a>に、実装の設計は<a href="planckvm-internals.html">内部仕様</a>にあります。</p>
 
 <h2 id="format">バイトコードのフォーマット</h2>
 <p>基本単位は 64 ビットの語で、ビットの番号は最下位を 0 とします。命令は 32 ビットで、コードの <code>instrs</code>（<code>u32</code> の plain array）の1要素に置きます。1つの Lambda かトップレベルの式が1つのコードで、入れ子の関数のコードは外側の定数表に入ります。コードは型 <code>Code</code> のユーザーデータで、オブジェクトの形は<a href="planckvm-repr.html">内部表現</a>にあります。</p>
@@ -36,10 +36,18 @@ AD | D の上位 16/16 | A の上位 8/8 | EXT (8)/8
 </ul>
 
 <h3>定数表と正しいコード</h3>
-<p>定数表の要素は値1語です。リテラル・<code>Quote</code> の中身・定数だけの M式は <code>LOADK</code>、シンボルは <code>MATCHHEAD</code>、セルは <code>GETGLOBAL</code> <code>SETGLOBAL</code>、入れ子のコードは <code>CLOSURE</code> が指します。生成する側は次を守ります。</p>
+<p>定数表の要素は値1語です。リテラル・<code>Quote</code> の中身・定数だけの M式は <code>LOADK</code>、シンボルは <code>MATCHHEAD</code>、セルは <code>GETGLOBAL</code> <code>SETGLOBAL</code>、入れ子のコードは <code>CLOSURE</code> が指します。コードは次を満たします。満たさないコードは、作るとき（<code>_code_new</code>）とイメージを読み込むときに、<code>invalid bytecode</code> で止まります。</p>
 <ul>
-<li>ジャンプ先は命令の先頭で、命令列の最後は <code>RET</code> <code>TCALL</code> <code>JMP</code> <code>HALT</code> <code>NEXT</code> のいずれかです。</li>
-<li>条件の命令の次の命令は <code>JMP</code>、<code>MATCH</code> で始まる命令の次の命令は <code>NEXT</code> か <code>JMP</code> です。</li>
+<li>オペコードは、評価器が実行する命令のどれかです。</li>
+<li>レジスタ番号は <code>nregs</code> より小さい値です。範囲で使う命令は、その全体が窓に入ります。<code>CALL</code> <code>TCALL</code> <code>BUILD</code> は <code>R[B]</code> から <code>R[B+C]</code>、<code>TUPLE</code> は <code>R[B]</code> から <code>R[B+C-1]</code>、<code>LOADNONE</code> は <code>R[A]</code> から <code>R[A+B-1]</code>、<code>HANDLE</code> は <code>R[B]</code> と <code>R[B+1]</code> です。</li>
+<li>定数表の添字は定数の個数より小さく、<code>GETGLOBAL</code> と <code>SETGLOBAL</code> が指す定数はセル、<code>CLOSURE</code> が指す定数はコードです。</li>
+<li>ジャンプ先は命令列の中の命令の先頭で、命令列の最後は <code>RET</code> <code>TCALL</code> <code>JMP</code> <code>HALT</code> <code>NEXT</code> のいずれかです。</li>
+<li>条件の命令の次の命令は <code>JMP</code>、<code>MATCH</code> で始まる命令の次の命令は <code>NEXT</code> か <code>JMP</code> で、どちらの次にも命令があります。条件の命令の <code>k</code> は 0 か 1 です。</li>
+<li><code>arity</code> は 255 以下で <code>nregs</code> 以下、<code>nregs</code> は 65535 以下です。<code>params</code> と <code>file</code> は -1 か定数表の添字で、<code>file</code> の定数は文字列です。位置の表の <code>pc</code> は命令列の中の添字で、昇順に並びます。</li>
+</ul>
+<p>次の検査は命令が実行するときに行い、満たさなければ <code>invalid bytecode</code> で止まります。<code>ENVGET</code> と <code>ENVSET</code> は、たどった先が環境で、スロットの番号がその範囲に入ること。<code>FIELD</code> は、<code>R[B]</code> が M式で、<code>C</code> がその引数の個数より小さいことです。</p>
+<p>次は生成する側が守ります。</p>
+<ul>
 <li>局所変数は、一時の値より小さい番号のレジスタに置きます。<code>CALL</code> <code>HANDLE</code> の時点で生きている値は、すべて <code>R[B]</code> より下に置きます（<code>HANDLE</code> は <code>R[B]</code> と <code>R[B+1]</code> も保ちます）。</li>
 <li><code>NEWENV</code> は、コードの中で1回だけ、パターンの照合がすべて成功したあとに実行します。照合が終わるまで <code>R[0]</code> から <code>R[arity-1]</code> を書き換えません。</li>
 </ul>
@@ -55,8 +63,8 @@ AD | D の上位 16/16 | A の上位 8/8 | EXT (8)/8
 <tr><td>GETGLOBAL</td><td>0x04</td><td>AD A D</td><td>R[A] := K[D] のセルの値</td><td></td></tr>
 <tr><td>SETGLOBAL</td><td>0x05</td><td>AD A D</td><td>K[D] のセルの値を R[A] にする（Def と Set）</td><td>W</td></tr>
 <tr><td>NEWENV</td><td>0x06</td><td>AD D</td><td>スロット D 個（none）の環境を作り、現在の環境を親にして現在の環境にする</td><td>S</td></tr>
-<tr><td>ENVGET</td><td>0x07</td><td>ABC A B C</td><td>R[A] := 親を B 回たどった環境のスロット C</td><td></td></tr>
-<tr><td>ENVSET</td><td>0x08</td><td>ABC A B C</td><td>親を B 回たどった環境のスロット C を R[A] にする</td><td>W</td></tr>
+<tr><td>ENVGET</td><td>0x07</td><td>ABC A B C</td><td>R[A] := 親を B 回たどった環境のスロット C</td><td>T</td></tr>
+<tr><td>ENVSET</td><td>0x08</td><td>ABC A B C</td><td>親を B 回たどった環境のスロット C を R[A] にする</td><td>W T</td></tr>
 <tr><td>JMP</td><td>0x09</td><td>J sJ</td><td>pc += sJ</td><td></td></tr>
 <tr><td>TEST</td><td>0x0A</td><td>ABC A k</td><td>R[A] が false 以外なら真</td><td></td></tr>
 <tr><td>TEQ</td><td>0x0B</td><td>ABC A B k</td><td>R[A] == R[B]</td><td><code>_eq</code></td></tr>
@@ -78,7 +86,7 @@ AD | D の上位 16/16 | A の上位 8/8 | EXT (8)/8
 <tr><td>TUPLE</td><td>0x1B</td><td>ABC A B C</td><td>R[A] := Tuple{R[B], ..., R[B+C-1]}</td><td>S</td></tr>
 <tr><td>CONS</td><td>0x1C</td><td>ABC A B C</td><td>R[A] := Cons{R[B], R[C]}</td><td>S</td></tr>
 <tr><td>BUILD</td><td>0x1D</td><td>ABC A B C</td><td>R[A] := 頭が symbol R[B]、引数が R[B+1], ..., R[B+C] の M式</td><td>S T</td></tr>
-<tr><td>FIELD</td><td>0x1E</td><td>ABC A B C</td><td>R[A] := M式 R[B] の C 番目の引数。検査しない</td><td></td></tr>
+<tr><td>FIELD</td><td>0x1E</td><td>ABC A B C</td><td>R[A] := M式 R[B] の C 番目の引数</td><td>T</td></tr>
 <tr><td>MATCHEQ</td><td>0x1F</td><td>AD A D</td><td>R[A] と K[D] が EQ で等しければ次の命令を飛ばす</td><td></td></tr>
 <tr><td>MATCHHEAD</td><td>0x20</td><td>ABC A B C</td><td>R[A] が頭 K[B]、引数 C 個の M式なら次の命令を飛ばす</td><td></td></tr>
 <tr><td>MATCHTYPE</td><td>0x21</td><td>ABC A B</td><td>R[A] の型が R[B] なら次の命令を飛ばす</td><td></td></tr>
@@ -97,7 +105,7 @@ AD | D の上位 16/16 | A の上位 8/8 | EXT (8)/8
 <tr><td>NE</td><td>0x2E</td><td>ABC A B C</td><td>EQ の逆</td><td><code>_ne</code></td></tr>
 <tr><td>HEAD</td><td>0x2F</td><td>ABC A B</td><td>R[A] := M式 R[B] の頭</td><td><code>head</code> T</td></tr>
 <tr><td>ARITY</td><td>0x30</td><td>ABC A B</td><td>R[A] := M式 R[B] の引数の個数（ユーザーデータならフィールドの数）</td><td><code>arity</code> T</td></tr>
-<tr><td>ARG</td><td>0x31</td><td>ABC A B C</td><td>R[A] := M式 R[B] の R[C] 番目の引数（0 始まり。ユーザーデータならフィールド）</td><td><code>arg</code> T</td></tr>
+<tr><td>ARG</td><td>0x31</td><td>ABC A B C</td><td>R[A] := M式 R[B] の R[C] 番目の引数（0 始まり。ユーザーデータならフィールド。<code>Code</code> のフィールドは読めない）</td><td><code>arg</code> T</td></tr>
 <tr><td>ARGI</td><td>0x32</td><td>ABC A B C</td><td>同上。番目が即値 C</td><td><code>arg</code> T</td></tr>
 <tr><td>PUSH</td><td>0x33</td><td>ABC A B C</td><td>R[A] := M式 R[B] の引数の末尾に R[C] を加えた M式</td><td><code>push</code> S T</td></tr>
 <tr><td>TYPEOF</td><td>0x34</td><td>ABC A B</td><td>R[A] := R[B] の型（<code>Int</code>・<code>String</code> など）</td><td><code>type</code></td></tr>
@@ -121,7 +129,7 @@ AD | D の上位 16/16 | A の上位 8/8 | EXT (8)/8
 <li><code>eval(e)</code>: M式 e を現在の大域環境でコードに変換して実行します。コンパイルエラーは実行時エラーと同じく止まり、その <code>loc</code> は、コンパイルに失敗した式を囲む一番内側の <code>At</code> の位置です。<code>At</code> が無ければ <code>none</code> です。内側のフレームは通常のフレームなので、<code>eval</code> の中の <code>PERFORM</code> でも複製できます。</li>
 <li><code>_set_file(path)</code>: 読み込み中のファイルを path にし、前の値を返します。大域変数の定義元の判定に使います。</li>
 <li>システムの組み込み: <code>_sys_open(path)</code> は読み込み用にファイルを開き、記述子か負の数を返します。<code>_sys_read(fd, buf, n)</code> は <code>u8</code> の plain array buf の先頭へ最大 n バイトを読み、読んだバイト数を返します（終わりでは 0）。<code>_sys_write(fd, buf, n)</code> は buf の先頭 n バイトを書き、書いたバイト数を返します。<code>_sys_close(fd)</code> は記述子を閉じます。<code>_sys_argc()</code> と <code>_sys_argv(i)</code> は機械のコマンドラインの個数と文字列で、先頭が機械、2番目がイメージです。</li>
-<li>実行中にコードを作る組み込み: <code>_code_new(arity, nregs, instrs, consts, file, locs)</code> は、<code>u32</code> の plain array instrs と array consts から、この頁のフォーマットどおりのコードを作ります。instrs・consts・locs は写さず、コードがそのまま持ちます。<code>file</code> はファイル名の文字列の consts での添字（無ければ -1）で、<code>u32</code> の plain array locs は位置の表の項 <code>pc</code>・<code>line</code>・<code>column</code> を並べたものです。<code>_lambda(code)</code> はコードの環境なしの Lambda です。<code>_cells()</code> は大域変数のセルすべての array です。<code>_cell_new(symbol, g)</code> は世代 g で値が <code>none</code> のセルを作ります。<code>_cell_field(c, i)</code> はセル c の値（i が 0）・名前の symbol（1）・世代（2）で、<code>_cell_set(c, v)</code> は値を書きます。</li>
+<li>実行中にコードを作る組み込み: <code>_code_new(arity, nregs, instrs, consts, file, locs)</code> は、<code>u32</code> の plain array instrs と array consts から、この頁のフォーマットどおりのコードを作ります。コードは instrs・consts・locs を写して持ちます。作ったあとにこれらの配列を書き換えても、コードは変わりません。作ったコードは上の条件を検査し、満たさなければ止まります。<code>file</code> はファイル名の文字列の consts での添字（無ければ -1）で、<code>u32</code> の plain array locs は位置の表の項 <code>pc</code>・<code>line</code>・<code>column</code> を並べたものです。<code>_lambda(code)</code> はコードの環境なしの Lambda です。<code>_cells()</code> は大域変数のセルすべての array です。<code>_cell_new(symbol, g)</code> は世代 g で値が <code>none</code> のセルを作ります。<code>_cell_field(c, i)</code> はセル c の値（i が 0）・名前の symbol（1）・世代（2）で、<code>_cell_set(c, v)</code> は値を書きます。</li>
 <li>ビット演算は負の数も含めて無限桁の 2 の補数として扱います。</li>
 </ul>
 

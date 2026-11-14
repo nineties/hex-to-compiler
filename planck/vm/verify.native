@@ -1,0 +1,378 @@
+# verify: the checks of planckvm on the bytecode
+#
+# The bytecode is not trusted. A code is checked when it is made (_code_new in builtin.native) and the codes of an image are checked when the image is loaded
+# (vm.native); a code that is not valid stops the program with a message that begins with "invalid bytecode" (an instruction or the fields of a code) or
+# "invalid image" (the objects of an image). The instructions then run with no check of the operands that are known from the code:
+#   the opcode is one that the machine has (EXT is not);
+#   a register, or the registers that an instruction reads or writes as a range, are in the window: below nregs;
+#   a constant index is below the number of the constants, and the constant that GETGLOBAL and SETGLOBAL name is a cell, the one that CLOSURE names a code;
+#   a jump goes to an instruction of the code; a condition instruction and a match instruction are followed by the instruction that the loop skips (JMP, and
+#   NEXT or JMP) and by one more instruction; the last instruction is RET, TCALL, JMP, HALT or NEXT.
+# What depends on the values that run is checked by the instructions: the environment of ENVGET and ENVSET (ctl.native), FIELD (ops.native), the calls,
+# the arithmetic and the arrays.
+# A code keeps its own copies of the instructions and the constants (see _code_new), so that they are not changed after the check.
+import mem
+import obj
+import arr
+
+# the instruction that comes after the instruction at pc, or -1 when there is none
+fun next_word[r](h: &r [u8], ib: i64, pc: i64, n: i64) -> i64 {
+    if pc + 1 >= n { return -1 }
+    ld_u32(h, ib + (pc + 1) * 4)
+}
+
+fun reg_ok(x: i64, nr: i64) {
+    if x >= nr { die("invalid bytecode: a register is out of the window") }
+}
+
+# the c registers from x
+fun regs_ok(x: i64, c: i64, nr: i64) {
+    if c > 0 {
+        if x + c > nr { die("invalid bytecode: a register is out of the window") }
+    }
+}
+
+fun k_ok(d: i64, nk: i64) {
+    if d >= nk { die("invalid bytecode: a constant index is out of range") }
+}
+
+fun is_cell_at[r](h: &r [u8], v: i64) -> bool {
+    if (v & 1) == 1 { return false }
+    if kind_of(h, v) != 13 { return false }
+    size_of(h, v) == 3
+}
+
+fun is_code[r](h: &r [u8], v: i64) -> bool {
+    if (v & 1) == 1 { return false }
+    if kind_of(h, v) != 15 { return false }
+    if size_of(h, v) != 9 { return false }
+    hg(h, (v >> 3) + 2) == hg(h, 16)
+}
+
+# the word w of the instruction at pc of a code of n instructions, nr registers and nk constants (the first constant is the word kb of the heap); nxt is the
+# instruction after it, or -1
+fun check_instr[r](h: &r [u8], w: i64, nxt: i64, pc: i64, n: i64, nr: i64, nk: i64, kb: i64) {
+    let op = w & 255
+    let a = (w >> 8) & 255
+    let b = (w >> 16) & 255
+    let c = (w >> 24) & 255
+    let d = (w >> 16) & 65535
+    if op == 0 or op == 33 or op == 35 or (op >= 47 and op <= 48) or (op >= 52 and op <= 53) or op == 58 or op == 59 or op == 30 {
+        # MOVE MATCHTYPE PERFORM HEAD ARITY TYPEOF STRLEN ALEN HASH FIELD
+        reg_ok(a, nr)
+        reg_ok(b, nr)
+        if op == 33 {
+            if nxt < 0 or (((nxt & 255) != 23) and ((nxt & 255) != 9)) or pc + 2 >= n { die("invalid bytecode: a match is not followed by NEXT or JMP") }
+        }
+    } else if (op >= 37 and op <= 41) or (op >= 43 and op <= 46) or op == 26 or op == 28 or op == 49 or op == 51 or op == 54 or op == 55 or op == 57 or op == 60 or op == 61 {
+        # ADD SUB MUL DIV MOD LT GE EQ NE FUSION CONS ARG PUSH ORD AGET ASET PLAINGET PLAINSET
+        reg_ok(a, nr)
+        reg_ok(b, nr)
+        reg_ok(c, nr)
+    } else if op == 42 or op == 50 or op == 56 {
+        # ADDI ARGI AGETI
+        reg_ok(a, nr)
+        reg_ok(b, nr)
+    } else if op >= 11 and op <= 14 {
+        # TEQ TNE TLT TGE
+        reg_ok(a, nr)
+        reg_ok(b, nr)
+        if c > 1 { die("invalid bytecode: the field k of a condition is not 0 or 1") }
+        if nxt < 0 or (nxt & 255) != 9 or pc + 2 >= n { die("invalid bytecode: a condition is not followed by JMP") }
+    } else if op == 10 or (op >= 17 and op <= 19) {
+        # TEST TEQI TLTI TGEI
+        reg_ok(a, nr)
+        if c > 1 { die("invalid bytecode: the field k of a condition is not 0 or 1") }
+        if nxt < 0 or (nxt & 255) != 9 or pc + 2 >= n { die("invalid bytecode: a condition is not followed by JMP") }
+    } else if op == 15 or op == 16 {
+        # TEQK TNEK
+        reg_ok(a, nr)
+        k_ok(b, nk)
+        if c > 1 { die("invalid bytecode: the field k of a condition is not 0 or 1") }
+        if nxt < 0 or (nxt & 255) != 9 or pc + 2 >= n { die("invalid bytecode: a condition is not followed by JMP") }
+    } else if op == 1 or op == 22 or op == 24 or op == 7 or op == 8 {
+        # LOADI RET HALT ENVGET ENVSET
+        reg_ok(a, nr)
+    } else if op == 2 {
+        reg_ok(a, nr)
+        k_ok(d, nk)
+    } else if op == 4 or op == 5 {
+        # GETGLOBAL SETGLOBAL
+        reg_ok(a, nr)
+        k_ok(d, nk)
+        if not is_cell_at(h, hg(h, kb + d)) { die("invalid bytecode: the constant of a global variable is not a cell") }
+    } else if op == 25 {
+        # CLOSURE
+        reg_ok(a, nr)
+        k_ok(d, nk)
+        if not is_code(h, hg(h, kb + d)) { die("invalid bytecode: the constant of a closure is not a code") }
+    } else if op == 31 {
+        # MATCHEQ
+        reg_ok(a, nr)
+        k_ok(d, nk)
+        if nxt < 0 or (((nxt & 255) != 23) and ((nxt & 255) != 9)) or pc + 2 >= n { die("invalid bytecode: a match is not followed by NEXT or JMP") }
+    } else if op == 32 {
+        # MATCHHEAD
+        reg_ok(a, nr)
+        k_ok(b, nk)
+        if nxt < 0 or (((nxt & 255) != 23) and ((nxt & 255) != 9)) or pc + 2 >= n { die("invalid bytecode: a match is not followed by NEXT or JMP") }
+    } else if op == 3 {
+        # LOADNONE
+        regs_ok(a, b, nr)
+    } else if op == 9 {
+        # JMP
+        let t = pc + 1 + s24(w >> 8)
+        if t < 0 or t >= n { die("invalid bytecode: a jump goes out of the code") }
+    } else if op == 20 {
+        # CALL: the function and the c arguments are R[B] to R[B+C]
+        reg_ok(a, nr)
+        reg_ok(b + c, nr)
+    } else if op == 21 {
+        # TCALL
+        reg_ok(b + c, nr)
+    } else if op == 27 {
+        # TUPLE
+        reg_ok(a, nr)
+        regs_ok(b, c, nr)
+    } else if op == 29 {
+        # BUILD: the head and the c arguments
+        reg_ok(a, nr)
+        reg_ok(b + c, nr)
+    } else if op == 34 {
+        # HANDLE: the thunk R[B] and the handler R[B+1]
+        reg_ok(a, nr)
+        reg_ok(b + 1, nr)
+    } else if op != 6 and op != 23 {
+        # NEWENV and NEXT have no operand to check
+        die("invalid bytecode: unknown instruction")
+    }
+}
+
+# the checks of the fields of the code (a value that is a code) and of its instructions
+fun check_code[r](h: &r [u8], code: i64) {
+    if not is_code(h, code) { die("invalid bytecode: not a code") }
+    let cb = code >> 3
+    let nrv = hg(h, cb + 3)
+    let arv = hg(h, cb + 4)
+    if (nrv & 1) != 1 or (arv & 1) != 1 { die("invalid bytecode: the numbers of the registers are not integers") }
+    let nr = nrv >> 1
+    let ar = arv >> 1
+    if nr < 0 or nr > 65535 or ar < 0 or ar > 255 { die("invalid bytecode: the number of the registers is out of range") }
+    if ar > nr { die("invalid bytecode: the arity is more than the number of the registers") }
+    let ins = hg(h, cb + 5)
+    let ks = hg(h, cb + 6)
+    let ls = hg(h, cb + 8)
+    if (ins & 1) == 1 or (ks & 1) == 1 or (ls & 1) == 1 { die("invalid bytecode: the fields of a code are not arrays") }
+    if kind_of(h, ins) != 7 or kind_of(h, ls) != 7 or kind_of(h, ks) != 6 { die("invalid bytecode: the fields of a code are not arrays") }
+    if hg(h, (ins >> 3) + 2) != 7 or hg(h, (ls >> 3) + 2) != 7 { die("invalid bytecode: the instructions and the positions are not u32 plain arrays") }
+    let n = hg(h, (ins >> 3) + 3)
+    let nk = size_of(h, ks) - 1
+    if n < 1 { die("invalid bytecode: a code has no instruction") }
+    let pv = hg(h, cb + 7)
+    let fv = hg(h, cb + 9)
+    if (pv & 1) != 1 or (fv & 1) != 1 { die("invalid bytecode: params and file are not integers") }
+    let params = pv >> 1
+    let fi = fv >> 1
+    if params < -1 or params >= nk { die("invalid bytecode: params is out of range") }
+    if fi < -1 or fi >= nk { die("invalid bytecode: the file name is out of range") }
+    if fi >= 0 {
+        if not is_string(h, hg(h, (ks >> 3) + 2 + fi)) { die("invalid bytecode: the file name is not a string") }
+    }
+    # the position table: the entries pc, line, column in ascending order of pc, and each pc is an instruction
+    let nl = hg(h, (ls >> 3) + 3)
+    if nl % 3 != 0 { die("invalid bytecode: the position table is not made of the entries of 3") }
+    let lb = ls + 32
+    var prev: i64
+    prev = 0
+    for e in 0 as i64..nl / 3 {
+        let pc = ld_u32(h, lb + 12 * e)
+        if pc < prev or pc >= n { die("invalid bytecode: the position table is not in order or has a position out of the code") }
+        prev = pc
+    }
+    let ib = hg(h, cb + 5) + 32
+    let kb = (ks >> 3) + 2
+    for pc in 0 as i64..n {
+        check_instr(h, ld_u32(h, ib + pc * 4), next_word(h, ib, pc, n), pc, n, nr, nk, kb)
+    }
+    let last = ld_u32(h, ib + (n - 1) * 4) & 255
+    if last != 9 and last != 21 and last != 22 and last != 23 and last != 24 {
+        die("invalid bytecode: the code does not end with RET, TCALL, JMP, HALT or NEXT")
+    }
+}
+
+# ---- the image
+
+# the arity of the builtin that has the id, or -1 when there is none in an image (the id 44 is made by _record_new when the program runs)
+fun builtin_arity(id: i64) -> i64 {
+    if id < 0 or id > 57 or id == 44 { return -1 }
+    if id == 49 or id == 51 { return 0 }
+    if id == 4 or id == 35 or id == 38 or id == 46 or id == 47 { return 3 }
+    if id == 55 { return 6 }
+    if id == 3 or id == 5 or (id >= 20 and id <= 22) or (id >= 25 and id <= 29) or id == 31 or id == 34 or id == 37 or id == 42 or id == 43 or id == 52 or id == 53 or id == 54 or id == 57 { return 2 }
+    1
+}
+
+# whether the word v of the image of n words is an integer, or a reference to the start of an object; starts[i] is 1 for the word i that has a header
+fun value_ok[r](starts: &r [u8], n: i64, v: i64) -> bool {
+    if (v & 1) == 1 { return true }
+    if (v & 7) != 0 { return false }
+    let i = v >> 3
+    if i < 17 or i >= n { return false }
+    (starts[i] as i64) == 1
+}
+
+fun image_slot[r](starts: &r [u8], n: i64, v: i64) {
+    if not value_ok(starts, n, v) { die("invalid image: a word is not an integer or a reference to an object") }
+}
+
+# the kind of the object that the checked reference v points to, or -1 for an integer
+fun kind_or_int[r](h: &r [u8], v: i64) -> i64 {
+    if (v & 1) == 1 { return -1 }
+    kind_of(h, v)
+}
+
+# the words of the objects of the image (the words 17 to n) have the kinds, the sizes and the references that the machine takes for granted, and the codes are
+# valid; the image is the first n words of the heap h
+fun verify_image[r](h: &r [u8], n: i64) {
+    if n < 18 { die("invalid image: too short") }
+    let starts = allocate(n + 1, 0 as u8)
+    var at: i64
+    at = 17
+    while at < n {
+        let hd = hg(h, at)
+        if hd < 0 { die("invalid image: a header is not valid") }
+        if (hd & 3) != 1 { die("invalid image: a header is not valid") }
+        let kind = (hd >> 2) & 15
+        if kind == 11 or kind == 12 or kind == 14 { die("invalid image: an object of a kind that an image does not have") }
+        let size = hd >> 6
+        if at + 1 + size > n { die("invalid image: an object goes beyond the end of the file") }
+        starts[at] = 1 as u8
+        at += 1 + size
+    }
+    region q {
+        var sb: &q [u8]
+        sb = &q starts
+        for i in 0 as i64..17 {
+            let v = hg(h, i)
+            if (v & 1) == 1 { die("invalid image: a root is not a reference") }
+            image_slot(sb, n, v)
+        }
+        if kind_of(h, hg(h, 0)) != 8 { die("invalid image: the first root is not a Lambda") }
+        for i in 1 as i64..7 {
+            if kind_of(h, hg(h, i)) != 4 { die("invalid image: a root is not a symbol") }
+        }
+        for i in 7 as i64..17 {
+            let t = hg(h, i)
+            if kind_of(h, t) != 13 or size_of(h, t) != 4 { die("invalid image: a root is not a type") }
+        }
+        at = 17
+        while at < n {
+            let hd = hg(h, at)
+            let kind = (hd >> 2) & 15
+            let size = hd >> 6
+            verify_object(h, sb, n, at, kind, size)
+            at += 1 + size
+        }
+    }
+    # every reference is known to point to an object now, so the codes can be read
+    at = 17
+    while at < n {
+        let hd = hg(h, at)
+        let size = hd >> 6
+        if ((hd >> 2) & 15) == 15 {
+            if hg(h, at + 2) == hg(h, 16) { check_code(h, at * 8) }
+        }
+        at += 1 + size
+    }
+    free(starts)
+}
+
+# the object at the word at: its size and the words that hold values
+fun verify_object[r](h: &r [u8], sb: &r [u8], n: i64, at: i64, kind: i64, size: i64) {
+    if kind == 0 {
+        if size < 2 { die("invalid image: a big integer is too small") }
+        let sg = hg(h, at + 1)
+        let nd = hg(h, at + 2)
+        if sg < 0 or sg > 1 or nd < 0 or nd > size - 2 { die("invalid image: a big integer has a wrong number of digits") }
+    } else if kind == 1 {
+        if size != 1 { die("invalid image: a float is not 1 word") }
+    } else if kind == 2 {
+        if size != 2 { die("invalid image: a complex number is not 2 words") }
+    } else if kind == 3 {
+        if size < 1 { die("invalid image: a string is too small") }
+        let slen = hg(h, at + 1)
+        if slen < 0 or slen > 8 * (size - 1) or size != 1 + (slen + 7) / 8 { die("invalid image: a string has a wrong length") }
+    } else if kind == 4 {
+        if size != 2 { die("invalid image: a symbol is not 2 words") }
+        image_slot(sb, n, hg(h, at + 1))
+        if kind_or_int(h, hg(h, at + 1)) != 3 { die("invalid image: the name of a symbol is not a string") }
+    } else if kind == 5 {
+        if size < 1 { die("invalid image: a m-expr is too small") }
+        for j in 1 as i64..size + 1 {
+            image_slot(sb, n, hg(h, at + j))
+        }
+        if kind_or_int(h, hg(h, at + 1)) != 4 { die("invalid image: the head of a m-expr is not a symbol") }
+    } else if kind == 6 {
+        if size < 1 { die("invalid image: an array is too small") }
+        for j in 2 as i64..size + 1 {
+            image_slot(sb, n, hg(h, at + j))
+        }
+    } else if kind == 7 {
+        if size < 3 { die("invalid image: a plain array is too small") }
+        let t = hg(h, at + 2)
+        let cnt = hg(h, at + 3)
+        if t < 0 or t > 13 { die("invalid image: a plain array has a wrong type") }
+        if cnt < 0 or cnt > 8 * size { die("invalid image: a plain array has a wrong count") }
+        if size != 3 + (cnt * t_size(t) + 7) / 8 { die("invalid image: a plain array has a wrong count") }
+    } else if kind == 8 {
+        if size != 3 { die("invalid image: a Lambda is not 3 words") }
+        image_slot(sb, n, hg(h, at + 2))
+        image_slot(sb, n, hg(h, at + 3))
+        if kind_or_int(h, hg(h, at + 2)) != 15 { die("invalid image: the code of a Lambda is not a code") }
+        if not is_code(h, hg(h, at + 2)) { die("invalid image: the code of a Lambda is not a code") }
+        let ek = kind_or_int(h, hg(h, at + 3))
+        if ek != 12 and ek != 4 { die("invalid image: the environment of a Lambda is not an environment") }
+    } else if kind == 9 {
+        if size < 2 { die("invalid image: a Fusion is too small") }
+        for j in 2 as i64..size + 1 {
+            image_slot(sb, n, hg(h, at + j))
+            let fk = kind_or_int(h, hg(h, at + j))
+            if fk != 8 and fk != 10 { die("invalid image: an alternative of a Fusion is not a function") }
+        }
+    } else if kind == 10 {
+        if size != 4 { die("invalid image: a builtin is not 4 words") }
+        let idv = hg(h, at + 2)
+        let arv = hg(h, at + 3)
+        if (idv & 1) != 1 or (arv & 1) != 1 { die("invalid image: the id and the arity of a builtin are not integers") }
+        if builtin_arity(idv >> 1) != (arv >> 1) { die("invalid image: a builtin has an id that does not exist or a wrong arity") }
+        image_slot(sb, n, hg(h, at + 4))
+    } else if kind == 13 {
+        if size == 3 {
+            # a cell of a global variable: the value, the name and the generation
+            image_slot(sb, n, hg(h, at + 1))
+            image_slot(sb, n, hg(h, at + 2))
+            if kind_or_int(h, hg(h, at + 2)) != 4 { die("invalid image: the name of a cell is not a symbol") }
+            if (hg(h, at + 3) & 1) != 1 { die("invalid image: the generation of a cell is not an integer") }
+        } else if size == 4 {
+            # a type: the number, the name, the field names and the type
+            for j in 2 as i64..5 {
+                image_slot(sb, n, hg(h, at + j))
+            }
+            if kind_or_int(h, hg(h, at + 2)) != 4 { die("invalid image: the name of a type is not a symbol") }
+            if kind_or_int(h, hg(h, at + 3)) != 5 { die("invalid image: the fields of a type are not a Tuple") }
+            if kind_or_int(h, hg(h, at + 4)) != 13 { die("invalid image: the type of a type is not a type") }
+        } else {
+            die("invalid image: a type or a cell has a wrong size")
+        }
+    } else if kind == 15 {
+        if size < 2 { die("invalid image: a data is too small") }
+        for j in 2 as i64..size + 1 {
+            image_slot(sb, n, hg(h, at + j))
+        }
+        let ty = hg(h, at + 2)
+        if kind_or_int(h, ty) != 13 or size_of(h, ty) != 4 { die("invalid image: the type of a data is not a type") }
+        if ty == hg(h, 16) and size != 9 { die("invalid image: a code is not 9 words") }
+    } else {
+        die("invalid image: an object of an unknown kind")
+    }
+}

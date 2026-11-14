@@ -39,7 +39,7 @@
 </ol></details></nav>
 <main>
 <h1>planckvm instructions</h1>
-<p class="lead">An instruction is 32 bits, and only high-frequency operations are instructions. Everything else is a builtin function. The code generator keeps the code correct, and the evaluator does not check it. This page defines the bytecode format, the instructions, the builtins and the instructions for each feature of planck. The machine and the values are in <a href="planckvm.html">planckvm: execution model and values</a>, and the design inside an implementation is in <a href="planckvm-internals.html">planckvm internals</a>.</p>
+<p class="lead">An instruction is 32 bits, and only high-frequency operations are instructions. Everything else is a builtin function. This page defines the bytecode format, the instructions, the builtins and the instructions for each feature of planck. The machine and the values are in <a href="planckvm.html">planckvm: execution model and values</a>, and the design inside an implementation is in <a href="planckvm-internals.html">planckvm internals</a>.</p>
 
 <h2 id="format">Bytecode format</h2>
 <p>The basic unit is a 64-bit word, and bits are numbered from 0 at the least significant bit. An instruction is 32 bits, and one instruction is an element of <code>instrs</code> (a <code>u32</code> plain array) of the code. One lambda or one top-level expression is one code. The code of a nested function lies in the constant table of the outer code. A code is a user data of the type <code>Code</code>, and its shape as an object is in <a href="planckvm-repr.html">Internal representation</a>.</p>
@@ -84,10 +84,18 @@
 </ul>
 
 <h3>Constant table and a correct code</h3>
-<p>An element of the constant table is one value word. <code>LOADK</code> takes literals, the content of a <code>Quote</code> and an M-expression of constants, <code>MATCHHEAD</code> takes symbols, <code>GETGLOBAL</code> and <code>SETGLOBAL</code> take cells, and <code>CLOSURE</code> takes a nested code. The code generator keeps the following.</p>
+<p>An element of the constant table is one value word. <code>LOADK</code> takes literals, the content of a <code>Quote</code> and an M-expression of constants, <code>MATCHHEAD</code> takes symbols, <code>GETGLOBAL</code> and <code>SETGLOBAL</code> take cells, and <code>CLOSURE</code> takes a nested code. A code meets the following. A code that does not meet them stops with <code>invalid bytecode</code> when it is made (<code>_code_new</code>) and when an image is loaded.</p>
 <ul>
-<li>A jump goes to the start of an instruction, and the last instruction is one of <code>RET</code>, <code>TCALL</code>, <code>JMP</code>, <code>HALT</code> and <code>NEXT</code>.</li>
-<li>The instruction after a test instruction is <code>JMP</code>, and the instruction after an instruction that starts with <code>MATCH</code> is <code>NEXT</code> or <code>JMP</code>.</li>
+<li>The opcode is one of the instructions that the evaluator runs.</li>
+<li>A register number is less than <code>nregs</code>. An instruction that uses a range has the whole range in the window: <code>CALL</code>, <code>TCALL</code> and <code>BUILD</code> use <code>R[B]</code> to <code>R[B+C]</code>, <code>TUPLE</code> uses <code>R[B]</code> to <code>R[B+C-1]</code>, <code>LOADNONE</code> uses <code>R[A]</code> to <code>R[A+B-1]</code>, and <code>HANDLE</code> uses <code>R[B]</code> and <code>R[B+1]</code>.</li>
+<li>An index in the constant table is less than the number of the constants. The constant of <code>GETGLOBAL</code> and <code>SETGLOBAL</code> is a cell, and the constant of <code>CLOSURE</code> is a code.</li>
+<li>A jump goes to the start of an instruction of the code, and the last instruction is one of <code>RET</code>, <code>TCALL</code>, <code>JMP</code>, <code>HALT</code> and <code>NEXT</code>.</li>
+<li>The instruction after a test instruction is <code>JMP</code>, and the instruction after an instruction that starts with <code>MATCH</code> is <code>NEXT</code> or <code>JMP</code>; each of them has an instruction after it. The <code>k</code> of a test instruction is 0 or 1.</li>
+<li><code>arity</code> is at most 255 and at most <code>nregs</code>, and <code>nregs</code> is at most 65535. <code>params</code> and <code>file</code> are -1 or an index in the constant table, and the constant of <code>file</code> is a string. The <code>pc</code> of the position table is an index of the instructions, in ascending order.</li>
+</ul>
+<p>The following checks are made when an instruction runs, and the program stops with <code>invalid bytecode</code> when one fails. <code>ENVGET</code> and <code>ENVSET</code> need an environment at the end of the parent links and a slot number in its range. <code>FIELD</code> needs a M-expression in <code>R[B]</code> and a <code>C</code> less than its number of arguments.</p>
+<p>The code generator keeps the following.</p>
+<ul>
 <li>Local variables are in registers with smaller numbers than the temporaries. At a <code>CALL</code> or <code>HANDLE</code>, every live value is below <code>R[B]</code> (<code>HANDLE</code> also keeps <code>R[B]</code> and <code>R[B+1]</code>).</li>
 <li><code>NEWENV</code> runs once in a code, after all the pattern matches have succeeded. <code>R[0]</code> to <code>R[arity-1]</code> are not written until then.</li>
 </ul>
@@ -103,8 +111,8 @@
 <tr><td>GETGLOBAL</td><td>0x04</td><td>AD A D</td><td>R[A] := the value of the cell K[D]</td><td></td></tr>
 <tr><td>SETGLOBAL</td><td>0x05</td><td>AD A D</td><td>Set the cell K[D] to R[A] (Def and Set)</td><td>W</td></tr>
 <tr><td>NEWENV</td><td>0x06</td><td>AD D</td><td>Make an environment of D slots (none) whose parent is the current one, and make it current</td><td>S</td></tr>
-<tr><td>ENVGET</td><td>0x07</td><td>ABC A B C</td><td>R[A] := slot C of the environment B parent links up</td><td></td></tr>
-<tr><td>ENVSET</td><td>0x08</td><td>ABC A B C</td><td>Set slot C of the environment B parent links up to R[A]</td><td>W</td></tr>
+<tr><td>ENVGET</td><td>0x07</td><td>ABC A B C</td><td>R[A] := slot C of the environment B parent links up</td><td>T</td></tr>
+<tr><td>ENVSET</td><td>0x08</td><td>ABC A B C</td><td>Set slot C of the environment B parent links up to R[A]</td><td>W T</td></tr>
 <tr><td>JMP</td><td>0x09</td><td>J sJ</td><td>pc += sJ</td><td></td></tr>
 <tr><td>TEST</td><td>0x0A</td><td>ABC A k</td><td>True when R[A] is not false</td><td></td></tr>
 <tr><td>TEQ</td><td>0x0B</td><td>ABC A B k</td><td>R[A] == R[B]</td><td><code>_eq</code></td></tr>
@@ -126,7 +134,7 @@
 <tr><td>TUPLE</td><td>0x1B</td><td>ABC A B C</td><td>R[A] := Tuple{R[B], ..., R[B+C-1]}</td><td>S</td></tr>
 <tr><td>CONS</td><td>0x1C</td><td>ABC A B C</td><td>R[A] := Cons{R[B], R[C]}</td><td>S</td></tr>
 <tr><td>BUILD</td><td>0x1D</td><td>ABC A B C</td><td>R[A] := the M-expression with the head symbol R[B] and the arguments R[B+1], ..., R[B+C]</td><td>S T</td></tr>
-<tr><td>FIELD</td><td>0x1E</td><td>ABC A B C</td><td>R[A] := argument C of the M-expression R[B]. Unchecked</td><td></td></tr>
+<tr><td>FIELD</td><td>0x1E</td><td>ABC A B C</td><td>R[A] := argument C of the M-expression R[B]</td><td>T</td></tr>
 <tr><td>MATCHEQ</td><td>0x1F</td><td>AD A D</td><td>Skip the next instruction when R[A] and K[D] are equal by EQ</td><td></td></tr>
 <tr><td>MATCHHEAD</td><td>0x20</td><td>ABC A B C</td><td>Skip the next instruction when R[A] is an M-expression with the head K[B] and C arguments</td><td></td></tr>
 <tr><td>MATCHTYPE</td><td>0x21</td><td>ABC A B</td><td>Skip the next instruction when the type of R[A] is R[B]</td><td></td></tr>
@@ -145,7 +153,7 @@
 <tr><td>NE</td><td>0x2E</td><td>ABC A B C</td><td>The opposite of EQ</td><td><code>_ne</code></td></tr>
 <tr><td>HEAD</td><td>0x2F</td><td>ABC A B</td><td>R[A] := the head of the M-expression R[B]</td><td><code>head</code> T</td></tr>
 <tr><td>ARITY</td><td>0x30</td><td>ABC A B</td><td>R[A] := the number of arguments of the M-expression R[B] (the number of fields of a user data)</td><td><code>arity</code> T</td></tr>
-<tr><td>ARG</td><td>0x31</td><td>ABC A B C</td><td>R[A] := argument R[C] of the M-expression R[B], from 0 (a field of a user data)</td><td><code>arg</code> T</td></tr>
+<tr><td>ARG</td><td>0x31</td><td>ABC A B C</td><td>R[A] := argument R[C] of the M-expression R[B], from 0 (a field of a user data; a field of a <code>Code</code> cannot be read)</td><td><code>arg</code> T</td></tr>
 <tr><td>ARGI</td><td>0x32</td><td>ABC A B C</td><td>Same, with the immediate C</td><td><code>arg</code> T</td></tr>
 <tr><td>PUSH</td><td>0x33</td><td>ABC A B C</td><td>R[A] := the M-expression R[B] with R[C] added at the end of its arguments</td><td><code>push</code> S T</td></tr>
 <tr><td>TYPEOF</td><td>0x34</td><td>ABC A B</td><td>R[A] := the type of R[B] (such as <code>Int</code> and <code>String</code>)</td><td><code>type</code></td></tr>
@@ -169,7 +177,7 @@
 <li><code>eval(e)</code>: compile the M-expression e in the current global environment and run it. A compile error stops like a runtime error, and its <code>loc</code> is the position of the innermost <code>At</code> around the expression that failed to compile, or <code>none</code> when there is none. The inner frames are ordinary frames, so they can be copied when a <code>PERFORM</code> happens inside <code>eval</code>.</li>
 <li><code>_set_file(path)</code>: make path the file being loaded and return the previous value. It is used to decide where a global variable is defined.</li>
 <li>The system builtins: <code>_sys_open(path)</code> opens a file for reading and gives its descriptor, or a negative number. <code>_sys_read(fd, buf, n)</code> reads at most n bytes into the start of the <code>u8</code> plain array buf and gives the number of bytes, 0 at the end. <code>_sys_write(fd, buf, n)</code> writes the first n bytes of buf and gives the number written. <code>_sys_close(fd)</code> closes a descriptor. <code>_sys_argc()</code> and <code>_sys_argv(i)</code> give the number and the strings of the command line of the machine, whose first is the machine and second the image.</li>
-<li>The code that is made while the program runs: <code>_code_new(arity, nregs, instrs, consts, file, locs)</code> is a code of the <code>u32</code> plain array instrs and the array consts, as in the format of this page. The code keeps instrs, consts and locs as they are, without copying them. <code>file</code> is the index in consts of the string of the file name, or -1, and the <code>u32</code> plain array locs holds the entries <code>pc</code>, <code>line</code> and <code>column</code> of the position table. <code>_lambda(code)</code> is the Lambda of a code with no environment. <code>_cells()</code> is an array of all the cells of the global variables. <code>_cell_new(symbol, g)</code> makes a cell of the generation g with the value <code>none</code>. <code>_cell_field(c, i)</code> is the value (i = 0), the name symbol (1) or the generation (2) of the cell c, and <code>_cell_set(c, v)</code> writes the value.</li>
+<li>The code that is made while the program runs: <code>_code_new(arity, nregs, instrs, consts, file, locs)</code> is a code of the <code>u32</code> plain array instrs and the array consts, as in the format of this page. The code keeps copies of instrs, consts and locs, so writing these arrays after the code is made does not change the code. The code is checked against the conditions above, and the program stops when it does not meet them. <code>file</code> is the index in consts of the string of the file name, or -1, and the <code>u32</code> plain array locs holds the entries <code>pc</code>, <code>line</code> and <code>column</code> of the position table. <code>_lambda(code)</code> is the Lambda of a code with no environment. <code>_cells()</code> is an array of all the cells of the global variables. <code>_cell_new(symbol, g)</code> makes a cell of the generation g with the value <code>none</code>. <code>_cell_field(c, i)</code> is the value (i = 0), the name symbol (1) or the generation (2) of the cell c, and <code>_cell_set(c, v)</code> writes the value.</li>
 <li>Bit operations treat negative numbers as infinite two's complement.</li>
 </ul>
 

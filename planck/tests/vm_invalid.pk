@@ -1,0 +1,194 @@
+# The images that planckvm must stop on: an invalid instruction, a code with wrong fields, a code that a program makes while it runs, and a broken image.
+# usage: planck0 planck/tests/vm_invalid.pk <directory>
+# The directory gets an image <name>.img for each case and the file cases.txt of the lines <name>|<the message on the standard error>.
+# make test-vm-invalid runs planckvm on each image and checks that it stops with the status 1 and the message.
+use("pvm/image")
+use("pvm/compile")
+use("bytes")
+
+dir := array_get(argv(), 1)
+
+bc(m) := _strcat("invalid bytecode: ", m)
+im(m) := _strcat("invalid image: ", m)
+
+# the entry code main has the instructions that are not valid; leaf is a valid code that the constants can name
+leaf := Code{"leaf", 0, 1, [LOADI{0, 1}, RET{0}], []}
+bad(name, msg, nregs, instrs, consts) := Case{name, pvm_image.build([Code{"main", 0, nregs, instrs, consts}, leaf], "main"), bc(msg)}
+
+# a valid image, and the image with the code `extra` too
+good_main := Code{"main", 0, 2, [LOADI{0, 1}, RET{0}], []}
+with_code(name, msg, code) := Case{name, pvm_image.build([good_main, code], "main"), bc(msg)}
+
+good := pvm_image.build([good_main], "main")
+
+copy(b) := {
+    c := bytes.new()
+    bytes.append(c, b)
+    c
+}
+
+zeros_buf(n) := {
+    b := bytes.new()
+    bytes.zeros(b, n)
+    b
+}
+
+plus_byte(b) := {
+    c := copy(b)
+    bytes.u8(c, 0)
+    c
+}
+
+# the word i (a word of the file) is set to hi * 2^32 + lo
+patched(name, msg, i, lo, hi) := {
+    b := copy(good)
+    bytes.set_u32(b, i * 8, lo)
+    bytes.set_u32(b, i * 8 + 4, hi)
+    Case{name, b, im(msg)}
+}
+
+# the word that counts from the end of the file
+patched_end(name, msg, k, lo, hi) := patched(name, msg, bytes.len(good) / 8 - k, lo, hi)
+
+registers := "a register is out of the window"
+constants := "a constant index is out of range"
+condition := "a condition is not followed by JMP"
+matchmsg := "a match is not followed by NEXT or JMP"
+refmsg := "a word is not an integer or a reference to an object"
+
+cases := [
+    # registers: the window of a code is the registers below nregs
+    bad("reg_move", registers, 2, [MOVE{5, 0}, RET{0}], []),
+    bad("reg_ret", registers, 1, [RET{3}], []),
+    bad("reg_arith", registers, 2, [ADD{0, 1, 2}, RET{0}], []),
+    bad("reg_call_args", registers, 3, [CALL{0, 1, 5}, RET{0}], []),
+    bad("reg_call_result", registers, 2, [CALL{4, 0, 0}, RET{0}], []),
+    bad("reg_tcall", registers, 2, [TCALL{1, 1}], []),
+    bad("reg_tuple", registers, 2, [TUPLE{0, 1, 3}, RET{0}], []),
+    bad("reg_build", registers, 2, [BUILD{0, 1, 1}, RET{0}], []),
+    bad("reg_loadnone", registers, 2, [LOADNONE{1, 3}, RET{0}], []),
+    bad("reg_handle", registers, 2, [HANDLE{0, 1}, RET{0}], []),
+    bad("reg_perform", registers, 2, [PERFORM{0, 2}, RET{0}], []),
+    bad("reg_envget", registers, 1, [ENVGET{1, 0, 0}, RET{0}], []),
+    bad("reg_aget", registers, 2, [AGET{0, 1, 2}, RET{0}], []),
+    bad("reg_matchtype", registers, 2, [MATCHTYPE{0, 2}, NEXT{}, RET{0}], []),
+    bad("reg_test", registers, 1, [TEST{1, 0}, JMP{0}, RET{0}], []),
+    # the numbers of the constants
+    bad("k_loadk", constants, 1, [LOADK{0, 4}, RET{0}], [I{1}]),
+    bad("k_teqk", constants, 1, [TEQK{0, 9, 0}, JMP{1}, RET{0}, RET{0}], [I{1}]),
+    bad("k_matchhead", constants, 1, [MATCHHEAD{0, 7, 0}, NEXT{}, RET{0}], [Y{"X"}]),
+    bad("k_matcheq", constants, 1, [MATCHEQ{0, 3}, NEXT{}, RET{0}], [I{1}]),
+    bad("k_closure", constants, 1, [CLOSURE{0, 2}, RET{0}], [K{"leaf"}]),
+    bad("k_getglobal", constants, 1, [GETGLOBAL{0, 2}, RET{0}], [C{"println"}]),
+    bad("k_setglobal", constants, 1, [LOADI{0, 1}, SETGLOBAL{0, 2}, RET{0}], [C{"println"}]),
+    # the types of the constants: the cell of a global variable and the code of a closure
+    bad("global_not_cell", "the constant of a global variable is not a cell", 1, [GETGLOBAL{0, 0}, RET{0}], [I{1}]),
+    bad("global_set_not_cell", "the constant of a global variable is not a cell", 1, [LOADI{0, 1}, SETGLOBAL{0, 0}, RET{0}], [S{"x"}]),
+    bad("closure_not_code", "the constant of a closure is not a code", 1, [CLOSURE{0, 0}, RET{0}], [S{"x"}]),
+    # jumps
+    bad("jmp_forward", "a jump goes out of the code", 1, [JMP{50}, RET{0}], []),
+    bad("jmp_backward", "a jump goes out of the code", 1, [JMP{-9}, RET{0}], []),
+    bad("jmp_to_end", "a jump goes out of the code", 1, [JMP{1}, RET{0}], []),
+    # the instruction after a condition and after a match, and the last instruction
+    bad("cond_no_jmp", condition, 1, [TEST{0, 0}, RET{0}, RET{0}], []),
+    bad("cond_at_end", condition, 1, [LOADI{0, 1}, TEST{0, 0}, JMP{-2}], []),
+    bad("cond_k", "the field k of a condition is not 0 or 1", 1, [TEST{0, 2}, JMP{0}, RET{0}], []),
+    bad("match_no_next", matchmsg, 1, [MATCHEQ{0, 0}, RET{0}, RET{0}], [I{1}]),
+    bad("match_at_end", matchmsg, 1, [MATCHEQ{0, 0}, NEXT{}], [I{1}]),
+    bad("no_terminator", "the code does not end with RET, TCALL, JMP, HALT or NEXT", 1, [LOADI{0, 1}], []),
+    bad("empty_code", "a code has no instruction", 1, [], []),
+    bad("ext", "unknown instruction", 1, [EXT{0}, RET{0}], []),
+    # the fields of a code
+    with_code("arity_over_regs", "the arity is more than the number of the registers", Code{"wide", 3, 1, [RET{0}], []}),
+    with_code("regs_over_limit", "the number of the registers is out of range", Code{"huge", 0, 70000, [RET{0}], []}),
+    # FIELD and the environments are checked when they run
+    bad("field_not_mexpr", "FIELD: not a m-expr", 2, [LOADI{0, 1}, FIELD{1, 0, 0}, RET{1}], []),
+    bad("field_index", "FIELD: the index is out of range", 2, [LOADK{0, 0}, FIELD{1, 0, 5}, RET{1}], [M{"Tuple", [I{1}]}]),
+    bad("envget_no_env", "ENVGET or ENVSET: not an environment", 1, [ENVGET{0, 0, 0}, RET{0}], []),
+    bad("envget_parent", "ENVGET or ENVSET: the parent is not an environment", 1, [NEWENV{1}, ENVGET{0, 2, 0}, RET{0}], []),
+    bad("envget_depth", "ENVGET or ENVSET: not an environment", 1, [NEWENV{1}, ENVGET{0, 1, 0}, RET{0}], []),
+    bad("envget_slot", "ENVGET or ENVSET: the slot is out of range", 1, [NEWENV{1}, ENVGET{0, 0, 3}, RET{0}], []),
+    bad("envset_slot", "ENVGET or ENVSET: the slot is out of range", 1, [NEWENV{1}, LOADI{0, 1}, ENVSET{0, 0, 3}, RET{0}], []),
+    # the image: the file, the roots, the headers and the references (words 0 to 16 are the roots, the word 17 is the header of the first object, a string)
+    Case{"img_empty", bytes.new(), im("too short")},
+    Case{"img_roots_only", zeros_buf(136), im("too short")},
+    Case{"img_odd_size", plus_byte(good), im("the size is not a multiple of 8")},
+    patched("img_root_int", "a root is not a reference", 1, 5, 0),
+    patched("img_root_out", refmsg, 2, 8000000, 0),
+    patched("img_root_inside", refmsg, 3, 8 * 18, 0),
+    patched("img_root_misaligned", refmsg, 2, 164, 0),
+    patched("img_root_not_symbol", "a root is not a symbol", 1, 8 * 17, 0),
+    patched("img_root_not_lambda", "the first root is not a Lambda", 0, 8 * 17, 0),
+    patched("img_root_not_type", "a root is not a type", 8, 8 * 20, 0),
+    patched("img_header_zero", "a header is not valid", 17, 0, 0),
+    patched("img_header_kind", "an object of a kind that an image does not have", 17, 2 * 64 + 11 * 4 + 1, 0),
+    patched("img_header_beyond", "an object goes beyond the end of the file", 17, 3 * 4 + 1, 4096),
+    patched("img_string_length", "a string has a wrong length", 18, 99, 0),
+    patched("img_symbol_name", "the name of a symbol is not a string", 21, 8 * 20, 0),
+    patched_end("img_lambda_code", "the code of a Lambda is not a code", 2, 8 * 17, 0),
+    patched_end("img_lambda_env", "the environment of a Lambda is not an environment", 1, 8 * 17, 0)
+]
+
+# the codes that a program makes while it runs: _code_new(arity, nregs, instructions, constants, file, positions) checks the code that it makes
+rt(name, msg, prog) := Case{name, pvm_compile.image(prog), bc(msg)}
+
+rt_cases := [
+    rt("rt_unknown_op", "unknown instruction", [
+        `(ins := plain_array('u32, 2)),
+        `(plain_set(ins, 0, 62)),
+        `(plain_set(ins, 1, 22)),
+        `(_code_new(0, 2, ins, array(0), -1, plain_array('u32, 0)))
+    ]),
+    rt("rt_register", registers, [
+        `(ins := plain_array('u32, 2)),
+        `(plain_set(ins, 0, 589824)),
+        `(plain_set(ins, 1, 22)),
+        `(_code_new(0, 2, ins, array(0), -1, plain_array('u32, 0)))
+    ]),
+    rt("rt_jump", "a jump goes out of the code", [
+        `(ins := plain_array('u32, 2)),
+        `(plain_set(ins, 0, 51209)),
+        `(plain_set(ins, 1, 22)),
+        `(_code_new(0, 2, ins, array(0), -1, plain_array('u32, 0)))
+    ]),
+    rt("rt_global_not_cell", "the constant of a global variable is not a cell", [
+        `(ins := plain_array('u32, 2)),
+        `(plain_set(ins, 0, 4)),
+        `(plain_set(ins, 1, 22)),
+        `(ks := array(1)),
+        `(array_set(ks, 0, 5)),
+        `(_code_new(0, 2, ins, ks, -1, plain_array('u32, 0)))
+    ]),
+    rt("rt_closure_not_code", "the constant of a closure is not a code", [
+        `(ins := plain_array('u32, 2)),
+        `(plain_set(ins, 0, 25)),
+        `(plain_set(ins, 1, 22)),
+        `(ks := array(1)),
+        `(array_set(ks, 0, "x")),
+        `(_code_new(0, 2, ins, ks, -1, plain_array('u32, 0)))
+    ]),
+    rt("rt_no_terminator", "the code does not end with RET, TCALL, JMP, HALT or NEXT", [
+        `(ins := plain_array('u32, 1)),
+        `(plain_set(ins, 0, 1)),
+        `(_code_new(0, 2, ins, array(0), -1, plain_array('u32, 0)))
+    ]),
+    rt("rt_arity", "the arity is more than the number of the registers", [
+        `(ins := plain_array('u32, 1)),
+        `(plain_set(ins, 0, 22)),
+        `(_code_new(3, 1, ins, array(0), -1, plain_array('u32, 0)))
+    ])
+]
+
+all := append(cases, rt_cases)
+
+emit(dir, index, Case{name, img, msg}) := {
+    write_file(_strcat(dir, _strcat("/", _strcat(name, ".img"))), bytes.to_u8(img))
+    bytes.string(index, name)
+    bytes.string(index, "|")
+    bytes.string(index, msg)
+    bytes.string(index, "\n")
+}
+
+index := bytes.new()
+each(c -> emit(dir, index, c), all)
+write_file(_strcat(dir, "/cases.txt"), bytes.to_u8(index))
