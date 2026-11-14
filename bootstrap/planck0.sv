@@ -2689,7 +2689,7 @@
     (var n 0)
     (= n (array_index "array_set" a i))
     (set a (+ n 1) v)
-    (return v)
+    (return noneS)
     )
 
 (fun p_array_len (a)
@@ -2806,16 +2806,16 @@
     (if (== kind 0) (do
         (if (|| (< x 0) (> x 255)) (runtime_error "plain_set: not a u8: " v))
         (setb d n x)
-        (return v)
+        (return noneS)
         ))
     (if (== kind 1) (do
         (if (|| (< x 0) (> x 65535)) (runtime_error "plain_set: not a u16: " v))
         (setb d (* 2 n) (& x 255))
         (setb d (+ (* 2 n) 1) (>> x 8))
-        (return v)
+        (return noneS)
         ))
     (set d n x)
-    (return v)
+    (return noneS)
     )
 
 ; plain_copy(dst, di, src, si, n): copy n elements of src from si to dst from di
