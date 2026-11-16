@@ -9,12 +9,13 @@
 #   compile(name, funs, datas) the object of the functions of lower and the data (see x64.pk)
 #   executable(objects)          the file as a buffer of bytes (see bytes.pk) that joins the objects: the format of the file, the address
 #                             where it is loaded and the entry are the machine's
-# target.get(name) is the target with the name name. The targets are linux_x86_64 (an ELF file for Linux), macos_x86_64 (a Mach-O file for macOS) and wasm32 (a module of WebAssembly, backend/wasm.pk). A machine is added by writing its functions and one line of all.
+# target.get(name) is the target with the name name. The targets are linux_x86_64 (an ELF file for Linux), macos_x86_64 (a Mach-O file for macOS), linux_arm64, macos_arm64 and wasm32 (a module of WebAssembly, backend/wasm.pk). A machine is added by writing its functions and one line of all.
 
 use("base")
 use("list")
 use("backend/ir")
 use("backend/x64")
+use("backend/arm64")
 use("backend/link")
 use("backend/elf")
 use("backend/macho")
@@ -41,9 +42,27 @@ macos_x64_executable(objects) := {
     macho.image('x86_64, arg(image, 0), arg(image, 1))
 }
 
+# === arm64 (Linux) ===
+# the registers are 64-bit: the functions need no rewriting
+arm64_lower(f, helpers) := f
+
+linux_arm64_executable(objects) := {
+    image := linker.link(objects, "_start", x64_base, elf.header_size(2))
+    elf.image('aarch64, arg(image, 0), arg(image, 1))
+}
+
+# === arm64 (macOS) ===
+# the code refers to its data by the distance, so the linker places the program at the address 0 and the writer moves it behind the first 4 GB of the address space (macho.pk)
+macos_arm64_executable(objects) := {
+    image := linker.link_paged(objects, "_start", 0, macho.header_size('arm64, 2), macho.page_size('arm64))
+    macho.image('arm64, arg(image, 0), arg(image, 1))
+}
+
 # === All targets ===
 all := [Target{'linux_x86_64, 8, x64_lower, (name, funs, datas) -> x64.compile(os.select_linux_x64, name, funs, datas), x64_executable},
     Target{'macos_x86_64, 8, x64_lower, (name, funs, datas) -> x64.compile(os.select_macos_x64, name, funs, datas), macos_x64_executable},
+    Target{'linux_arm64, 8, arm64_lower, (name, funs, datas) -> arm64.compile(os.select_linux_arm64, name, funs, datas), linux_arm64_executable},
+    Target{'macos_arm64, 8, arm64_lower, (name, funs, datas) -> arm64.compile(os.select_macos_arm64, name, funs, datas), macos_arm64_executable},
     Target{'wasm32, 4, wasm.lower, wasm.compile, wasm.executable}]
 
 export default := 'linux_x86_64
@@ -60,7 +79,7 @@ export compile(Target{_, _, _, compile, _}, name, funs, datas) := compile(name, 
 export executable(Target{_, _, _, _, executable}, objects) := executable(objects)
 
 test {
-    assert(map(t -> arg(t, 0), all) == ['linux_x86_64, 'macos_x86_64, 'wasm32], "the targets are linux_x86_64, macos_x86_64 and wasm32")
+    assert(map(t -> arg(t, 0), all) == ['linux_x86_64, 'macos_x86_64, 'linux_arm64, 'macos_arm64, 'wasm32], "the targets are linux_x86_64, macos_x86_64, linux_arm64, macos_arm64 and wasm32")
 }
 
 }

@@ -161,4 +161,94 @@ select_macos_x64(emit, label, 'abort, args, d) := {
 }
 select_macos_x64(emit, label, name, args, d) := panic(f"os.select_macos_x64: the service {symname(name)} is not known")
 
+# === Linux on arm64 ===
+# A system call is svc #0 with the number in x8 and the arguments in x0 to x5; the result is in x0, a negative number for an error, and no other register changes.
+# open is openat with the directory AT_FDCWD (-100).
+a64_reg_number_linux := 8
+a64_reg_args := [0, 1, 2, 3, 4, 5]
+a64_reg_result := 0
+linux_a64_read := 63
+linux_a64_write := 64
+linux_a64_openat := 56
+linux_a64_close := 57
+linux_a64_exit := 93
+linux_a64_exit_group := 94
+linux_a64_brk := 214
+linux_at_fdcwd := -100
+
+# the registers of a system call: the number in the register numreg and the arguments
+a64_load(emit, numreg, number, args) := {
+    emit(I{'mov, [D{numreg}, K{number}]})
+    k := 0
+    each(a -> {
+        emit(I{'mov, [D{a64_reg_args[k]}, os_arg(a)]})
+        k = k + 1
+    }, args)
+}
+
+# the instruction of the system call: svc with the immediate imm, which reads the number and the arguments and gives the result in x0
+a64_svc(emit, imm, numreg, args) := emit(I{'svc, append([K{imm}, IU{numreg}, ID{a64_reg_result}], map(r -> IU{r}, list.take(a64_reg_args, length(args))))})
+
+linux_a64_call(emit, number, args, d) := {
+    a64_load(emit, a64_reg_number_linux, number, args)
+    a64_svc(emit, 0, a64_reg_number_linux, args)
+    if (d != none) emit(I{'mov, [D{d}, U{a64_reg_result}]})
+}
+
+export select_linux_arm64(emit, label, 'write, args, d) := linux_a64_call(emit, linux_a64_write, args, d)
+select_linux_arm64(emit, label, 'read, args, d) := linux_a64_call(emit, linux_a64_read, args, d)
+select_linux_arm64(emit, label, 'open, args, d) := linux_a64_call(emit, linux_a64_openat, append([K{linux_at_fdcwd}], append(args, [K{linux_o_rdonly}])), d)
+select_linux_arm64(emit, label, 'create, args, d) := linux_a64_call(emit, linux_a64_openat, append([K{linux_at_fdcwd}], append(args, [K{linux_o_create}, K{linux_mode}])), d)
+select_linux_arm64(emit, label, 'close, args, d) := linux_a64_call(emit, linux_a64_close, args, d)
+select_linux_arm64(emit, label, 'exit, args, d) := linux_a64_call(emit, linux_a64_exit, args, d)
+select_linux_arm64(emit, label, 'grow, args, d) := linux_a64_call(emit, linux_a64_brk, args, d)
+# the program starts with the stack pointer at the word that holds the number of the arguments, which is the first of the arguments of the function _start
+select_linux_arm64(emit, label, 'args, args, d) := emit(I{'lea, [W{'w64}, D{d}, MF{'arg, 0, 0}]})
+select_linux_arm64(emit, label, 'abort, args, d) := {
+    a64_load(emit, a64_reg_number_linux, linux_a64_exit_group, [K{abort_status}])
+    a64_svc(emit, 0, a64_reg_number_linux, [K{abort_status}])
+    emit(I{'ud2, []})
+}
+select_linux_arm64(emit, label, name, args, d) := panic(f"os.select_linux_arm64: the service {symname(name)} is not known")
+
+# === macOS on arm64 ===
+# The system calls are those of BSD, called by svc #0x80 with the number in x16 and the arguments in x0 to x5. An error is the flag of carry and the number of the error in x0 as a positive number;
+# cneg makes it the negative number that Linux gives.
+a64_reg_number_macos := 16
+
+macos_a64_call(emit, number, args, d) := {
+    a64_load(emit, a64_reg_number_macos, number, args)
+    a64_svc(emit, 128, a64_reg_number_macos, args)
+    emit(I{'cnegcs, [DU{a64_reg_result}]})
+    if (d != none) emit(I{'mov, [D{d}, U{a64_reg_result}]})
+}
+
+export select_macos_arm64(emit, label, 'write, args, d) := macos_a64_call(emit, macos_write, args, d)
+select_macos_arm64(emit, label, 'read, args, d) := macos_a64_call(emit, macos_read, args, d)
+select_macos_arm64(emit, label, 'open, args, d) := macos_a64_call(emit, macos_open, append(args, [K{linux_o_rdonly}]), d)
+select_macos_arm64(emit, label, 'create, args, d) := macos_a64_call(emit, macos_open, append(args, [K{macos_o_create}, K{linux_mode}]), d)
+select_macos_arm64(emit, label, 'close, args, d) := macos_a64_call(emit, macos_close, args, d)
+select_macos_arm64(emit, label, 'exit, args, d) := macos_a64_call(emit, macos_exit, args, d)
+select_macos_arm64(emit, label, 'grow, args, d) := {
+    # the result is the address asked, and for 0 the start of the area that mmap gives (see macOS on x86-64)
+    emit(I{'mov, [D{d}, os_arg(args[0])]})
+    map_it := label()
+    done := label()
+    emit(I{'jcc, [Cc{'ne}, L{done}, W{'w64}, U{d}, K{0}]})
+    emit(I{'jmp, [L{map_it}]})
+    emit(I{'label, [L{map_it}]})
+    emit(I{'movabs, [D{a64_reg_args[1]}, K{0}, K{8}, K{0}, K{0}]})
+    macos_a64_call(emit, macos_mmap, [K{0}, a64_reg_args[1], K{macos_mmap_prot}, K{macos_mmap_flags}, K{-1}, K{0}], d)
+    emit(I{'jmp, [L{done}]})
+    emit(I{'label, [L{done}]})
+}
+# dyld calls the program as main(argc, argv): the address of the arguments is the address of argv, which follows the word that holds their number
+select_macos_arm64(emit, label, 'args, args, d) := emit(I{'sub, [W{'w64}, D{d}, U{1}, K{8}]})
+select_macos_arm64(emit, label, 'abort, args, d) := {
+    a64_load(emit, a64_reg_number_macos, macos_exit, [K{abort_status}])
+    a64_svc(emit, 128, a64_reg_number_macos, [K{abort_status}])
+    emit(I{'ud2, []})
+}
+select_macos_arm64(emit, label, name, args, d) := panic(f"os.select_macos_arm64: the service {symname(name)} is not known")
+
 }

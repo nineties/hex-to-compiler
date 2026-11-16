@@ -1,0 +1,448 @@
+# a64enc: encodes instructions of ir.pk as arm64 (A64) machine code
+# Copyright (C) 2026 nineties
+#
+# The registers 0 to 30 are x0 to x30 and 31 is the stack pointer where an instruction takes it (the base of a memory operand, the arithmetic with an integer) and the zero
+# register otherwise. x16 and x17 are the registers that the encoder uses for itself: an integer that does not fit in the field of an instruction, an address that is far, the
+# quotient of a division. The floating point registers v16 and v17 are used the same way and no instruction of the code names them.
+# An instruction of an operand width starts with W{'w32} or W{'w64}. The operations are:
+#   mov add sub mul band bor bxor shl shr sar divs divu rems remu mulhu   [W, D d, U a, U or K b]
+#   neg not                                                              [W, D, U]
+#   movl sx8 sx16 zx8 zx16 sext64                                         [D, U]
+#   movabs                                                               [D, K p3, K p2, K p1, K p0]
+#   lea                                                                  [W, D, memory]: the address, which is the sum of the base and the displacement or of a symbol
+#   cset                                                                 [Cc, W, D, U a, U or K b]: d is 1 when a cc b, otherwise 0
+#   jcc jmp label                                                        [Cc, L, W, U a, U or K b], [L], [L]: a jump to a label
+#   ldr str                                                              [W{u8 u16 w32 w64 sb32 sb64 sh32 sh64}, D, memory], [W{w8 w16 w32 w64}, memory, U or K]
+#   bl blr ret svc cnegcs brk ud2                                         [S name], [U], [], [K], [D], [K], []
+#   spadj stpfp ldpfp setfp                                               [K n]: the stack pointer plus n; x29 and x30 stored at and loaded from the stack pointer; x29 set to the stack pointer
+#   fadd fsub fmul fdiv fsqrt fcmp cvti2f cvtf2i cvtf2f                    as in ir.pk, on v16 and v17
+# A memory operand is M{U base, disp} or MG{name, disp}. The emitter is Em{object, section, buf, labels, fixups}.
+
+use("base")
+use("list")
+use("table")
+use("vector")
+use("bytes")
+use("backend/object")
+use("backend/ir")
+
+module a64enc {
+
+fun movi
+
+# === Emitter ===
+export new(o, secname) := {
+    s := object.section(o, secname, 'code, 16)
+    Em{o, secname, object.buf(s), table.new(), vector.new()}
+}
+
+export pos(Em{_, _, b, _, _}) := bytes.len(b)
+
+pow2(n) := bit_shl(1, n)
+
+# word(em, hi, lo, fields) writes the instruction whose upper and lower halves are hi and lo with the fields added: a field is Tuple{shift, value}
+# and the fields do not overlap the bits of hi and lo. An integer of planck0 has 31 bits, so a word is kept as its two halves.
+word(em, hi, lo, fields) := {
+    h := hi
+    l := lo
+    each((Tuple{s, v}) -> if (s >= 16) {
+        h = h + v * pow2(s - 16)
+    } else {
+        x := v * pow2(s)
+        l = l + x % 65536
+        h = h + x / 65536
+    }, fields)
+    h = h + l / 65536
+    l = l % 65536
+    b := arg(em, 2)
+    bytes.u8(b, l % 256)
+    bytes.u8(b, l / 256)
+    bytes.u8(b, h % 256)
+    bytes.u8(b, h / 256)
+}
+
+export label(Em{_, _, b, labels, _}, l) := table.set(labels, l, bytes.len(b))
+
+# a branch to the label l: kind 'b26 (the field of 26 bits of b) or 'c19 (the field of 19 bits at the bit 5 of b.cond)
+branch_fixup(Em{_, _, b, _, fixups}, kind, l) := vector.push(fixups, Tuple{bytes.len(b), l, kind})
+
+# finish(em) fills in the distances to the labels of the function that was written
+export finish(Em{_, _, b, labels, fixups}) := {
+    each((Tuple{at, l, kind}) -> {
+        t := table.get(labels, l, -1)
+        if (t < 0) panic(f"a64enc.finish: label L{l} is not in the function")
+        d := (t - at) / 4
+        if (t < at) d = 0 - ((at - t) / 4)
+        if (kind == 'b26) {
+            if (d >= 33554432 or d < -33554432) panic("a64enc.finish: a branch is too far")
+            v := bit_and(d, 67108863)
+            bytes.set(b, at, v % 256)
+            bytes.set(b, at + 1, v / 256 % 256)
+            bytes.set(b, at + 2, v / 65536 % 256)
+            bytes.set(b, at + 3, bytes.get(b, at + 3) + v / 16777216)
+        } else {
+            if (d >= 262144 or d < -262144) panic("a64enc.finish: a conditional branch is too far")
+            v := bit_and(d, 524287) * 32
+            bytes.set(b, at, bytes.get(b, at) + v % 256)
+            bytes.set(b, at + 1, v / 256 % 256)
+            bytes.set(b, at + 2, v / 65536 % 256)
+        }
+    }, vector.to_list(fixups))
+}
+
+# a relocation of the instruction that is written next
+reloc(Em{o, section, b, _, _}, kind, name, off) := object.reloc(o, section, bytes.len(b), kind, name, off)
+
+# === Operands ===
+reg_of(D{r}) := r
+reg_of(U{r}) := r
+reg_of(DU{r}) := r
+reg_of(_) := panic("a64: a register is expected")
+
+sf(z) := if (z == 'w64) 32768 else 0
+
+# the condition codes
+cc := [Tuple{'eq, 0}, Tuple{'ne, 1}, Tuple{'geu, 2}, Tuple{'ltu, 3}, Tuple{'gtu, 8}, Tuple{'leu, 9}, Tuple{'ge, 10}, Tuple{'lt, 11}, Tuple{'gt, 12}, Tuple{'le, 13}]
+cc_code(c) := {
+    e := find(e -> arg(e, 0) == c, cc)
+    if (e == none) panic(f"a64: unknown condition {c}")
+    e[1]
+}
+
+# the conditions after a comparison of floating point numbers: a NaN makes every one of them false except ne
+fcc := [Tuple{'eq, 0}, Tuple{'ne, 1}, Tuple{'gt, 12}, Tuple{'ge, 10}, Tuple{'lt, 4}, Tuple{'le, 9}]
+fcc_code(c) := {
+    e := find(e -> arg(e, 0) == c, fcc)
+    if (e == none) panic(f"a64: unknown condition {c} of floating point numbers")
+    e[1]
+}
+
+# === Instructions ===
+# add and subtract with an integer of 12 bits (the integer is shifted by 12 bits when sh is 1)
+addsub_imm(em, z, sub, setf, d, n, imm, sh) := word(em, 4352 + (if (sub) 16384 else 0) + (if (setf) 8192 else 0) + sf(z) + (if (sh) 64 else 0), 0, [Tuple{10, imm}, Tuple{5, n}, Tuple{0, d}])
+
+addsub_reg(em, z, sub, setf, d, n, m) := word(em, 2816 + (if (sub) 16384 else 0) + (if (setf) 8192 else 0) + sf(z), 0, [Tuple{16, m}, Tuple{5, n}, Tuple{0, d}])
+
+# the logical operations: band 0x0A00, bor 0x2A00, bxor 0x4A00 and orn 0x2A20 (the upper half)
+logic_hi(op) := if (op == 'band) 2560 else if (op == 'bor) 10752 else if (op == 'bxor) 18944 else 10784
+logic_reg(em, z, op, d, n, m) := word(em, logic_hi(op) + sf(z), 0, [Tuple{16, m}, Tuple{5, n}, Tuple{0, d}])
+
+# mov d, s
+mov_reg(em, z, d, s) := logic_reg(em, z, 'bor, d, 31, s)
+
+# the bitfield moves: ubfm (sign false) and sbfm (sign true)
+bfm(em, z, sign, d, n, immr, imms) := word(em, (if (z == 'w64) (if (sign) 37696 else 54080) else (if (sign) 4864 else 21248)), 0, [Tuple{16, immr}, Tuple{10, imms}, Tuple{5, n}, Tuple{0, d}])
+
+# movz, movn and movk of the part hw of 16 bits
+movw(em, kind, z, d, imm, hw) := word(em, (if (kind == 'movn) 4736 else if (kind == 'movz) 21120 else 29312) + sf(z), 0, [Tuple{21, hw}, Tuple{5, imm}, Tuple{0, d}])
+
+# movi(em, z, d, n) loads the integer n (31 bits, sign extended to the register) into d
+movi(em, z, d, n) = {
+    if (n >= 0) {
+        movw(em, 'movz, z, d, n % 65536, 0)
+        if (n >= 65536) movw(em, 'movk, z, d, n / 65536, 1)
+    } else if (n >= -65536) movw(em, 'movn, z, d, 0 - n - 1, 0)
+    else if (z == 'w64) {
+        # movn sets every bit but the low 16, and the upper half of the low 32 bits is set by movk; the bits above stay 1 for a negative integer
+        movw(em, 'movn, z, d, bit_and(0 - n - 1, 65535), 0)
+        movw(em, 'movk, z, d, bit_and(bit_sar(n, 16), 65535), 1)
+    } else {
+        movw(em, 'movz, z, d, bit_and(n, 65535), 0)
+        movw(em, 'movk, z, d, bit_and(bit_sar(n, 16), 65535), 1)
+    }
+}
+
+# the register that holds b: the register itself, or x16 loaded with the integer
+val(em, U{r}) := r
+val(em, K{n}) := {
+    movi(em, 'w64, 16, n)
+    16
+}
+
+# add, sub and cmp (subs to the zero register) with a register or an integer
+addsub(em, z, sub, setf, d, n, b) := match b {
+    K{k} -> if (k >= 0 and k < 4096) addsub_imm(em, z, sub, setf, d, n, k, false)
+        else if (k < 0 and k > -4096 and not setf) addsub_imm(em, z, not sub, false, d, n, 0 - k, false)
+        else {
+            movi(em, 'w64, 16, k)
+            addsub_reg(em, z, sub, setf, d, n, 16)
+        }
+  | U{r} -> addsub_reg(em, z, sub, setf, d, n, r)
+}
+
+# the size of a memory access: log2 of the bytes, and the opcode (store 0, load 1, load with the sign to a 64-bit register 2, to a 32-bit register 3)
+access_size(k) := match k {
+    'w8 -> 0
+  | 'u8 -> 0
+  | 'sb32 -> 0
+  | 'sb64 -> 0
+  | 'w16 -> 1
+  | 'u16 -> 1
+  | 'sh32 -> 1
+  | 'sh64 -> 1
+  | 'w32 -> 2
+  | _ -> 3
+}
+access_opc(k) := match k {
+    'sb64 -> 2
+  | 'sh64 -> 2
+  | 'sb32 -> 3
+  | 'sh32 -> 3
+  | _ -> 1
+}
+is_store(k) := member(k, ['w8, 'w16, 'w32, 'w64])
+
+# a load or a store of the kind k of the register t at the memory operand m. The kind of a load and a store differ: a store is the width and a load is the width and the extension.
+# loadstore_kind distinguishes by the instruction, so the opcode of a store is 0 and that of a load is read from the kind.
+access(em, store, k, t, m) := {
+    size := access_size(k)
+    opc := if (store) 0 else access_opc(k)
+    scale := pow2(size)
+    match m {
+        M{U{b}, d} -> if (d >= 0 and d % scale == 0 and d / scale < 4096) {
+            word(em, 14592 + size * 16384 + opc * 64, 0, [Tuple{10, d / scale}, Tuple{5, b}, Tuple{0, t}])
+        } else if (d >= -256 and d < 256) {
+            word(em, 14336 + size * 16384 + opc * 64, 0, [Tuple{12, bit_and(d, 511)}, Tuple{5, b}, Tuple{0, t}])
+        } else {
+            movi(em, 'w64, 17, d)
+            word(em, 14368 + size * 16384 + opc * 64 + 17, 26624, [Tuple{5, b}, Tuple{0, t}])
+        }
+      | MG{name, d} -> {
+            reloc(em, 'Page21, name, d)
+            word(em, 36864, 0, [Tuple{0, 17}])
+            reloc(em, 'Lo12, name, d)
+            addsub_imm(em, 'w64, false, false, 17, 17, 0, false)
+            word(em, 14592 + size * 16384 + opc * 64, 0, [Tuple{5, 17}, Tuple{0, t}])
+        }
+      | _ -> panic("a64: a memory operand is expected")
+    }
+}
+
+# the address of the memory operand m in d
+lea(em, d, M{U{b}, disp}) := {
+    if (disp >= 0 and disp < 4096) addsub_imm(em, 'w64, false, false, d, b, disp, false)
+    else if (disp < 0 and disp > -4096) addsub_imm(em, 'w64, true, false, d, b, 0 - disp, false)
+    else {
+        if (b == 31) panic("a64: the address of a far place of the stack")
+        movi(em, 'w64, 17, disp)
+        addsub_reg(em, 'w64, false, false, d, b, 17)
+    }
+}
+lea(em, d, MG{name, off}) := {
+    reloc(em, 'Page21, name, off)
+    word(em, 36864, 0, [Tuple{0, d}])
+    reloc(em, 'Lo12, name, off)
+    addsub_imm(em, 'w64, false, false, d, d, 0, false)
+}
+lea(em, d, _) := panic("a64: the address of a memory operand is expected")
+
+# the stack pointer plus n
+spadj(em, n) := {
+    sub := n < 0
+    m := if (sub) 0 - n else n
+    if (m >= 4096) addsub_imm(em, 'w64, sub, false, 31, 31, m / 4096, true)
+    if (m % 4096 != 0) addsub_imm(em, 'w64, sub, false, 31, 31, m % 4096, false)
+}
+
+# a move of the floating point register 16 or 17 from or to a register: the bits of a double (w64) or of a single (w32)
+fmov_in(em, z, v, r) := word(em, if (z == 'w64) 40551 else 7719, 0, [Tuple{5, r}, Tuple{0, v}])
+fmov_out(em, z, r, v) := word(em, if (z == 'w64) 40550 else 7718, 0, [Tuple{5, v}, Tuple{0, r}])
+
+# a scalar operation of floating point of the lower half lo on v16 and v17 (a double with the upper half 0x1E60, a single with 0x1E20)
+fop(em, z, lo, d, n, m) := word(em, if (z == 'w64) 7776 else 7712, lo, [Tuple{16, m}, Tuple{5, n}, Tuple{0, d}])
+
+fop_lo(op) := if (op == 'fadd) 10240 else if (op == 'fsub) 14336 else if (op == 'fmul) 2048 else 6144
+
+cset(em, z, c, d) := word(em, 6784 + sf(z), 1024, [Tuple{16, 31}, Tuple{12, bit_xor(c, 1)}, Tuple{5, 31}, Tuple{0, d}])
+
+# emit(em, i) writes the instruction i. A jump to the label that follows is left out by emit_code.
+emit(em, i) := match I{ir.op(i), ir.explicit(i)} {
+    I{'label, [L{l}]} -> label(em, l)
+  | I{'mov, [W{z}, D{d}, U{s}]} -> mov_reg(em, z, d, s)
+  | I{'movl, [D{d}, U{s}]} -> mov_reg(em, 'w32, d, s)
+  | I{'mov, [W{z}, D{d}, K{n}]} -> movi(em, z, d, n)
+  | I{'movabs, [D{d}, K{p3}, K{p2}, K{p1}, K{p0}]} -> {
+        parts := [p0, p1, p2, p3]
+        first := true
+        k := 0
+        each(p -> {
+            if (p != 0) {
+                movw(em, if (first) 'movz else 'movk, 'w64, d, p, k)
+                first = false
+            }
+            k = k + 1
+        }, parts)
+        if (first) movw(em, 'movz, 'w64, d, 0, 0)
+    }
+  | I{'lea, [W{_}, D{d}, m]} -> lea(em, d, m)
+  | I{'add, [W{z}, D{d}, U{a}, b]} -> addsub(em, z, false, false, d, a, b)
+  | I{'sub, [W{z}, D{d}, U{a}, b]} -> addsub(em, z, true, false, d, a, b)
+  | I{'mul, [W{z}, D{d}, U{a}, b]} -> {
+        m := val(em, b)
+        word(em, 6912 + sf(z), 0, [Tuple{16, m}, Tuple{10, 31}, Tuple{5, a}, Tuple{0, d}])
+    }
+  | I{op, [W{z}, D{d}, U{a}, b]} if op == 'band or op == 'bor or op == 'bxor -> logic_reg(em, z, op, d, a, val(em, b))
+  | I{'shl, [W{z}, D{d}, U{a}, K{n}]} -> {
+        w := if (z == 'w64) 64 else 32
+        bfm(em, z, false, d, a, (w - n) % w, w - 1 - n)
+    }
+  | I{'shr, [W{z}, D{d}, U{a}, K{n}]} -> bfm(em, z, false, d, a, n, if (z == 'w64) 63 else 31)
+  | I{'sar, [W{z}, D{d}, U{a}, K{n}]} -> bfm(em, z, true, d, a, n, if (z == 'w64) 63 else 31)
+  | I{op, [W{z}, D{d}, U{a}, U{b}]} if op == 'shl or op == 'shr or op == 'sar ->
+        word(em, 6848 + sf(z), if (op == 'shl) 8192 else if (op == 'shr) 9216 else 10240, [Tuple{16, b}, Tuple{5, a}, Tuple{0, d}])
+  | I{'divs, [W{z}, D{d}, U{a}, b]} -> {
+        m := val(em, b)
+        word(em, 6848 + sf(z), 3072, [Tuple{16, m}, Tuple{5, a}, Tuple{0, d}])
+    }
+  | I{'divu, [W{z}, D{d}, U{a}, b]} -> {
+        m := val(em, b)
+        word(em, 6848 + sf(z), 2048, [Tuple{16, m}, Tuple{5, a}, Tuple{0, d}])
+    }
+  | I{op, [W{z}, D{d}, U{a}, b]} if op == 'rems or op == 'remu -> {
+        m := val(em, b)
+        word(em, 6848 + sf(z), if (op == 'rems) 3072 else 2048, [Tuple{16, m}, Tuple{5, a}, Tuple{0, 17}])
+        word(em, 6912 + sf(z), 32768, [Tuple{16, 17}, Tuple{10, a}, Tuple{5, m}, Tuple{0, d}])
+    }
+  | I{'mulhu, [W{_}, D{d}, U{a}, b]} -> {
+        m := val(em, b)
+        word(em, 39872, 31744, [Tuple{16, m}, Tuple{5, a}, Tuple{0, d}])
+    }
+  | I{'neg, [W{z}, D{d}, U{a}]} -> addsub_reg(em, z, true, false, d, 31, a)
+  | I{'not, [W{z}, D{d}, U{a}]} -> logic_reg(em, z, 'orn, d, 31, a)
+  | I{'sx8, [D{d}, U{a}]} -> bfm(em, 'w32, true, d, a, 0, 7)
+  | I{'sx16, [D{d}, U{a}]} -> bfm(em, 'w32, true, d, a, 0, 15)
+  | I{'zx8, [D{d}, U{a}]} -> bfm(em, 'w32, false, d, a, 0, 7)
+  | I{'zx16, [D{d}, U{a}]} -> bfm(em, 'w32, false, d, a, 0, 15)
+  | I{'sext64, [D{d}, U{a}]} -> bfm(em, 'w64, true, d, a, 0, 31)
+  | I{'cset, [Cc{c}, W{z}, D{d}, U{a}, b]} -> {
+        addsub(em, z, true, true, 31, a, b)
+        cset(em, 'w32, cc_code(c), d)
+    }
+  | I{'jcc, [Cc{c}, L{l}, W{z}, U{a}, b]} -> {
+        addsub(em, z, true, true, 31, a, b)
+        branch_fixup(em, 'c19, l)
+        word(em, 21504, cc_code(c), [])
+    }
+  | I{'jmp, [L{l}]} -> {
+        branch_fixup(em, 'b26, l)
+        word(em, 5120, 0, [])
+    }
+  | I{'ldr, [W{k}, D{d}, m]} -> access(em, false, k, d, m)
+  | I{'str, [W{k}, m, U{s}]} -> access(em, true, k, s, m)
+  | I{'str, [W{k}, m, K{n}]} -> {
+        if (n == 0) access(em, true, k, 31, m) else {
+            movi(em, 'w64, 16, n)
+            access(em, true, k, 16, m)
+        }
+    }
+  | I{'bl, [S{name, _}]} -> {
+        reloc(em, 'B26, name, 0)
+        word(em, 37888, 0, [])
+    }
+  | I{'blr, [U{r}]} -> word(em, 54847, 0, [Tuple{5, r}])
+  | I{'ret, []} -> word(em, 54879, 960, [])
+  | I{'svc, [K{n}]} -> word(em, 54272, 1, [Tuple{5, n}])
+  | I{'cnegcs, [DU{d}]} -> word(em, 39552 + 16384, 1024, [Tuple{16, d}, Tuple{12, 3}, Tuple{5, d}, Tuple{0, d}])
+  | I{'brk, [K{n}]} -> word(em, 54304, 0, [Tuple{5, n}])
+  | I{'ud2, []} -> word(em, 54304, 0, [])
+  | I{'spadj, [K{n}]} -> spadj(em, n)
+  | I{'stpfp, []} -> word(em, 43264, 0, [Tuple{10, 30}, Tuple{5, 31}, Tuple{0, 29}])
+  | I{'ldpfp, []} -> word(em, 43328, 0, [Tuple{10, 30}, Tuple{5, 31}, Tuple{0, 29}])
+  | I{'setfp, []} -> addsub_imm(em, 'w64, false, false, 29, 31, 0, false)
+  | I{op, [W{z}, D{d}, U{a}, U{b}]} if op == 'fadd or op == 'fsub or op == 'fmul or op == 'fdiv -> {
+        fmov_in(em, z, 16, a)
+        fmov_in(em, z, 17, b)
+        fop(em, z, fop_lo(op), 16, 16, 17)
+        fmov_out(em, z, d, 16)
+    }
+  | I{'fsqrt, [W{z}, D{d}, U{a}]} -> {
+        fmov_in(em, z, 16, a)
+        word(em, if (z == 'w64) 7777 else 7713, 49152, [Tuple{5, 16}, Tuple{0, 16}])
+        fmov_out(em, z, d, 16)
+    }
+  | I{'fcmp, [Cc{c}, W{z}, D{d}, U{a}, U{b}]} -> {
+        fmov_in(em, z, 16, a)
+        fmov_in(em, z, 17, b)
+        fop(em, z, 8192, 0, 16, 17)
+        cset(em, 'w32, fcc_code(c), d)
+    }
+  | I{'cvti2f, [W{z}, D{d}, U{a}]} -> {
+        word(em, if (z == 'w64) 40546 else 40482, 0, [Tuple{5, a}, Tuple{0, 16}])
+        fmov_out(em, z, d, 16)
+    }
+  | I{'cvtf2i, [W{z}, D{d}, U{a}]} -> {
+        fmov_in(em, z, 16, a)
+        word(em, if (z == 'w64) 40568 else 40504, 0, [Tuple{5, 16}, Tuple{0, 16}])
+        # x86 gives the least integer for a NaN and for a number too great: the saturated greatest one is made the least (the carry of one more), and a NaN is made the least
+        movw(em, 'movn, 'w64, 17, 32768, 3)
+        addsub_reg(em, 'w64, true, true, 31, 16, 17)
+        word(em, 39552 + 0, 1024, [Tuple{16, 16}, Tuple{12, 1}, Tuple{5, 16}, Tuple{0, 16}])
+        fop(em, z, 8192, 0, 16, 16)
+        movw(em, 'movz, 'w64, 17, 32768, 3)
+        word(em, 39552, 0, [Tuple{16, 16}, Tuple{12, 6}, Tuple{5, 17}, Tuple{0, 16}])
+        mov_reg(em, 'w64, d, 16)
+    }
+  | I{'cvtf2f, [W{z}, D{d}, U{a}]} -> {
+        fmov_in(em, z, 16, a)
+        if (z == 'w64) word(em, 7778, 16384, [Tuple{5, 16}, Tuple{0, 16}]) else word(em, 7714, 49152, [Tuple{5, 16}, Tuple{0, 16}])
+        fmov_out(em, if (z == 'w64) 'w32 else 'w64, d, 16)
+    }
+  | _ -> panic(f"a64: cannot encode {ir.show(i)}")
+}
+
+# emit_code(em, code) writes the instructions of a function; a jump to the label that follows is left out
+export emit_code(em, code) := {
+    xs := code
+    while (xs != []) {
+        i := xs[0]
+        rest := list.drop(xs, 1)
+        skip := match i {
+            I{'jmp, [L{l}]} -> match rest {
+                (I{'label, [L{m}]}) :: _ -> m == l
+              | _ -> false
+            }
+          | _ -> false
+        }
+        if (not skip) emit(em, i)
+        xs = rest
+    }
+    finish(em)
+}
+
+test {
+    code(is) := {
+        o := object.new("t")
+        e := new(o, ".text")
+        each(i -> emit(e, i), is)
+        vector.to_list(object.buf(object.section(o, ".text", 'code, 16)))
+    }
+    w32 := W{'w32}
+    w64 := W{'w64}
+    # the words are written little endian: add x0, x1, x2 is 0x8B020020
+    assert(code([I{'add, [w64, D{0}, U{1}, U{2}]}]) == [32, 0, 2, 139], "add x0, x1, x2")
+    assert(code([I{'sub, [w32, D{3}, U{4}, K{5}]}]) == [131, 20, 0, 81], "sub w3, w4, #5")
+    assert(code([I{'mov, [w64, D{0}, K{1}]}]) == [32, 0, 128, 210], "movz x0, #1")
+    assert(code([I{'mov, [w64, D{0}, U{1}]}]) == [224, 3, 1, 170], "mov x0, x1")
+    assert(code([I{'ret, []}]) == [192, 3, 95, 214], "ret")
+    assert(code([I{'stpfp, []}]) == [253, 123, 0, 169], "stp x29, x30, [sp]")
+    assert(code([I{'ldr, [W{'w64}, D{0}, M{U{31}, 0}]}]) == [224, 3, 64, 249], "ldr x0, [sp]")
+    assert(code([I{'str, [W{'w64}, M{U{29}, 16}, U{19}]}]) == [179, 11, 0, 249], "str x19, [x29, #16]")
+    assert(code([I{'mul, [w64, D{0}, U{1}, U{2}]}]) == [32, 124, 2, 155], "mul x0, x1, x2")
+    assert(code([I{'divs, [w64, D{0}, U{1}, U{2}]}]) == [32, 12, 194, 154], "sdiv x0, x1, x2")
+    assert(code([I{'shl, [w64, D{0}, U{1}, K{3}]}]) == [32, 240, 125, 211], "lsl x0, x1, #3")
+    assert(code([I{'shr, [w32, D{0}, U{1}, K{3}]}]) == [32, 124, 3, 83], "lsr w0, w1, #3")
+    assert(code([I{'sar, [w64, D{0}, U{1}, K{3}]}]) == [32, 252, 67, 147], "asr x0, x1, #3")
+    assert(code([I{'sext64, [D{0}, U{1}]}]) == [32, 124, 64, 147], "sxtw x0, w1")
+    assert(code([I{'zx8, [D{0}, U{1}]}]) == [32, 28, 0, 83], "uxtb w0, w1")
+    assert(code([I{'cset, [Cc{'eq}, w64, D{0}, U{1}, U{2}]}]) == [63, 0, 2, 235, 224, 23, 159, 26], "cmp x1, x2; cset w0, eq")
+    assert(code([I{'spadj, [K{-32}]}]) == [255, 131, 0, 209], "sub sp, sp, #32")
+    assert(code([I{'spadj, [K{32}]}]) == [255, 131, 0, 145], "add sp, sp, #32")
+    assert(code([I{'svc, [K{0}]}]) == [1, 0, 0, 212], "svc #0")
+    assert(code([I{'svc, [K{128}]}]) == [1, 16, 0, 212], "svc #0x80")
+    assert(code([I{'mov, [w64, D{0}, K{-1}]}]) == [0, 0, 128, 146], "movn x0, #0")
+    assert(code([I{'mov, [w64, D{0}, K{70000}]}]) == [0, 46, 130, 210, 32, 0, 160, 242], "movz x0, #4464; movk x0, #1, lsl 16")
+    assert(code([I{'lea, [w64, D{0}, M{U{29}, 16}]}]) == [160, 67, 0, 145], "add x0, x29, #16")
+    assert(code([I{'fadd, [w64, D{0}, U{1}, U{2}]}]) == [48, 0, 103, 158, 81, 0, 103, 158, 16, 42, 113, 30, 0, 2, 102, 158], "fmov d16, x1; fmov d17, x2; fadd d16, d16, d17; fmov x0, d16")
+}
+
+}

@@ -142,7 +142,7 @@ tmp-vmf: $(VMF_UNIT_FILES) planck0
 	./planck0 planck/vasmc.pk link $@ linux_x86_64 $(VMF_UNIT_FILES)
 
 # the planckvm with floating point as a program for each platform: dist/planckvm-<target> (the units are the same for every target of the word 8)
-DIST_TARGETS := linux_x86_64
+DIST_TARGETS := linux_x86_64 macos_x86_64 linux_arm64 macos_arm64
 DIST_FILES := $(addprefix dist/planckvm-,$(DIST_TARGETS))
 .PHONY: dist
 dist: $(DIST_FILES)
@@ -217,7 +217,7 @@ test-all: test-planck0
 	./planck0 planck/tests/x64.pk
 	./planck0 planck/tests/target.pk
 	./planck0 planck/tests/unit.pk
-	./planck0 tools/test.pk backend/cfg backend/x64enc backend/x64 backend/target
+	./planck0 tools/test.pk backend/cfg backend/x64enc backend/x64 backend/a64enc backend/arm64 backend/target
 	@for f in $(BACKEND_EXAMPLES); do \
 		./planck0 $$f tmp-backend || exit 1; \
 		./tmp-backend > tmp-backend.out || exit 1; \

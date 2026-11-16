@@ -43,6 +43,14 @@ link_join(objects, names, joined, pieces) := each(name -> {
     table.set(joined, name, Tuple{out, al})
 }, names)
 
+# add_bits(b, at, lo, hi) adds the halves lo and hi of 16 bits to the word of 4 bytes at at: the fields of an instruction that a relocation fills are 0 before
+add_bits(b, at, lo, hi) := {
+    bytes.set(b, at, bytes.get(b, at) + lo % 256)
+    bytes.set(b, at + 1, bytes.get(b, at + 1) + lo / 256)
+    bytes.set(b, at + 2, bytes.get(b, at + 2) + hi % 256)
+    bytes.set(b, at + 3, bytes.get(b, at + 3) + hi / 256)
+}
+
 link_with(objects, entry, base, header, file_align, gap) := {
     each(o -> each(s -> if (not member(arg(s, 0), append(first, second))) panic(f"link: the section {arg(s, 0)} of {object.name(o)} is not supported"), object.sections(o)), objects)
     joined := table.new()
@@ -93,12 +101,30 @@ link_with(objects, entry, base, header, file_align, gap) := {
             if (s == none) panic(f"link: {symbol} is not defined (used in {object.name(o)})")
             at := table.get(pieces, Tuple{k, section}, 0) + off
             place := table.get(addr, section, 0) + at
-            v := match kind {
-                'Abs32 -> s + addend
-              | 'Pc32 -> s + addend - place
+            buf := arg(table.get(joined, section, none), 0)
+            match kind {
+                'Abs32 -> bytes.set_u32(buf, at, s + addend)
+              | 'Pc32 -> bytes.set_u32(buf, at, s + addend - place)
+              | 'Page21 -> {
+                    # adrp: the distance in pages of 4096 bytes in the fields immlo (bits 29 and 30) and immhi (bits 5 to 23)
+                    pages := bit_sar(s + addend, 12) - bit_sar(place, 12)
+                    if (pages >= 1048576 or pages < -1048576) panic(f"link: {symbol} is too far for adrp")
+                    hi := bit_and(bit_sar(pages, 2), 524287)
+                    add_bits(buf, at, hi * 32 % 65536, hi * 32 / 65536 + bit_and(pages, 3) * 8192)
+                }
+              | 'Lo12 -> {
+                    # add with an integer: the low 12 bits of the address in the bits 10 to 21
+                    x := bit_and(s + addend, 4095) * 1024
+                    add_bits(buf, at, x % 65536, x / 65536)
+                }
+              | 'B26 -> {
+                    d := s + addend - place
+                    if (d % 4 != 0 or d >= 134217728 or d < -134217728) panic(f"link: {symbol} is too far for a branch")
+                    x := bit_and(bit_sar(d, 2), 67108863)
+                    add_bits(buf, at, x % 65536, x / 65536)
+                }
               | _ -> panic(f"link: unknown kind of relocation {kind}")
             }
-            bytes.set_u32(arg(table.get(joined, section, none), 0), at, v)
         }, object.relocs(o))
         k = k + 1
     }, objects)
