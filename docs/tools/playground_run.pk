@@ -5,6 +5,9 @@
 #   run    evaluates the expressions of the text in order, and writes only what the program writes
 #   repl   writes the session at the prompt of the REPL: each expression after "> " (the lines of it that go on after "... "), then its value,
 #          except for none and for definitions, which write no value
+#   session  is repl for the lines that the user typed one by one. The text is the entries separated by a line of one form feed (U+000C),
+#          and each entry is read and evaluated by itself, so that an entry does not go on in the next one. After the last entry a line of one
+#          form feed is written, which tells that no entry stopped the evaluation.
 # A syntax error or a runtime error (the effect Error) is written and stops the evaluation.
 # It needs the libraries of planck/lib/io.pk, planck/lib/string.pk and planck/lib/pvm/link.pk, and the grammar of planck/syntax.pk, in the image.
 
@@ -40,6 +43,7 @@ module playground {
         line := 1
         col := 1
         go := true
+        ok := true
         while (go) {
             r := parse_at(s, Loc{"<playground>", line, col})
             e := arg(r, 0)
@@ -47,6 +51,7 @@ module playground {
             else if (type(e) == Expr and head(e) == 'SyntaxError) {
                 put(peg_error_text(e))
                 put("\n")
+                ok = false
                 go = false
             } else {
                 rest := arg(r, 1)
@@ -69,22 +74,39 @@ module playground {
                         failed = true
                         none
                     }
-                    if (failed) go = false
-                    else if (session and v != none and not is_def(e)) println(v)
+                    if (failed) {
+                        ok = false
+                        go = false
+                    } else if (session and v != none and not is_def(e)) println(v)
                 }
             }
         }
+        ok
     }
 
     export run() := {
         mode := read_line()
         b := strbuf.new()
+        entries := []
         line := read_line()
         while (line != none) {
-            strbuf.add(b, line)
-            strbuf.add(b, "\n")
+            if (mode == "session" and strlen(line) == 1 and ord(line, 0) == 12) {
+                entries = strbuf.string(b) :: entries
+                b = strbuf.new()
+            } else {
+                strbuf.add(b, line)
+                strbuf.add(b, "\n")
+            }
             line = read_line()
         }
-        eval_text(strbuf.string(b), mode == "repl")
+        if (mode == "session") {
+            ok := true
+            es := list.reverse(strbuf.string(b) :: entries)
+            while (ok and es != []) {
+                ok = eval_text(list.nth(es, 0), true)
+                es = list.drop(es, 1)
+            }
+            if (ok) put("\f\n")
+        } else eval_text(strbuf.string(b), mode == "repl")
     }
 }

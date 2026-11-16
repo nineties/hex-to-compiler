@@ -76,12 +76,13 @@
   }
 
   // The Playground is a REPL. The VM runs a program in a fresh worker, so a line is evaluated together with the lines accepted before it, and only
-  // the part of the session that is new is shown. A final expression that only prints its echo tells that the evaluation was not stopped by an error.
+  // the part of the session that is new is shown. The lines are sent as the entries of the mode "session" (see docs/tools/playground_run.pk),
+  // each of which is read by itself. The session ends with a line of one form feed if no entry stopped the evaluation.
   function playground(root) {
     var log = root.querySelector("#pg-log");
     var input = root.querySelector("#pg-in");
-    var MARK = "\"playground-mark\"";
-    var history = "";
+    var END = "\f\n";
+    var history = [];
     var shown = "";
     var busy = false;
 
@@ -117,15 +118,14 @@
       if (line === "" || busy) return;
       busy = true;
       input.disabled = true;
-      run("repl", history + line + "\n" + MARK + "\n", function (r) {
-        var full = r.stdout;
-        var ok = full.slice(0, shown.length) === shown && full.indexOf("> " + MARK + "\n") >= 0;
+      run("session", history.concat([line]).join("\n\f\n") + "\n", function (r) {
+        var ended = r.stdout.slice(-END.length) === END;
+        var full = ended ? r.stdout.slice(0, -END.length) : r.stdout;
+        var ok = ended && full.slice(0, shown.length) === shown;
         if (ok) {
-          var cut = full.lastIndexOf("> " + MARK + "\n");
-          var fresh = full.slice(shown.length, cut);
-          add(fresh);
-          shown = full.slice(0, cut);
-          history += line + "\n";
+          add(full.slice(shown.length));
+          shown = full;
+          history.push(line);
         } else if (r.status !== 0 && r.stdout === "") {
           add(r.stderr);
         } else {
