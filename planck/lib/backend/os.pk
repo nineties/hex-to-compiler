@@ -13,8 +13,9 @@
 #   args []              gives the address of the arguments of the program: a word that holds their number n, then n words that hold the
 #                        address of each, which is the bytes of the argument followed by a byte 0. It is used by the start of the program only.
 #   abort []             ends the program as failed (the status abort_status); it does not return
-# The names do not depend on the system. os.select_x64(emit, name, args, d) turns one of them into the instructions of
-# x86-64 on Linux (syscall). This file is the only place that knows the numbers and the registers; another system or machine adds its own.
+# The names do not depend on the system. os.select_linux_x64(emit, label, name, args, d) turns one of them into the instructions of
+# x86-64 on Linux (syscall), and os.select_macos_x64 into those of x86-64 on macOS; label() is a new label for the code that has a branch.
+# This file is the only place that knows the numbers and the registers; another system or machine adds its own.
 
 use("base")
 use("list")
@@ -59,34 +60,105 @@ x64_frame_to_args := 8
 # the register of the flags that an addition defines (the same as flags_def of x64.pk)
 x64_reg_flags := 16
 
-x64_call(emit, number, args, d) := {
+# the registers of a system call: the number and the arguments
+x64_load(emit, number, args) := {
     emit(I{'mov, [D{x64_reg_number}, K{number}]})
     k := 0
     each(a -> {
         emit(I{'mov, [D{x64_reg_args[k]}, os_arg(a)]})
         k = k + 1
     }, args)
+}
+
+x64_call(emit, number, args, d) := {
+    x64_load(emit, number, args)
     emit(I{'syscall, append([IU{x64_reg_number}, ID{x64_reg_number}, ID{x64_reg_rcx}, ID{x64_reg_r11}], map(r -> IU{r}, list.take(x64_reg_args, length(args))))})
     if (d != none) emit(I{'mov, [D{d}, U{x64_reg_number}]})
 }
 
-export select_x64(emit, 'write, args, d) := x64_call(emit, x64_write, args, d)
-select_x64(emit, 'read, args, d) := x64_call(emit, x64_read, args, d)
-select_x64(emit, 'open, args, d) := x64_call(emit, x64_open, append(args, [K{linux_o_rdonly}]), d)
-select_x64(emit, 'create, args, d) := x64_call(emit, x64_open, append(args, [K{linux_o_create}, K{linux_mode}]), d)
-select_x64(emit, 'close, args, d) := x64_call(emit, x64_close, args, d)
-select_x64(emit, 'exit, args, d) := x64_call(emit, x64_exit, args, d)
-select_x64(emit, 'grow, args, d) := x64_call(emit, x64_brk, args, d)
-select_x64(emit, 'args, args, d) := {
+export select_linux_x64(emit, label, 'write, args, d) := x64_call(emit, x64_write, args, d)
+select_linux_x64(emit, label, 'read, args, d) := x64_call(emit, x64_read, args, d)
+select_linux_x64(emit, label, 'open, args, d) := x64_call(emit, x64_open, append(args, [K{linux_o_rdonly}]), d)
+select_linux_x64(emit, label, 'create, args, d) := x64_call(emit, x64_open, append(args, [K{linux_o_create}, K{linux_mode}]), d)
+select_linux_x64(emit, label, 'close, args, d) := x64_call(emit, x64_close, args, d)
+select_linux_x64(emit, label, 'exit, args, d) := x64_call(emit, x64_exit, args, d)
+select_linux_x64(emit, label, 'grow, args, d) := x64_call(emit, x64_brk, args, d)
+select_linux_x64(emit, label, 'args, args, d) := {
     emit(I{'mov, [D{d}, U{x64_reg_frame}]})
     emit(I{'add, [DU{d}, K{x64_frame_to_args}, ID{x64_reg_flags}]})
 }
-select_x64(emit, 'abort, args, d) := {
+select_linux_x64(emit, label, 'abort, args, d) := {
     emit(I{'mov, [D{x64_reg_number}, K{x64_exit_group}]})
     emit(I{'mov, [D{x64_reg_args[0]}, K{abort_status}]})
     emit(I{'syscall, [IU{x64_reg_number}, IU{x64_reg_args[0]}, ID{x64_reg_number}, ID{x64_reg_rcx}, ID{x64_reg_r11}]})
     emit(I{'ud2, []})
 }
-select_x64(emit, name, args, d) := panic(f"os.select_x64: the service {symname(name)} is not known")
+select_linux_x64(emit, label, name, args, d) := panic(f"os.select_linux_x64: the service {symname(name)} is not known")
+
+# === macOS on x86-64 ===
+# The system calls are those of BSD, called by syscall with the number of the call added to the class 0x2000000 in rax; the arguments are in the registers of Linux, and rcx and r11
+# are changed. An error is the flag of carry and the number of the error in rax, as a positive number. It is made the negative number that Linux gives: sbb rcx, rcx makes -1 for the
+# flag and 0 otherwise, and (rax xor rcx) - rcx is -rax or rax.
+macos_class := 33554432
+macos_exit := 1
+macos_read := 3
+macos_write := 4
+macos_open := 5
+macos_close := 6
+macos_mmap := 197
+
+# open for writing, made new when it is not there, and emptied (O_WRONLY | O_CREAT | O_TRUNC)
+macos_o_create := 1537
+
+# the memory of the program: there is no brk, so grow 0 maps an area of 2^35 bytes, and the grow of an address gives that address (the pages are given on use)
+# (protection read and write, private and anonymous and without reserve)
+macos_heap_shift := 35
+macos_mmap_prot := 3
+macos_mmap_flags := 4162
+
+# the register that holds the address of the arguments of the program, which follow the number of them in the memory
+x64_reg_argv := 6
+
+macos_x64_call(emit, number, args, d) := {
+    x64_load(emit, macos_class + number, args)
+    emit(I{'syscall, append([IU{x64_reg_number}, ID{x64_reg_number}, ID{x64_reg_rcx}, ID{x64_reg_r11}, ID{x64_reg_flags}], map(r -> IU{r}, list.take(x64_reg_args, length(args))))})
+    emit(I{'sbb, [W{'w64}, DU{x64_reg_rcx}, U{x64_reg_rcx}, IU{x64_reg_flags}, ID{x64_reg_flags}]})
+    emit(I{'bxor, [W{'w64}, DU{x64_reg_number}, U{x64_reg_rcx}, ID{x64_reg_flags}]})
+    emit(I{'sub, [W{'w64}, DU{x64_reg_number}, U{x64_reg_rcx}, ID{x64_reg_flags}]})
+    if (d != none) emit(I{'mov, [D{d}, U{x64_reg_number}]})
+}
+
+export select_macos_x64(emit, label, 'write, args, d) := macos_x64_call(emit, macos_write, args, d)
+select_macos_x64(emit, label, 'read, args, d) := macos_x64_call(emit, macos_read, args, d)
+select_macos_x64(emit, label, 'open, args, d) := macos_x64_call(emit, macos_open, append(args, [K{linux_o_rdonly}]), d)
+select_macos_x64(emit, label, 'create, args, d) := macos_x64_call(emit, macos_open, append(args, [K{macos_o_create}, K{linux_mode}]), d)
+select_macos_x64(emit, label, 'close, args, d) := macos_x64_call(emit, macos_close, args, d)
+select_macos_x64(emit, label, 'exit, args, d) := macos_x64_call(emit, macos_exit, args, d)
+select_macos_x64(emit, label, 'grow, args, d) := {
+    # the result is the address asked, and for 0 the start of the area that mmap gives
+    emit(I{'mov, [D{d}, os_arg(args[0])]})
+    map_it := label()
+    done := label()
+    emit(I{'cmp, [W{'w64}, U{d}, K{0}, ID{x64_reg_flags}]})
+    emit(I{'jcc, [Cc{'ne}, L{done}, IU{x64_reg_flags}]})
+    emit(I{'jmp, [L{map_it}]})
+    emit(I{'label, [L{map_it}]})
+    emit(I{'mov, [D{x64_reg_args[1]}, K{1}]})
+    emit(I{'shl, [W{'w64}, DU{x64_reg_args[1]}, K{macos_heap_shift}, ID{x64_reg_flags}]})
+    macos_x64_call(emit, macos_mmap, [K{0}, x64_reg_args[1], K{macos_mmap_prot}, K{macos_mmap_flags}, K{-1}, K{0}], d)
+    emit(I{'jmp, [L{done}]})
+    emit(I{'label, [L{done}]})
+}
+select_macos_x64(emit, label, 'args, args, d) := {
+    emit(I{'mov, [D{d}, U{x64_reg_argv}]})
+    emit(I{'add, [DU{d}, K{-8}, ID{x64_reg_flags}]})
+}
+select_macos_x64(emit, label, 'abort, args, d) := {
+    emit(I{'mov, [D{x64_reg_number}, K{macos_class + macos_exit}]})
+    emit(I{'mov, [D{x64_reg_args[0]}, K{abort_status}]})
+    emit(I{'syscall, [IU{x64_reg_number}, IU{x64_reg_args[0]}, ID{x64_reg_number}, ID{x64_reg_rcx}, ID{x64_reg_r11}]})
+    emit(I{'ud2, []})
+}
+select_macos_x64(emit, label, name, args, d) := panic(f"os.select_macos_x64: the service {symname(name)} is not known")
 
 }

@@ -5,7 +5,8 @@
 # which is read and executed and holds the headers of the file in front, and .data and .bss make the second, which is read and written.
 # link(objects, entry, base, header) is Image{entry, segs, symbols}: the address of the symbol entry, the segments of elf.pk, and a table from
 # the global symbols to their addresses. base is the address where the file is loaded and header the size of the headers of the file for
-# two segments (elf.header_size(2)). A symbol that is used and not defined, or defined twice as global, stops the program.
+# two segments (elf.header_size(2)). The second segment follows the first in the file at a multiple of 16 bytes and in the memory one page after that place, as elf.pk
+# takes it; link_paged puts the second segment at the page of the file after the first, and at the same place in the memory. A symbol that is used and not defined, or defined twice as global, stops the program.
 
 use("base")
 use("list")
@@ -42,7 +43,7 @@ link_join(objects, names, joined, pieces) := each(name -> {
     table.set(joined, name, Tuple{out, al})
 }, names)
 
-export link(objects, entry, base, header) := {
+link_with(objects, entry, base, header, file_align, gap) := {
     each(o -> each(s -> if (not member(arg(s, 0), append(first, second))) panic(f"link: the section {arg(s, 0)} of {object.name(o)} is not supported"), object.sections(o)), objects)
     joined := table.new()
     pieces := table.new()
@@ -58,8 +59,8 @@ export link(objects, entry, base, header) := {
     }, first)
     end0 := cur
     # the second segment starts in the file where the first ends, and in memory one page after that
-    off1 := align(end0 - base, 16)
-    cur = base + off1 + 4096
+    off1 := align(end0 - base, file_align)
+    cur = base + off1 + gap
     each(n -> {
         j := table.get(joined, n, none)
         cur = align(cur, arg(j, 1))
@@ -115,14 +116,19 @@ export link(objects, entry, base, header) := {
     each(n -> {
         j := table.get(joined, n, none)
         if (n == ".data") {
-            bytes.zeros(seg1, table.get(addr, n, 0) - (base + off1 + 4096) - bytes.len(seg1))
+            bytes.zeros(seg1, table.get(addr, n, 0) - (base + off1 + gap) - bytes.len(seg1))
             bytes.append(seg1, arg(j, 0))
         }
     }, second)
-    memsz1 := end1 - (base + off1 + 4096)
+    memsz1 := end1 - (base + off1 + gap)
     segs := [Seg{base, 0, seg0, bytes.len(seg0), 5}]
-    if (memsz1 > 0) segs = append(segs, [Seg{base + off1 + 4096, off1, seg1, memsz1, 6}])
+    if (memsz1 > 0) segs = append(segs, [Seg{base + off1 + gap, off1, seg1, memsz1, 6}])
     Image{e, segs, globals}
 }
+
+export link(objects, entry, base, header) := link_with(objects, entry, base, header, 16, 4096)
+
+# link_paged(objects, entry, base, header, page) is the same for a format that puts each segment at a multiple of the page size, in the file and in the memory
+export link_paged(objects, entry, base, header, page) := link_with(objects, entry, base, header, page, 0)
 
 }

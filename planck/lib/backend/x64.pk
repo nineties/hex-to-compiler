@@ -29,7 +29,7 @@
 # register is movl, which is never taken out as a move between equal registers. An address is a 64-bit value.
 # The calling convention: 8 bytes for each argument, the arguments are pushed from the last to the first and removed by the caller,
 # the results are in rax and rdx, rbx and r12 to r15 are kept by the callee (and rbp, the frame pointer).
-# The services of the system and trap are selected by os.select_x64 of os.pk.
+# The services of the system and trap are selected by sys(emit, label, name, args, d), which is a function of os.pk for the system of the target.
 
 use("base")
 use("list")
@@ -51,11 +51,11 @@ commutative := ['add, 'mul, 'band, 'bor, 'bxor]
 
 fun select_one
 
-# select(f, code) is the instructions for x86-64 of the machine independent instructions code
-select(f, code) := {
+# select(sys, f, code) is the instructions for x86-64 of the machine independent instructions code, with the system sys
+select(sys, f, code) := {
     out := []
     emit := i -> { out = i :: out }
-    each(i -> select_one(f, emit, i), code)
+    each(i -> select_one(sys, f, emit, i), code)
     reverse(out)
 }
 
@@ -71,7 +71,7 @@ sse_ops := [Tuple{'fadd, 88}, Tuple{'fmul, 89}, Tuple{'fsub, 92}, Tuple{'fdiv, 9
 # the width of a register: 'w64 for a physical register and a virtual register of 64 bits
 x64_wd(f, r) := if (ir.is_vreg(r) and ir.width(f, r) == 32) 'w32 else 'w64
 
-select_one(f, emit, i) = {
+select_one(sys, f, emit, i) = {
     nv := w -> ir.vreg(f, if (w == 'w64) 64 else 32)
     wd := r -> x64_wd(f, r)
     # d = s for registers: a 32-bit value that comes from a physical register is made whole by a 32-bit move
@@ -237,7 +237,7 @@ select_one(f, emit, i) = {
             if (rets != []) mov(rets[0], 0)
             if (length(rets) > 1) mov(rets[1], 2)
         }
-      | I{'os, [N{name}, Us{args}, D{d}]} -> os.select_x64(os_emit, name, args, d)
+      | I{'os, [N{name}, Us{args}, D{d}]} -> sys(os_emit, () -> ir.label(f), name, args, d)
       | I{'ret, [Us{values}]} -> {
             if (values != []) mov(0, values[0])
             if (length(values) > 1) mov(2, values[1])
@@ -249,7 +249,7 @@ select_one(f, emit, i) = {
             emit(I{'jcc, [Cc{c}, L{t}, IU{16}]})
             emit(I{'jmp, [L{e}]})
         }
-      | I{'trap, []} -> os.select_x64(os_emit, 'abort, [], none)
+      | I{'trap, []} -> sys(os_emit, () -> ir.label(f), 'abort, [], none)
       | _ -> panic(f"x64.select: cannot select {ir.show(i)}")
     }
 }
@@ -317,8 +317,8 @@ frame(f, code) := {
 }
 
 # === Functions and modules ===
-compile_fun(f, em) := {
-    code := select(f, ir.code(f))
+compile_fun(sys, f, em) := {
+    code := select(sys, f, ir.code(f))
     code = sched.code(code, sched_model)
     g := ir.set_code(f, code)
     code = regalloc.allocate(g, ra)
@@ -327,10 +327,10 @@ compile_fun(f, em) := {
     x64enc.emit_code(em, code)
 }
 
-# compile(name, funs, datas) is an object of the functions (ir.fun) and the data (see object.add_data of object.pk)
-export compile(name, funs, datas) := {
+# compile(sys, name, funs, datas) is an object of the functions (ir.fun) and the data (see object.add_data of object.pk), for the system sys
+export compile(sys, name, funs, datas) := {
     o := object.new(name)
-    each(f -> compile_fun(f, x86enc.new(o, ".text")), funs)
+    each(f -> compile_fun(sys, f, x86enc.new(o, ".text")), funs)
     object.add_data(o, datas)
     o
 }
@@ -342,7 +342,7 @@ test {
     f := ir.fn("t")
     a := ir.vreg(f, 32)
     b := ir.vreg(f, 64)
-    sel(is) := select(f, is)
+    sel(is) := select(os.select_linux_x64, f, is)
     # a 32-bit move and a 64-bit one; the extensions are moves that stay
     assert(sel([I{'mov, [D{a}, U{a + 0}]}]) == [I{'mov, [w32, D{a}, U{a}]}], "a 32-bit move")
     assert(sel([I{'zext64, [D{b}, U{a}]}]) == [I{'movl, [D{b}, U{a}]}], "zext64")
