@@ -143,12 +143,17 @@ tmp-vmf: $(VMF_UNIT_FILES) planck0
 
 # the planckvm with floating point as a program for each platform: dist/planckvm-<target> (the units are the same for every target of the word 8)
 DIST_TARGETS := linux_x86_64 macos_x86_64 linux_arm64 macos_arm64
-DIST_FILES := $(addprefix dist/planckvm-,$(DIST_TARGETS))
+DIST_FILES := $(addprefix dist/planckvm-,$(DIST_TARGETS)) dist/planckvm-windows_x86_64.exe
 .PHONY: dist
 dist: $(DIST_FILES)
 dist/planckvm-%: $(VMF_UNIT_FILES) $(VASMC_SOURCES) planck0
 	mkdir -p dist
 	./planck0 planck/vasmc.pk link $@ $* $(VMF_UNIT_FILES)
+
+# the file of Windows has the extension .exe
+dist/planckvm-windows_x86_64.exe: $(VMF_UNIT_FILES) $(VASMC_SOURCES) planck0
+	mkdir -p dist
+	./planck0 planck/vasmc.pk link $@ windows_x86_64 $(VMF_UNIT_FILES)
 
 test-vm: tmp-vmf
 	@for f in $(VM_ALL_EXAMPLES); do \

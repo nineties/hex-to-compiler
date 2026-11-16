@@ -251,4 +251,270 @@ select_macos_arm64(emit, label, 'abort, args, d) := {
 }
 select_macos_arm64(emit, label, name, args, d) := panic(f"os.select_macos_arm64: the service {symname(name)} is not known")
 
+# === Windows on x86-64 ===
+# The services are the functions of KERNEL32.DLL, which the program calls through the table of addresses that the loader fills in (pe.pk): call [__imp_<name>]. A call follows the convention of Windows:
+# the first four arguments are in rcx, rdx, r8 and r9, the others are on the stack above 32 bytes of space for the callee, the stack pointer is a multiple of 16 at the call, and rax, rcx, rdx, r8 to r11
+# and the registers of floating point are changed. Programs of planck keep the stack pointer at any multiple of 8, so a call saves the stack pointer, rounds it down and makes room for the arguments:
+#   [rsp + 0 .. 31]   the space for the callee      [rsp + 32 ..]   the fifth argument and the following      [rsp + 64]   the saved stack pointer      [rsp + 72]   a variable of 4 bytes
+# The data of the services (see pe.runtime): __os_heap the start of the memory that VirtualAlloc reserved and __os_commit the end of what is committed, __os_cmd the copy of the command line and __os_argv the
+# arguments that are cut from it (the number of them, then the address of each).
+export windows_imports := ["ExitProcess", "GetStdHandle", "WriteFile", "ReadFile", "CreateFileA", "CloseHandle", "VirtualAlloc", "GetCommandLineA"]
+export windows_vars := [Tuple{"__os_heap", 8}, Tuple{"__os_commit", 8}, Tuple{"__os_argv", 8 + 8 * 512}, Tuple{"__os_cmd", 33000}]
+
+win_arg_regs := [1, 2, 8, 9]
+win_rsp := 4
+win_space := 80
+win_saved := 64
+win_local := 72
+
+# the instructions of the arguments: a register of the code, K{n}, Big{p3, p2, p1, p0} (an integer of 64 bits in four parts of 16 bits), 'out (the address of the variable), Mem{name} (the 8 bytes of
+# a variable) or Sub{r, name} (r minus that variable)
+win_fl := ID{x64_reg_flags}
+win_load(emit, r, spec) := match spec {
+    K{n} -> emit(I{'mov, [D{r}, K{n}]})
+  | Big{p3, p2, p1, p0} -> emit(I{'movabs, [D{r}, K{p3}, K{p2}, K{p1}, K{p0}]})
+  | 'out -> emit(I{'lea, [W{'w64}, D{r}, M{U{win_rsp}, win_local}]})
+  | Mem{name} -> emit(I{'mov, [W{'w64}, D{r}, MG{name, 0}]})
+  | Sub{v, name} -> {
+        emit(I{'mov, [W{'w64}, D{r}, MG{name, 0}]})
+        emit(I{'neg, [W{'w64}, DU{r}, win_fl]})
+        emit(I{'add, [W{'w64}, DU{r}, U{v}, win_fl]})
+    }
+  | v -> emit(I{'mov, [D{r}, U{v}]})
+}
+
+# the instruction that stores an argument at the place of the stack, with rax free
+win_store(emit, at, spec) := match spec {
+    K{n} -> emit(I{'mov, [W{'w64}, M{U{win_rsp}, at}, K{n}]})
+  | Big{p3, p2, p1, p0} -> {
+        emit(I{'movabs, [D{0}, K{p3}, K{p2}, K{p1}, K{p0}]})
+        emit(I{'mov, [W{'w64}, M{U{win_rsp}, at}, U{0}]})
+    }
+  | v -> emit(I{'mov, [W{'w64}, M{U{win_rsp}, at}, U{v}]})
+}
+
+# win_call(emit, name, args) calls the function name of KERNEL32 with the arguments; the result is in rax, and win_end gives the stack pointer back
+win_call(emit, name, args) := {
+    emit(I{'mov, [D{0}, U{win_rsp}]})
+    emit(I{'band, [W{'w64}, DU{win_rsp}, K{-16}, win_fl]})
+    emit(I{'sub, [W{'w64}, DU{win_rsp}, K{win_space}, win_fl]})
+    emit(I{'mov, [W{'w64}, M{U{win_rsp}, win_saved}, U{0}]})
+    k := 0
+    each(a -> {
+        if (k >= 4) win_store(emit, 32 + 8 * (k - 4), a)
+        k = k + 1
+    }, args)
+    k = 0
+    each(a -> {
+        if (k < 4) win_load(emit, win_arg_regs[k], a)
+        k = k + 1
+    }, args)
+    emit(I{'call, append([MG{f"__imp_{name}", 0}, ID{0}, ID{1}, ID{2}, ID{8}, ID{9}, ID{10}, ID{11}, win_fl, ID{17}, ID{18}], map(r -> IU{r}, list.take(win_arg_regs, if (length(args) < 4) length(args) else 4)))})
+}
+
+win_end(emit) := emit(I{'mov, [W{'w64}, D{win_rsp}, M{U{win_rsp}, win_saved}]})
+
+win_cmp(emit, z, a, b) := emit(I{'cmp, [W{z}, U{a}, b, win_fl]})
+win_jcc(emit, c, l) := emit(I{'jcc, [Cc{c}, L{l}, IU{x64_reg_flags}]})
+win_jmp(emit, l) := emit(I{'jmp, [L{l}]})
+win_label(emit, l) := emit(I{'label, [L{l}]})
+
+# a conditional jump to l that falls through to a new label
+win_if(emit, label, c, l) := {
+    next := label()
+    win_jcc(emit, c, l)
+    win_jmp(emit, next)
+    win_label(emit, next)
+}
+
+# write and read: the file 0, 1 and 2 are the standard handles; the result is the number of bytes, or -1
+win_io(emit, label, api, args, d) := {
+    lstd := label()
+    lgo := label()
+    emit(I{'mov, [D{d}, os_arg(args[0])]})
+    win_cmp(emit, 'w64, d, K{2})
+    win_jcc(emit, 'leu, lstd)
+    win_jmp(emit, lgo)
+    win_label(emit, lstd)
+    emit(I{'mov, [D{d}, K{-10}]})
+    emit(I{'sub, [W{'w32}, DU{d}, os_arg(args[0]), win_fl]})
+    win_call(emit, "GetStdHandle", [d])
+    win_end(emit)
+    emit(I{'mov, [D{d}, U{0}]})
+    win_jmp(emit, lgo)
+    win_label(emit, lgo)
+    win_call(emit, api, [d, args[1], args[2], 'out, K{0}])
+    emit(I{'mov, [D{d}, K{-1}]})
+    ldone := label()
+    win_cmp(emit, 'w32, 0, K{0})
+    win_if(emit, label, 'eq, ldone)
+    emit(I{'mov, [W{'w32}, D{d}, M{U{win_rsp}, win_local}]})
+    win_jmp(emit, ldone)
+    win_label(emit, ldone)
+    win_end(emit)
+}
+
+windows_x64_open(emit, access, share, disposition, args, d) := {
+    win_call(emit, "CreateFileA", [args[0], access, K{share}, K{0}, K{disposition}, K{128}, K{0}])
+    win_end(emit)
+    emit(I{'mov, [D{d}, U{0}]})
+}
+
+# the arguments of the program: the command line is copied, and cut at the spaces outside of quotes. rsi is the place in the command line, rdi the place in the copy, r8 the place in the table of the arguments,
+# r9 their number, r10 is 1 in quotes and rcx is the character
+# the labels of the parts: skip, next, start, chars, copy, quote, separator, end and done
+win_args_start(emit, ls) := {
+    win_call(emit, "GetCommandLineA", [])
+    win_end(emit)
+    emit(I{'mov, [W{'w64}, D{6}, U{0}]})
+    emit(I{'lea, [W{'w64}, D{7}, MG{"__os_cmd", 0}]})
+    emit(I{'lea, [W{'w64}, D{8}, MG{"__os_argv", 8}]})
+    emit(I{'mov, [W{'w32}, D{9}, K{0}]})
+    emit(I{'mov, [W{'w32}, D{10}, K{0}]})
+    win_jmp(emit, ls[0])
+}
+
+# the spaces between the arguments are skipped; the start of an argument is put in the table
+win_args_skip(emit, label, ls) := {
+    win_label(emit, ls[0])
+    emit(I{'movzxb, [W{'w32}, D{1}, M{U{6}, 0}]})
+    win_cmp(emit, 'w32, 1, K{0})
+    win_if(emit, label, 'eq, ls[8])
+    win_cmp(emit, 'w32, 1, K{32})
+    win_if(emit, label, 'eq, ls[1])
+    win_cmp(emit, 'w32, 1, K{9})
+    win_if(emit, label, 'eq, ls[1])
+    win_jmp(emit, ls[2])
+    win_label(emit, ls[1])
+    emit(I{'add, [W{'w64}, DU{6}, K{1}, win_fl]})
+    win_jmp(emit, ls[0])
+    win_label(emit, ls[2])
+    emit(I{'mov, [W{'w64}, M{U{8}, 0}, U{7}]})
+    emit(I{'add, [W{'w64}, DU{8}, K{8}, win_fl]})
+    emit(I{'add, [W{'w32}, DU{9}, K{1}, win_fl]})
+    emit(I{'mov, [W{'w32}, D{10}, K{0}]})
+    win_jmp(emit, ls[3])
+}
+
+# the characters of an argument are copied; a quote changes r10 and a space outside of quotes ends the argument
+win_args_chars(emit, label, ls) := {
+    win_label(emit, ls[3])
+    emit(I{'movzxb, [W{'w32}, D{1}, M{U{6}, 0}]})
+    win_cmp(emit, 'w32, 1, K{0})
+    win_if(emit, label, 'eq, ls[7])
+    win_cmp(emit, 'w32, 1, K{34})
+    win_if(emit, label, 'eq, ls[5])
+    win_cmp(emit, 'w32, 10, K{0})
+    win_if(emit, label, 'ne, ls[4])
+    win_cmp(emit, 'w32, 1, K{32})
+    win_if(emit, label, 'eq, ls[6])
+    win_cmp(emit, 'w32, 1, K{9})
+    win_if(emit, label, 'eq, ls[6])
+    win_jmp(emit, ls[4])
+    win_label(emit, ls[4])
+    emit(I{'movb, [M{U{7}, 0}, U{1}]})
+    emit(I{'add, [W{'w64}, DU{7}, K{1}, win_fl]})
+    emit(I{'add, [W{'w64}, DU{6}, K{1}, win_fl]})
+    win_jmp(emit, ls[3])
+    win_label(emit, ls[5])
+    emit(I{'bxor, [W{'w32}, DU{10}, K{1}, win_fl]})
+    emit(I{'add, [W{'w64}, DU{6}, K{1}, win_fl]})
+    win_jmp(emit, ls[3])
+}
+
+win_args_end(emit, ls, d) := {
+    win_label(emit, ls[6])
+    emit(I{'movb, [M{U{7}, 0}, K{0}]})
+    emit(I{'add, [W{'w64}, DU{7}, K{1}, win_fl]})
+    emit(I{'add, [W{'w64}, DU{6}, K{1}, win_fl]})
+    win_jmp(emit, ls[0])
+    win_label(emit, ls[7])
+    emit(I{'movb, [M{U{7}, 0}, K{0}]})
+    win_jmp(emit, ls[8])
+    win_label(emit, ls[8])
+    emit(I{'lea, [W{'w64}, D{d}, MG{"__os_argv", 0}]})
+    emit(I{'mov, [W{'w64}, M{U{d}, 0}, U{9}]})
+}
+
+# the labels of grow: commit, base, have, reserve, ok and done. The first call reserves 2^35 bytes of address space and gives their start
+win_grow_reserve(emit, ls, d) := {
+    win_label(emit, ls[1])
+    emit(I{'mov, [W{'w64}, D{0}, MG{"__os_heap", 0}]})
+    win_cmp(emit, 'w64, 0, K{0})
+    win_jcc(emit, 'ne, ls[2])
+    win_jmp(emit, ls[3])
+    win_label(emit, ls[3])
+    win_call(emit, "VirtualAlloc", [K{0}, Big{0, 8, 0, 0}, K{8192}, K{4}])
+    win_end(emit)
+    emit(I{'mov, [W{'w64}, MG{"__os_heap", 0}, U{0}]})
+    emit(I{'mov, [W{'w64}, MG{"__os_commit", 0}, U{0}]})
+    win_jmp(emit, ls[2])
+    win_label(emit, ls[2])
+    emit(I{'mov, [D{d}, U{0}]})
+    win_jmp(emit, ls[5])
+}
+
+# an address after the end that is committed: the pages up to it are committed; the result is 0 when the system does not give them
+win_grow_commit(emit, ls, d) := {
+    win_label(emit, ls[0])
+    emit(I{'mov, [W{'w64}, D{0}, MG{"__os_commit", 0}]})
+    emit(I{'cmp, [W{'w64}, U{d}, U{0}, win_fl]})
+    win_jcc(emit, 'leu, ls[5])
+    win_call(emit, "VirtualAlloc", [Mem{"__os_commit"}, Sub{d, "__os_commit"}, K{4096}, K{4}])
+    win_end(emit)
+    win_cmp(emit, 'w64, 0, K{0})
+    win_jcc(emit, 'ne, ls[4])
+    emit(I{'mov, [D{d}, K{0}]})
+    win_jmp(emit, ls[5])
+    win_label(emit, ls[4])
+    emit(I{'mov, [W{'w64}, MG{"__os_commit", 0}, U{d}]})
+    win_jmp(emit, ls[5])
+}
+
+windows_x64_args(emit, label, d) := {
+    ls := map(i -> label(), range(0, 9))
+    win_args_start(emit, ls)
+    win_args_skip(emit, label, ls)
+    win_args_chars(emit, label, ls)
+    win_args_end(emit, ls, d)
+}
+
+windows_x64_grow(emit, label, args, d) := {
+    ls := map(i -> label(), range(0, 6))
+    emit(I{'mov, [D{d}, os_arg(args[0])]})
+    win_cmp(emit, 'w64, d, K{0})
+    win_jcc(emit, 'ne, ls[0])
+    win_jmp(emit, ls[1])
+    win_grow_reserve(emit, ls, d)
+    win_grow_commit(emit, ls, d)
+    win_label(emit, ls[5])
+}
+
+export select_windows_x64(emit, label, 'write, args, d) := win_io(emit, label, "WriteFile", args, d)
+select_windows_x64(emit, label, 'read, args, d) := win_io(emit, label, "ReadFile", args, d)
+select_windows_x64(emit, label, 'open, args, d) := windows_x64_open(emit, Big{0, 0, 32768, 0}, 1, 3, args, d)
+select_windows_x64(emit, label, 'create, args, d) := windows_x64_open(emit, Big{0, 0, 16384, 0}, 0, 2, args, d)
+select_windows_x64(emit, label, 'close, args, d) := {
+    ldone := label()
+    win_call(emit, "CloseHandle", [args[0]])
+    emit(I{'mov, [D{d}, K{0}]})
+    win_cmp(emit, 'w32, 0, K{0})
+    win_if(emit, label, 'ne, ldone)
+    emit(I{'mov, [D{d}, K{-1}]})
+    win_jmp(emit, ldone)
+    win_label(emit, ldone)
+    win_end(emit)
+}
+select_windows_x64(emit, label, 'exit, args, d) := {
+    win_call(emit, "ExitProcess", [args[0]])
+    emit(I{'ud2, []})
+}
+select_windows_x64(emit, label, 'grow, args, d) := windows_x64_grow(emit, label, args, d)
+select_windows_x64(emit, label, 'args, args, d) := windows_x64_args(emit, label, d)
+select_windows_x64(emit, label, 'abort, args, d) := {
+    win_call(emit, "ExitProcess", [K{abort_status}])
+    emit(I{'ud2, []})
+}
+select_windows_x64(emit, label, name, args, d) := panic(f"os.select_windows_x64: the service {symname(name)} is not known")
+
 }
