@@ -602,45 +602,84 @@ RUN_BUTTONS := false
 run_attrs(mode, name, ext) := if (not RUN_BUTTONS or try_read_file(f"{EX}/{name}.norun") != none) ""
     else f" data-run=\"{mode}\" data-src=\"{html_escape(rstrip_nl(ex_file(name, ext)))}\""
 
-# the samples of the Playground: examples that run in the browser (the examples of the tutorial, whose output test_playground.js checks),
-# each as (NAME, the name in the list)
+# the samples of the Playground: examples that run in the browser (the examples of the tutorial, whose output test_playground.js checks).
+# Each is (NAME, the name in the list, the first block, the last block), where a block is the lines between blank lines of the example. An example
+# that has more than one topic is split into samples of one topic each
 SAMPLES := [
-    ("t1_hello", "hello"),
-    ("t1_vars", "variables"),
-    ("t1_func", "function"),
-    ("t1_rec", "factorial"),
-    ("t1_scope", "scope"),
-    ("e_undefined", "undefined variable"),
-    ("t2_lists", "lists"),
-    ("t2_mexpr", "M-expression"),
-    ("t3_fib", "fib"),
-    ("t3_fib_lines", "fib (clauses)"),
-    ("t3_list", "list length"),
-    ("t3_match", "match"),
-    ("t3_extend", "extending a function"),
-    ("t3_deriv", "derivative"),
-    ("t4_list", "list library"),
-    ("t4_for", "for loop"),
-    ("t4_table", "table"),
-    ("t5_exception", "exception"),
-    ("t5_generator", "generator"),
-    ("t5_choose", "nondeterminism"),
-    ("t6_quote", "quote"),
-    ("t6_eval", "custom eval"),
-    ("t6_unparse", "unparse"),
-    ("t7_unless", "unless"),
-    ("t7_pipe", "pipe operator"),
-    ("t7_repeat", "repeat"),
-    ("t7_calc", "calculator grammar"),
-    ("t8_record", "record"),
-    ("t8_local", "local functions"),
-    ("t8_return", "early return"),
-    ("t9_index", "index"),
-    ("t9_kind", "custom index"),
-    ("t9_rewrite", "rewrite rules")]
+    ("t1_hello", "hello", 0, 99),
+    ("t1_vars", "variables", 0, 99),
+    ("t1_func", "functions", 0, 99),
+    ("t1_rec", "factorial", 0, 0),
+    ("t1_rec", "closure counter", 1, 1),
+    ("t1_scope", "scope", 0, 99),
+    ("e_undefined", "undefined variable", 0, 99),
+    ("t2_lists", "lists and tuples", 0, 99),
+    ("t2_mexpr", "M-expression", 0, 99),
+    ("t3_fib", "fib", 0, 99),
+    ("t3_fib_lines", "fib (clauses)", 0, 99),
+    ("t3_list", "list patterns", 0, 99),
+    ("t3_match", "match", 0, 99),
+    ("t3_extend", "extending a function", 0, 99),
+    ("t3_deriv", "derivative", 0, 99),
+    ("t4_list", "list library", 0, 99),
+    ("t4_for", "for loop", 0, 99),
+    ("t4_table", "table", 0, 0),
+    ("t4_table", "vector", 1, 1),
+    ("t5_exception", "exception", 0, 99),
+    ("t5_generator", "generator", 0, 99),
+    ("t5_choose", "nondeterminism", 0, 99),
+    ("t6_quote", "quote and eval", 0, 0),
+    ("t6_quote", "quasi-quote", 1, 1),
+    ("t6_eval", "custom eval", 0, 99),
+    ("t6_unparse", "unparse", 0, 99),
+    ("t7_unless", "unless", 0, 99),
+    ("t7_pipe", "pipe operator", 0, 99),
+    ("t7_repeat", "repeat", 0, 99),
+    ("t7_calc", "calculator grammar", 0, 99),
+    ("t8_record", "record", 0, 99),
+    ("t8_local", "local functions", 0, 99),
+    ("t8_return", "early return", 0, 0),
+    ("t8_return", "break and continue", 1, 1),
+    ("t9_index", "indexing", 0, 99),
+    ("t9_kind", "custom index", 0, 99),
+    ("t9_rewrite", "rewrite rules", 0, 99)]
 
-# the options of the list of samples of the Playground. Each has its code in data-src, as the blocks of the tutorial do
-samples_html() := string.join("\n", list.map(s -> f"<option value=\"{arg(s, 0)}\" data-src=\"{html_escape(rstrip_nl(ex_file(arg(s, 0), "pk")))}\">{html_escape(arg(s, 1))}</option>", SAMPLES))
+# the blocks first to last of the text of an example
+blocks_of(text, first, last) := {
+    ls := split_lines(text)
+    b := strbuf.new()
+    k := 0
+    prev_blank := false
+    wrote := false
+    i := 0
+    while (i < vector.len(ls)) {
+        l := ls[i]
+        if (lead(l) == strlen(l)) prev_blank = true
+        else {
+            if (prev_blank) k = k + 1
+            prev_blank = false
+            if (k >= first and k <= last) {
+                if (wrote and k > first and (i == 0 or lead(ls[i - 1]) == strlen(ls[i - 1]))) strbuf.add(b, "\n")
+                strbuf.add(b, l)
+                strbuf.add(b, "\n")
+                wrote = true
+            }
+        }
+        i = i + 1
+    }
+    strbuf.string(b)
+}
+
+# the options of the list of samples of the Playground. Each has its code in data-src, as the blocks of the tutorial do. The value is NAME, and
+# NAME.FIRST for a part of an example
+sample_option(s) := {
+    name := arg(s, 0)
+    value := if (arg(s, 2) == 0 and arg(s, 3) == 99) name else f"{name}.{arg(s, 2)}"
+    code := rstrip_nl(blocks_of(ex_file(name, "pk"), arg(s, 2), arg(s, 3)))
+    f"<option value=\"{value}\" data-src=\"{html_escape(code)}\">{html_escape(arg(s, 1))}</option>"
+}
+
+samples_html() := string.join("\n", list.map(sample_option, SAMPLES))
 
 # === Excerpts of the source files ===
 
