@@ -1,4 +1,4 @@
-# tests for backend/target.pk: the bytes of the executables that vasm/build.pk makes for the target x86_64
+# tests for backend/target.pk: the bytes of the executables that vasm/build.pk makes for the target linux_x86_64
 # Copyright (C) 2026 nineties
 
 passed := 0
@@ -14,11 +14,11 @@ check(actual, expected) := if (actual == expected) {
 
 use("vasm/build")
 
-# the default target is x86_64
-check(target.default, 'x86_64)
+# the default target is linux_x86_64
+check(target.default, 'linux_x86_64)
 
 # the file of the x86-64 target is a 64-bit ELF file of the machine 62, loaded at 0x400000
-t64 := target.get('x86_64)
+t64 := target.get('linux_x86_64)
 check(target.word(t64), 8)
 path64 := "planck/examples/vasm/hello.vasm"
 m64 := arg(peg_parse('vasm, read_file(path64)), 0)
@@ -30,6 +30,32 @@ check(map(i -> bytes.get(file64, i), range(32, 36)), [64, 0, 0, 0])
 check(map(i -> bytes.get(file64, i), range(52, 58)), [64, 0, 56, 0, 2, 0])
 # the first segment is loaded at 0x400000
 check(map(i -> bytes.get(file64, i), range(64 + 16, 64 + 20)), [0, 0, 64, 0])
+
+# the file of the macos_x86_64 target is a 64-bit Mach-O file of the cpu x86-64 and the type of an executable file, loaded after a page zero of 0x400000
+tmac := target.get('macos_x86_64)
+check(target.word(tmac), 8)
+filemac := vasm_build.executable_for(tmac, m64)
+check(map(i -> bytes.get(filemac, i), range(0, 8)), [207, 250, 237, 254, 7, 0, 0, 1])
+check(map(i -> bytes.get(filemac, i), range(12, 16)), [2, 0, 0, 0])
+check(map(i -> bytes.get(filemac, i), range(32 + 8, 32 + 16)), [95, 95, 80, 65, 71, 69, 90, 69])
+check(map(i -> bytes.get(filemac, i), range(32 + 32, 32 + 40)), [0, 0, 64, 0, 0, 0, 0, 0])
+
+# the file of the windows_x86_64 target is a PE file: the signature MZ, the PE header at 0x40, the machine 0x8664 and three sections
+twin := target.get('windows_x86_64)
+check(target.word(twin), 8)
+filewin := vasm_build.executable_for(twin, m64)
+check(map(i -> bytes.get(filewin, i), range(0, 2)), [77, 90])
+check(map(i -> bytes.get(filewin, i), range(64, 70)), [80, 69, 0, 0, 100, 134])
+check(map(i -> bytes.get(filewin, i), range(64 + 6, 64 + 8)), [3, 0])
+
+# the file of the linux_arm64 target is an ELF file of the machine 183; that of the macos_arm64 target is a Mach-O file of the cpu arm64
+tla := target.get('linux_arm64)
+check(target.word(tla), 8)
+filela := vasm_build.executable_for(tla, m64)
+check(map(i -> bytes.get(filela, i), range(16, 20)), [2, 0, 183, 0])
+tma := target.get('macos_arm64)
+filema := vasm_build.executable_for(tma, m64)
+check(map(i -> bytes.get(filema, i), range(0, 8)), [207, 250, 237, 254, 12, 0, 0, 1])
 
 # the file made without a target is the file of the default target
 check(vector.to_list(vasm_build.executable(m64)) == vector.to_list(file64), true)

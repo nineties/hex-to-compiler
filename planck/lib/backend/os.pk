@@ -13,8 +13,10 @@
 #   args []              gives the address of the arguments of the program: a word that holds their number n, then n words that hold the
 #                        address of each, which is the bytes of the argument followed by a byte 0. It is used by the start of the program only.
 #   abort []             ends the program as failed (the status abort_status); it does not return
-# The names do not depend on the system. os.select_x64(emit, name, args, d) turns one of them into the instructions of
-# x86-64 on Linux (syscall). This file is the only place that knows the numbers and the registers; another system or machine adds its own.
+# The names do not depend on the system. os.select_<system>_<machine>(emit, label, name, args, d) turns one of them into the instructions of
+# that system and machine: select_linux_x64 (syscall), select_macos_x64, select_windows_x64 (calls of KERNEL32), select_linux_arm64 and
+# select_macos_arm64; label() is a new label for the code that has a branch.
+# This file is the only place that knows the numbers and the registers; another system or machine adds its own.
 
 use("base")
 use("list")
@@ -59,34 +61,461 @@ x64_frame_to_args := 8
 # the register of the flags that an addition defines (the same as flags_def of x64.pk)
 x64_reg_flags := 16
 
-x64_call(emit, number, args, d) := {
+# the registers of a system call: the number and the arguments
+x64_load(emit, number, args) := {
     emit(I{'mov, [D{x64_reg_number}, K{number}]})
     k := 0
     each(a -> {
         emit(I{'mov, [D{x64_reg_args[k]}, os_arg(a)]})
         k = k + 1
     }, args)
+}
+
+x64_call(emit, number, args, d) := {
+    x64_load(emit, number, args)
     emit(I{'syscall, append([IU{x64_reg_number}, ID{x64_reg_number}, ID{x64_reg_rcx}, ID{x64_reg_r11}], map(r -> IU{r}, list.take(x64_reg_args, length(args))))})
     if (d != none) emit(I{'mov, [D{d}, U{x64_reg_number}]})
 }
 
-export select_x64(emit, 'write, args, d) := x64_call(emit, x64_write, args, d)
-select_x64(emit, 'read, args, d) := x64_call(emit, x64_read, args, d)
-select_x64(emit, 'open, args, d) := x64_call(emit, x64_open, append(args, [K{linux_o_rdonly}]), d)
-select_x64(emit, 'create, args, d) := x64_call(emit, x64_open, append(args, [K{linux_o_create}, K{linux_mode}]), d)
-select_x64(emit, 'close, args, d) := x64_call(emit, x64_close, args, d)
-select_x64(emit, 'exit, args, d) := x64_call(emit, x64_exit, args, d)
-select_x64(emit, 'grow, args, d) := x64_call(emit, x64_brk, args, d)
-select_x64(emit, 'args, args, d) := {
+export select_linux_x64(emit, label, 'write, args, d) := x64_call(emit, x64_write, args, d)
+select_linux_x64(emit, label, 'read, args, d) := x64_call(emit, x64_read, args, d)
+select_linux_x64(emit, label, 'open, args, d) := x64_call(emit, x64_open, append(args, [K{linux_o_rdonly}]), d)
+select_linux_x64(emit, label, 'create, args, d) := x64_call(emit, x64_open, append(args, [K{linux_o_create}, K{linux_mode}]), d)
+select_linux_x64(emit, label, 'close, args, d) := x64_call(emit, x64_close, args, d)
+select_linux_x64(emit, label, 'exit, args, d) := x64_call(emit, x64_exit, args, d)
+select_linux_x64(emit, label, 'grow, args, d) := x64_call(emit, x64_brk, args, d)
+select_linux_x64(emit, label, 'args, args, d) := {
     emit(I{'mov, [D{d}, U{x64_reg_frame}]})
     emit(I{'add, [DU{d}, K{x64_frame_to_args}, ID{x64_reg_flags}]})
 }
-select_x64(emit, 'abort, args, d) := {
+select_linux_x64(emit, label, 'abort, args, d) := {
     emit(I{'mov, [D{x64_reg_number}, K{x64_exit_group}]})
     emit(I{'mov, [D{x64_reg_args[0]}, K{abort_status}]})
     emit(I{'syscall, [IU{x64_reg_number}, IU{x64_reg_args[0]}, ID{x64_reg_number}, ID{x64_reg_rcx}, ID{x64_reg_r11}]})
     emit(I{'ud2, []})
 }
-select_x64(emit, name, args, d) := panic(f"os.select_x64: the service {symname(name)} is not known")
+select_linux_x64(emit, label, name, args, d) := panic(f"os.select_linux_x64: the service {symname(name)} is not known")
+
+# === macOS on x86-64 ===
+# The system calls are those of BSD, called by syscall with the number of the call added to the class 0x2000000 in rax; the arguments are in the registers of Linux, and rcx and r11
+# are changed. An error is the flag of carry and the number of the error in rax, as a positive number. It is made the negative number that Linux gives: sbb rcx, rcx makes -1 for the
+# flag and 0 otherwise, and (rax xor rcx) - rcx is -rax or rax.
+macos_class := 33554432
+macos_exit := 1
+macos_read := 3
+macos_write := 4
+macos_open := 5
+macos_close := 6
+macos_mmap := 197
+
+# open for writing, made new when it is not there, and emptied (O_WRONLY | O_CREAT | O_TRUNC)
+macos_o_create := 1537
+
+# the memory of the program: there is no brk, so grow 0 maps an area of 2^35 bytes, and the grow of an address gives that address (the pages are given on use)
+# (protection read and write, private and anonymous and without reserve)
+macos_heap_shift := 35
+macos_mmap_prot := 3
+macos_mmap_flags := 4162
+
+# the register that holds the address of the arguments of the program, which follow the number of them in the memory
+x64_reg_argv := 6
+
+macos_x64_call(emit, number, args, d) := {
+    x64_load(emit, macos_class + number, args)
+    emit(I{'syscall, append([IU{x64_reg_number}, ID{x64_reg_number}, ID{x64_reg_rcx}, ID{x64_reg_r11}, ID{x64_reg_flags}], map(r -> IU{r}, list.take(x64_reg_args, length(args))))})
+    emit(I{'sbb, [W{'w64}, DU{x64_reg_rcx}, U{x64_reg_rcx}, IU{x64_reg_flags}, ID{x64_reg_flags}]})
+    emit(I{'bxor, [W{'w64}, DU{x64_reg_number}, U{x64_reg_rcx}, ID{x64_reg_flags}]})
+    emit(I{'sub, [W{'w64}, DU{x64_reg_number}, U{x64_reg_rcx}, ID{x64_reg_flags}]})
+    if (d != none) emit(I{'mov, [D{d}, U{x64_reg_number}]})
+}
+
+export select_macos_x64(emit, label, 'write, args, d) := macos_x64_call(emit, macos_write, args, d)
+select_macos_x64(emit, label, 'read, args, d) := macos_x64_call(emit, macos_read, args, d)
+select_macos_x64(emit, label, 'open, args, d) := macos_x64_call(emit, macos_open, append(args, [K{linux_o_rdonly}]), d)
+select_macos_x64(emit, label, 'create, args, d) := macos_x64_call(emit, macos_open, append(args, [K{macos_o_create}, K{linux_mode}]), d)
+select_macos_x64(emit, label, 'close, args, d) := macos_x64_call(emit, macos_close, args, d)
+select_macos_x64(emit, label, 'exit, args, d) := macos_x64_call(emit, macos_exit, args, d)
+select_macos_x64(emit, label, 'grow, args, d) := {
+    # the result is the address asked, and for 0 the start of the area that mmap gives
+    emit(I{'mov, [D{d}, os_arg(args[0])]})
+    map_it := label()
+    done := label()
+    emit(I{'cmp, [W{'w64}, U{d}, K{0}, ID{x64_reg_flags}]})
+    emit(I{'jcc, [Cc{'ne}, L{done}, IU{x64_reg_flags}]})
+    emit(I{'jmp, [L{map_it}]})
+    emit(I{'label, [L{map_it}]})
+    emit(I{'mov, [D{x64_reg_args[1]}, K{1}]})
+    emit(I{'shl, [W{'w64}, DU{x64_reg_args[1]}, K{macos_heap_shift}, ID{x64_reg_flags}]})
+    macos_x64_call(emit, macos_mmap, [K{0}, x64_reg_args[1], K{macos_mmap_prot}, K{macos_mmap_flags}, K{-1}, K{0}], d)
+    emit(I{'jmp, [L{done}]})
+    emit(I{'label, [L{done}]})
+}
+select_macos_x64(emit, label, 'args, args, d) := {
+    emit(I{'mov, [D{d}, U{x64_reg_argv}]})
+    emit(I{'add, [DU{d}, K{-8}, ID{x64_reg_flags}]})
+}
+select_macos_x64(emit, label, 'abort, args, d) := {
+    emit(I{'mov, [D{x64_reg_number}, K{macos_class + macos_exit}]})
+    emit(I{'mov, [D{x64_reg_args[0]}, K{abort_status}]})
+    emit(I{'syscall, [IU{x64_reg_number}, IU{x64_reg_args[0]}, ID{x64_reg_number}, ID{x64_reg_rcx}, ID{x64_reg_r11}]})
+    emit(I{'ud2, []})
+}
+select_macos_x64(emit, label, name, args, d) := panic(f"os.select_macos_x64: the service {symname(name)} is not known")
+
+# === Linux on arm64 ===
+# A system call is svc #0 with the number in x8 and the arguments in x0 to x5; the result is in x0, a negative number for an error, and no other register changes.
+# open is openat with the directory AT_FDCWD (-100).
+a64_reg_number_linux := 8
+a64_reg_args := [0, 1, 2, 3, 4, 5]
+a64_reg_result := 0
+linux_a64_read := 63
+linux_a64_write := 64
+linux_a64_openat := 56
+linux_a64_close := 57
+linux_a64_exit := 93
+linux_a64_exit_group := 94
+linux_a64_brk := 214
+linux_at_fdcwd := -100
+
+# the registers of a system call: the number in the register numreg and the arguments
+a64_load(emit, numreg, number, args) := {
+    emit(I{'mov, [D{numreg}, K{number}]})
+    k := 0
+    each(a -> {
+        emit(I{'mov, [D{a64_reg_args[k]}, os_arg(a)]})
+        k = k + 1
+    }, args)
+}
+
+# the instruction of the system call: svc with the immediate imm, which reads the number and the arguments and gives the result in x0
+a64_svc(emit, imm, numreg, args) := emit(I{'svc, append([K{imm}, IU{numreg}, ID{a64_reg_result}], map(r -> IU{r}, list.take(a64_reg_args, length(args))))})
+
+linux_a64_call(emit, number, args, d) := {
+    a64_load(emit, a64_reg_number_linux, number, args)
+    a64_svc(emit, 0, a64_reg_number_linux, args)
+    if (d != none) emit(I{'mov, [D{d}, U{a64_reg_result}]})
+}
+
+export select_linux_arm64(emit, label, 'write, args, d) := linux_a64_call(emit, linux_a64_write, args, d)
+select_linux_arm64(emit, label, 'read, args, d) := linux_a64_call(emit, linux_a64_read, args, d)
+select_linux_arm64(emit, label, 'open, args, d) := linux_a64_call(emit, linux_a64_openat, append([K{linux_at_fdcwd}], append(args, [K{linux_o_rdonly}])), d)
+select_linux_arm64(emit, label, 'create, args, d) := linux_a64_call(emit, linux_a64_openat, append([K{linux_at_fdcwd}], append(args, [K{linux_o_create}, K{linux_mode}])), d)
+select_linux_arm64(emit, label, 'close, args, d) := linux_a64_call(emit, linux_a64_close, args, d)
+select_linux_arm64(emit, label, 'exit, args, d) := linux_a64_call(emit, linux_a64_exit, args, d)
+select_linux_arm64(emit, label, 'grow, args, d) := linux_a64_call(emit, linux_a64_brk, args, d)
+# the program starts with the stack pointer at the word that holds the number of the arguments, which is the first of the arguments of the function _start
+select_linux_arm64(emit, label, 'args, args, d) := emit(I{'lea, [W{'w64}, D{d}, MF{'arg, 0, 0}]})
+select_linux_arm64(emit, label, 'abort, args, d) := {
+    a64_load(emit, a64_reg_number_linux, linux_a64_exit_group, [K{abort_status}])
+    a64_svc(emit, 0, a64_reg_number_linux, [K{abort_status}])
+    emit(I{'ud2, []})
+}
+select_linux_arm64(emit, label, name, args, d) := panic(f"os.select_linux_arm64: the service {symname(name)} is not known")
+
+# === macOS on arm64 ===
+# The system calls are those of BSD, called by svc #0x80 with the number in x16 and the arguments in x0 to x5. An error is the flag of carry and the number of the error in x0 as a positive number;
+# cneg makes it the negative number that Linux gives.
+a64_reg_number_macos := 16
+
+macos_a64_call(emit, number, args, d) := {
+    a64_load(emit, a64_reg_number_macos, number, args)
+    a64_svc(emit, 128, a64_reg_number_macos, args)
+    emit(I{'cnegcs, [DU{a64_reg_result}]})
+    if (d != none) emit(I{'mov, [D{d}, U{a64_reg_result}]})
+}
+
+export select_macos_arm64(emit, label, 'write, args, d) := macos_a64_call(emit, macos_write, args, d)
+select_macos_arm64(emit, label, 'read, args, d) := macos_a64_call(emit, macos_read, args, d)
+select_macos_arm64(emit, label, 'open, args, d) := macos_a64_call(emit, macos_open, append(args, [K{linux_o_rdonly}]), d)
+select_macos_arm64(emit, label, 'create, args, d) := macos_a64_call(emit, macos_open, append(args, [K{macos_o_create}, K{linux_mode}]), d)
+select_macos_arm64(emit, label, 'close, args, d) := macos_a64_call(emit, macos_close, args, d)
+select_macos_arm64(emit, label, 'exit, args, d) := macos_a64_call(emit, macos_exit, args, d)
+select_macos_arm64(emit, label, 'grow, args, d) := {
+    # the result is the address asked, and for 0 the start of the area that mmap gives (see macOS on x86-64)
+    emit(I{'mov, [D{d}, os_arg(args[0])]})
+    map_it := label()
+    done := label()
+    emit(I{'jcc, [Cc{'ne}, L{done}, W{'w64}, U{d}, K{0}]})
+    emit(I{'jmp, [L{map_it}]})
+    emit(I{'label, [L{map_it}]})
+    emit(I{'movabs, [D{a64_reg_args[1]}, K{0}, K{8}, K{0}, K{0}]})
+    macos_a64_call(emit, macos_mmap, [K{0}, a64_reg_args[1], K{macos_mmap_prot}, K{macos_mmap_flags}, K{-1}, K{0}], d)
+    emit(I{'jmp, [L{done}]})
+    emit(I{'label, [L{done}]})
+}
+# dyld calls the program as main(argc, argv): the address of the arguments is the address of argv, which follows the word that holds their number
+select_macos_arm64(emit, label, 'args, args, d) := emit(I{'sub, [W{'w64}, D{d}, U{1}, K{8}]})
+select_macos_arm64(emit, label, 'abort, args, d) := {
+    a64_load(emit, a64_reg_number_macos, macos_exit, [K{abort_status}])
+    a64_svc(emit, 128, a64_reg_number_macos, [K{abort_status}])
+    emit(I{'ud2, []})
+}
+select_macos_arm64(emit, label, name, args, d) := panic(f"os.select_macos_arm64: the service {symname(name)} is not known")
+
+# === Windows on x86-64 ===
+# The services are the functions of KERNEL32.DLL, which the program calls through the table of addresses that the loader fills in (pe.pk): call [__imp_<name>]. A call follows the convention of Windows:
+# the first four arguments are in rcx, rdx, r8 and r9, the others are on the stack above 32 bytes of space for the callee, the stack pointer is a multiple of 16 at the call, and rax, rcx, rdx, r8 to r11
+# and the registers of floating point are changed. Programs of planck keep the stack pointer at any multiple of 8, so a call saves the stack pointer, rounds it down and makes room for the arguments:
+#   [rsp + 0 .. 31]   the space for the callee      [rsp + 32 ..]   the fifth argument and the following      [rsp + 64]   the saved stack pointer      [rsp + 72]   a variable of 4 bytes
+# The data of the services (see pe.runtime): __os_heap the start of the memory that VirtualAlloc reserved and __os_commit the end of what is committed, __os_cmd the copy of the command line and __os_argv the
+# arguments that are cut from it (the number of them, then the address of each).
+export windows_imports := ["ExitProcess", "GetStdHandle", "WriteFile", "ReadFile", "CreateFileA", "CloseHandle", "VirtualAlloc", "GetCommandLineA"]
+export windows_vars := [Tuple{"__os_heap", 8}, Tuple{"__os_commit", 8}, Tuple{"__os_argv", 8 + 8 * 512}, Tuple{"__os_cmd", 33000}]
+
+win_arg_regs := [1, 2, 8, 9]
+win_rsp := 4
+win_space := 80
+win_saved := 64
+win_local := 72
+
+# the instructions of the arguments: a register of the code, K{n}, Big{p3, p2, p1, p0} (an integer of 64 bits in four parts of 16 bits), 'out (the address of the variable), Mem{name} (the 8 bytes of
+# a variable) or Sub{r, name} (r minus that variable)
+win_fl := ID{x64_reg_flags}
+win_load(emit, r, spec) := match spec {
+    K{n} -> emit(I{'mov, [D{r}, K{n}]})
+  | Big{p3, p2, p1, p0} -> emit(I{'movabs, [D{r}, K{p3}, K{p2}, K{p1}, K{p0}]})
+  | 'out -> emit(I{'lea, [W{'w64}, D{r}, M{U{win_rsp}, win_local}]})
+  | Mem{name} -> emit(I{'mov, [W{'w64}, D{r}, MG{name, 0}]})
+  | Sub{v, name} -> {
+        emit(I{'mov, [W{'w64}, D{r}, MG{name, 0}]})
+        emit(I{'neg, [W{'w64}, DU{r}, win_fl]})
+        emit(I{'add, [W{'w64}, DU{r}, U{v}, win_fl]})
+    }
+  | v -> emit(I{'mov, [D{r}, U{v}]})
+}
+
+# the instruction that stores an argument at the place of the stack, with rax free
+win_store(emit, at, spec) := match spec {
+    K{n} -> emit(I{'mov, [W{'w64}, M{U{win_rsp}, at}, K{n}]})
+  | Big{p3, p2, p1, p0} -> {
+        emit(I{'movabs, [D{0}, K{p3}, K{p2}, K{p1}, K{p0}]})
+        emit(I{'mov, [W{'w64}, M{U{win_rsp}, at}, U{0}]})
+    }
+  | v -> emit(I{'mov, [W{'w64}, M{U{win_rsp}, at}, U{v}]})
+}
+
+# win_call(emit, name, args) calls the function name of KERNEL32 with the arguments; the result is in rax, and win_end gives the stack pointer back
+win_call(emit, name, args) := {
+    emit(I{'mov, [D{0}, U{win_rsp}]})
+    emit(I{'band, [W{'w64}, DU{win_rsp}, K{-16}, win_fl]})
+    emit(I{'sub, [W{'w64}, DU{win_rsp}, K{win_space}, win_fl]})
+    emit(I{'mov, [W{'w64}, M{U{win_rsp}, win_saved}, U{0}]})
+    k := 0
+    each(a -> {
+        if (k >= 4) win_store(emit, 32 + 8 * (k - 4), a)
+        k = k + 1
+    }, args)
+    k = 0
+    each(a -> {
+        if (k < 4) win_load(emit, win_arg_regs[k], a)
+        k = k + 1
+    }, args)
+    emit(I{'call, append([MG{f"__imp_{name}", 0}, ID{0}, ID{1}, ID{2}, ID{8}, ID{9}, ID{10}, ID{11}, win_fl, ID{17}, ID{18}], map(r -> IU{r}, list.take(win_arg_regs, if (length(args) < 4) length(args) else 4)))})
+}
+
+win_end(emit) := emit(I{'mov, [W{'w64}, D{win_rsp}, M{U{win_rsp}, win_saved}]})
+
+win_cmp(emit, z, a, b) := emit(I{'cmp, [W{z}, U{a}, b, win_fl]})
+win_jcc(emit, c, l) := emit(I{'jcc, [Cc{c}, L{l}, IU{x64_reg_flags}]})
+win_jmp(emit, l) := emit(I{'jmp, [L{l}]})
+win_label(emit, l) := emit(I{'label, [L{l}]})
+
+# a conditional jump to l that falls through to a new label
+win_if(emit, label, c, l) := {
+    next := label()
+    win_jcc(emit, c, l)
+    win_jmp(emit, next)
+    win_label(emit, next)
+}
+
+# write and read: the file 0, 1 and 2 are the standard handles; the result is the number of bytes, or -1
+win_io(emit, label, api, args, d) := {
+    lstd := label()
+    lgo := label()
+    emit(I{'mov, [D{d}, os_arg(args[0])]})
+    win_cmp(emit, 'w64, d, K{2})
+    win_jcc(emit, 'leu, lstd)
+    win_jmp(emit, lgo)
+    win_label(emit, lstd)
+    emit(I{'mov, [D{d}, K{-10}]})
+    emit(I{'sub, [W{'w32}, DU{d}, os_arg(args[0]), win_fl]})
+    win_call(emit, "GetStdHandle", [d])
+    win_end(emit)
+    emit(I{'mov, [D{d}, U{0}]})
+    win_jmp(emit, lgo)
+    win_label(emit, lgo)
+    win_call(emit, api, [d, args[1], args[2], 'out, K{0}])
+    emit(I{'mov, [D{d}, K{-1}]})
+    ldone := label()
+    win_cmp(emit, 'w32, 0, K{0})
+    win_if(emit, label, 'eq, ldone)
+    emit(I{'mov, [W{'w32}, D{d}, M{U{win_rsp}, win_local}]})
+    win_jmp(emit, ldone)
+    win_label(emit, ldone)
+    win_end(emit)
+}
+
+windows_x64_open(emit, access, share, disposition, args, d) := {
+    win_call(emit, "CreateFileA", [args[0], access, K{share}, K{0}, K{disposition}, K{128}, K{0}])
+    win_end(emit)
+    emit(I{'mov, [D{d}, U{0}]})
+}
+
+# the arguments of the program: the command line is copied, and cut at the spaces outside of quotes. rsi is the place in the command line, rdi the place in the copy, r8 the place in the table of the arguments,
+# r9 their number, r10 is 1 in quotes and rcx is the character
+# the labels of the parts: skip, next, start, chars, copy, quote, separator, end and done
+win_args_start(emit, ls) := {
+    win_call(emit, "GetCommandLineA", [])
+    win_end(emit)
+    emit(I{'mov, [W{'w64}, D{6}, U{0}]})
+    emit(I{'lea, [W{'w64}, D{7}, MG{"__os_cmd", 0}]})
+    emit(I{'lea, [W{'w64}, D{8}, MG{"__os_argv", 8}]})
+    emit(I{'mov, [W{'w32}, D{9}, K{0}]})
+    emit(I{'mov, [W{'w32}, D{10}, K{0}]})
+    win_jmp(emit, ls[0])
+}
+
+# the spaces between the arguments are skipped; the start of an argument is put in the table
+win_args_skip(emit, label, ls) := {
+    win_label(emit, ls[0])
+    emit(I{'movzxb, [W{'w32}, D{1}, M{U{6}, 0}]})
+    win_cmp(emit, 'w32, 1, K{0})
+    win_if(emit, label, 'eq, ls[8])
+    win_cmp(emit, 'w32, 1, K{32})
+    win_if(emit, label, 'eq, ls[1])
+    win_cmp(emit, 'w32, 1, K{9})
+    win_if(emit, label, 'eq, ls[1])
+    win_jmp(emit, ls[2])
+    win_label(emit, ls[1])
+    emit(I{'add, [W{'w64}, DU{6}, K{1}, win_fl]})
+    win_jmp(emit, ls[0])
+    win_label(emit, ls[2])
+    emit(I{'mov, [W{'w64}, M{U{8}, 0}, U{7}]})
+    emit(I{'add, [W{'w64}, DU{8}, K{8}, win_fl]})
+    emit(I{'add, [W{'w32}, DU{9}, K{1}, win_fl]})
+    emit(I{'mov, [W{'w32}, D{10}, K{0}]})
+    win_jmp(emit, ls[3])
+}
+
+# the characters of an argument are copied; a quote changes r10 and a space outside of quotes ends the argument
+win_args_chars(emit, label, ls) := {
+    win_label(emit, ls[3])
+    emit(I{'movzxb, [W{'w32}, D{1}, M{U{6}, 0}]})
+    win_cmp(emit, 'w32, 1, K{0})
+    win_if(emit, label, 'eq, ls[7])
+    win_cmp(emit, 'w32, 1, K{34})
+    win_if(emit, label, 'eq, ls[5])
+    win_cmp(emit, 'w32, 10, K{0})
+    win_if(emit, label, 'ne, ls[4])
+    win_cmp(emit, 'w32, 1, K{32})
+    win_if(emit, label, 'eq, ls[6])
+    win_cmp(emit, 'w32, 1, K{9})
+    win_if(emit, label, 'eq, ls[6])
+    win_jmp(emit, ls[4])
+    win_label(emit, ls[4])
+    emit(I{'movb, [M{U{7}, 0}, U{1}]})
+    emit(I{'add, [W{'w64}, DU{7}, K{1}, win_fl]})
+    emit(I{'add, [W{'w64}, DU{6}, K{1}, win_fl]})
+    win_jmp(emit, ls[3])
+    win_label(emit, ls[5])
+    emit(I{'bxor, [W{'w32}, DU{10}, K{1}, win_fl]})
+    emit(I{'add, [W{'w64}, DU{6}, K{1}, win_fl]})
+    win_jmp(emit, ls[3])
+}
+
+win_args_end(emit, ls, d) := {
+    win_label(emit, ls[6])
+    emit(I{'movb, [M{U{7}, 0}, K{0}]})
+    emit(I{'add, [W{'w64}, DU{7}, K{1}, win_fl]})
+    emit(I{'add, [W{'w64}, DU{6}, K{1}, win_fl]})
+    win_jmp(emit, ls[0])
+    win_label(emit, ls[7])
+    emit(I{'movb, [M{U{7}, 0}, K{0}]})
+    win_jmp(emit, ls[8])
+    win_label(emit, ls[8])
+    emit(I{'lea, [W{'w64}, D{d}, MG{"__os_argv", 0}]})
+    emit(I{'mov, [W{'w64}, M{U{d}, 0}, U{9}]})
+}
+
+# the labels of grow: commit, base, have, reserve, ok and done. The first call reserves 2^35 bytes of address space and gives their start
+win_grow_reserve(emit, ls, d) := {
+    win_label(emit, ls[1])
+    emit(I{'mov, [W{'w64}, D{0}, MG{"__os_heap", 0}]})
+    win_cmp(emit, 'w64, 0, K{0})
+    win_jcc(emit, 'ne, ls[2])
+    win_jmp(emit, ls[3])
+    win_label(emit, ls[3])
+    win_call(emit, "VirtualAlloc", [K{0}, Big{0, 8, 0, 0}, K{8192}, K{4}])
+    win_end(emit)
+    emit(I{'mov, [W{'w64}, MG{"__os_heap", 0}, U{0}]})
+    emit(I{'mov, [W{'w64}, MG{"__os_commit", 0}, U{0}]})
+    win_jmp(emit, ls[2])
+    win_label(emit, ls[2])
+    emit(I{'mov, [D{d}, U{0}]})
+    win_jmp(emit, ls[5])
+}
+
+# an address after the end that is committed: the pages up to it are committed; the result is 0 when the system does not give them
+win_grow_commit(emit, ls, d) := {
+    win_label(emit, ls[0])
+    emit(I{'mov, [W{'w64}, D{0}, MG{"__os_commit", 0}]})
+    emit(I{'cmp, [W{'w64}, U{d}, U{0}, win_fl]})
+    win_jcc(emit, 'leu, ls[5])
+    win_call(emit, "VirtualAlloc", [Mem{"__os_commit"}, Sub{d, "__os_commit"}, K{4096}, K{4}])
+    win_end(emit)
+    win_cmp(emit, 'w64, 0, K{0})
+    win_jcc(emit, 'ne, ls[4])
+    emit(I{'mov, [D{d}, K{0}]})
+    win_jmp(emit, ls[5])
+    win_label(emit, ls[4])
+    emit(I{'mov, [W{'w64}, MG{"__os_commit", 0}, U{d}]})
+    win_jmp(emit, ls[5])
+}
+
+windows_x64_args(emit, label, d) := {
+    ls := map(i -> label(), range(0, 9))
+    win_args_start(emit, ls)
+    win_args_skip(emit, label, ls)
+    win_args_chars(emit, label, ls)
+    win_args_end(emit, ls, d)
+}
+
+windows_x64_grow(emit, label, args, d) := {
+    ls := map(i -> label(), range(0, 6))
+    emit(I{'mov, [D{d}, os_arg(args[0])]})
+    win_cmp(emit, 'w64, d, K{0})
+    win_jcc(emit, 'ne, ls[0])
+    win_jmp(emit, ls[1])
+    win_grow_reserve(emit, ls, d)
+    win_grow_commit(emit, ls, d)
+    win_label(emit, ls[5])
+}
+
+export select_windows_x64(emit, label, 'write, args, d) := win_io(emit, label, "WriteFile", args, d)
+select_windows_x64(emit, label, 'read, args, d) := win_io(emit, label, "ReadFile", args, d)
+select_windows_x64(emit, label, 'open, args, d) := windows_x64_open(emit, Big{0, 0, 32768, 0}, 1, 3, args, d)
+select_windows_x64(emit, label, 'create, args, d) := windows_x64_open(emit, Big{0, 0, 16384, 0}, 0, 2, args, d)
+select_windows_x64(emit, label, 'close, args, d) := {
+    ldone := label()
+    win_call(emit, "CloseHandle", [args[0]])
+    emit(I{'mov, [D{d}, K{0}]})
+    win_cmp(emit, 'w32, 0, K{0})
+    win_if(emit, label, 'ne, ldone)
+    emit(I{'mov, [D{d}, K{-1}]})
+    win_jmp(emit, ldone)
+    win_label(emit, ldone)
+    win_end(emit)
+}
+select_windows_x64(emit, label, 'exit, args, d) := {
+    win_call(emit, "ExitProcess", [args[0]])
+    emit(I{'ud2, []})
+}
+select_windows_x64(emit, label, 'grow, args, d) := windows_x64_grow(emit, label, args, d)
+select_windows_x64(emit, label, 'args, args, d) := windows_x64_args(emit, label, d)
+select_windows_x64(emit, label, 'abort, args, d) := {
+    win_call(emit, "ExitProcess", [K{abort_status}])
+    emit(I{'ud2, []})
+}
+select_windows_x64(emit, label, name, args, d) := panic(f"os.select_windows_x64: the service {symname(name)} is not known")
 
 }

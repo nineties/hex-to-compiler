@@ -48,7 +48,7 @@ planck0: bootstrap/planck0.sv plisp2 $(SASM_LIBS)
 
 VASM_EXAMPLES := $(wildcard planck/examples/vasm/*.vasm)
 NATIVE_EXAMPLES := $(wildcard planck/examples/native/*.native)
-VASM_TARGETS := x86_64
+VASM_TARGETS := linux_x86_64
 VM_ALL_EXAMPLES := $(wildcard planck/examples/vm/*.pk)
 # the programs that use a float are left out of the examples of VM0, the planckvm without floating point
 VM0_EXAMPLES := $(filter-out planck/examples/vm/float.pk planck/examples/vm/plain_float.pk planck/examples/vm/trans.pk planck/examples/vm/bits.pk planck/examples/vm/equality.pk planck/examples/vm/plain_int.pk,$(wildcard planck/examples/vm/*.pk))
@@ -60,7 +60,7 @@ clean:
 	rm -f pforth
 	rm -f plisp2
 	rm -f planck0
-	rm -rf tmp-vm tmp-vm-build tmp-vmf tmp-vmf-build
+	rm -rf tmp-vm tmp-vm-build tmp-vmf tmp-vmf-build dist
 	rm -f $(ASM_EXAMPLE_TARGETS)
 	rm -f $(SASM_EXAMPLE_TARGETS)
 
@@ -101,13 +101,13 @@ vm_imports = $(addprefix $(VM_BUILD)/,$(addsuffix .unit,$(shell sed -n 's/^impor
 # a unit is compiled once the units that it imports are, so make -j compiles the units that do not depend on each other at the same time
 define VM_UNIT_RULE
 $(VM_BUILD)/$(1).unit: $(call vm_src,$(1)) $(call vm_imports,$(1)) $(VASMC_SOURCES) planck0 | $(VM_BUILD)
-	./planck0 planck/vasmc.pk unit $$< $$@ x86_64 $(call vm_imports,$(1))
+	./planck0 planck/vasmc.pk unit $$< $$@ linux_x86_64 $(call vm_imports,$(1))
 endef
 $(foreach u,$(VM_UNITS),$(eval $(call VM_UNIT_RULE,$(u))))
 $(VM_BUILD):
 	mkdir -p $@
 tmp-vm: $(VM_UNIT_FILES) planck0
-	./planck0 planck/vasmc.pk link $@ x86_64 $(VM_UNIT_FILES)
+	./planck0 planck/vasmc.pk link $@ linux_x86_64 $(VM_UNIT_FILES)
 
 # the coefficients and the constants of the floating point of planck/vm are written by tools/gen_fm_vm0.pk, which runs on tmp-vm (the planckvm without floating point)
 $(VM_BUILD)/fmk.img: tools/gen_fm_vm0.pk planck/lib/pvm/cas.pk planck/lib/pvm/compile.pk planck0 | $(VM_BUILD)
@@ -115,13 +115,13 @@ $(VM_BUILD)/fmk.img: tools/gen_fm_vm0.pk planck/lib/pvm/cas.pk planck/lib/pvm/co
 $(VM_BUILD)/fmk.native: $(VM_BUILD)/fmk.img tmp-vm
 	./tmp-vm $< > $@
 $(VM_BUILD)/fmk.unit: $(VM_BUILD)/fmk.native $(VASMC_SOURCES) planck0
-	./planck0 planck/vasmc.pk unit $< $@ x86_64
+	./planck0 planck/vasmc.pk unit $< $@ linux_x86_64
 
 # check exp, log, pow, sin, cos and atan2 of planck/vm/fm.native; the status of the program is the number of results more than 1 ulp apart
 test-fm: $(VM_BUILD)/fmk.unit planck0
-	./planck0 planck/vasmc.pk unit planck/vm/fm.native $(VM_BUILD)/fm.unit x86_64 $(VM_BUILD)/fmk.unit
-	./planck0 planck/vasmc.pk unit planck/tests/fm/main.native $(VM_BUILD)/fmtest.unit x86_64 $(VM_BUILD)/fm.unit
-	./planck0 planck/vasmc.pk link $(VM_BUILD)/fmtest x86_64 $(VM_BUILD)/fmk.unit $(VM_BUILD)/fm.unit $(VM_BUILD)/fmtest.unit
+	./planck0 planck/vasmc.pk unit planck/vm/fm.native $(VM_BUILD)/fm.unit linux_x86_64 $(VM_BUILD)/fmk.unit
+	./planck0 planck/vasmc.pk unit planck/tests/fm/main.native $(VM_BUILD)/fmtest.unit linux_x86_64 $(VM_BUILD)/fm.unit
+	./planck0 planck/vasmc.pk link $(VM_BUILD)/fmtest linux_x86_64 $(VM_BUILD)/fmk.unit $(VM_BUILD)/fm.unit $(VM_BUILD)/fmtest.unit
 	$(VM_BUILD)/fmtest
 
 # the units of tmp-vmf: flt, dec and trans of planck/vm, and fm, which needs the units that VM0 made
@@ -129,17 +129,31 @@ VMF_BUILD := tmp-vmf-build
 VMF_REAL := flt dec trans
 VMF_UNIT_FILES := $(filter-out $(addprefix $(VM_BUILD)/,$(addsuffix .unit,$(VMF_REAL))),$(VM_UNIT_FILES)) $(VM_BUILD)/fmk.unit $(VM_BUILD)/fm.unit $(addprefix $(VMF_BUILD)/,$(addsuffix .unit,$(VMF_REAL)))
 $(VM_BUILD)/fm.unit: planck/vm/fm.native $(VM_BUILD)/fmk.unit $(VASMC_SOURCES) planck0
-	./planck0 planck/vasmc.pk unit $< $@ x86_64 $(VM_BUILD)/fmk.unit
+	./planck0 planck/vasmc.pk unit $< $@ linux_x86_64 $(VM_BUILD)/fmk.unit
 $(VMF_BUILD):
 	mkdir -p $@
 $(VMF_BUILD)/flt.unit: planck/vm/flt.native $(VM_BUILD)/fm.unit $(VM_BUILD)/mem.unit $(VM_BUILD)/big.unit $(VASMC_SOURCES) planck0 | $(VMF_BUILD)
-	./planck0 planck/vasmc.pk unit $< $@ x86_64 $(VM_BUILD)/fm.unit $(VM_BUILD)/mem.unit $(VM_BUILD)/big.unit
+	./planck0 planck/vasmc.pk unit $< $@ linux_x86_64 $(VM_BUILD)/fm.unit $(VM_BUILD)/mem.unit $(VM_BUILD)/big.unit
 $(VMF_BUILD)/dec.unit: planck/vm/dec.native $(VMF_BUILD)/flt.unit $(VM_BUILD)/mem.unit $(VASMC_SOURCES) planck0 | $(VMF_BUILD)
-	./planck0 planck/vasmc.pk unit $< $@ x86_64 $(VM_BUILD)/mem.unit $(VMF_BUILD)/flt.unit
+	./planck0 planck/vasmc.pk unit $< $@ linux_x86_64 $(VM_BUILD)/mem.unit $(VMF_BUILD)/flt.unit
 $(VMF_BUILD)/trans.unit: planck/vm/trans.native $(VMF_BUILD)/flt.unit $(VM_BUILD)/fm.unit $(VM_BUILD)/mem.unit $(VASMC_SOURCES) planck0 | $(VMF_BUILD)
-	./planck0 planck/vasmc.pk unit $< $@ x86_64 $(VM_BUILD)/fm.unit $(VM_BUILD)/mem.unit $(VMF_BUILD)/flt.unit
+	./planck0 planck/vasmc.pk unit $< $@ linux_x86_64 $(VM_BUILD)/fm.unit $(VM_BUILD)/mem.unit $(VMF_BUILD)/flt.unit
 tmp-vmf: $(VMF_UNIT_FILES) planck0
-	./planck0 planck/vasmc.pk link $@ x86_64 $(VMF_UNIT_FILES)
+	./planck0 planck/vasmc.pk link $@ linux_x86_64 $(VMF_UNIT_FILES)
+
+# the planckvm with floating point as a program for each platform: dist/planckvm-<target> (the units are the same for every target of the word 8)
+DIST_TARGETS := linux_x86_64 macos_x86_64 linux_arm64 macos_arm64
+DIST_FILES := $(addprefix dist/planckvm-,$(DIST_TARGETS)) dist/planckvm-windows_x86_64.exe
+.PHONY: dist
+dist: $(DIST_FILES)
+dist/planckvm-%: $(VMF_UNIT_FILES) $(VASMC_SOURCES) planck0
+	mkdir -p dist
+	./planck0 planck/vasmc.pk link $@ $* $(VMF_UNIT_FILES)
+
+# the file of Windows has the extension .exe
+dist/planckvm-windows_x86_64.exe: $(VMF_UNIT_FILES) $(VASMC_SOURCES) planck0
+	mkdir -p dist
+	./planck0 planck/vasmc.pk link $@ windows_x86_64 $(VMF_UNIT_FILES)
 
 test-vm: tmp-vmf
 	@for f in $(VM_ALL_EXAMPLES); do \
@@ -178,9 +192,9 @@ test-vm0: tmp-vm
 
 # check the division by the reciprocal of planck/vm/udiv.native against its definition; the status of the program is the number of wrong results
 test-udiv: planck0
-	./planck0 planck/vasmc.pk unit planck/vm/udiv.native tmp-udiv-lib.unit x86_64
-	./planck0 planck/vasmc.pk unit planck/tests/udiv/main.native tmp-udiv-main.unit x86_64 tmp-udiv-lib.unit
-	./planck0 planck/vasmc.pk link tmp-udiv x86_64 tmp-udiv-lib.unit tmp-udiv-main.unit
+	./planck0 planck/vasmc.pk unit planck/vm/udiv.native tmp-udiv-lib.unit linux_x86_64
+	./planck0 planck/vasmc.pk unit planck/tests/udiv/main.native tmp-udiv-main.unit linux_x86_64 tmp-udiv-lib.unit
+	./planck0 planck/vasmc.pk link tmp-udiv linux_x86_64 tmp-udiv-lib.unit tmp-udiv-main.unit
 	./tmp-udiv; s=$$?; rm -f tmp-udiv tmp-udiv-*.unit; exit $$s
 
 # run everything: test-planck0 and then the libraries, the tools, the vasm, native and backend tests, and the examples
@@ -208,7 +222,7 @@ test-all: test-planck0
 	./planck0 planck/tests/x64.pk
 	./planck0 planck/tests/target.pk
 	./planck0 planck/tests/unit.pk
-	./planck0 tools/test.pk backend/cfg backend/x64enc backend/x64 backend/target
+	./planck0 tools/test.pk backend/cfg backend/x64enc backend/x64 backend/a64enc backend/arm64 backend/target
 	@for f in $(BACKEND_EXAMPLES); do \
 		./planck0 $$f tmp-backend || exit 1; \
 		./tmp-backend > tmp-backend.out || exit 1; \
@@ -230,9 +244,9 @@ test-all: test-planck0
 		[ "$$s" = "$$(cat planck/examples/units/main.status)" ] || { echo "planck/examples/units ($$t): exit status $$s"; exit 1; }; \
 		echo "planck/examples/units ($$t): ok"; \
 	done; rm -f tmp-lib.unit tmp-main.unit tmp-units
-	@./planck0 planck/vasmc.pk unit planck/examples/units/lib.native tmp-lib.unit x86_64 || exit 1
+	@./planck0 planck/vasmc.pk unit planck/examples/units/lib.native tmp-lib.unit linux_x86_64 || exit 1
 	@for f in planck/tests/units/*.native; do \
-		./planck0 planck/vasmc.pk unit $$f tmp-unit.unit x86_64 tmp-lib.unit > tmp-unit.out && { echo "$$f: should stop"; exit 1; }; \
+		./planck0 planck/vasmc.pk unit $$f tmp-unit.unit linux_x86_64 tmp-lib.unit > tmp-unit.out && { echo "$$f: should stop"; exit 1; }; \
 		diff -u $${f%.native}.out tmp-unit.out || exit 1; \
 		echo "$$f: stops"; \
 	done; rm -f tmp-lib.unit tmp-unit.unit tmp-unit.out
