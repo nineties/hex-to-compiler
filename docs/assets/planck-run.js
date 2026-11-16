@@ -1,6 +1,6 @@
 // planck-run.js: runs the planck code of a page in the browser.
 // A block of the tutorial with data-run (the mode "run" or "repl") and data-src (the code) gets a button that runs it, and the page of the
-// playground (id="playground") is a REPL. The code runs in planck-worker.js on the PlanckVM of vm.wasm.
+// playground (id="playground") has two tabs, a REPL and a page to run the code of an editor. The code runs in planck-worker.js on the PlanckVM of vm.wasm.
 (function () {
   "use strict";
 
@@ -11,7 +11,8 @@
     running: ja ? "実行中" : "Running",
     stopped: ja ? "時間がかかりすぎたので止めました" : "Stopped because it took too long",
     failed: ja ? "実行できませんでした" : "Could not run",
-    out: ja ? "出力" : "Output"
+    out: ja ? "出力" : "Output",
+    empty: ja ? "(出力はありません)" : "(no output)"
   };
   var LIMIT_MS = 30000;
 
@@ -75,10 +76,10 @@
     block.appendChild(button);
   }
 
-  // The Playground is a REPL. The VM runs a program in a fresh worker, so a line is evaluated together with the lines accepted before it, and only
+  // The REPL of the Playground. The VM runs a program in a fresh worker, so a line is evaluated together with the lines accepted before it, and only
   // the part of the session that is new is shown. The lines are sent as the entries of the mode "session" (see docs/tools/playground_run.pk),
   // each of which is read by itself. The session ends with a line of one form feed if no entry stopped the evaluation.
-  function playground(root) {
+  function repl(root) {
     var log = root.querySelector("#pg-log");
     var input = root.querySelector("#pg-in");
     var END = "\f\n";
@@ -148,7 +149,92 @@
       }
     });
     input.addEventListener("input", fit);
-    input.focus();
+    return function () { input.focus(); };
+  }
+
+  // The page to run code of the Playground: the whole text of the editor is run as a program (the mode "run"), and what it writes is shown.
+  // The list of samples puts the code of an example into the editor.
+  function runner(root) {
+    var code = root.querySelector("#pg-code");
+    var go = root.querySelector("#pg-go");
+    var sample = root.querySelector("#pg-sample");
+    var out = root.querySelector("#pg-out");
+    var label = root.querySelector("#pg-out-label");
+    var busy = false;
+
+    function go_run() {
+      if (busy) return;
+      busy = true;
+      go.disabled = true;
+      go.textContent = text.running;
+      run("run", code.value, function (r) {
+        var s = (r.stdout + (r.status !== 0 ? r.stderr : "")).replace(/\n$/, "");
+        out.textContent = s === "" ? text.empty : s;
+        out.className = "out run-out" + (s === "" ? " empty" : "");
+        label.hidden = false;
+        out.hidden = false;
+        go.disabled = false;
+        go.textContent = text.run;
+        busy = false;
+      });
+    }
+
+    go.addEventListener("click", go_run);
+    code.addEventListener("keydown", function (ev) {
+      if (ev.key === "Enter" && (ev.metaKey || ev.ctrlKey) && !ev.isComposing) {
+        ev.preventDefault();
+        go_run();
+      }
+    });
+    sample.addEventListener("change", function () {
+      var o = sample.options[sample.selectedIndex];
+      var src = o.getAttribute("data-src");
+      if (src === null) return;
+      code.value = src;
+      label.hidden = true;
+      out.hidden = true;
+      code.focus();
+    });
+    return function () { code.focus(); };
+  }
+
+  // The tabs: the REPL and the page to run code. The tab is kept in the fragment of the URL (#repl or #run).
+  function playground(root) {
+    var names = ["repl", "run"];
+    var focus = { repl: repl(root), run: runner(root) };
+    var tabs = {};
+    var panels = {};
+    names.forEach(function (n) {
+      tabs[n] = root.querySelector("#pg-tab-" + n);
+      panels[n] = root.querySelector("#pg-" + n);
+    });
+
+    function select(n, move) {
+      names.forEach(function (m) {
+        var on = m === n;
+        tabs[m].setAttribute("aria-selected", on ? "true" : "false");
+        tabs[m].tabIndex = on ? 0 : -1;
+        panels[m].hidden = !on;
+      });
+      if (move) focus[n]();
+    }
+
+    names.forEach(function (n, i) {
+      tabs[n].addEventListener("click", function () {
+        select(n, true);
+        try { history.replaceState(null, "", "#" + n); } catch (e) { /* the fragment is only a convenience */ }
+      });
+      tabs[n].addEventListener("keydown", function (ev) {
+        var k = ev.key === "ArrowRight" ? 1 : ev.key === "ArrowLeft" ? -1 : 0;
+        if (k === 0) return;
+        ev.preventDefault();
+        var m = names[(i + k + names.length) % names.length];
+        select(m, false);
+        tabs[m].focus();
+      });
+    });
+    var first = location.hash === "#run" ? "run" : "repl";
+    select(first, true);
   }
 
   var blocks = document.querySelectorAll("[data-run]");
