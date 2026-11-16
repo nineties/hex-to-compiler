@@ -15,8 +15,7 @@
 #   <!--text NAME-->   examples/NAME.txt, as code that is not planck
 #   <!--bits ... -->   a diagram of 32-bit words as an HTML table. A line is one word,
 #                      "label | field text/width | ...", and the widths of a line must add up to 32
-#   <!--samples-->     (in src/LANG/playground.html) the options of the list of samples of the Playground, which are the examples that the
-#                      pages of the tutorial run
+#   <!--samples-->     (in src/LANG/playground.html) the options of the list of samples of the Playground
 #   <!--diagram-->     the diagram of the stages (inline SVG, a wide one and a narrow one)
 #   <!--file F A-->    an excerpt of the source F. A is the start of a line, and the excerpt is the item
 #                      that begins at the line (for a line at the left edge, up to the blank line before
@@ -603,39 +602,45 @@ RUN_BUTTONS := false
 run_attrs(mode, name, ext) := if (not RUN_BUTTONS or try_read_file(f"{EX}/{name}.norun") != none) ""
     else f" data-run=\"{mode}\" data-src=\"{html_escape(rstrip_nl(ex_file(name, ext)))}\""
 
-# the examples of the tutorial that run in the browser, in the order of the pages, each as (the title of its page, NAME): the samples of the Playground
-SAMPLES := vector.new()
-SAMPLE_PAGE := ""
-
-add_sample(name) := {
-    i := 0
-    found := false
-    while (i < vector.len(SAMPLES)) {
-        if (arg(SAMPLES[i], 1) == name) found = true
-        i = i + 1
-    }
-    if (not found) vector.push(SAMPLES, (SAMPLE_PAGE, name))
-}
+# the samples of the Playground: examples that run in the browser (the examples of the tutorial, whose output test_playground.js checks),
+# each as (NAME, the name in the list)
+SAMPLES := [
+    ("t1_hello", "hello"),
+    ("t1_vars", "variables"),
+    ("t1_func", "function"),
+    ("t1_rec", "factorial"),
+    ("t1_scope", "scope"),
+    ("e_undefined", "undefined variable"),
+    ("t2_lists", "lists"),
+    ("t2_mexpr", "M-expression"),
+    ("t3_fib", "fib"),
+    ("t3_fib_lines", "fib (clauses)"),
+    ("t3_list", "list length"),
+    ("t3_match", "match"),
+    ("t3_extend", "extending a function"),
+    ("t3_deriv", "derivative"),
+    ("t4_list", "list library"),
+    ("t4_for", "for loop"),
+    ("t4_table", "table"),
+    ("t5_exception", "exception"),
+    ("t5_generator", "generator"),
+    ("t5_choose", "nondeterminism"),
+    ("t6_quote", "quote"),
+    ("t6_eval", "custom eval"),
+    ("t6_unparse", "unparse"),
+    ("t7_unless", "unless"),
+    ("t7_pipe", "pipe operator"),
+    ("t7_repeat", "repeat"),
+    ("t7_calc", "calculator grammar"),
+    ("t8_record", "record"),
+    ("t8_local", "local functions"),
+    ("t8_return", "early return"),
+    ("t9_index", "index"),
+    ("t9_kind", "custom index"),
+    ("t9_rewrite", "rewrite rules")]
 
 # the options of the list of samples of the Playground. Each has its code in data-src, as the blocks of the tutorial do
-samples_html() := {
-    b := strbuf.new()
-    group := none
-    i := 0
-    while (i < vector.len(SAMPLES)) {
-        s := SAMPLES[i]
-        if (arg(s, 0) != group) {
-            if (group != none) strbuf.add(b, "</optgroup>\n")
-            group = arg(s, 0)
-            strbuf.add(b, f"<optgroup label=\"{html_escape(group)}\">\n")
-        }
-        name := arg(s, 1)
-        strbuf.add(b, f"<option value=\"{name}\" data-src=\"{html_escape(rstrip_nl(ex_file(name, "pk")))}\">{name}.pk</option>\n")
-        i = i + 1
-    }
-    if (group != none) strbuf.add(b, "</optgroup>")
-    strbuf.string(b)
-}
+samples_html() := string.join("\n", list.map(s -> f"<option value=\"{arg(s, 0)}\" data-src=\"{html_escape(rstrip_nl(ex_file(arg(s, 0), "pk")))}\">{html_escape(arg(s, 1))}</option>", SAMPLES))
 
 # === Excerpts of the source files ===
 
@@ -813,7 +818,6 @@ expand(body) := {
     # an example with a button shows its output only after a run
     body = by_name(body, "ex", name -> {
         attrs := run_attrs("run", name, "pk")
-        if (attrs != "") add_sample(name)
         shown := if (attrs == "") f"\n{out_block(name)}" else ""
         f"<div class=\"example\"{attrs}>\n{code_block(name)}{shown}\n</div>"
     })
@@ -924,18 +928,15 @@ build_lang(lang) := {
     n := 1
     tb := read_src(f"{src}/index.html")
     write_file(f"{out}/index.html", page(none, none, arg(tb, 0), expand(arg(tb, 1)), [], ""))
-    SAMPLES = vector.new()
     for (s in sections(lang)) {
         section := arg(s, 0)
         for (p in arg(s, 2)) {
             tb = read_src(f"{src}/{section}/{arg(p, 0)}.html")
             RUN_BUTTONS = section == "tutorial"
-            SAMPLE_PAGE = arg(p, 1)
             write_file(f"{out}/{section}/{arg(p, 0)}.html", page(section, arg(p, 0), arg(tb, 0), expand(arg(tb, 1)), arg(s, 2), arg(s, 1)))
             n = n + 1
         }
     }
-    # the samples are the examples that the pages of the tutorial run
     tb = read_src(f"{src}/playground.html")
     write_file(f"{out}/playground.html", page(none, "playground", arg(tb, 0), replace_lit(expand(arg(tb, 1)), "<!--samples-->", samples_html()), [], ""))
     n + 1
