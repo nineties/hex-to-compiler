@@ -39,7 +39,8 @@ module pvm_compile {
     X_HASENV := 15
     X_NSLOTS := 16
     X_TBASE := 17
-    X_SIZE := 18
+    X_REST := 18
+    X_SIZE := 19
 
     V_NAME := 0
     V_CONTEXT := 1
@@ -87,6 +88,7 @@ module pvm_compile {
         c[X_HASENV] = false
         c[X_NSLOTS] = 0
         c[X_TBASE] = 0
+        c[X_REST] = false
         vector.push(contexts, c)
         c
     }
@@ -509,7 +511,12 @@ module pvm_compile {
         ch := new_context(c, false, n, notail)
         i := 0
         while (i < n) {
-            bind_to(ch, arg(params, i), P{i})
+            p := arg(params, i)
+            if (type(p) == Expr and head(p) == '_Rest and arity(p) == 1 and i == n - 1) {
+                ch[X_REST] = true
+                p = arg(p, 0)
+            }
+            bind_to(ch, p, P{i})
             i = i + 1
         }
         cxt(ch, body, 0)
@@ -875,7 +882,7 @@ module pvm_compile {
             }, reverse(c[X_OWNED]))
         }
         each(i -> finish(c, out, i), vector.to_list(c[X_BODY]))
-        Code{c[X_NAME], c[X_ARITY], c[X_TBASE] + c[X_NTMP], vector.to_list(out), vector.to_list(c[X_CONSTS])}
+        Code{c[X_NAME], c[X_ARITY] + (if (c[X_REST]) 256 else 0), c[X_TBASE] + c[X_NTMP], vector.to_list(out), vector.to_list(c[X_CONSTS])}
     }
 
     fun compile_in

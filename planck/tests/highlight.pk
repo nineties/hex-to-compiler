@@ -11,8 +11,7 @@ check(actual, expected) := if (actual == expected) {
     passed = passed + 1
 } else {
     failed = failed + 1
-    print("Test failed: expected "); print(expected)
-    print(" but got "); println(actual)
+    print(f"Test failed: expected {expected} but got {actual}")
 }
 
 at(h, i, t) := i + strlen(t) <= strlen(h) and substr(h, i, i + strlen(t)) == t
@@ -51,7 +50,7 @@ check(highlight.html("x := 1"),
 check(highlight.html("if (a) b else c"),
       "<span class=\"tok-kw\">if</span> <span class=\"tok-op\">(</span><span class=\"tok-name\">a</span><span class=\"tok-op\">)</span> <span class=\"tok-name\">b</span> <span class=\"tok-kw\">else</span> <span class=\"tok-name\">c</span>")
 check(highlight.html("print(\"a b\")"),
-      "<span class=\"tok-name\">put</span><span class=\"tok-op\">(</span><span class=\"tok-str\">\"a b\"</span><span class=\"tok-op\">)</span>")
+      "<span class=\"tok-name\">print</span><span class=\"tok-op\">(</span><span class=\"tok-str\">\"a b\"</span><span class=\"tok-op\">)</span>")
 check(highlight.html("f\"n = {n}\""),
       "<span class=\"tok-str\">f\"</span><span class=\"tok-str\">n = </span><span class=\"tok-op\">{</span><span class=\"tok-name\">n</span><span class=\"tok-op\">}</span><span class=\"tok-str\">\"</span>")
 
@@ -69,7 +68,7 @@ check(highlight.html(""), "")
 # === Without the tags the output is the source ===
 srcs := [
     "a := [1, 2, 3]\nb := a[0] + 0x1f - 0b101\n",
-    "fib(n) := if (n < 2) n else fib(n - 1) + fib(n - 2)\nprintln(fib(10))\n",
+    "fib(n) := if (n < 2) n else fib(n - 1) + fib(n - 2)\nprint(fib(10))\n",
     "handle { perform 1 } with Tuple{Tuple{v, k}, k(v)}\n",
     "while (i < 3) {\n    i = i + 1 # step\n}\n",
     "'sym ` Apply{!f, Tuple{!x}}",
@@ -88,14 +87,14 @@ for (f in ["planck/lib/list.pk", "planck/examples/extend.pk", "planck/examples/c
 }
 
 # === A rule declared in the text colors the rest of the text ===
-ext := "primary ::= 'for i:ident 'in a:add_expr \"..\" b:add_expr body:block { `Do{!i} } | ...\nfor i in 1..5 { println(i) }\n"
+ext := "primary ::= 'for i:ident 'in a:add_expr \"..\" b:add_expr body:block { `Do{!i} } | ...\nfor i in 1..5 { print(i) }\n"
 version := peg_version
 h := highlight.html(ext)
 check(plain(h), ext)
 check(has(h, "<span class=\"tok-kw\">for</span> <span class=\"tok-name\">i</span> <span class=\"tok-kw\">in</span> <span class=\"tok-num\">1</span><span class=\"tok-op\">..</span><span class=\"tok-num\">5</span>"), true)
 check(peg_version, version)
 # the rule is gone after highlight, so the same text no longer reads as the extension
-h2 := highlight.html("for i in 1..5 { println(i) }\n")
+h2 := highlight.html("for i in 1..5 { print(i) }\n")
 check(has(h2, "<span class=\"tok-op\">..</span>"), false)
 
 # a word added by a declaration is a keyword where it is used, and a name where the declaration is gone
@@ -103,5 +102,14 @@ un := "primary ::= 'unless \"(\" c:expr \")\" a:expr { `If{!c, none, !a} } | ...
 check(has(highlight.html(un), "<span class=\"tok-kw\">unless</span> <span class=\"tok-op\">(</span>"), true)
 check(has(highlight.html("unless (1 > 2) print(1)\n"), "<span class=\"tok-kw\">unless</span>"), false)
 
-print("Tests passed "); print(passed); print("/"); println(passed + failed)
+# a name in a call is a name, and its = is an operator
+hn := highlight.html("f(1, a = 5)\n")
+check(has(hn, "<span class=\"tok-name\">a</span> <span class=\"tok-op\">=</span>"), true)
+check(plain(hn), "f(1, a = 5)\n")
+# a definition with a default
+hd := highlight.html("f(x, a = 1) := x + a\n")
+check(has(hd, "<span class=\"tok-name\">a</span> <span class=\"tok-op\">=</span>"), true)
+check(plain(hd), "f(x, a = 1) := x + a\n")
+
+print(f"Tests passed {passed}/{passed + failed}")
 if (failed > 0) exit(1)
