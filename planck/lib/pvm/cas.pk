@@ -1,19 +1,10 @@
-# pvm/cas: a small computer algebra system for planckvm, written in the subset of planck that pvm/compile translates
 # Copyright (C) 2026 nineties
-#
-# cas_lib is a quoted block of definitions; cas_program(body) puts it in front of the statements of body.
-# The integers of planckvm have no limit on the number of digits, so a rational is Q{n, d} of two integers (d > 0, no common factor)
-# and the arithmetic is written with the plain operators and gcd, isqrt, pow and bit_len, which are defined below on the operators.
-#
-# An expression is quoted planck: `(exp(x) - 1), `(1 / (1 + x * x)). The functions exp, log, sin, cos, atan and atanh and the operators
-# + - * / and pow(a, k) can be differentiated and expanded in series. A series is an array of rationals: the coefficients of x^0, x^1, ... x^n.
 
 cas_lib := `({
     fail(m) := {
         println(m)
         exit(1)
     }
-    # --- integer functions on the operators of big integers
     pow(x, k) := {
         r := 1
         b := x
@@ -25,7 +16,6 @@ cas_lib := `({
         }
         r
     }
-    # the number of bits of the magnitude of n; 0 for 0
     bit_len(n) := {
         m := if (n < 0) 0 - n else n
         if (m == 0) 0 else {
@@ -49,7 +39,6 @@ cas_lib := `({
         }
         a
     }
-    # the floor of the square root of n >= 0 by Newton's method from a start that is not below the root
     isqrt(n) := {
         if (n < 2) n else {
             x := pow(2, (bit_len(n) + 1) / 2)
@@ -62,7 +51,6 @@ cas_lib := `({
         }
     }
 
-    # --- the parts of an expression: Apply{f, Tuple{a, b}}
     is_app(e) := type(e) == Expr
     app_f(e) := arg(e, 0)
     app_a(e, k) := arg(arg(e, 1), k)
@@ -70,7 +58,6 @@ cas_lib := `({
     make1(f, a) := mexpr('Apply, X{f, mexpr('Tuple, X{a})})
     make2(f, a, b) := mexpr('Apply, X{f, mexpr('Tuple, X{a, b})})
 
-    # --- rationals
     qq(n, d) := {
         if (d < 0) qq(0 - n, 0 - d) else {
             g := gcd(n, d)
@@ -100,7 +87,6 @@ cas_lib := `({
     qzero_v := Q{0, 1}
     qone_v := Q{1, 1}
 
-    # --- series
     sconst_q(c, n) := {
         a := array(n + 1)
         i := 0
@@ -146,7 +132,6 @@ cas_lib := `({
         }
         c
     }
-    # the reciprocal: b0 = 1 / a0 and bk = -b0 (a1 b(k-1) + ... + ak b0)
     sinv(a) := {
         n := array_len(a)
         b := array(n)
@@ -166,7 +151,6 @@ cas_lib := `({
         }
         b
     }
-    # the integral from 0: one coefficient longer, c(k+1) = ak / (k + 1)
     sint(a) := {
         n := array_len(a)
         c := array(n + 1)
@@ -184,8 +168,6 @@ cas_lib := `({
         }
     }
 
-    # --- the derivative of an expression, in the form of the rule a student writes
-    # the derivative of f in f(u), as an expression of u
     fprime(e) := {
         f := app_f(e)
         u := app_a(e, 0)
@@ -224,7 +206,6 @@ cas_lib := `({
         }
     }
 
-    # f(0) when u(0) = c, for the functions that are rational there
     fvalue(e, c) := {
         f := app_f(e)
         z := qcmp(c, qzero_v) == 0
@@ -237,8 +218,6 @@ cas_lib := `({
         else fail("cas: the value is not rational")
     }
 
-    # --- the series of an expression to degree n
-    # The series of f(u) is f(u(0)) plus the integral of f'(u) u'. The integral cuts the degree by one, so the recursion ends after n steps.
     ser(e, x, n) := {
         if (type(e) == Int) sconst_q(rat(e), n)
         else if (type(e) == Symbol) { if (e == x) sx(n) else fail("cas: a variable other than x") }
@@ -263,10 +242,8 @@ cas_lib := `({
     }
     taylor(e, x, n) := ser(e, x, n)
 
-    # --- polynomials from series
     reverse(Nil{}, acc) := acc
     reverse(x :: xs, acc) := reverse(xs, x :: acc)
-    # the coefficients of x^start, x^(start+step), ... that matter for |x| <= xmax: the ones whose term can be 2^-bits of 1 or more
     terms(s, start, step, xmax, bits) := {
         eps := qq(1, pow(2, bits))
         out := []
@@ -281,8 +258,6 @@ cas_lib := `({
         reverse(out, [])
     }
 
-    # --- evaluation
-    # the value of the series at the rational x, as an integer near v * 2^p
     eval_fixed(s, Q{xn, xd}, p) := {
         pw := pow(2, p)
         sum := 0
@@ -297,9 +272,7 @@ cas_lib := `({
         sum
     }
 
-    # --- constants, as the series evaluated to p bits (rationals with the denominator 2^p)
     fixed_q(v, p) := qq(v, pow(2, p))
-    # pi = 16 atan(1/5) - 4 atan(1/239) (Machin), as an integer near pi * 2^p
     pi_int(p) := {
         g := 16
         n := (p + g) / 2 + 4
@@ -307,7 +280,6 @@ cas_lib := `({
         (16 * eval_fixed(s, qq(1, 5), p + g) - 4 * eval_fixed(s, qq(1, 239), p + g)) / pow(2, g)
     }
     pi_q(p) := fixed_q(pi_int(p), p)
-    # ln 2 = 2 atanh(1/3)
     ln2_int(p) := {
         g := 16
         n := (p + g) * 2 / 3 + 4
@@ -315,7 +287,6 @@ cas_lib := `({
         2 * eval_fixed(s, qq(1, 3), p + g) / pow(2, g)
     }
     ln2_q(p) := fixed_q(ln2_int(p), p)
-    # atan of a rational x >= 0: atan(x) = atan(1/2) + atan((x - 1/2) / (1 + x/2)) brings x below 1/2, where the series converges fast
     atan_q(x, p) := {
         g := 16
         half := qq(1, 2)
@@ -329,8 +300,6 @@ cas_lib := `({
     }
     sqrt_q(x, p) := fixed_q(isqrt(arg(x, 0) * pow(2, 2 * p) / arg(x, 1)), p)
 
-    # --- from rationals to floats
-    # an * 2^sh / d, rounded to the nearest integer (ties to even)
     rounded(an, d, sh) := {
         num := if (sh >= 0) an * pow(2, sh) else an
         den := if (sh >= 0) d else d * pow(2, 0 - sh)
@@ -338,7 +307,6 @@ cas_lib := `({
         r2 := 2 * (num % den)
         if (r2 > den or (r2 == den and m % 2 == 1)) m + 1 else m
     }
-    # the float nearest to x (ties to even): Fl{m, sh} is m * 2^-sh with m of 53 bits and a sign
     fl(x) := {
         n := arg(x, 0)
         d := arg(x, 1)
@@ -354,7 +322,6 @@ cas_lib := `({
     flq(Fl{m, sh}) := if (sh >= 0) qq(m, pow(2, sh)) else qq(m * pow(2, 0 - sh), 1)
     p10(k) := if (k >= 0) qq(pow(10, k), 1) else qq(1, pow(10, 0 - k))
 
-    # x rounded to w significant bits, as a rational
     round_sig(x, w) := {
         n := arg(x, 0)
         d := arg(x, 1)
@@ -368,15 +335,12 @@ cas_lib := `({
             if (n < 0) qneg(v) else v
         }
     }
-    # x as the sum of floats with w1, w2, ... significant bits: the first nearest x, the second nearest the rest, and so on
     split(x, Nil{}) := []
     split(x, w :: ws) := {
         p := round_sig(x, w)
         fl(p) :: split(qsub(x, p), ws)
     }
 
-    # --- text of a number, written to the output
-    # the digits of the integer v >= 0 with k digits, with leading zeros
     put_digits(v, k) := {
         if (k > 0) {
             h := pow(10, k - 1)
@@ -390,7 +354,6 @@ cas_lib := `({
         while (t > 0) { n = n + 1; t = t / 10 }
         n
     }
-    # the shortest decimal that reads back as the float, as a native literal: 6.931471805599453e-1
     put_flit(f) := {
         v := flq(f)
         if (arg(v, 0) == 0) put("0.0") else {
@@ -402,7 +365,6 @@ cas_lib := `({
             k := 1
             digits := none
             while (digits == none) {
-                # a / 10^e10 * 10^(k-1) rounded to an integer of k digits
                 scaled := qmul(a, qdiv(p10(k - 1), p10(e10)))
                 digit := rounded(arg(scaled, 0), arg(scaled, 1), 0)
                 back := qmul(qq(digit, 1), qdiv(p10(e10), p10(k - 1)))
@@ -419,7 +381,6 @@ cas_lib := `({
         }
     }
 
-    # the first n digits of 2/pi in base 2^24: floor(2/pi * 2^(24 n)) cut into digits, the most significant first
     tpi_digits(n) := {
         p := 24 * n + 64
         v := pow(2, 24 * n + 1) * pow(2, p) / pi_int(p)
@@ -434,7 +395,6 @@ cas_lib := `({
     }
 })
 
-# the statements of the program: those of cas_lib and then those of body, a quoted block
 cas_program(body) := {
     out := []
     i := arity(body) - 1

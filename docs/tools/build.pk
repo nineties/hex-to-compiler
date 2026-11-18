@@ -1,35 +1,4 @@
-# build.pk: writes docs/ from the page sources in src/, the examples and the source files.
 # Copyright (C) 2026 nineties
-#
-# usage (in the root of the repository): ./planck0 docs/tools/build.pk
-#
-# src/ has the pieces of the pages: src/ja for Japanese and src/en for English. The Japanese pages
-# are written to docs/ja/ and the English pages to docs/en/. The first line of a piece is
-# <!--title TITLE-->. These marks in a piece are replaced:
-#   <!--ex NAME-->     examples/NAME.pk and examples/NAME.out, as the code and its output
-#   <!--src NAME-->    only examples/NAME.pk
-#   <!--repl NAME-->   examples/NAME.out as a session at the prompt of the REPL (a line "> expression", the
-#                      lines of it that go on "... expression", and then the lines of the output and the value).
-#                      examples/NAME.repl is the input, and run_examples.sh makes the .out with repl.pk
-#   <!--out NAME-->    only examples/NAME.out
-#   <!--text NAME-->   examples/NAME.txt, as code that is not planck
-#   <!--bits ... -->   a diagram of 32-bit words as an HTML table. A line is one word,
-#                      "label | field text/width | ...", and the widths of a line must add up to 32
-#   <!--samples-->     (in src/LANG/playground.html) the options of the list of samples of the Playground
-#   <!--diagram-->     the diagram of the stages (inline SVG, a wide one and a narrow one)
-#   <!--file F A-->    an excerpt of the source F. A is the start of a line, and the excerpt is the item
-#                      that begins at the line (for a line at the left edge, up to the blank line before
-#                      the next line at the left edge).
-#                      <!--file F A .. B--> is from the line A to the line before B,
-#                      <!--file F A ..--> is from the line A to the end, and <!--file F--> is the whole file
-#   [[F A]]            a link to the item A of the source F ([[F A .. B]] is the same).
-#                      A and B must each match exactly one line, or the build stops
-#                      (write fun f, not (fun f, which starts with a parenthesis)
-# The blocks of ex and repl in the pages of the tutorial get a button that runs the code in the browser (assets/planck-run.js), and src/LANG/playground.html is
-# the page of an editor to run code.
-# The code of planck is written as HTML with spans of the classes by highlight.html (planck/lib/highlight.pk).
-# docs/index.html is the entrance that chooses a language, and the pages at the old URLs such as docs/tutorial/
-# only move to docs/ja/.
 
 use("base")
 use("list")
@@ -44,9 +13,6 @@ OUT := "docs"
 REPO := "https://github.com/nineties/hex-to-compiler"
 SITE := "hex-to-compiler project"
 
-# === Text ===
-
-# the character classes of the bytes
 is_word(c) := string.is_alnum(c) or c == 95 or c >= 128
 is_path(c) := is_word(c) or c == 46 or c == 47 or c == 45
 is_blank(c) := c == 32 or c == 9 or c == 10 or c == 13 or c == 11 or c == 12
@@ -62,7 +28,6 @@ starts_at(s, i, pat) := {
     ok
 }
 
-# str_find(s, pat, from) is the first position >= from where pat starts, or -1
 str_find(s, pat, from) := {
     n := strlen(s)
     m := strlen(pat)
@@ -76,14 +41,12 @@ str_find(s, pat, from) := {
     r
 }
 
-# the position after the bytes of s from i that are accepted by ok
 run_end(s, i, ok) := {
     n := strlen(s)
     while (i < n and ok(ord(s, i))) i = i + 1
     i
 }
 
-# the first position of s that is not blank (strlen(s) for a blank string)
 lead(s) := run_end(s, 0, is_blank)
 
 strip(s) := {
@@ -93,14 +56,12 @@ strip(s) := {
     substr(s, i, j)
 }
 
-# rstrip_nl("a\n\n") is "a"
 rstrip_nl(s) := {
     j := strlen(s)
     while (j > 0 and ord(s, j - 1) == 10) j = j - 1
     substr(s, 0, j)
 }
 
-# the number of characters of the UTF-8 string s
 char_count(s) := {
     n := 0
     i := 0
@@ -150,7 +111,6 @@ html_escape(s) := {
     }
 }
 
-# the lines of s without the newlines, as a vector
 split_lines(s) := {
     v := vector.new()
     n := strlen(s)
@@ -167,7 +127,6 @@ split_lines(s) := {
     v
 }
 
-# the lines from a to b - 1 of the vector ls, joined by newlines
 join_lines(ls, a, b) := {
     bf := strbuf.new()
     i := a
@@ -179,7 +138,6 @@ join_lines(ls, a, b) := {
     strbuf.string(bf)
 }
 
-# scan(s, prefix, f) replaces the texts that start with prefix: f(s, i) is none, or (the end of the match, the new text)
 scan(s, prefix, f) := {
     b := strbuf.new()
     pos := 0
@@ -198,8 +156,6 @@ scan(s, prefix, f) := {
     strbuf.string(b)
 }
 
-# === Reading files ===
-
 read_text(path) := {
     t := try_read_file(path)
     if (t == none) panic(f"missing {path}")
@@ -215,7 +171,6 @@ ex_file(name, ext) := {
 
 source_lines := table.new()
 
-# the lines of a source file of the repository
 lines_of(f) := {
     ls := table.get(source_lines, f, none)
     if (ls == none) {
@@ -224,8 +179,6 @@ lines_of(f) := {
     }
     ls
 }
-
-# === Texts of the pages ===
 
 SECTIONS_JA := [
     ("tutorial", "チュートリアル", [
@@ -323,14 +276,10 @@ table.set(UI_EN, "toc", " contents")
 table.set(UI_EN, "switch", "日本語")
 table.set(UI_EN, "lang", "en")
 
-# the language of the page being written
 LANG := "ja"
 
 ui(key) := (if (LANG == "ja") UI_JA else UI_EN)[key]
 
-# === The diagram of the stages ===
-
-# a node: name, description in Japanese, description in English, the key of the language it is written in
 D_NODES := table.new()
 table.set(D_NODES, "xxd", ("pforth.xxd", "16進ダンプ", "Hex dump", "mc"))
 table.set(D_NODES, "pforth", ("pforth", "1文字の語だけの Forth", "Forth with one-letter words", "mc"))
@@ -351,18 +300,14 @@ table.set(D_LANG, "sasm", ("sasm", "sasm"))
 table.set(D_LANG, "native", ("native", "native"))
 table.set(D_LANG, "pk", ("M式・planck", "M-expr, planck"))
 
-# the edges: from, to
 D_EDGES := [("xxd", "pforth"), ("pforth", "plisp"), ("plisp", "asm"), ("asm", "plisp2"), ("plisp2", "planck0"), ("planck0", "vasmc"), ("vasmc", "vm0"), ("vm0", "vm"), ("vm", "planck")]
 
-# the stages: the nodes, the title in Japanese, the title in English
 D_STAGES := [
     (["xxd", "pforth", "plisp"], "ステージ1　機械語 → Forth → Lisp", "Stage 1: machine code to Lisp"),
     (["asm", "plisp2"], "ステージ2　機械語を出す道具", "Stage 2: machine code tools"),
     (["planck0"], "ステージ3　planck の最初のサブセット", "Stage 3: first Planck subset"),
     (["vasmc", "vm0", "vm", "planck"], "ステージ4　PlanckVM と planck", "Stage 4: PlanckVM and planck")]
 
-# the width of the text t in the font size 12, in hundredths: a character of the CJK range is as wide as the size (1200), the others are
-# 0.58 of it (696)
 text_width100(t) := {
     acc := 0
     n := strlen(t)
@@ -379,10 +324,8 @@ text_width100(t) := {
     acc
 }
 
-# v / 2 rounded to an integer, a half to the even one (v is not negative)
 half_even(v) := if (v % 2 == 0) v / 2 else if ((v / 2) % 2 == 0) v / 2 else v / 2 + 1
 
-# v / 100 rounded to an integer, a half to the even one (v is not negative)
 round100(v) := {
     r := v / 100
     d := v % 100
@@ -422,7 +365,6 @@ svg_edge(a, b, pos, kind) := {
         gy1 := y1
         gy2 := y2
         if ((a == "plisp" and b == "asm") or (a == "plisp2" and b == "planck0") or (a == "planck0" and b == "vasmc")) {
-            # in the narrow diagram an arrow between the stages runs from the bottom of the box above to the top of the box below
             gy1 = y1 + 12
             gy2 = y2 - 38
             y2 = gy2 + 3
@@ -516,16 +458,12 @@ svg(lang, kind) := {
 
 diagram(lang) := string.join("\n", ["<div class=\"dg-wrap\">", svg(lang, "wide"), svg(lang, "narrow"), "</div>"])
 
-# === Bit diagram ===
-
-# the last position of the byte c in s
 last_index(s, c) := {
     i := strlen(s) - 1
     while (i >= 0 and ord(s, i) != c) i = i - 1
     i
 }
 
-# bits(spec): a line of spec is a word. The label is above the word, and a field is a cell of a table with colspan of its width
 bits(spec) := {
     h := vector.new()
     vector.push(h, "<table class=\"bits\">")
@@ -562,11 +500,8 @@ bits(spec) := {
     string.join("\n", vector.to_list(h))
 }
 
-# === Code and output in the pages ===
-
 hl_cache := table.new()
 
-# the HTML of planck code. The same code is highlighted once
 highlighted(text) := {
     h := table.get(hl_cache, text, none)
     if (h == none) {
@@ -580,7 +515,6 @@ code_block(name) := f"<p class=\"file\">{name}.pk</p>\n<pre class=\"pk\">{highli
 
 out_block(name) := f"<p class=\"label\">{ui("out")}</p>\n<pre class=\"out\">{html_escape(rstrip_nl(ex_file(name, "out")))}</pre>"
 
-# a session at the prompt: the lines of the input are highlighted and the others are the output
 repl_block(name) := {
     ls := split_lines(rstrip_nl(ex_file(name, "out")))
     b := strbuf.new()
@@ -595,16 +529,11 @@ repl_block(name) := {
     f"<pre class=\"repl\">{rstrip_nl(strbuf.string(b))}</pre>"
 }
 
-# the pages of the tutorial run their examples (see planck-run.js). An example with the file examples/NAME.norun does not
 RUN_BUTTONS := false
 
-# the attributes of an example that planck-run.js gives a button to run: the mode and the code, which is examples/NAME.EXT
 run_attrs(mode, name, ext) := if (not RUN_BUTTONS or try_read_file(f"{EX}/{name}.norun") != none) ""
     else f" data-run=\"{mode}\" data-src=\"{html_escape(rstrip_nl(ex_file(name, ext)))}\""
 
-# the samples of the Playground: examples that run in the browser (the examples of the tutorial, whose output test_playground.js checks).
-# Each is (NAME, the name in the list, the first block, the last block), where a block is the lines between blank lines of the example. An example
-# that has more than one topic is split into samples of one topic each
 SAMPLES := [
     ("t1_hello", "hello", 0, 99),
     ("t1_vars", "variables", 0, 99),
@@ -644,7 +573,6 @@ SAMPLES := [
     ("t9_kind", "custom index", 0, 99),
     ("t9_rewrite", "rewrite rules", 0, 99)]
 
-# the blocks first to last of the text of an example
 blocks_of(text, first, last) := {
     ls := split_lines(text)
     b := strbuf.new()
@@ -670,8 +598,6 @@ blocks_of(text, first, last) := {
     strbuf.string(b)
 }
 
-# the options of the list of samples of the Playground. Each has its code in data-src, as the blocks of the tutorial do. The value is NAME, and
-# NAME.FIRST for a part of an example
 sample_option(s) := {
     name := arg(s, 0)
     value := if (arg(s, 2) == 0 and arg(s, 3) == 99) name else f"{name}.{arg(s, 2)}"
@@ -681,12 +607,8 @@ sample_option(s) := {
 
 samples_html() := string.join("\n", list.map(sample_option, SAMPLES))
 
-# === Excerpts of the source files ===
-
 blank_line(l) := lead(l) == strlen(l)
 
-# the number of the line of ls that starts with anchor (after the blanks, and after a ( unless anchor starts with it).
-# It stops unless exactly one line does
 find_line(ls, anchor, ref) := {
     al := strlen(anchor)
     paren := ord(anchor, 0) == 40
@@ -712,15 +634,11 @@ find_line(ls, anchor, ref) := {
     first
 }
 
-# end, moved up to after the last line that is not blank
 trim_end(ls, end) := {
     while (end > 0 and blank_line(ls[end - 1])) end = end - 1
     end
 }
 
-# the number of the last line of the item that starts at the line i. An item at the left edge goes up to the blank line
-# before the next line at the left edge. An indented item goes up to the line before the next line of the same indent
-# (a line of only a closing ) } ] is in it)
 item_end(ls, i) := {
     n := vector.len(ls)
     s := lead(ls[i])
@@ -744,8 +662,6 @@ item_end(ls, i) := {
     trim_end(ls, j)
 }
 
-# the range of an excerpt, (the first line, the last line) counted from 1. spec is A (the item at the line A),
-# A .. B (from the line A to the line before B), A .. (from A to the end) or empty (the whole file)
 span(path, spec, ref) := {
     ls := lines_of(path)
     n := vector.len(ls)
@@ -771,7 +687,6 @@ span(path, spec, ref) := {
     r
 }
 
-# the name of an excerpt that is shown: the anchor without the marks of the code around it
 label_of(path, spec) := {
     d := str_find(spec, " ..", 0)
     name := strip(if (d < 0) spec else substr(spec, 0, d))
@@ -809,9 +724,6 @@ line_link(path, spec, ref) := {
     f"<a href=\"{REPO}/blob/main/{path}{line_anchor(arg(ab, 0), arg(ab, 1))}\"><code>{label_of(path, spec)}</code></a>"
 }
 
-# === Expanding the marks of a piece ===
-
-# the replacement of <!--KIND NAME--> by render(NAME)
 by_name(body, kind, render) := {
     prefix := f"<!--{kind} "
     scan(body, prefix, (s, i) -> {
@@ -821,7 +733,6 @@ by_name(body, kind, render) := {
     })
 }
 
-# <!--file F A--> where F is of the letters, digits and _ . / - and A is a text of one line
 expand_file(body) := scan(body, "<!--file ", (s, i) -> {
     p0 := i + 9
     t := str_find(s, "-->", p0 + 1)
@@ -834,7 +745,6 @@ expand_file(body) := scan(body, "<!--file ", (s, i) -> {
     }
 })
 
-# [[F A]] where A is a text of one line without ]]
 expand_link(body) := scan(body, "[[", (s, i) -> {
     p0 := i + 2
     e := run_end(s, p0, is_path)
@@ -854,7 +764,6 @@ expand(body) := {
         e := str_find(s, "-->", j)
         if (e < 0) none else (e + 3, bits(substr(s, j, e)))
     })
-    # an example with a button shows its output only after a run
     body = by_name(body, "ex", name -> {
         attrs := run_attrs("run", name, "pk")
         shown := if (attrs == "") f"\n{out_block(name)}" else ""
@@ -868,8 +777,6 @@ expand(body) := {
     body = expand_link(body)
     replace_lit(body, "@REPO@", REPO)
 }
-
-# === Pages ===
 
 href(frm_sec, to_sec, to_page) := {
     up := if (frm_sec != none) "../" else ""
@@ -887,7 +794,6 @@ nav(cur_sec) := {
     string.join("\n", vector.to_list(items))
 }
 
-# the path to the same page in the other language
 other_lang_href(cur_sec, cur_page) := {
     path := if (cur_sec != none) f"{cur_sec}/{cur_page}.html" else if (cur_page != none) f"{cur_page}.html" else "index.html"
     other_code := if (LANG == "ja") "en" else "ja"
@@ -951,7 +857,6 @@ page(cur_sec, cur_page, title, body, toc_pages, sec_label) := {
         ""])
 }
 
-# a piece is <!--title TITLE--> on the first line and then the body. The result is (TITLE, the body)
 read_src(path) := {
     s := read_text(path)
     nl := str_find(s, "\n", 0)
@@ -959,7 +864,6 @@ read_src(path) := {
     (substr(s, 10, nl - 3), substr(s, nl + 1, strlen(s)))
 }
 
-# the pages of a language. The number of the pages is returned
 build_lang(lang) := {
     LANG = lang
     src := f"{SRC}/{lang}"
@@ -981,7 +885,6 @@ build_lang(lang) := {
     n + 1
 }
 
-# docs/index.html: the entrance that chooses a language
 entrance() := string.join("\n", [
     "<!DOCTYPE html>",
     "<html lang=\"en\">",
@@ -1003,7 +906,6 @@ entrance() := string.join("\n", [
     "</html>",
     ""])
 
-# the page that shows where the page moved
 moved(to) := string.join("\n", [
     "<!DOCTYPE html>",
     "<html lang=\"ja\">",

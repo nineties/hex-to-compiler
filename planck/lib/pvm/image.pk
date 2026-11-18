@@ -1,23 +1,4 @@
-# pvm/image: writes the image file that planckvm reads
 # Copyright (C) 2026 nineties
-#
-# The image is the initial heap of planckvm as 64-bit little-endian words; the word index in the file is the heap index.
-# Words 0 to 16 are the roots: 0 is the Lambda that is run first, 1 false, 2 true, 3 none, 4 Tuple, 5 Cons, 6 Nil, and 7 to 16 the symbols
-# the types of the values (Int String Symbol Expr Function Array Plain Float Complex Code). The objects follow.
-# The global variables of the cells Int, String, Symbol, Expr, Function, Array, Plain, Float, Complex, Code and Type have the types as the values.
-# A code is a data of the type Code: Code{nregs, arity, instrs, consts, params, locs, file} (see planckvm-repr). instrs and locs are u32 plain arrays and consts an array.
-#
-# pvm_image.build(codes, entry) is the buffer of bytes of the image (bytes.pk). codes is a list of
-# Code{name, arity, nregs, instrs, consts}. entry is the name of the code that is run first; its arity is 0.
-# instrs is a list of Name{operands} with the mnemonics of the table in planckvm-isa, and Label{'l} that gives a position a name; a jump takes the name.
-# consts is a list of
-#   I{n}  integer       S{"text"}  string       Y{"name"}  symbol       C{"name"}  cell of the global variable
-#   Cg{"name", g}  the cell of generation g of the global variable (C{"name"} is generation 0)
-#   (the cell of a builtin name has the builtin as the value; a cell holds its generation, which _cell_field gives)
-#   Fl{hi, lo}  float of the two halves of its binary64 (each 0 to 2^32-1, given as the integer that has the same low 32 bits as a signed value)
-#   K{"code"}  code     M{"head", [consts]}  m-expr whose arguments are constants       T{}  true, F{}  false, N{}  none
-#   Live{v}  the value v itself, for the code that is made while the program runs (not for the image)
-# An integer is a small integer here: |n| < 2^29.
 
 use("base")
 use("list")
@@ -26,7 +7,6 @@ use("vector")
 use("bytes")
 
 module pvm_image {
-    # mnemonic: [opcode, form, fields]; the fields are placed in the order of the operands
     isa := [
         ["MOVE", 0, 'abc, ['a, 'b]], ["LOADI", 1, 'ad, ['a, 'd]], ["LOADK", 2, 'ad, ['a, 'd]], ["LOADNONE", 3, 'abc, ['a, 'b]],
         ["GETGLOBAL", 4, 'ad, ['a, 'd]], ["SETGLOBAL", 5, 'ad, ['a, 'd]], ["NEWENV", 6, 'ad, ['d]],
@@ -51,7 +31,6 @@ module pvm_image {
         ["PLAINSET", 61, 'abc, ['a, 'b, 'c]]
     ]
 
-    # the builtins that planckvm calls without a frame: [name, id, number of arguments]
     export builtins := [
         ["put", 0, 1], ["print", 1, 1], ["println", 2, 1], ["mexpr", 3, 2], ["substr", 4, 3],
         ["_strcat", 5, 2], ["intern", 6, 1], ["symname", 7, 1], ["exit", 8, 1],
@@ -75,7 +54,6 @@ module pvm_image {
         r
     }
 
-    # the sizes of the instructions are one word; labels take no space
     is_label(Label{_}) := true
     is_label(_) := false
 
@@ -98,10 +76,8 @@ module pvm_image {
 
     byte(n) := bit_and(n, 255)
 
-    # the 4 bytes of a 32-bit value from the low end; a negative integer stands for the value with the same low 32 bits
     u32_bytes(n) := [byte(n), byte(bit_sar(n, 8)), byte(bit_sar(n, 16)), byte(bit_sar(n, 24))]
 
-    # one instruction as 4 bytes [op, a, b, c]; pc is the index of the next word
     export encode(labels, pc, i) := {
         e := find_op(symname(head(i)))
         form := e[2]
@@ -127,7 +103,6 @@ module pvm_image {
         else [e[1], byte(j), byte(bit_sar(j, 8)), byte(bit_sar(j, 16))]
     }
 
-    # lays the objects out after the 17 root words and writes them
     layout(objects, roots) := {
         n := vector.len(objects)
         addr := array(n)
@@ -158,7 +133,6 @@ module pvm_image {
         out
     }
 
-    # an object is Object{kind, items}; an item is W{n} (a word, a small integer in the low 30 bits), B{[b0, ..., b7]} (the 8 bytes of a word), R{id} (a reference), V{n} (a small integer value)
     export build(codes, entry) := {
         objects := vector.new()
         names := table.new()
@@ -183,16 +157,13 @@ module pvm_image {
             string := string_object(s)
             add(['symbol, s], Object{4, [R{string}, V{0}]})
         })
-        # the roots first: false, true, none; they are symbols
         f_ := symbol("false")
         t_ := symbol("true")
         n_ := symbol("none")
         tuple_ := symbol("Tuple")
         cons_ := symbol("Cons")
         nil_ := symbol("Nil")
-        # the types: the type Type is the type of every type, so it is made first and refers to itself
         empty_ := add(['mexpr, "Tuple", []], Object{5, [R{tuple_}]})
-        # the fields of the type Code
         code_fields := add(['mexpr, "Tuple", "Code"], Object{5, R{tuple_} :: map(s -> R{symbol(s)}, ["nregs", "arity", "instrs", "consts", "params", "locs", "file"])})
         type_object := table.new()
         make_type(n) := {
@@ -207,7 +178,6 @@ module pvm_image {
         builtin_object(e) := once(['builtin, e[0]], () -> {
             add(['builtin, e[0]], Object{10, [W{0}, V{e[1]}, V{e[2]}, R{symbol(e[0])}]})
         })
-        # the cell of generation g of a global variable: a Def makes the next one. Only generation 0 holds the builtin of the name.
         cell_g(s, g) := once(['cell, s, g], () -> {
             sym := symbol(s)
             b := if (g == 0) list.find(e -> e[0] == s, builtins) else none
@@ -215,10 +185,8 @@ module pvm_image {
             add(['cell, s, g], Object{13, [value, R{sym}, V{g}]})
         })
         cell(s) := cell_g(s, 0)
-        # reserve the code objects so that they can refer to each other
         each(c -> add(['code, c[0]], Object{15, []}), codes)
         code_type := table.get(type_object, "Code", none)
-        # a u32 plain array of the elements bs (each is the list of the 4 bytes of an element); two elements are in a word, and the last word of an odd number is filled with zeros
         u32_plain(bs) := {
             n := length(bs)
             nw := (n + 1) // 2
@@ -267,7 +235,6 @@ module pvm_image {
             locs := []
             file := none
             pc := 0
-            # an instruction At{Loc{file, line, column}, i} has an entry in the position table: the file is the string after the constants
             each(i -> if (not is_label(i)) {
                 if (head(i) == 'At) {
                     l := arg(i, 0)

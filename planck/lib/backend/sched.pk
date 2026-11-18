@@ -1,11 +1,4 @@
-# sched: list scheduling of the instructions of a basic block
 # Copyright (C) 2026 nineties
-#
-# An instruction waits for the instructions that define the registers it uses (for the latency of the definition),
-# that use the registers it defines, and that touch memory before it. The instructions are placed one in each cycle:
-# of those that can start, the one with the longest chain of latencies behind it comes first, and the earlier one in the code when they tie.
-# A model is SchedModel{latency, effect}: latency(i) is the cycles an instruction takes to give its result, and
-# effect(i) is 'none, 'load, 'store (it also reads memory) or 'barrier (it reads, writes and may do anything else) for memory.
 
 use("base")
 use("list")
@@ -18,7 +11,6 @@ module sched {
 
 unit_model := SchedModel{i -> 1, i -> 'none}
 
-# the instructions of a block that are not placed: a label at the start and a terminator at the end
 split(xs) := {
     head_part := if (xs != [] and ir.op(xs[0]) == 'label) [xs[0]] else []
     rest := list.drop(xs, length(head_part))
@@ -27,7 +19,6 @@ split(xs) := {
     Tuple{head_part, body, tail_part}
 }
 
-# sched_body(body, model) is the instructions of body (a list) in the new order
 sched_body(body, model) := {
     n := length(body)
     if (n < 2) body else {
@@ -42,7 +33,6 @@ sched_body(body, model) := {
             array_set(npred, k, 0)
             k = k + 1
         }
-        # an edge i -> j with the cycles j must wait after i is placed
         edge := (i, j, w) -> {
             array_set(succs, i, Tuple{j, w} :: array_get(succs, i))
             array_set(npred, j, array_get(npred, j) + 1)
@@ -78,7 +68,6 @@ sched_body(body, model) := {
             }
             j = j + 1
         }
-        # priority: the longest chain of waits from the instruction to the end of the block
         prio := array(n)
         k = n - 1
         while (k >= 0) {
@@ -107,7 +96,6 @@ sched_body(body, model) := {
         cycle := 0
         placed := 0
         while (placed < n) {
-            # the best of the instructions that can start now
             best := -1
             each(c -> if (array_get(ready_at, c) <= cycle) {
                 if (best < 0 or array_get(prio, c) > array_get(prio, best) or (array_get(prio, c) == array_get(prio, best) and c < best)) best = c
@@ -129,7 +117,6 @@ sched_body(body, model) := {
     }
 }
 
-# code(code, model) schedules every block of code
 export code(code, model) := {
     bs := cfg.blocks(code)
     r := []

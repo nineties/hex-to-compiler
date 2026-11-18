@@ -1,19 +1,10 @@
-# vasm/check: a language with types, ownership and named regions, written in .pk files
 # Copyright (C) 2026 nineties
-#
-# vasm{| struct ... fun ... |} reads structs and functions of the language and is Module{[Struct{...}, Fun{...}, ...]}.
-# vasm_check.check(m) is the list of VasmError{kind, Pos{d}, msg}, one for each struct or function with an error,
-# and vasm_check.errors(file, m) gives the positions as Loc{file, line, column} of the file.
-# The declarations of the syntax are written outside the module, at the top level, and the functions of the checker are in the module vasm_check.
 
 use("list")
 use("table")
 use("string")
 use("error")
 
-# === Syntax ===
-
-# the elements of Tuple{a, ...} as a list
 vasm_tlist(t) := {
     xs := []
     i := arity(t) - 1
@@ -24,11 +15,8 @@ vasm_tlist(t) := {
     xs
 }
 
-# the list in the value Tuple{} or Tuple{xs} of e?
 vasm_option_list(t) := if (arity(t) == 0) [] else arg(t, 0)
 
-# vasm_here reads nothing and is Pos{d}, where d is the number of characters from the next token to the end of the text.
-# The text parsed is the rest of the file, so d also counts to the end of the file.
 _define_rule('vasm_here, p -> {
     peg_pv = Pos{peg_srclen - peg_skip_ws(p)}
     p
@@ -39,8 +27,6 @@ _define_rule('vasm_newline, 'Not{Same{}})
 vasm_kw ::= ('fun | 'struct | 'var | 'region | 'own | 'mutable | 'i8 | 'i16 | 'i32 | 'i64 | 'u8 | 'u16 | 'u32 | 'u64 | 'f32 | 'f64 | 'bool | 'value | 'true | 'false | 'if | 'else | 'while | 'return | 'as | 'static)
 vasm_name ::= !vasm_kw x:ident { x }
 
-# the value of the text s of an integer literal, or Big{s} if it is out of -32768 to 32767.
-# The value is not computed past the range, so that it does not wrap around as an integer of planck.
 vasm_literal_value(s) := {
     n := strlen(s)
     i := 0
@@ -68,7 +54,6 @@ vasm_literal_value(s) := {
     if (big or v > 32767) Big{s} else v
 }
 
-# an integer literal as integer reads it, with the value of vasm_literal_value
 _define_rule('vasm_int_literal, p -> {
     s := peg_skip_ws(p)
     q := peg_token_int(p)
@@ -88,7 +73,6 @@ vasm_type ::= 'i8 { I8{} } | 'i16 { I16{} } | 'i32 { I32{} } | 'i64 { I64{} }
     | "[" t:vasm_type "]" { Array{t} }
     | s:vasm_name { Named{s} }
 
-# a floating point literal 1.5, -0.25 or 1.0e-3: FImm{at, its text}
 vasm_operand ::= at:vasm_here x:float { FImm{at, x} }
     | at:vasm_here n:vasm_int_literal { Imm{at, n} }
     | at:vasm_here s:string { String{at, s} }
@@ -101,7 +85,6 @@ vasm_binop ::= "+" { 'add } | "-" { 'sub } | "*" { 'mul } | "/" { 'div } | "%" {
     | "<<" { 'shl } | ">>" { 'shr } | "&" { 'bit_and } | "|" { 'bit_or } | "^" { 'bit_xor }
     | "==" { 'eq } | "!=" { 'ne } | "<=" { 'le } | ">=" { 'ge } | "<" { 'lt } | ">" { 'gt }
 
-# an argument is a value, or a place *p, p[i] or p.f, which only swap takes
 vasm_arg ::= at:vasm_here "*" p:vasm_name { Load{at, p} }
     | at:vasm_here a:vasm_name "[" i:vasm_operand "]" { Index{at, a, i} }
     | at:vasm_here a:vasm_name "." f:vasm_name { Get{at, a, f} }
@@ -109,7 +92,6 @@ vasm_arg ::= at:vasm_here "*" p:vasm_name { Load{at, p} }
 vasm_more_arg ::= "," a:vasm_arg { a }
 vasm_args ::= a:vasm_arg r:vasm_more_arg* { a :: vasm_tlist(r) }
 
-# fields of a struct or of a struct value are separated by "," or a new line
 vasm_fsep ::= "," | vasm_newline
 vasm_init ::= at:vasm_here f:vasm_name ":" a:vasm_operand { Init{at, f, a} }
 vasm_more_init ::= vasm_fsep i:vasm_init { i }
@@ -166,9 +148,6 @@ vasm ::= fs:vasm_item* { Module{vasm_tlist(fs)} }
 
 module vasm_check {
 
-# === Types ===
-
-# the integer types: Tuple{type, name, bits, signed}
 export ints := [
     Tuple{I8{}, "i8", 8, true}, Tuple{I16{}, "i16", 16, true},
     Tuple{I32{}, "i32", 32, true}, Tuple{I64{}, "i64", 64, true},
@@ -177,11 +156,8 @@ export ints := [
 export int_entry(t) := find(e -> arg(e, 0) == t, ints)
 export int(t) := int_entry(t) != none
 
-# the floating point types
 export flt(t) := t == F32{} or t == F64{}
 
-# A literal is from -32768 to 32767. A type of 16 bits or more holds all of them but the negative ones
-# for an unsigned type, so these are the bounds of a literal of the type e of ints.
 literal_lo(e) := if (not arg(e, 3)) 0 else if (arg(e, 2) == 8) -128 else -32768
 literal_hi(e) := if (arg(e, 2) != 8) 32767 else if (arg(e, 3)) 127 else 255
 
@@ -200,13 +176,6 @@ show_type(TVar{n}) := symname(n)
 show_type(Place{u}) := _strcat("a place of ", show_type(u))
 show_type(t) := arg(int_entry(t), 1)
 
-# === Checker state ===
-# vasm_info: name -> Info{type, regions open at the declaration}, for the variables in scope
-# a state: name -> Vs{status, loans}, and ".dead" -> true after return
-#   status: 'init, 'uninit, Moved{at}, Freed{at}, Taken{at} (an own value whose contents are moved out by x = *p)
-#   or Parts{fields} (a struct value whose fields that own are moved out by x = s.f); loans: [Loan{region, kind}, ...]
-# regions: the regions in scope, the innermost first, ending with the regions of the function
-
 sigs := table.new()
 structs := table.new()
 vasm_info := table.new()
@@ -214,8 +183,6 @@ regions := []
 fun_regions := []
 ret_type := Unit{}
 
-# t owns a value: t is own or value, or a struct with a field that owns, or an array of them.
-# A value in a register is copied (linear); a value in a struct, in a box or in an array of own is what own is there.
 fun owning_in
 owning(t) := owning_in(t, [])
 owning_in(Own{_}, seen) := true
@@ -228,29 +195,17 @@ owning_in(Named{s}, seen) := {
 }
 owning_in(_, seen) := false
 
-# the fields of the struct s that own, in the order of the struct
 own_fields(s) := map((Field{_, x, _}) -> x, filter((Field{_, _, u}) -> owning(u), arg(table.get(structs, s, none), 2)))
 
-# An integer literal is Literal{n} until it meets an integer type; Literal{none} is the result of an operation on literals.
-# Integers, bool and structs without own are copied. own and a struct with own are linear: they are moved
-# by a use and must be moved or freed once. &mutable is moved by a use, except for an argument of a call
-# (call). & is copied.
 linear(t) := head(t) == 'Own or (head(t) == 'Named and owning(t))
 moves(t) := linear(t) or (head(t) == 'Ref and arg(t, 0) == 'mutable)
 
-# the built-in functions, given as types with the type variable T.
-# free also marks its argument as freed (call). The contents of own are checked by type_ok.
-# swap(x, v) puts v in the place x (*p, p[i] or p.f) and gives the value that was there.
 export builtins := table.new()
 table.set(builtins, 'box, Sig{[], [TVar{'T}], Own{TVar{'T}}})
 table.set(builtins, 'free, Sig{[], [Own{TVar{'T}}], Unit{}})
 table.set(builtins, 'allocate, Sig{[], [I64{}, TVar{'T}], Own{Array{TVar{'T}}}})
 table.set(builtins, 'len, Sig{['r], [Ref{'shr, 'r, Array{TVar{'T}}}], I64{}})
-# mulhi(a, b) is the upper 64 bits of the product of the unsigned 64-bit integers a and b
 table.set(builtins, 'mulhi, Sig{[], [U64{}, U64{}], U64{}})
-# Reads and writes of a number at a byte position of a byte array. load_u16, ld_s16, ld_u32 and ld_s32 read 2 or 4 bytes at the position off
-# (little-endian) and extend them to i64 by zero or by sign; ld_64 reads 8 bytes. store_16, st_32 and st_64 write the lower 2, 4 or 8 bytes of v.
-# The position need not be a multiple of the width. A position with off < 0 or off + width > len(a) stops the program.
 table.set(builtins, 'load_u16, Sig{['r], [Ref{'shr, 'r, Array{U8{}}}, I64{}], I64{}})
 table.set(builtins, 'ld_s16, Sig{['r], [Ref{'shr, 'r, Array{U8{}}}, I64{}], I64{}})
 table.set(builtins, 'ld_u32, Sig{['r], [Ref{'shr, 'r, Array{U8{}}}, I64{}], I64{}})
@@ -261,8 +216,6 @@ table.set(builtins, 'st_32, Sig{['r], [Ref{'mutable, 'r, Array{U8{}}}, I64{}, I6
 table.set(builtins, 'st_64, Sig{['r], [Ref{'mutable, 'r, Array{U8{}}}, I64{}, I64{}], Unit{}})
 table.set(builtins, 'swap, Sig{[], [Place{TVar{'T}}, TVar{'T}], TVar{'T}})
 
-# Floating point. f64_sqrt(x) and f32_sqrt(x) are the square roots. The bits of a number are read and made again by f64_bits, f64_from_bits,
-# f32_bits and f32_from_bits, which give the number its bits as an unsigned integer of the same width and back.
 table.set(builtins, 'f64_sqrt, Sig{[], [F64{}], F64{}})
 table.set(builtins, 'f32_sqrt, Sig{[], [F32{}], F32{}})
 table.set(builtins, 'f64_bits, Sig{[], [F64{}], U64{}})
@@ -284,7 +237,6 @@ copy_state(st) := {
     s
 }
 
-# the variables of a state, without the removed ones
 vars(st) := filter(x -> type(x) == Symbol and table.get(st, x, none) != none, table.keys(st))
 
 lookup(at, x) := {
@@ -303,19 +255,16 @@ need_init(at, st, x) := match status(st, x) {
   | Parts{fs} -> fail(at, 'moved, f"{symname(x)}.{symname(fs[0])} is moved out")
 }
 
-# the fields moved out of the struct value x
 moved_fields(st, x) := match status(st, x) {
     Parts{fs} -> fs
   | _ -> []
 }
 
-# the field f of the struct value x is read or written: x is initialized and f is not moved out
 need_field(at, st, x, f) := match status(st, x) {
     Parts{fs} -> if (member(f, fs)) fail(at, 'moved, f"{symname(x)}.{symname(f)} is used after it is moved")
   | _ -> need_init(at, st, x)
 }
 
-# x of type t still owns a value with the status s: something in it is not moved out or freed
 owns(t, s) := if (not linear(t)) false else match s {
     'init -> true
   | Taken{_} -> true
@@ -323,7 +272,6 @@ owns(t, s) := if (not linear(t)) false else match s {
   | _ -> false
 }
 
-# the status s of x of type t as far as the checks of if and while see it: what x still owns, or initialized or not
 key(t, s) := if (not linear(t)) s == 'init else if (not owns(t, s)) 'none else match s {
     Taken{_} -> 'taken
   | Parts{fs} -> Parts{fs}
@@ -333,7 +281,6 @@ key(t, s) := if (not linear(t)) s == 'init else if (not owns(t, s)) 'none else m
 no_loans(at, st, x, what) := if (loans(st, x) != []) fail(at, 'borrowed, f"{symname(x)} is borrowed and cannot be {what}")
 no_mutable_loan(at, st, x, what) := if (list.any(l -> arg(l, 1) == 'mutable, loans(st, x))) fail(at, 'borrowed, f"{symname(x)} is borrowed as mutable and cannot be {what}")
 
-# the contents of own and of a borrow: an integer, bool, a struct or own, or an array of them
 fun type_ok
 contents_ok(at, t, u) := {
     e := if (head(u) == 'Array) arg(u, 0) else u
@@ -359,10 +306,6 @@ declare(at, st, x, t, init) := {
     table.set(st, x, Vs{if (init) 'init else 'uninit, []})
 }
 
-# === Regions, integers and the types of values ===
-
-# q outlives r: q is r, or q is static (the region of the string literals, which lasts to the end of the program),
-# or r is a region opened in the function and q was opened before it. The regions of the function are not ordered.
 outlives(q, r) := q == r or q == 'static or (r != 'static and not member(r, fun_regions) and list.index_of(q, regions) > list.index_of(r, regions))
 
 literal_range(at, n, t) := if (n != none) {
@@ -370,8 +313,6 @@ literal_range(at, n, t) := if (n != none) {
     if (n < literal_lo(e) or n > literal_hi(e)) fail(at, 'type, f"{n} is out of the range of {arg(e, 1)}")
 }
 
-# a value of type t can be put where e is expected: an integer literal in the range of e,
-# or a borrow of a region that outlives the region of e
 fits(at, e, t) := if (head(t) == 'Literal and int(e)) {
     literal_range(at, arg(t, 0), e)
     true
@@ -381,7 +322,6 @@ else if (head(e) == 'Array and head(t) == 'Array) fits(at, arg(e, 0), arg(t, 0))
 else if (head(e) == 'Ref and head(t) == 'Ref) arg(e, 0) == arg(t, 0) and outlives(arg(t, 1), arg(e, 1)) and fits(at, arg(e, 2), arg(t, 2))
 else e == t
 
-# a borrow that does not fit only because its region is opened inside the function and does not outlive the expected one
 escapes(e, t) := head(e) == 'Ref and head(t) == 'Ref and arg(e, 0) == arg(t, 0) and arg(e, 2) == arg(t, 2) and not member(arg(t, 1), fun_regions)
 
 export mentions(Ref{_, q, u}, r) := q == r or mentions(u, r)
@@ -397,13 +337,10 @@ export subst(t, rmap, tsub) := match t {
   | _ -> t
 }
 
-# === Operands and values ===
-
 export pos(Bin{_, a, _}) := arg(a, 0)
 pos(Mov{a}) := arg(a, 0)
 pos(o) := arg(o, 0)
 
-# the type of the operand o, which is read. own and &mutable are moved.
 vasm_use(st, Imm{at, n}) := if (type(n) == Int) Literal{n} else if (n == true or n == false) Bool{}
     else fail(at, 'type, f"{arg(n, 0)} is out of the range of a literal, -32768 to 32767; make it with << and |")
 vasm_use(st, FImm{_, _}) := FLiteral{}
@@ -419,7 +356,6 @@ vasm_use(st, Reg{at, x}) := {
     t
 }
 
-# the type of the contents of the pointer p, to read (write is false) or write
 ptr(at, st, p, write) := {
     t := type_of(at, p)
     need_init(at, st, p)
@@ -436,15 +372,12 @@ ptr(at, st, p, write) := {
     }
 }
 
-# the contents of p, which must not be an array (a whole array is not read or written at once)
 cell(at, st, p, write) := {
     u := ptr(at, st, p, write)
     if (head(u) == 'Array) fail(at, 'type, f"{symname(p)} points to an array; use an element {symname(p)}[i]")
     u
 }
 
-# the element type of the array p at the index operand i. The range of i is checked when the program runs.
-# For a value p the kind of the value is checked when the program runs too.
 elem(at, st, p, i, write) := {
     isval := type_of(at, p) == Value{}
     if (isval) need_init(at, st, p)
@@ -455,14 +388,12 @@ elem(at, st, p, i, write) := {
     arg(u, 0)
 }
 
-# the type of the field f of the struct s
 field_type(at, s, f) := {
     fd := find((Field{_, x, _}) -> x == f, arg(table.get(structs, s, none), 2))
     if (fd == none) fail(at, 'type, f"struct {symname(s)} has no field {symname(f)}")
     arg(fd, 2)
 }
 
-# the struct of a register p of a struct type, or of the contents of a pointer p
 struct_of(at, st, p, write) := {
     t := type_of(at, p)
     u := if (head(t) == 'Named) {
@@ -473,8 +404,6 @@ struct_of(at, st, p, write) := {
     arg(u, 0)
 }
 
-# x = *p. Contents that own are moved out of an own p, which is then Taken until *p is written or p is freed.
-# They are not moved out of a borrow.
 vasm_load(at, st, p) := {
     u := cell(at, st, p, false)
     if (owning(u)) {
@@ -485,7 +414,6 @@ vasm_load(at, st, p) := {
     u
 }
 
-# x = p.f. A field that owns is moved out of a struct value p, and not copied out of a pointer p.
 get(at, st, p, f) := {
     t := type_of(at, p)
     if (head(t) == 'Named) {
@@ -503,7 +431,6 @@ get(at, st, p, f) := {
     }
 }
 
-# the type of the place a (*p, p[i] or p.f) of swap, which is read and written
 place(st, Load{at, p}) := cell(at, st, p, true)
 place(st, Index{at, p, i}) := {
     if (type_of(at, p) == Value{}) fail(at, 'type, f"{symname(p)} is value; write {symname(p)}[i] = v")
@@ -519,9 +446,6 @@ place(st, Get{at, p, f}) := {
 place(st, a) := fail(arg(a, 0), 'type, "the first argument of swap is a place: *p, p[i] or p.f")
 is_place(a) := member(head(a), ['Load, 'Index, 'Get])
 
-# a parameter type pt of a function matches an argument type t.
-# rs are the regions of the function; rsub gets the regions given to each, tsub the type of T.
-# &mutable is given to &.
 vasm_match(at, pt, t, rs, rsub, tsub) := if (head(pt) == 'Place) vasm_match(at, arg(pt, 0), t, rs, rsub, tsub)
 else if (head(pt) == 'TVar) {
     b := table.get(tsub, arg(pt, 0), none)
@@ -541,7 +465,6 @@ else if (head(pt) == 'TVar) {
 else if (head(pt) == 'Array and head(t) == 'Array) vasm_match(at, arg(pt, 0), arg(t, 0), rs, rsub, tsub)
 else fits(at, pt, t)
 
-# the region given to r: the innermost of the regions qs of the arguments, which all outlive it
 pick_region(at, f, r, qs) := {
     inner := filter(q -> list.all(q2 -> outlives(q2, q), qs), qs)
     names := join(", ", map(q -> symname(q), reverse(qs)))
@@ -549,8 +472,6 @@ pick_region(at, f, r, qs) := {
     arg(inner, 0)
 }
 
-# An &mutable register given to a borrow parameter is borrowed again for the call and is not moved,
-# unless the result has the region of the parameter. It is given once in the call.
 mutable_reg(a) := if (head(a) == 'Reg) {
     t := type_of(arg(a, 0), arg(a, 1))
     head(t) == 'Ref and arg(t, 0) == 'mutable
@@ -563,13 +484,11 @@ value_operand(st, a) := {
     if (t != Value{}) fail(arg(a, 0), 'type, f"the value is {show_type(t)}, not value")
 }
 
-# v(a, ...) for a register v of value: the arguments and the result are value. That v is a function that takes as many arguments is checked when the program runs.
 is_value_reg(f) := {
     i := table.get(vasm_info, f, none)
     i != none and arg(i, 0) == Value{}
 }
 
-# x = fun f(a, ...): the arguments are the first arguments of f, and all that f takes and gives is value
 closure(at, st, f, args) := {
     sig := table.get(sigs, f, none)
     if (sig == none) fail(at, 'undefined, f"function {symname(f)} is not defined")
@@ -621,7 +540,6 @@ call_named(at, st, f, args) = {
         if (not vasm_match(arg(a, 0), p, t, rs, rsub, tsub)) fail(arg(a, 0), 'type, f"the argument is {show_type(t)} but {symname(f)} takes {show_type(p)}")
     }, list.zip(ps, args))
     if (freeing) {
-        # what is left in the value is freed with it
         set_status(st, arg(args[0], 1), Freed{at})
     }
     if (user == none and f == 'allocate and owning(table.get(tsub, 'T, I64{}))) fail(at, 'owner, "allocate copies its value to every element, so the value does not own")
@@ -637,7 +555,6 @@ call_named(at, st, f, args) = {
 
 int_operand(o, t) := if (not (int(t) or head(t) == 'Literal)) fail(arg(o, 0), 'type, f"the operand is {show_type(t)}, not an integer")
 
-# the type of the right-hand side r
 rhs(st, r) := match r {
     Mov{o} -> vasm_use(st, o)
   | Bin{op, a, b} -> {
@@ -738,16 +655,11 @@ assign(at, st, x, t) := {
         fail(at, 'type, f"{symname(x)} is {show_type(dt)} but the value is {show_type(t)}")
     }
     no_loans(at, st, x, "assigned")
-    # what x owned before is released here
     set_status(st, x, 'init)
 }
 
-# What an own value still owns at the end of its block or of the function is released there:
-# the contents of a box, the fields of a struct and the elements of an array that are not moved out.
-# So nothing is checked; the function is kept to mark the places where the release happens.
 leak_all(at, st) := none
 
-# the state after if: both branches must agree on own values
 merge(at, a, b) := if (dead(a)) b else if (dead(b)) a else {
     m := table.new()
     each(x -> {
@@ -768,7 +680,6 @@ replace(st, m) := {
     table.set(st, ".dead", dead(m))
 }
 
-# a loop must give back the own and &mutable values it moves
 loop_same(at, a, b) := each(x -> {
     t := arg(table.get(vasm_info, x, none), 0)
     if (moves(t) and key(t, status(a, x)) != key(t, status(b, x))) fail(at, 'loop, f"{symname(x)} is moved or freed in the loop and not given a value again")
@@ -781,7 +692,6 @@ add_loans(st, b) := each(x -> {
 
 end_region(st, r) := each(x -> set_loans(st, x, filter(l -> arg(l, 0) != r, loans(st, x))), vars(st))
 
-# check the statements of a block with the state st, which is updated
 block(ss, st) := {
     declared := []
     for (s in ss) if (not dead(st)) match s {
@@ -824,7 +734,6 @@ block(ss, st) := {
             if (not fits(at, u, t)) fail(at, 'type, f"field {symname(f)} of {symname(s)} is {show_type(u)} but the value is {show_type(t)}")
         }
       | CallS{at, f, args} -> {
-            # a result that owns a value and is not kept is released here
             call(at, st, f, args)
         }
       | IfS{at, c, a, b} -> {
@@ -872,32 +781,17 @@ block(ss, st) := {
     }, declared)
 }
 
-# The services of the system are built-in functions too: they take values of vasm and no address, and are checked like any other call.
-# write(fd, a) writes the bytes of the array a, which is only borrowed, to the file fd, and gives the number of bytes written, or
-# a negative number for an error. exit(status) ends the program with the status (the low 8 bits are seen by the system).
 table.set(builtins, 'write, Sig{['r], [I64{}, Ref{'shr, 'r, Array{U8{}}}], I64{}})
 table.set(builtins, 'exit, Sig{[], [I64{}], Unit{}})
 
-# The ports to the files and the arguments of the program take and give values of vasm too.
-# argc() is the number of the arguments of the program, and argv(i) is the i-th of them, an array of bytes without a terminator that
-# is not released while the program runs (hence static); an i out of range ends the program as failed. argv(0) is the name of the program.
-# open(path) opens the file whose name is the bytes of the array path for reading and gives the file, or a negative number for an error.
-# read(fd, a) reads the bytes of the file fd into the array a, as many as it holds at most, and gives the number read (0 at the end of the file),
-# or a negative number for an error. close(fd) closes the file.
 table.set(builtins, 'argc, Sig{[], [], I64{}})
 table.set(builtins, 'argv, Sig{[], [I64{}], Ref{'shr, 'static, Array{U8{}}}})
 table.set(builtins, 'open, Sig{['r], [Ref{'shr, 'r, Array{U8{}}}], I64{}})
 table.set(builtins, 'read, Sig{['r], [I64{}, Ref{'mutable, 'r, Array{U8{}}}], I64{}})
 table.set(builtins, 'close, Sig{[], [I64{}], Unit{}})
 
-# create(path) opens the file whose name is the bytes of the array path for writing, emptied or made new, and gives the file or a negative number.
 table.set(builtins, 'create, Sig{['r], [Ref{'shr, 'r, Array{U8{}}}], I64{}})
 
-# The functions on values of value. A value that is not of the kind a function takes ends the program as failed, as an index out of range does.
-# is(v, h, n): v is a constructed value with the head h and n arguments. typeof(v): the same symbol as typeof of planck.
-# head(v): the head of a constructed value. arity(v): the number of the arguments, the elements or the bytes (a constructed value, an array, a string or symbol).
-# array(n, v): a new array of n elements v. mexpr(h, a): a constructed value with the head h, and the elements of the array a as its arguments.
-# intern(s): the symbol named by the string s. symname(s): the name of the symbol s as a string.
 table.set(builtins, 'is, Sig{[], [Value{}, Value{}, I64{}], Bool{}})
 table.set(builtins, 'typeof, Sig{[], [Value{}], Value{}})
 table.set(builtins, 'head, Sig{[], [Value{}], Value{}})
@@ -927,14 +821,12 @@ check_fun(Fun{at, f, rs, ps, ret, body}) := {
     }
 }
 
-# the struct s has a field of the struct target, directly or in a field of a field
 reaches(target, s, seen) := list.any((Field{_, _, t}) -> if (head(t) == 'Named) {
     n := arg(t, 0)
     sd := table.get(structs, n, none)
     n == target or (sd != none and not member(n, seen) and reaches(target, n, n :: seen))
 } else false, arg(table.get(structs, s, none), 2))
 
-# a field is an integer, bool, a struct or own, and does not borrow
 check_struct(Struct{at, s, fs}) := {
     if (arg(table.get(structs, s, none), 0) != at) fail(at, 'type, f"struct {symname(s)} is already defined")
     regions = []
@@ -949,8 +841,6 @@ check_struct(Struct{at, s, fs}) := {
     if (reaches(s, s, [s])) fail(at, 'type, f"struct {symname(s)} contains itself")
 }
 
-# check_with(m, imports) checks m, whose functions may call the functions and use the structs of imports, a list of
-# structs and functions (the bodies of the functions are not read). Only the items of m are checked.
 export check_with(m, imports) := {
     items := arg(m, 0)
     sigs = table.new()
@@ -970,24 +860,20 @@ export check_with(m, imports) := {
     reverse(errors)
 }
 
-# the errors of the module m: [VasmError{kind, Pos{d}, msg}, ...], the first error of each struct and function
 export check(m) := check_with(m, [])
 
-# check with the positions in the file: [VasmError{kind, Loc{file, line, column}, msg}, ...]
 export errors(file, m) := {
     src := read_file(file)
     n := strlen(src)
     map((VasmError{kind, Pos{d}, msg}) -> VasmError{kind, error.loc_at(file, src, n - d), msg}, check(m))
 }
 
-# errors_with(file, m, imports) is errors for a module that may use the items of imports (see check_with)
 export errors_with(file, m, imports) := {
     src := read_file(file)
     n := strlen(src)
     map((VasmError{kind, Pos{d}, msg}) -> VasmError{kind, error.loc_at(file, src, n - d), msg}, check_with(m, imports))
 }
 
-# print the errors as file:line:column: message, or "ok"
 export report(file, m) := {
     es := errors(file, m)
     if (es == []) print("ok")

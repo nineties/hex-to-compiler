@@ -1,4 +1,3 @@
-# tests for planck/lib/highlight.pk
 # Copyright (C) 2026 nineties
 
 use("highlight")
@@ -16,7 +15,6 @@ check(actual, expected) := if (actual == expected) {
 
 at(h, i, t) := i + strlen(t) <= strlen(h) and substr(h, i, i + strlen(t)) == t
 
-# the text of an output: the tags removed and the escapes undone
 plain(h) := {
     b := strbuf.new()
     n := strlen(h)
@@ -44,7 +42,6 @@ plain(h) := {
 
 has(h, part) := string.index_of_string(h, part, 0) >= 0
 
-# === Classes ===
 check(highlight.html("x := 1"),
       "<span class=\"tok-name\">x</span> <span class=\"tok-op\">:=</span> <span class=\"tok-num\">1</span>")
 check(highlight.html("if (a) b else c"),
@@ -57,7 +54,6 @@ check(highlight.html("f\"n = {n}\""),
 check(highlight.html("x + 1.5e-3"),
       "<span class=\"tok-name\">x</span> <span class=\"tok-op\">+</span> <span class=\"tok-num\">1.5e-3</span>")
 
-# === Comments and escapes ===
 check(highlight.html("# a <b> & c\nx"), "<span class=\"tok-com\"># a &lt;b&gt; &amp; c</span>\n<span class=\"tok-name\">x</span>")
 check(highlight.html("x # t"), "<span class=\"tok-name\">x</span> <span class=\"tok-com\"># t</span>")
 check(highlight.html("a < b and c > d"),
@@ -65,7 +61,6 @@ check(highlight.html("a < b and c > d"),
 check(highlight.html("\"#\" # \"x\""), "<span class=\"tok-str\">\"#\"</span> <span class=\"tok-com\"># \"x\"</span>")
 check(highlight.html(""), "")
 
-# === Without the tags the output is the source ===
 srcs := [
     "a := [1, 2, 3]\nb := a[0] + 0x1f - 0b101\n",
     "fib(n) := if (n < 2) n else fib(n - 1) + fib(n - 2)\nprint(fib(10))\n",
@@ -76,37 +71,30 @@ srcs := [
 ]
 for (s in srcs) check(plain(highlight.html(s)), s)
 
-# partial text: the part which does not parse is left as it is
 check(plain(highlight.html("x := 1\n)) ?? (\ny := if (a) b else c\n")), "x := 1\n)) ?? (\ny := if (a) b else c\n")
 check(has(highlight.html("x := 1\n)) ?? (\ny := if (a) b else c\n"), "<span class=\"tok-kw\">else</span>"), true)
 
-# files of the repository
 for (f in ["planck/lib/list.pk", "planck/examples/extend.pk", "planck/examples/calc.pk"]) {
     s := read_file(f)
     check(plain(highlight.html(s)), s)
 }
 
-# === A rule declared in the text colors the rest of the text ===
 ext := "primary ::= 'for i:ident 'in a:add_expr \"..\" b:add_expr body:block { `Do{!i} } | ...\nfor i in 1..5 { print(i) }\n"
 version := peg_version
 h := highlight.html(ext)
 check(plain(h), ext)
 check(has(h, "<span class=\"tok-kw\">for</span> <span class=\"tok-name\">i</span> <span class=\"tok-kw\">in</span> <span class=\"tok-num\">1</span><span class=\"tok-op\">..</span><span class=\"tok-num\">5</span>"), true)
 check(peg_version, version)
-# the rule is gone after highlight, so the same text no longer reads as the extension
 h2 := highlight.html("for i in 1..5 { print(i) }\n")
 check(has(h2, "<span class=\"tok-op\">..</span>"), false)
 
-# a word added by a declaration is a keyword where it is used, and a name where the declaration is gone
 un := "primary ::= 'unless \"(\" c:expr \")\" a:expr { `If{!c, none, !a} } | ...\nunless (1 > 2) print(1)\n"
 check(has(highlight.html(un), "<span class=\"tok-kw\">unless</span> <span class=\"tok-op\">(</span>"), true)
 check(has(highlight.html("unless (1 > 2) print(1)\n"), "<span class=\"tok-kw\">unless</span>"), false)
 
-# a name in a call is a name, and its = is an operator
 hn := highlight.html("f(1, a = 5)\n")
 check(has(hn, "<span class=\"tok-name\">a</span> <span class=\"tok-op\">=</span>"), true)
 check(plain(hn), "f(1, a = 5)\n")
-# a definition with a default
 hd := highlight.html("f(x, a = 1) := x + a\n")
 check(has(hd, "<span class=\"tok-name\">a</span> <span class=\"tok-op\">=</span>"), true)
 check(plain(hd), "f(x, a = 1) := x + a\n")

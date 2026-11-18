@@ -1,4 +1,3 @@
-# tests for the syntax (planck/syntax.pk) and the packrat parser (planck/peg.pk)
 # Copyright (C) 2026 nineties
 
 passed := 0
@@ -11,16 +10,11 @@ check(actual, expected) := if (actual == expected) {
     print(f"Test failed: expected {expected} but got {actual}")
 }
 
-# the tree of the first expression in s
 tree(s) := arg(peg_parse('toplevel, s), 0)
-# the tree with the At of the calls, for the text that starts at loc
 tree_at(s, loc) := arg(parse_at(s, loc), 0)
 at(l, c, e) := mexpr('At, Tuple{Loc{"f.pk", l, c}, e})
-# the rest of s after the first expression
 rest(s) := arg(peg_parse('toplevel, s), 1)
 
-# === The position of a call ===
-# only f(...) in the text is wrapped in At, with the position of the start of f
 check(tree_at("f(x)", Loc{"f.pk", 1, 1}), at(1, 1, 'Apply{f, Tuple{x}}))
 check(tree_at("  f(x)", Loc{"f.pk", 3, 5}), at(3, 7, 'Apply{f, Tuple{x}}))
 check(tree_at("g(1,\n  f(2))", Loc{"f.pk", 7, 10}), at(7, 10, mexpr('Apply, Tuple{'g, mexpr('Tuple, Tuple{1, at(8, 3, 'Apply{f, Tuple{2}})})})))
@@ -28,18 +22,13 @@ check(tree_at("f(x)(y)", Loc{"f.pk", 1, 1}), at(1, 1, mexpr('Apply, Tuple{at(1, 
 check(tree_at("a + b", Loc{"f.pk", 1, 1}), 'Apply{_add, Tuple{a, b}})
 check(tree_at("a.b", Loc{"f.pk", 1, 1}), 'Apply{_record_get, Tuple{a, Quote{b}}})
 check(tree_at("a[1]", Loc{"f.pk", 1, 1}), 'Apply{_index_get, Tuple{a, 1}})
-# a call in a quote or a quasi-quote is not wrapped, but one in !e is
 check(tree_at("'f(x)", Loc{"f.pk", 1, 1}), 'Quote{Apply{f, Tuple{x}}})
 check(tree_at("`f(x, !g(y))", Loc{"f.pk", 1, 1}), mexpr('QuasiQuote, Tuple{mexpr('Apply, Tuple{'f, mexpr('Tuple, Tuple{'x, mexpr('UnQuote, Tuple{at(1, 8, 'Apply{g, Tuple{y}})})})})}))
-# a call in a pattern is not wrapped
 check(tree_at("(f(p)) -> p", Loc{"f.pk", 1, 1}), 'Lambda{Tuple{Apply{Quote{f}, Tuple{p}}}, p})
-# the next expression is counted from the rest of the text
 check(arg(parse_at("f(x)\ng(y)", Loc{"f.pk", 1, 1}), 1), "g(y)")
-# a text parsed with no position has no At
 check(tree("g(1, f(2))"), 'Apply{g, Tuple{1, Apply{f, Tuple{2}}}})
 check(arg(parse("f(x)"), 0), 'Apply{f, Tuple{x}})
 
-# === Atoms ===
 check(tree("x"), 'x)
 check(tree("42"), 42)
 check(tree("-3"), -3)
@@ -56,7 +45,6 @@ check(tree("2.0e10"), 'Apply{_float, Tuple{"2.0e10"}})
 check(tree("1.5 + 2"), 'Apply{_add, Tuple{Apply{_float, Tuple{"1.5"}}, 2}})
 check(tree("f(1.5, x)"), 'Apply{f, Tuple{Apply{_float, Tuple{"1.5"}}, x}})
 check(rest("1.5 x"), "x")
-# a float needs digits on both sides of the point and after e
 check(head(tree("1.5e x")), 'SyntaxError)
 check(head(tree("1. 5")), 'SyntaxError)
 check(tree("1073741823"), 1073741823)
@@ -83,7 +71,6 @@ check(tree("(1, x)"), 'Tuple{1, x})
 check(tree("[1, 2]"), 'Cons{1, Cons{2, Nil{}}})
 check(tree("[]"), 'Nil{})
 
-# === Operators ===
 check(tree("1 + 2 * 3"), 'Apply{_add, Tuple{1, Apply{_mul, Tuple{2, 3}}}})
 check(tree("(1 + 2) * 3"), 'Apply{_mul, Tuple{Apply{_add, Tuple{1, 2}}, 3}})
 check(tree("1 - 2 - 3"), 'Apply{_sub, Tuple{Apply{_sub, Tuple{1, 2}}, 3}})
@@ -110,7 +97,6 @@ check(tree("a - +b"), 'Apply{_sub, Tuple{a, b}})
 check(tree("+f(x)"), 'Apply{f, Tuple{x}})
 check(tree("a - -1"), 'Apply{_sub, Tuple{a, -1}})
 
-# === Calls, functions and definitions ===
 check(tree("f(x, 1)"), 'Apply{f, Tuple{x, 1}})
 check(tree("f()(x)"), 'Apply{Apply{f, Tuple{}}, Tuple{x}})
 check(tree("x -> x + 1"), 'Lambda{Tuple{x}, Apply{_add, Tuple{x, 1}}})
@@ -124,14 +110,12 @@ check(tree("x := 1"), 'Def{x, 1})
 check(tree("f(x) := x"), 'Do{Declare{f}, Set{f, Fusion{f, Lambda{Tuple{x}, x}}}})
 check(tree("x = y"), 'Set{x, y})
 
-# === Quotation ===
 check(tree("'a"), 'Quote{a})
 check(tree("'(a + 1)"), 'Quote{Apply{_add, Tuple{a, 1}}})
 check(tree("`F{!x}"), 'QuasiQuote{F{UnQuote{x}}})
 check(tree("`{ !i := 1; !i = !i + 1 }"), 'QuasiQuote{Do{Def{UnQuote{i}, 1}, Set{UnQuote{i}, Apply{_add, Tuple{UnQuote{i}, 1}}}}})
 check(tree("`(if (c) !i = 1 else !i := 2)"), 'QuasiQuote{If{c, Set{UnQuote{i}, 1}, Def{UnQuote{i}, 2}}})
 
-# === Blocks and control ===
 check(tree("{ a; b }"), 'Do{a, b})
 check(tree("{\n a\n b\n}"), 'Do{a, b})
 check(tree("{}"), 'Do{})
@@ -159,7 +143,6 @@ check(head(tree("if a { b }")), 'SyntaxError)
 check(head(tree("while a { b }")), 'SyntaxError)
 check(tree("perform E{x}"), 'Perform{E{x}})
 
-# === Cons ===
 check(tree("x :: xs"), 'Cons{x, xs})
 check(tree("1 :: 2 :: []"), 'Cons{1, Cons{2, Nil{}}})
 check(tree("a + 1 :: b * 2"), 'Cons{Apply{_add, Tuple{a, 1}}, Apply{_mul, Tuple{b, 2}}})
@@ -167,7 +150,6 @@ check(tree("a :: b == c :: d"), 'Apply{_eq, Tuple{Cons{a, b}, Cons{c, d}}})
 check(tree("a :: b - 1"), 'Cons{a, Apply{_sub, Tuple{b, 1}}})
 check(tree("(a :: b) :: c"), 'Cons{Cons{a, b}, c})
 
-# a..b is Range{a, b}. It binds looser than + - and tighter than the comparisons and ::
 check(tree("0..3"), 'Range{0, 3})
 check(tree("a .. b"), 'Range{a, b})
 check(tree("a + 1..b * 2"), 'Range{Apply{_add, Tuple{a, 1}}, Apply{_mul, Tuple{b, 2}}})
@@ -185,7 +167,6 @@ check(tree("(x :: Nil{}) -> x | (x :: xs) -> xs"), 'Fusion{Lambda{Tuple{Cons{x, 
 check(tree("f(x :: xs) := x"), 'Do{Declare{f}, Set{f, Fusion{f, Lambda{Tuple{Cons{x, xs}}, x}}}})
 check(tree("xs ::= ident"), 'Apply{_define_rule, Tuple{Quote{xs}, Quote{ident}}})
 
-# === Lines and comments ===
 check(tree("a\n-1"), 'a)
 check(rest("a\n-1"), "-1")
 check(tree("a -\n1"), 'Apply{_sub, Tuple{a, 1}})
@@ -200,7 +181,6 @@ check(head(tree("x := )")), 'SyntaxError)
 check(head(tree(")")), 'SyntaxError)
 check(head(tree("\"abc")), 'SyntaxError)
 
-# === Evaluation of the new syntax ===
 fun fib
 fib(0) = 0
 fib(1) = 1
@@ -225,7 +205,6 @@ if (count == 0) count = 10 else count = 20
 check(count, 10)
 if (count == 0) count = 1 else if (count == 10) count = 2 else count = 3
 check(count, 2)
-# dangling else binds to the nearest if
 dangle(a, b) := if (a) if (b) "ab" else "a-nb"
 check(dangle(true, true), "ab")
 check(dangle(true, false), "a-nb")
@@ -256,7 +235,6 @@ w := 'name
 check(`{ !w := 1; !w = 2 }, 'Do{Def{name, 1}, Set{name, 2}})
 check(Apply{_add, Tuple{1, 2}}, 3)
 
-# === match ===
 check(tree("match x { A{a} -> a\n| B{} -> 0 }"), 'Apply{Fusion{Lambda{Tuple{A{a}}, a}, Lambda{Tuple{B{}}, 0}}, Tuple{x}})
 check(tree("match x { 1 -> 2 }"), 'Apply{Lambda{Tuple{1}, 2}, Tuple{x}})
 check(tree("match f(x) + 1 { y -> y | _ -> 0 }"), 'Apply{Fusion{Lambda{Tuple{y}, y}, Lambda{Tuple{_}, 0}}, Tuple{Apply{_add, Tuple{Apply{f, Tuple{x}}, 1}}}})
@@ -278,7 +256,6 @@ check(shape(0), "zero")
 check(shape(7), "small odd")
 check(shape(8), "small even")
 check(shape(70), "big")
-# a guard that is false goes on to the arms after it, with the same value
 check(match 5 { n if n > 10 -> "a" | n if n > 3 -> "b" | _ -> "c" }, "b")
 check(match 5 { 5 if false -> "a" | 5 -> "b" }, "b")
 fun tree_eval
@@ -293,31 +270,25 @@ check(match [1, 2] { x :: xs -> x | Nil{} -> 0 }, 1)
 check(match 'a { 'a -> 1 | 'b -> 2 }, 1)
 k := 3
 check(match k { 3 -> match k + 1 { n if n > 3 -> "inner" | _ -> "no" } | _ -> "outer" }, "inner")
-# matching nested guards: each match has its own variables
 nest(a, b) := match a { x if x > 0 -> match b { y if y > 0 -> x + y | _ -> x } | _ -> 0 }
 check(nest(1, 2), 3)
 check(nest(1, -2), 1)
 check(nest(-1, 2), 0)
-# the scrutinee is evaluated once
 calls := 0
 once() := { calls = calls + 1; 5 }
 check(match once() { n if n > 9 -> 1 | n if n > 4 -> 2 | _ -> 3 }, 2)
 check(calls, 1)
-# an arm may change variables of the outside
 acc := 0
 match 4 { n if n > 3 -> { acc = acc + n } | _ -> { acc = 100 } }
 check(acc, 4)
-# the inside of match is a function joined by |, applied to the value
 check(tree("match x { 1 -> a | 2 -> b | _ -> c }"), 'Apply{Fusion{Lambda{Tuple{1}, a}, Fusion{Lambda{Tuple{2}, b}, Lambda{Tuple{_}, c}}}, Tuple{x}})
 check(tree("match x { f }"), 'Apply{f, Tuple{x}})
 inc := (x) -> x + 1
 check(match 4 { inc }, 5)
 check(match 4 { inc | _ -> 0 }, 5)
 check(head(tree("match x { 1 -> a; 2 -> b }")), 'SyntaxError)
-# a | at the start of a line goes on with the arms, and a comment may come between them
 check(tree("match x {\n    1 -> a   # one\n  | 2 -> b\n}"), tree("match x { 1 -> a | 2 -> b }"))
 check(tree("match x {\n    1 -> a\n    | 2 -> b\n}"), tree("match x { 1 -> a | 2 -> b }"))
-# a branch of if, and the value of return, end before |
 check(tree("match x { 0 -> if (c) 1 else 2 | n -> n }"), 'Apply{Fusion{Lambda{Tuple{0}, If{c, 1, 2}}, Lambda{Tuple{n}, n}}, Tuple{x}})
 check(tree("match x { 0 -> if (c) 1 | n -> n }"), 'Apply{Fusion{Lambda{Tuple{0}, If{c, 1, none}}, Lambda{Tuple{n}, n}}, Tuple{x}})
 check(tree("if (c) x = 1 else y := 2"), 'If{c, Set{x, 1}, Def{y, 2}})
@@ -337,7 +308,6 @@ first_pos(xs) := {
 }
 check(first_pos([-1, 0, 7, 8]), 7)
 check(first_pos([-1]), 0)
-# a match in an arm, which is not the last one
 kind(a, b) := match a {
     0 -> match b {
         0 -> "both"
@@ -351,14 +321,11 @@ check(kind(0, 1), "a")
 check(kind(1, 0), "b")
 check(kind(1, 1), "none")
 check(kind(-1, 0), "neg")
-# an arm takes one parameter, so a tuple pattern is in parentheses
 check(match (1, 2) { ((a, b)) -> a + b | _ -> 0 }, 3)
 check(match (1, 2) { (a, b) -> a + b | _ -> 0 }, 0)
-# patterns written as expressions with guards
 check(match '(x * x) { a * b if a == b -> a | _ -> 0 }, 'x)
 check(match '(x * y) { a * b if a == b -> a | a * b -> b | _ -> 0 }, 'y)
 check(match '(1 + 2) { a @ Int + b @ Int if a < b -> b - a | _ -> 0 }, 1)
-# a guard in a function outside of match: the functions after its | are tried when it is false
 sgn := n if n > 0 -> 1 | n if n < 0 -> -1 | _ -> 0
 check(sgn(5), 1)
 check(sgn(-3), -1)
@@ -366,13 +333,11 @@ check(sgn(0), 0)
 bigger := (a, b) if a > b -> a | (a, b) -> b
 check(bigger(3, 1), 3)
 check(bigger(1, 3), 3)
-# the arguments of another number go to the functions after the guard
 ar := (a, b) if a > 0 -> "two" | (a) -> "one"
 check(ar(1, 1), "two")
 check(ar(1), "one")
 pos := n if n > 0 -> n
 check(pos(2), 2)
-# also in parentheses, and when the functions after it are joined in parentheses
 pg := (n if n > 0 -> "pos") | (_ -> "other")
 check(pg(-1), "other")
 pg2 := (n if n > 0 -> "pos" | n if n < -5 -> "low") | _ -> "other"
@@ -382,13 +347,11 @@ check(tree("(n if c -> 1) | g"), tree("n if c -> 1 | g"))
 pg3 := (0 -> "zero" | n if n > 0 -> "pos") | _ -> "other"
 check(pg3(0), "zero")
 check(pg3(-1), "other")
-# a guard sees the variables of the parameters, and the body sees the variables outside
 lim := 10
 under := n if n < lim -> n + lim | n -> n
 check(under(3), 13)
 check(under(30), 30)
 
-# === String interpolation ===
 check(tree("f\"a{x}b\""), 'Apply{_strcat, Tuple{Apply{_strcat, Tuple{"a", Apply{_to_text, Tuple{x}}}}, "b"}})
 check(tree("f\"{x}\""), 'Apply{_to_text, Tuple{x}})
 check(tree("f\"{x}{y}\""), 'Apply{_strcat, Tuple{Apply{_to_text, Tuple{x}}, Apply{_to_text, Tuple{y}}}})
@@ -448,7 +411,6 @@ use("pretty")
 check(f"list {[1, 2]}", "list [1, 2]")
 check(f"sym {'a} tree {F{1, "s"}}", "sym a tree F{1, \"s\"}")
 
-# === Records ===
 check(head(tree("record Tok(kind, value, pos) = tok")), 'Do)
 check(arity(tree("record Tok(kind, value, pos) = tok")), 5)
 check(head(tree("record R() = r")), 'Do)
@@ -483,14 +445,12 @@ check(nd.left.right, 2)
 check(nd.right, 3)
 check(type(tk) == Token, true)
 check(type(nd) == Token, false)
-# the field is found by the type
 check(rev(1, 2, 3).a, 3)
 check(fwd(1, 2, 3).a, 1)
 getv(t) := t.value
 check(getv(tk), "abc")
 check(getv(token('num, 7, 0)), 7)
 check((match tk { t @ Token -> t.kind }), 'id)
-# a type declared again with the same name is another type
 record Token(value, kind) = tok2
 check(tok2(1, 2).kind, 2)
 check(type(tok2(1, 2)) == Token, true)
@@ -500,7 +460,6 @@ check(_record_index(tok2(1, 2), 'value), 0)
 check(_record_index(tk, 'pos), 2)
 check(_record_index(tk, 'x), none)
 check(_record_index(3, 'x), none)
-# the same name under another type is another field
 check(_record_index(nd, 'op), 0)
 check(_record_index(rev(1, 2, 3), 'a), 2)
 check(_record_index(fwd(1, 2, 3), 'a), 0)
@@ -509,10 +468,8 @@ check(_record_get(tk, 'pos), 3)
 record R0() = r0
 check(_record_index(r0(), 'x), none)
 check(arity(r0()), 0)
-# data are equal when they are the same value
 check(tk == tk, true)
 check(token('id, "abc", 3) == tk, false)
-# with copies the data with a field replaced
 tk2 := tk with { kind = 'num, pos = 9 }
 check(tk2.kind, 'num)
 check(tk2.pos, 9)
@@ -521,7 +478,6 @@ check(tk.pos, 3)
 check(type(tk2) == Token, false)
 check((tk with { pos = tk.pos + 1 }).pos, 4)
 
-# === for, return and break ===
 rh := 'Lambda{Tuple{Return{v}, k}, v}
 bh := 'Lambda{Tuple{Break{}, k}, none}
 check(tree("for (x in xs) f(x)"), 'Apply{peg_for, Tuple{xs, Lambda{Tuple{x}, Apply{f, Tuple{x}}}}})
@@ -540,7 +496,6 @@ check(tree("x -> return x"), `Lambda{Tuple{x}, Handle{Perform{Return{x}}, !rh}})
 check(tree("while (a) { break }"), `Handle{While{a, Do{Perform{Break{}}}}, !bh})
 check(tree("while (a) b"), 'While{a, b})
 check(tree("for (x in xs) break"), `Handle{Apply{peg_for, Tuple{xs, Lambda{Tuple{x}, Perform{Break{}}}}}, !bh})
-# a loop or a function handles only its own return and break
 check(tree("while (a) { while (b) break }"), `While{a, Do{Handle{While{b, Perform{Break{}}}, !bh}}})
 check(tree("f() := { g() := return 1; 2 }"), `Do{Declare{f}, Set{f, Fusion{f, Lambda{Tuple{}, Do{Do{Declare{g}, Set{g, Fusion{g, Lambda{Tuple{}, Handle{Perform{Return{1}}, !rh}}}}}, 2}}}}})
 check(tree("f() := for (x in xs) return x"), `Do{Declare{f}, Set{f, Fusion{f, Lambda{Tuple{}, Handle{Apply{peg_for, Tuple{xs, Lambda{Tuple{x}, Perform{Return{x}}}}}, !rh}}}}})
@@ -573,7 +528,6 @@ check(total, 36)
 for (Tuple{a, b} in [Tuple{1, 2}, Tuple{3, 4}]) total = total + a * b
 check(total, 50)
 check((for (x in [1]) x), none)
-# for knows no type: it walks the iterator that _iter(xs) makes. The types of the core are the arms of _iter.
 collect(xs) := {
     r := []
     for (x in xs) r = x :: r
@@ -607,12 +561,10 @@ vector.push(bv, 1)
 vector.push(bv, 2)
 check(collect(bv), [1, 2])
 check(collect(vector.new()), [])
-# an element pushed in the loop is visited
 grow := vector.new()
 vector.push(grow, 1)
 for (x in grow) if (x < 4) vector.push(grow, x + 1)
 check(vector.to_list(grow), [1, 2, 3, 4])
-# a type of the program is added by _iter in front, and it works with break, continue and return
 record Countdown(n) = countdown
 _iter = (c @ Countdown) -> {
     i := c.n
@@ -635,7 +587,6 @@ cd_first(xs, k) := {
     none
 }
 check(cd_first(countdown(9), 3), 2)
-# a source that never ends, which only break stops
 record Nat() = nat
 _iter = (_ @ Nat) -> {
     i := 0
@@ -650,7 +601,6 @@ for (x in nat()) {
     nat_sum += x
 }
 check(nat_sum, 55)
-# the loops over the same value do not share their places, and a loop in a loop is fine
 pairs := []
 for (x in countdown(2)) for (y in countdown(2)) pairs = Tuple{x, y} :: pairs
 check(length(pairs), 4)
@@ -674,7 +624,6 @@ for (x in range(1, 100)) {
     s = s + x
 }
 check(s, 10)
-# break leaves only the inner loop
 pairs := 0
 for (i in range(0, 3)) {
     for (j in range(0, 3)) {
@@ -683,7 +632,6 @@ for (i in range(0, 3)) {
     }
 }
 check(pairs, 3)
-# continue goes on to the next round of while and for
 odd := 0
 i := 0
 while (i < 10) {
@@ -704,7 +652,6 @@ for (Tuple{a, b} in [Tuple{1, 2}, Tuple{0, 5}, Tuple{3, 4}]) {
     tsum = tsum + a * b
 }
 check(tsum, 14)
-# continue goes on in the inner loop only
 cnt := 0
 for (i in range(0, 3)) {
     for (j in range(0, 4)) {
@@ -714,7 +661,6 @@ for (i in range(0, 3)) {
     cnt = cnt + 100
 }
 check(cnt, 3 * 100 + 3 * 3)
-# the code after the inner loop runs even when the inner loop continues in its last round
 cnt = 0
 i = 0
 while (i < 3) {
@@ -728,7 +674,6 @@ while (i < 3) {
     cnt = cnt + 1
 }
 check(cnt, 3)
-# continue and break in one loop
 k := 0
 log := 0
 while (true) {
@@ -738,7 +683,6 @@ while (true) {
     log = log + k
 }
 check(log, 9)
-# continue under match and in a function that has a return
 skip_neg(xs) := {
     r := Nil{}
     for (x in xs) {
@@ -750,12 +694,10 @@ skip_neg(xs) := {
 }
 check(skip_neg([1, -2, 3, 99, 4]), [3, 1])
 check(skip_neg([-1, 5]), [5])
-# a continue in a function called from the body belongs to that function's own loop
 f_in() := { t := 0; for (x in [1, 2, 3]) { if (x == 2) continue; t = t + x }; t }
 w := 0
 for (x in [1, 2]) { if (x == 1) continue; w = w + f_in() }
 check(w, 4)
-# return leaves the function, from inside loops
 first_pair(xs) := {
     for (a in xs) {
         for (b in xs) {
@@ -792,15 +734,12 @@ ask() := {
 }
 check(handle ask() with (Ask{}, k) -> k(21), 42)
 check(handle ask() with (Ask{}, k) -> k(-1), 0)
-# recursion keeps one Return handler for each call
 fact(m) := { if (m <= 1) return 1; m * fact(m - 1) }
 check(fact(10), 3628800)
-# a loop variable is a pattern variable of the body only
 x := 7
 for (x in [1, 2]) total = total + x
 check(x, 7)
 
-# === the right-hand side of := sees the previous variable ===
 check(tree("x := x + 1"), 'Def{x, Apply{_add, Tuple{x, 1}}})
 check(tree("x := (n) -> x(n)"), 'Def{x, Lambda{Tuple{n}, Apply{x, Tuple{n}}}})
 prev_a := 1
@@ -815,7 +754,6 @@ check({ pb := 1; pb := pb + 1; pb }, 2)
 check({ pf(n) := n + 1; pf := (n) -> pf(n) * 10; pf(1) }, 20)
 check({ pc(n) := if (n == 0) 0 else 1 + pc(n - 1); pc(3) }, 3)
 
-# === function definitions in a block ===
 check(tree("{ f(x) := x }"), 'Do{Do{Declare{f}, Set{f, Fusion{f, Lambda{Tuple{x}, x}}}}})
 check(tree("{ a := 1; f() := { a }; f() }"), 'Do{Def{a, 1}, Do{Declare{f}, Set{f, Fusion{f, Lambda{Tuple{}, Do{a}}}}}, Apply{f, Tuple{}}})
 check(tree("{ f(x :: xs) := x }"), 'Do{Do{Declare{f}, Set{f, Fusion{f, Lambda{Tuple{Cons{x, xs}}, x}}}}})
@@ -824,7 +762,6 @@ check(tree("{ f(x) := 1; f(x) := 2 }"), 'Do{Do{Declare{f}, Set{f, Fusion{f, Lamb
 check(tree("{ g := x -> x; y := 1 }"), 'Do{Def{g, Lambda{Tuple{x}, x}}, Def{y, 1}})
 check(tree("{ a; b }"), 'Do{a, b})
 
-# === fun and f(p, ...) = e ===
 check(tree("fun f"), 'Def{f, none})
 check(tree("{ fun f; f(x) = x }"), 'Do{Def{f, none}, Set{f, Fusion{f, Lambda{Tuple{x}, x}}}})
 check(tree("f(x, y) = x + y"), 'Set{f, Fusion{f, Lambda{Tuple{x, y}, Apply{_add, Tuple{x, y}}}}})
@@ -857,7 +794,6 @@ check({
     odd(n) = if (n == 0) false else even(n - 1)
     Tuple{even(10), odd(10), even(7)}
 }, Tuple{true, false, false})
-# f(p, ...) = e adds a function after the functions of f, which are tried in the order they are written
 fun fun_fact
 fun_fact(0) = 1
 fun_fact(n) = n * fun_fact(n - 1)
@@ -866,19 +802,16 @@ fun fun_order
 fun_order(n) = 1
 fun_order(0) = 2
 check(fun_order(0), 1)
-# the first one after fun f is the function itself, and the next one makes a Fusion
 fun fun_first
 fun_first(x) = x + 1
 fun_first_g := fun_first
 fun_first(0) = 5
 check(Tuple{fun_first(0), fun_first_g(0), fun_first_g == fun_first}, Tuple{1, 1, false})
-# functions of different numbers of parameters
 fun fun_ar
 fun_ar(x) = 1
 fun_ar(x, y) = 2
 fun_ar() = 0
 check(Tuple{fun_ar(), fun_ar(7), fun_ar(7, 8)}, Tuple{0, 1, 2})
-# f(p, ...) := e makes a new f, and f(p, ...) = e adds to it
 fib3(0) := 0
 fib3(1) = 1
 fib3(n) = fib3(n - 1) + fib3(n - 2)
@@ -887,14 +820,12 @@ fun_def(0) := 10
 fun_def(n) = n
 check(Tuple{fun_def(0), fun_def(3)}, Tuple{10, 3})
 
-# in a block
 check({
     fun fb
     fb(Nil{}) = 0
     fb(x :: xs) = x + fb(xs)
     fb([1, 2, 3])
 }, 6)
-# a function with a guard given by f: the next function is tried when the arguments do not match
 fun fun_gd
 fun_gd = (n) if n > 0 -> 1
 fun_gd(n) = 0
@@ -909,7 +840,6 @@ counter() := {
     inc()
 }
 check(counter(), 2)
-# a function of a block sees the variables defined before it, and the functions of the block call each other
 fact_sum(n) := {
     base := 1
     fact(m) := if (m <= 1) base else m * fact(m - 1)
@@ -928,7 +858,6 @@ find_in(xs, y) := {
 }
 check(find_in([1, 2, 3], 2), true)
 check(find_in([1, 2, 3], 5), false)
-# a recursive descent parser: sum := num ("+" num)* with parentheses
 parse_sum(toks) := {
     pos := 0
     fun sum
@@ -954,8 +883,6 @@ parse_sum(toks) := {
 }
 check(parse_sum([1, "+", "(", 2, "+", 3, ")", "+", 4]), 10)
 
-# === binding ===
-# a function sees the variables where it is defined, not those of its caller
 bind_x := "global"
 bind_g() := bind_x
 bind_h() := { bind_x := "local"; bind_g() }
@@ -967,12 +894,10 @@ check(bind_use(), 1)
 bind_add(n) := m -> n + m
 bind_call(f) := { n := 100; f(1) }
 check(bind_call(bind_add(10)), 11)
-# the top-level functions that call each other are declared with fun
 fun bind_od
 bind_ev(n) := if (n == 0) true else bind_od(n - 1)
 bind_od(n) = if (n == 0) false else bind_ev(n - 1)
 check(bind_ev(10), true)
-# a definition written later is not seen by the functions before it
 bind_b(n) := "global b"
 bind_ab() := {
     a(n) := bind_b(n)
@@ -981,12 +906,10 @@ bind_ab() := {
 }
 check(bind_ab(), Tuple{"global b", "local b"})
 check(bind_b(1), "global b")
-# the same name defined again with x := e is a new variable: the function made before keeps the old one
 bind_f(x) := 1
 bind_fg() := bind_f(0)
 bind_f := (x) -> 2
 check(Tuple{bind_fg(), bind_f(0)}, Tuple{1, 2})
-# an assignment is seen by the function made before
 bind_h2(x) := 1
 bind_h2g() := bind_h2(0)
 bind_h2 = (x) -> 2
@@ -997,11 +920,9 @@ bind_h3(x) = 2
 check(bind_h3g(), 2)
 bind_h3(x) = 3
 check(bind_h3g(), 2)
-# a variable that is not a function is defined where it is written
 bind_v := "outer"
 bind_seq() := { a := bind_v; bind_v := "inner"; Tuple{a, bind_v} }
 check(bind_seq(), Tuple{"outer", "inner"})
-# the variables are shared locations: a function sees later assignments
 bind_late(n) := {
     x := n
     g() := x
@@ -1010,7 +931,6 @@ bind_late(n) := {
 }
 check(bind_late(2), 3)
 
-# === Names that end in ? or ! ===
 empty?(xs) := arity(xs) == 0
 set!(x) := x + 1
 ok? := true
@@ -1029,22 +949,18 @@ check(a != b, true)
 check(a!=1, false)
 check(if (a!=b) 1 else 2, 1)
 check(f"{ok?}", "true")
-# in a grammar, a ? after a rule name is still an optional item
 qn_num ::= integer
 qn_opt ::= x:qn_num? "." { x }
 check(arg(peg_parse('qn_opt, "7 ."), 0), 'Tuple{7})
 check(arg(peg_parse('qn_opt, "."), 0), 'Tuple{})
 
-# === Packrat parser: grammar declarations ===
 num ::= integer
 check(arg(peg_parse('num, "12 rest"), 0), 12)
 check(arg(peg_parse('num, "12 rest"), 1), "rest")
 
-# direct left recursion is left associative
 diff ::= a:diff "-" b:num { a - b } | num
 check(arg(peg_parse('diff, "10 - 3 - 2"), 0), 5)
 
-# repetition, option, lookahead and keywords
 nums ::= "[" xs:num* "]" { xs }
 check(arg(peg_parse('nums, "[1 2 3]"), 0), 'Tuple{1, 2, 3})
 check(arg(peg_parse('nums, "[]"), 0), 'Tuple{})
@@ -1067,7 +983,6 @@ pair ::= a:num "," b:num { Tuple{a, b} }
 check(arg(peg_parse('pair, "1, 2"), 0), 'Tuple{1, 2})
 check(arg(peg_parse('pair, "1"), 0), 'Tuple{1})
 
-# nospace(s) is s with no blanks before it, delimited(e, sep) and delimited1(e, sep) are lists
 call ::= f:ident nospace("(") xs:delimited(num, ",") ")" { Tuple{f, xs} }
 check(arg(peg_parse('call, "f(1, 2)"), 0), 'Tuple{f, Tuple{1, 2}})
 check(arg(peg_parse('call, "f()"), 0), 'Tuple{f, Tuple{}})
@@ -1075,23 +990,18 @@ check(head(arg(peg_parse('call, "f (1)"), 0)), 'SyntaxError)
 list1 ::= xs:delimited1(num, ("," | ";")) { xs }
 check(arg(peg_parse('list1, "1, 2; 3"), 0), 'Tuple{1, 2, 3})
 check(head(arg(peg_parse('list1, "x"), 0)), 'SyntaxError)
-# same is satisfied by a token on the same line
 twin ::= a:num same b:num { Tuple{a, b} }
 check(arg(peg_parse('twin, "1 2"), 0), 'Tuple{1, 2})
 check(head(arg(peg_parse('twin, "1\n2"), 0)), 'SyntaxError)
-# a name that only starts with nospace or delimited is a rule name
 nospace_num ::= num
 delimited_num ::= x:nospace_num { x }
 check(arg(peg_parse('delimited_num, "5"), 0), 5)
 
-# ... is the previous definition
 color ::= 'red { 1 }
 color ::= 'blue { 2 } | ...
 check(arg(peg_parse('color, "red"), 0), 1)
 check(arg(peg_parse('color, "blue"), 0), 2)
 
-# === Any character and character classes ===
-# . is one character and [set] one character of the set. Blanks before them are skipped, and the value is the character
 cc_two ::= a:. b:. { Tuple{a, b} }
 check(arg(peg_parse('cc_two, "xy"), 0), 'Tuple{"x", "y"})
 check(arg(peg_parse('cc_two, "  x\n y rest"), 0), 'Tuple{"x", "y"})
@@ -1105,19 +1015,15 @@ check(arg(peg_parse('cc_digits, "123 rest"), 0), 'Tuple{"1", "2", "3"})
 check(arg(peg_parse('cc_digits, "123 rest"), 1), "rest")
 check(arg(peg_parse('cc_digits, "1 2"), 0), 'Tuple{"1", "2"})
 check(head(arg(peg_parse('cc_digits, "x1"), 0)), 'SyntaxError)
-# a class is a set of characters and ranges of letters or digits
 cc_hex ::= ds:[A-Fa-f0-9_]* { ds }
 check(arg(peg_parse('cc_hex, "Fa_9g"), 0), 'Tuple{"F", "a", "_", "9"})
-# [^set] is one character that is not in the set
 cc_str ::= "\"" cs:[^"]* "\"" { cs }
 check(arg(peg_parse('cc_str, "\"ab\""), 0), 'Tuple{"a", "b"})
 check(arg(peg_parse('cc_str, "\"\""), 0), 'Tuple{})
 cc_not ::= a:[^a-c\n] { a }
 check(arg(peg_parse('cc_not, "d"), 0), "d")
 check(head(arg(peg_parse('cc_not, "b"), 0)), 'SyntaxError)
-# blanks before a character are skipped, so a blank is never the character
 check(arg(peg_parse('cc_not, "\n"), 0), 'Eof{})
-# escapes: \a \0 \] \- \\ and a blank. Blanks at both ends of the set are not in it
 cc_esc ::= a:[\]\-\\]+ { a }
 check(arg(peg_parse('cc_esc, "]-\\x"), 0), 'Tuple{"]", "-", "\\"})
 cc_bell ::= a:[\a\0] { a }
@@ -1125,22 +1031,17 @@ check(arg(peg_parse('cc_bell, "\a"), 0), "\a")
 check(head(arg(peg_parse('cc_bell, "x"), 0)), 'SyntaxError)
 cc_sp ::= a:nospace("<") b:[\ x]+ { b }
 check(arg(peg_parse('cc_sp, "<x x"), 0), 'Tuple{"x", "x"})
-# a letter, a digit or _ before - makes a range. Other characters are themselves
 cc_sym ::= a:[+-*]+ { a }
 check(arg(peg_parse('cc_sym, "+-*/"), 0), 'Tuple{"+", "-", "*"})
-# a class in a sequence with other items and in a choice
 cc_id ::= a:[a-z] bs:[a-z0-9]* { Tuple{a, bs} } | "@" { 0 }
 check(arg(peg_parse('cc_id, "x12"), 0), 'Tuple{"x", Tuple{"1", "2"}})
 check(arg(peg_parse('cc_id, "@"), 0), 0)
-# invalid sets are syntax errors
 check(head(tree("cc_bad ::= [c-a]")), 'SyntaxError)
 check(head(tree("cc_bad ::= [a-]")), 'SyntaxError)
 check(head(tree("cc_bad ::= []")), 'SyntaxError)
 check(head(tree("cc_bad ::= [ ]")), 'SyntaxError)
 check(head(tree("cc_bad ::= [abc")), 'SyntaxError)
 
-# === Text of a rule: name{| text |} ===
-# the rule reads the text when the expression is parsed, and the value is a constant
 check(num{| 12 |}, 12)
 check(diff{| 10 - 3 - 2 |}, 5)
 check(diff{|10-3|}, 7)
@@ -1150,23 +1051,18 @@ check(tree("num{| 12 |}"), 'Quote{12})
 check(tree("diff{| 10 - 3 - 2 |}"), 'Quote{5})
 check(tree("nums{| [] |}"), 'Quote{Tuple{}})
 check(rest("num{| 1 |} x"), "x")
-# blanks, newlines and comments inside are skipped by the rule
 check(diff{|
     10   # ten
     - 3
 |}, 7)
-# the text is read only by the rule: | before the end is text of the rule
 bars ::= xs:("|" integer)* { xs }
 check(bars{| |1 |2 |}, 'Tuple{Tuple{"|", 1}, Tuple{"|", 2}})
-# the rule decides the end, so |} inside a string or braces of the rule is text
 strings ::= xs:string* { xs }
 check(strings{| "a |} b" "c" |}, 'Tuple{"a |} b", "c"})
 braces ::= "{" xs:num* "}" { xs }
 check(braces{| {1 2} |}, 'Tuple{1, 2})
-# an ident followed by { is still an m-expression, and { | is a block
 check(tree("F{x}"), 'F{x})
 check(tree("num {1}"), 'num)
-# errors: the position is in the text of the rule
 check(tree("num{| x |}"), 'SyntaxError{"unexpected input", "x |}"})
 check(tree("diff{| 10 - 3 2 |}"), 'SyntaxError{"unexpected input", "2 |}"})
 check(tree("diff{| 10 -\n 3 4 |}"), 'SyntaxError{"unexpected input", "4 |}"})
@@ -1174,11 +1070,9 @@ check(tree("num{| 1"), 'SyntaxError{"unexpected end of input"})
 check(tree("num{| 1 |"), 'SyntaxError{"unexpected input", "|"})
 check(head(tree("nosuch{| 1 |}")), 'SyntaxError)
 
-# a tree built by the rule may contain Quote and UnQuote of planck; it is the value as it is
 check(expr{| f(`!a) |}, 'Apply{f, Tuple{QuasiQuote{UnQuote{a}}}})
 check(expr{| 'a |}, 'Quote{a})
 
-# === Patterns written as expressions ===
 check(tree("a@Int + b@Int -> a + b"), 'Lambda{Tuple{Apply{Quote{_add}, Tuple{_TypeOf{a, Int}, _TypeOf{b, Int}}}}, Apply{_add, Tuple{a, b}}})
 check(tree("a * b + c -> a"), 'Lambda{Tuple{Apply{Quote{_add}, Tuple{Apply{Quote{_mul}, Tuple{a, b}}, c}}}, a})
 check(tree("(a + b) * c -> a"), 'Lambda{Tuple{Apply{Quote{_mul}, Tuple{Apply{Quote{_add}, Tuple{a, b}}, c}}}, a})
@@ -1200,14 +1094,11 @@ check(tree("(a + b, c) -> a"), 'Lambda{Tuple{Apply{Quote{_add}, Tuple{a, b}}, c}
 check(tree("((a, b)) -> a"), 'Lambda{Tuple{Tuple{a, b}}, a})
 check(tree("f(a + b) := a"), 'Do{Declare{f}, Set{f, Fusion{f, Lambda{Tuple{Apply{Quote{_add}, Tuple{a, b}}}, a}}}})
 check(tree("match e { a + 0 -> a | _ -> e }"), 'Apply{Fusion{Lambda{Tuple{Apply{Quote{_add}, Tuple{a, 0}}}, a}, Lambda{Tuple{_}, e}}, Tuple{e}})
-# M-expressions are patterns as before: a variable in the place of the function binds it
 check(tree("Apply{f, Tuple{x}} -> f"), 'Lambda{Tuple{Apply{f, Tuple{x}}}, f})
 check(tree("Apply{'_add, Tuple{a @ Int, b}} -> a"), 'Lambda{Tuple{Apply{Quote{_add}, Tuple{_TypeOf{a, Int}, b}}}, a})
-# a pattern ends before -> and the guard
 check(tree("x - 1 -> x"), 'Lambda{Tuple{Apply{Quote{_sub}, Tuple{x, 1}}}, x})
 check(tree("x->x - 1"), 'Lambda{Tuple{x}, Apply{_sub, Tuple{x, 1}}})
 
-# matching
 simp(e) := match e {
     a@Int + b@Int -> a + b
   | a + 0 -> a
@@ -1244,12 +1135,10 @@ pacc := 0
 for (a * b in ['(1 * 2), '(3 * 4)]) pacc = pacc + a * b
 check(pacc, 14)
 
-# extend the syntax of planck
 primary ::= 'unless c:expr a:block 'else b:block { `If{!c, !b, !a} } | ...
 check(unless 1 > 2 { "a" } else { "b" }, "a")
 check(tree("unless c { a } else { b }"), 'If{c, Do{b}, Do{a}})
 
-# === a[i], a[i] = v and t[p -> e | ...] ===
 check(tree("a[i]"), 'Apply{_index_get, Tuple{a, i}})
 check(tree("a[i][j]"), 'Apply{_index_get, Tuple{Apply{_index_get, Tuple{a, i}}, j}})
 check(tree("f(x)[i].g"), 'Apply{_record_get, Tuple{Apply{_index_get, Tuple{Apply{f, Tuple{x}}, i}}, Quote{g}}})
@@ -1260,7 +1149,6 @@ check(tree("a[i][j] = v"), 'Apply{_index_set, Tuple{Apply{_index_get, Tuple{a, i
 check(tree("a[i] = b[j] = v"), 'Apply{_index_set, Tuple{a, i, Apply{_index_set, Tuple{b, j, v}}}})
 check(tree("a[i] == v"), 'Apply{_eq, Tuple{Apply{_index_get, Tuple{a, i}}, v}})
 check(tree("t[x -> 1 | y -> 2]"), 'Apply{_index_get, Tuple{t, Fusion{Lambda{Tuple{x}, 1}, Lambda{Tuple{y}, 2}}}})
-# [ right after the expression, without a space, is an index. Otherwise it is a list.
 check(tree("a\n[1, 2]"), 'a)
 check(rest("a\n[1, 2]"), "[1, 2]")
 check(tree("a [1]"), 'a)
@@ -1268,7 +1156,6 @@ check(rest("a [1]"), "[1]")
 check(tree("{ a\n[1] }"), 'Do{a, Cons{1, Nil{}}})
 check(head(tree("f(a [1])")), 'SyntaxError)
 
-# arrays
 ia := array(3)
 ia[0] = 5
 check(ia[0], 5)
@@ -1280,7 +1167,6 @@ ib := array(2)
 ib[1] = array(2)
 ib[1][0] = "x"
 check(ib[1][0], "x")
-# tables: a missing key is none
 it := table.new()
 it["a"] = 1
 it['b] = 2
@@ -1292,16 +1178,12 @@ check(table.get(it, "a", 0), 11)
 fk := x -> x
 it[fk] = 3
 check(it[fk], 3)
-# strings: the byte
 check("abc"[0], "a")
 check("abc"[2], "c")
-# lists: the element
 check([10, 20, 30][0], 10)
 check([10, 20, 30][2], 30)
-# M-expressions: the argument
 check(F{1, 2}[1], 2)
 check(('(f(x, y)))[1][0], 'x)
-# a kind of value of the program: _index_get and _index_set are extended in front
 _index_get = (Matrix{w, _, d}, (i, j)) -> d[i * w + j] | _index_get
 _index_set = (Matrix{w, _, d}, (i, j), v) -> { d[i * w + j] = v } | _index_set
 im := Matrix{3, 2, array(6)}
@@ -1310,7 +1192,6 @@ check(im[(1, 2)], 8)
 check(array_get(arg(im, 2), 5), 8)
 check(im[0], 3)
 check([1, 2][1], 2)
-# a variable named index or index_set does not hide a[i] and a[i] = v
 index_var_test() := {
     index := 2
     index_set := 7
@@ -1324,7 +1205,6 @@ index_var_test() := {
 index_var_test()
 index := 1
 check([5, 6][index], 6)
-# variables with the names a library function has do not hide what the sugar calls
 record IP(x, y) = ip
 shadow_test() := {
     add := 1
@@ -1354,26 +1234,21 @@ shadow_test() := {
 }
 shadow_test()
 
-# rewriting: the arms are tried in order, from the root down
 rt1 := 'F{G{1}, H{2}}
 check(rt1[G{a} -> 'first | G{1} -> 'second], 'F{first, H{2}})
 check(rt1[G{1} -> 'second | G{a} -> 'first], 'F{second, H{2}})
-# a replaced part is not rewritten again
 check(('F{G{G{1}}})[G{a} -> K{a}], 'F{K{G{1}}})
-# a part that no arm matches: its arguments are rewritten, the head is kept
 check(('F{1, G{2}, K{G{3}, G}})[G{a} -> a], 'F{1, 2, K{3, G}})
 check(('G{1})[G{a} -> a], 1)
 check(('F{1})[G{a} -> a], 'F{1})
 check([1, 2, 3][x @ Int -> x * 10], [10, 20, 30])
 check(('(x * 1 + y))[Apply{_mul, Tuple{a, 1}} -> a], '(x + y))
-# patterns written as expressions in the arms
 check(('(x * 1 + y))[a * 1 -> a], '(x + y))
 check(('(1 + 2 * (3 + 4)))[a @ Int + b @ Int -> a + b], '(1 + 2 * 7))
 check(('(a + a + b))[a + b if a == b -> `(2 * !a)], '(2 * a + b))
 check(('(f(1) + g(2)))[f(x) -> x | g(x) -> x * 10], '(1 + 20))
 check(('(x + 0 * y))[a + 0 -> a | 0 * a -> 0], '(x + 0))
 check(tree("t[a @ Int + b @ Int -> a + b | -x -> x]"), 'Apply{_index_get, Tuple{t, Fusion{Lambda{Tuple{Apply{Quote{_add}, Tuple{_TypeOf{a, Int}, _TypeOf{b, Int}}}}, Apply{_add, Tuple{a, b}}}, Lambda{Tuple{Apply{Quote{_sub}, Tuple{0, x}}}, x}}}})
-# guards: when the guard is false the next arm is tried, and then the arguments
 rt2 := 'F{P{1, 1}, P{1, 2}}
 check(rt2[P{a, b} if a == b -> a], 'F{1, P{1, 2}})
 check(rt2[P{a, b} if a == b -> 'same | P{a, b} -> 'diff], 'F{same, diff})
@@ -1381,16 +1256,13 @@ check(('P{P{3, 3}, 2})[P{a, b} if a == b -> a], 'P{3, 2})
 check(rt2[P{1, 2} -> 'x | P{a, b} if a == b -> a], 'F{1, x})
 check(('F{G{1}, P{2, 2}})[P{a, b} if a == b -> a | G{a} if a > 5 -> a], 'F{G{1}, 2})
 check(('(a + a + b))[Apply{_add, Tuple{a, b}} if a == b -> `(2 * !a)], '(2 * a + b))
-# any function
 rf := G{a} -> a
 check(('F{G{1}})[rf], 'F{1})
-# the function of a call as a variable
 check(('(g(1, 2)))[(f)(a, b) -> a + b], 3)
 check(('(g(1, 2)))[(f)(a, b) -> f], 'g)
 check(('(k(7)))[(f)(a) -> a], 7)
 check(('(k(7, 8)))[(f)(a) -> a | (f)(a, b) -> b], 8)
 
-# === Rest parameters ===
 check(tree("f(a, rest...)"), 'Apply{f, Tuple{a, _Rest{rest}}})
 check(tree("(a, rest...) -> a"), 'Lambda{Tuple{a, _Rest{rest}}, a})
 check(tree("(rest...) -> rest"), 'Lambda{Tuple{_Rest{rest}}, rest})
@@ -1434,7 +1306,6 @@ check(match ('f(1, 2, 3)) { f(a, r...) -> r }, 'Tuple{2, 3})
 check(match 'F{1, G{2, 3, 4}} { F{a, G{b, r...}} -> r }, 'Tuple{3, 4})
 check(match 'F{1, 2, 3} { F{a, _...} -> a }, 1)
 
-# === with ===
 check(tree("p with { x = 1 }"), 'Apply{_with, Tuple{p, Quote{x}, 1}})
 check(tree("p with { x = 1, y = a + 2 }"), 'Apply{_with, Tuple{Apply{_with, Tuple{p, Quote{x}, 1}}, Quote{y}, Apply{_add, Tuple{a, 2}}}})
 check(tree("p with { x = 1 } with { y = 2 }"), 'Apply{_with, Tuple{Apply{_with, Tuple{p, Quote{x}, 1}}, Quote{y}, 2}})
@@ -1442,8 +1313,6 @@ check(tree("f(a).b with { x = 1 }"), 'Apply{_with, Tuple{Apply{_record_get, Tupl
 check(tree("r := p with { x = 1 }"), 'Def{r, Apply{_with, Tuple{p, Quote{x}, 1}}})
 check(tree("handle p with (E{}, k) -> 1"), 'Handle{p, Lambda{Tuple{E{}, k}, 1}})
 
-# === Destructuring ===
-# a block of the definitions of a temporary variable and of each name
 check(head(tree("(a, b) := e")), 'Do)
 check(arity(tree("(a, b) := e")), 3)
 check(arity(tree("(a, b, c) = e")), 4)
@@ -1454,7 +1323,6 @@ check(tree("(a, b)"), 'Tuple{a, b})
 check(tree("(a, b) == c"), 'Apply{_eq, Tuple{Tuple{a, b}, c}})
 check(tree("(a, b) -> a"), 'Lambda{Tuple{a, b}, a})
 
-# === Compound assignment ===
 check(tree("x += 1"), 'Set{x, Apply{_add, Tuple{x, 1}}})
 check(tree("x -= 1"), 'Set{x, Apply{_sub, Tuple{x, 1}}})
 check(tree("x *= y + 1"), 'Set{x, Apply{_mul, Tuple{x, Apply{_add, Tuple{y, 1}}}}})
@@ -1468,7 +1336,6 @@ check(tree("x == 1"), 'Apply{_eq, Tuple{x, 1}})
 check(tree("a[i] = 1"), 'Apply{_index_set, Tuple{a, i, 1}})
 check(tree("if (c) x += 1"), 'If{c, Set{x, Apply{_add, Tuple{x, 1}}}, none})
 
-# or in a pattern: the alternatives match the same value, and the arms after it are tried when none does
 size(0 or 1) := "small"
 size(_) := "big"
 check(size(0), "small")
@@ -1486,18 +1353,15 @@ check(match G{H{4}} { G{H{3 or 4} or J{}} -> 1 | _ -> 0 }, 1)
 check(match G{J{}} { G{H{3 or 4} or J{}} -> 1 | _ -> 0 }, 1)
 orlam := (1 or 2, x) -> x
 check(orlam(2, 8), 8)
-# an or and a guard together
 og(0 or 1, y) if y > 0 := "yes"
 og(_, _) := "no"
 check(og(1, 5), "yes")
 check(og(1, -5), "no")
 check(og(2, 5), "no")
-# an or expression is If{a, 'true, b}
 check(match '(p or q) { If{a, 'true, b} -> b | _ -> 0 }, 'q)
 check(match 5 { 'true or 'false -> 1 | 1 or 2 -> 2 | none or 5 -> 3 | _ -> 4 }, 3)
 check(match 6 { none or true -> 1 | _ -> 2 }, 2)
 
-# a name written twice matches two values that are ==
 same(a, a) := "same"
 same(_, _) := "differ"
 check(same(1, 1), "same")
@@ -1519,14 +1383,12 @@ check(sg(-2, -2), "no")
 check(sg(2, 3), "no")
 sl := (a, a) -> a
 check(sl(7, 7), 7)
-# a name written twice and an or together
 sor(a, 1 or 2, a) := a
 sor(_, _, _) := "no"
 check(sor(5, 2, 5), 5)
 check(sor(5, 3, 5), "no")
 check(sor(5, 2, 6), "no")
 
-# an or whose alternatives all bind the same variables binds them
 ov((x, 0) or (0, x)) := x
 ov(_) := "no"
 check(ov((3, 0)), 3)
@@ -1550,7 +1412,6 @@ check(ovg((0, 5)), "big")
 ovl := ((x, 0) or (0, x)) -> x + 1
 check(ovl((0, 5)), 6)
 
-# a guard on a definition: when it is false the definitions of the same name that follow are tried
 sign(x) if x > 0 := "pos"
 sign(0) := "zero"
 sign(_) := "neg"
@@ -1565,7 +1426,6 @@ check(dg1(5), "a")
 check(dg1(1), "b")
 check(dg1(0), "c")
 check(dg2(1), 2)
-# a definition of a function in a block
 blk := {
     h(x) if x > 0 := "p"
     h(_) := "n"
@@ -1573,8 +1433,6 @@ blk := {
 }
 check(blk, Tuple{"n", "p"})
 
-# === The position of a syntax error ===
-# without a position the error has no Loc; with parse_at the last argument is the Loc{file, line, column} of the error, counted from the start of the text
 check(peg_parse('toplevel, "x := )"), Tuple{'SyntaxError{"unexpected input", ")"}, ""})
 check(tree("1 +"), 'SyntaxError{"unexpected end of input"})
 check(tree_at("x := )", Loc{"f.pk", 1, 1}), 'SyntaxError{"unexpected input", ")", Loc{"f.pk", 1, 6}})
@@ -1584,19 +1442,14 @@ check(tree_at("a := (1 +\n", Loc{"f.pk", 2, 1}), 'SyntaxError{"unexpected end of
 check(peg_error_text(tree_at("x := )", Loc{"f.pk", 1, 1})), "f.pk:1:6: syntax error: unexpected input: \")\"")
 check(peg_error_text(tree_at("1 +", Loc{"<repl>", 1, 1})), "<repl>:1:4: syntax error: unexpected end of input")
 check(peg_error_text(tree("1 +")), "syntax error: unexpected end of input")
-# load prints the position of the error of the file, counted from the start of the file, and stops
 check(peg_file_error_text("g.pk", "a := 1\nb := 2 )\nc := 3\n", "b := 2 )\nc := 3\n"), "g.pk:2:8: syntax error: unexpected input: \")\"")
 
-# === Named arguments ===
-# f(x, name = v) in a call is _Kw{'name, v}; == is a comparison
 check(tree("f(1, a = 5)"), 'Apply{f, Tuple{1, _Kw{Quote{a}, 5}}})
 check(tree("f(a = 1, b = 2)"), 'Apply{f, Tuple{_Kw{Quote{a}, 1}, _Kw{Quote{b}, 2}}})
 check(tree("f(a == 1)"), 'Apply{f, Tuple{Apply{_eq, Tuple{a, 1}}}})
-# an argument without a name after one with a name is not a call
 check(rest("f(a = 1, 2)"), "(a = 1, 2)")
 
 kw1(x, a = 1, b = x + 10) := [x, a, b]
-# the arguments without names fill the parameters from the front, and the names fill the others, in any order
 check(kw1(1), [1, 1, 11])
 check(kw1(1, 7), [1, 7, 11])
 check(kw1(1, 7, 8), [1, 7, 8])
@@ -1604,17 +1457,14 @@ check(kw1(1, b = 5), [1, 1, 5])
 check(kw1(1, 7, b = 5), [1, 7, 5])
 check(kw1(1, b = 5, a = 6), [1, 6, 5])
 check(kw1(1, a = 6, b = 5), [1, 6, 5])
-# a default is evaluated at every call, from the parameters before it
 check(kw1(2, a = 6), [2, 6, 12])
 kw_count := 0
 kw2(a = { kw_count = kw_count + 1; kw_count }) := a
 check([kw2(), kw2(), kw2(a = 9), kw2()], [1, 2, 9, 3])
-# a function with the same name and the other number of arguments is another arm
 kw3(x) := "one"
 kw3(x, y = 0) := "two"
 check(kw3(1), "one")
 
-# === repr ===
 check(repr([1, "x", 'b]), "[1, \"x\", 'b]")
 check(repr("q"), "\"q\"")
 check(repr(Foo{1, [2]}), "Foo{1, [2]}")

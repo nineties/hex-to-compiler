@@ -1,16 +1,4 @@
-# unparse: print a syntax tree as text by reading the grammar that parses it
 # Copyright (C) 2026 nineties
-#
-# unparse.text(t) is a text that parses back to t with the rule expr.
-# The grammar is read from peg_sources (planck/peg.pk). An alternative of a rule
-#   Act{Seq{e1, e2, ...}, Lambda{Tuple{Tuple{l1, l2, ...}}, body}}
-# can be run backwards when body is a quasi-quotation (`Apply{_add, Tuple{!a, !b}}`),
-# Quote{c}, a label, or Tuple{labels}. Such an alternative is a template that
-# a tree is matched against. The labels bind the subtrees, and the elements of the sequence
-# are printed in order: texts as they are, rules by text_as(rule, subtree).
-# An alternative of a stronger rule where a weaker rule is wanted is put in the parentheses
-# of the grammar: "(" e ")". Each rule that has such an alternative gives the parentheses for
-# the rules that reach it (primary for expressions, pat_primary for patterns).
 
 use("base")
 use("list")
@@ -23,7 +11,6 @@ module unparse {
 bad := Bad{}
 is_mx(x) := type(x) == Expr
 
-# t without the At{loc, e} of the calls: the text has no position. The tree of a quote is data, so an At in it stays.
 no_at(t, nest) := {
     if (not is_mx(t)) t
     else if (head(t) == 'At and arity(t) == 2 and nest == 0) no_at(arg(t, 1), 0)
@@ -45,9 +32,6 @@ is_hole(p) := is_mx(p) and head(p) == 'Hole
 is_unwrap(p) := is_mx(p) and (head(p) == 'UnwrapReturn or head(p) == 'UnwrapBreak or head(p) == 'UnwrapContinue)
 hole(x) := mexpr('Hole, Tuple{x})
 
-# === Templates ===
-
-# the number of nodes of a template that are not holes. Generic{h, args} matches any M-expression.
 un_spec(p) :=
     if (not is_mx(p)) 2
     else if (is_hole(p)) 0
@@ -70,9 +54,6 @@ args_tuple(t) := {
     r
 }
 
-# UnwrapReturn{q}, UnwrapBreak{q} and UnwrapContinue{q} in a template match q against the tree
-# without the handler that the parser puts around a body that has return, break or continue in it
-# (peg_wrap in syntax.pk). The text of such a body has the word, and parsing it puts the handler back.
 strip(h, t) := {
     tag := if (h == 'UnwrapReturn) 'Return else if (h == 'UnwrapBreak) 'Break else 'Continue
     hd := if (h == 'UnwrapReturn) peg_ret_handler else if (h == 'UnwrapBreak) peg_break_handler else peg_continue_handler
@@ -81,8 +62,6 @@ strip(h, t) := {
 
 fun un_match
 
-# A body with a return that is not inside the handler of the parser is not what the parser makes
-# from a text with return in it (it would put the handler around the body again). No match.
 match_unwrap(p, t, env) := {
     t2 := strip(head(p), t)
     tag := if (head(p) == 'UnwrapReturn) 'Return else if (head(p) == 'UnwrapBreak) 'Break else 'Continue
@@ -98,7 +77,6 @@ match_args(p, t, i, env) := {
     ok
 }
 
-# un_match(template, tree, env) binds the holes in the table env. A label that appears twice must match equal subtrees.
 un_match(p, t, env) =
     if (is_hole(p)) {
         old := table.get(env, arg(p, 0), bad)
@@ -117,17 +95,13 @@ un_match(p, t, env) =
         is_mx(t) and head(t) == head(p) and arity(t) == arity(p) and match_args(p, t, 0, env)
     } else p == t
 
-# === Reading the actions of the grammar ===
-
 label_ok(x, labels) := type(x) == Symbol and x != '_ and member(x, labels)
 
-# Head{labels...} as a template
 vars_tmpl(h, tup, labels) := {
     r := mexpr(h, Tuple{})
     i := 0
     while (not is_bad(r) and i < arity(tup)) {
         v0 := arg(tup, i)
-        # peg_unat(x) takes the positions out of x, and the text has none
         v := if (is_mx(v0) and head(v0) == 'Apply and arg(v0, 0) == 'peg_unat and is_mx(arg(v0, 1)) and arity(arg(v0, 1)) == 1) arg(arg(v0, 1), 0) else v0
         r = if (label_ok(v, labels)) push(r, hole(v)) else bad
         i = i + 1
@@ -135,8 +109,6 @@ vars_tmpl(h, tup, labels) := {
     r
 }
 
-# a call of a function of syntax.pk that builds the tree (peg_lambda(ps, body) and the like), as the
-# template of the tree it makes. The wrapper that return, break and continue add is looked through.
 call_tmpl(c, labels) :=
     if (not (is_mx(c) and head(c) == 'Apply and arity(c) == 2 and is_mx(arg(c, 1)) and head(arg(c, 1)) == 'Tuple)) bad
     else if (not list.all(x -> label_ok(x, labels), pretty.args_of(arg(c, 1)))) bad
@@ -166,7 +138,6 @@ call_tmpl(c, labels) :=
         else bad
     }
 
-# the template of a quasi-quotation. A hole must be a label.
 quasi(p, labels) :=
     if (not is_mx(p)) p
     else if (head(p) == 'UnQuote) (if (label_ok(arg(p, 0), labels)) hole(arg(p, 0)) else call_tmpl(arg(p, 0), labels))
@@ -181,16 +152,13 @@ quasi(p, labels) :=
         r
     }
 
-# mexpr(h, args) in an action
 mexpr_tmpl(h, args, labels) :=
     if (is_mx(h) and head(h) == 'Quote and is_mx(args) and head(args) == 'Tuple) vars_tmpl(arg(h, 0), args, labels)
     else if (label_ok(h, labels) and label_ok(args, labels)) Generic{hole(h), hole(args)}
     else bad
 
-# peg_at(l, e) that the grammar builds around a call gives At{loc, e} for a text with a position. The template is the one of e, since the text has no position.
 is_at_builder(b) := is_mx(b) and head(b) == 'Apply and arg(b, 0) == 'peg_at and is_mx(arg(b, 1)) and head(arg(b, 1)) == 'Tuple and arity(arg(b, 1)) == 2
 
-# the body of an action without the positions of the calls in it, and without the builder of the At around a call
 normal_body(b0) := {
     b1 := no_at(b0, 0)
     b := if (is_mx(b1) and head(b1) == 'Do and arity(b1) == 1) arg(b1, 0) else b1
@@ -210,12 +178,10 @@ body_tmpl(b, labels) :=
 
 mentions(x, s) := if (is_mx(x)) list.any(c -> mentions(c, s), pretty.args_of(x)) else x == s
 
-# return takes an optional expression: Option{Seq{same, expr}}. The template has the expression itself.
 unopt(e) :=
     if (is_mx(e) and head(e) == 'Option and is_mx(arg(e, 0)) and head(arg(e, 0)) == 'Seq and arity(arg(e, 0)) == 2 and arg(arg(e, 0), 0) == 'same) arg(arg(e, 0), 1)
     else e
 
-# the labels and the template of an action, as Tuple{labels, template} or Bad{}
 action_of(f, elems, is_seq) := {
     n := length(elems)
     if (is_mx(f) and head(f) == 'Lambda) {
@@ -229,9 +195,6 @@ action_of(f, elems, is_seq) := {
         }
     } else bad
 }
-
-# === Constant texts ===
-# the text that an element always matches, such as "+", Tight{"("} or a rule like minus ::= same "-"
 
 const_text(e, depth) :=
     if (type(e) == String) e
@@ -252,14 +215,12 @@ const_text(e, depth) :=
         r
     } else bad
 
-# the kind of a piece: 'tight sticks to the left, 'prefix to the right
 const_kind(e, i, n, text, prev) :=
     if (is_mx(e) and head(e) == 'Tight) 'tight
     else if (text == "(" and prev == 'ident) 'tight
     else if (i == 0 and n > 1 and strlen(text) > 0 and not string.is_ident_char(ord(text, 0))) 'prefix
     else 'plain
 
-# ConstItem{text, kind} or ValueItem{label, element}, or Bad{} when an element cannot be run backwards
 make_items(elems, labels, holes) := {
     n := length(elems)
     fun go
@@ -282,14 +243,11 @@ make_items(elems, labels, holes) := {
 
 token_rule(r) := type(table.get(peg_sources, r, none)) == Function
 
-# the rule of the last element when it is a rule of its own, or none. The alternative
-# runs on to the right as far as that rule does.
 tail_of(items) :=
     if (items == []) none
     else if (head(list.last(items)) == 'ValueItem and type(arg(list.last(items), 1)) == Symbol and not token_rule(arg(list.last(items), 1))) arg(list.last(items), 1)
     else none
 
-# Alt{owner, order, template, items, tail}
 extract_act(owner, order, e, f) := {
     is_seq := is_mx(e) and head(e) == 'Seq
     elems0 := if (is_seq) pretty.args_of(e) else [e]
@@ -302,7 +260,6 @@ extract_act(owner, order, e, f) := {
     }
 }
 
-# "(" e ")" with any action: Paren{owner, inner rule, open, close}
 find_paren(owner, a) := {
     if (is_mx(a) and head(a) == 'Act and is_mx(arg(a, 0)) and head(arg(a, 0)) == 'Seq and arity(arg(a, 0)) == 3) {
         s := arg(a, 0)
@@ -327,7 +284,6 @@ token_types := {
     t
 }
 
-# === The model of the grammar ===
 ug_version := -1
 ug_extra := []
 ug_stack := []
@@ -396,7 +352,6 @@ reach_add(seen, r) := if (not set.has(seen, r)) {
     each(x -> reach_add(seen, x), table.get(ug_links, r, []))
 }
 
-# the rules that rule r reaches by alternatives that are only a rule name
 reach(r) := {
     c := table.get(ug_reach, r, none)
     if (c != none) c else {
@@ -407,16 +362,12 @@ reach(r) := {
     }
 }
 
-# an alternative is open when its last element is a rule that is looser than the rule of the alternative
-# (while (c) e ends with expr, which goes on to the right as far as it can)
 is_open(a) := alt_tail(a) != none and set.has(reach(alt_tail(a)), alt_owner(a)) and not set.has(reach(alt_owner(a)), alt_tail(a))
 
 first_of := (x :: _) -> x
 
 rest_of := (_ :: xs) -> xs
 
-# Cand{key, alt, paren or false}, the alternatives that can stand for rule r. The more concrete
-# template comes first. An alternative of a stronger rule needs parentheses.
 cands(r) := {
     c := table.get(ug_cands, r, none)
     if (c != none) c else {
@@ -438,8 +389,6 @@ cands(r) := {
     }
 }
 
-# === Printing ===
-
 ident_ok(name) := {
     ok := strlen(name) > 0 and string.is_ident_start(ord(name, 0)) and not table.get(peg_reserved, name, false)
     i := 1
@@ -456,7 +405,6 @@ print_token(rule, t) :=
     else if (rule == 'float) t
     else pretty.quote_string(t)
 
-# pieces are strings, T{s} (sticks to the left) and P{s} (sticks to the right)
 piece_text := (T{s}) -> s
             | (P{s}) -> s
             | (s) -> s
@@ -482,7 +430,6 @@ render(ps) := {
     out
 }
 
-# pp is declared here for the functions that it calls through text_as and try_cands
 fun pp
 
 list_pieces(inner, sep, v) := {
@@ -501,7 +448,6 @@ list_pieces(inner, sep, v) := {
     if (ok) reverse(acc) else none
 }
 
-# a rule that is only a list of another rule: idents ::= ident, ...
 is_list_rule(r) := {
     src := table.get(peg_sources, r, none)
     is_mx(src) and (head(src) == 'Delimited or head(src) == 'Delimited1 or head(src) == 'Many)
@@ -538,7 +484,6 @@ items_pieces = (Nil{}, env) -> []
                     if (ps == none or qs == none) none else append(ps, qs)
                 }
 
-# a quick test that the head and the constants just below the head of the template fit t
 fits(p, t) := {
     ok := true
     if (not is_mx(p)) ok = p == t
@@ -586,27 +531,23 @@ try_cands = (Nil{}, t) -> none
                 if (s == none) try_cands(cs, t) else s
              }
 
-# pp(rule, t) is the text of t as the rule, or none
 pp(r, t) =
     if (type(table.get(peg_sources, r, none)) == Function) {
         ty := table.get(token_types, r, none)
         if (ty != none and type(t) == ty) print_token(r, t) else none
     } else if (list.any(e -> arg(e, 0) == r and arg(e, 1) == t, ug_stack)) none
     else {
-        # a rule that passes its tree on to itself (identity actions) would go round forever
         ug_stack = Tuple{r, t} :: ug_stack
         result := try_cands(cands(r), t)
         ug_stack = list.drop(ug_stack, 1)
         result
     }
 
-# unparse.try_as(rule, t) is a text that the rule parses to t, or none when t has no such text
 export try_as(r, t) := {
     ensure()
     pp(r, no_at(t, 0))
 }
 
-# unparse.text_as(rule, t) is like unparse.try_as and stops the program when there is no text
 export text_as(r, t) := {
     s := try_as(r, t)
     if (s == none) panic(_strcat("unparse: cannot print ", show(t))) else s
@@ -614,22 +555,13 @@ export text_as(r, t) := {
 
 export text(t) := text_as('expr, t)
 
-# unparse.custom(owner, spec, tail, f) adds an alternative of the rule owner that is not
-# written in the grammar (what cannot be run backwards, or a layout). f(t) is the text of t or none.
-# spec ranks it against the templates of the grammar: the number of the nodes of a template that are not holes.
-# tail is the rule that the text runs on to the right as far as, or none.
 export custom(owner, spec, tail, f) := {
     ug_extra = append(ug_extra, [Tuple{owner, spec, tail, f}])
     ug_version = -1
 }
 
-# === Layout of the syntax of planck ===
-# { ... } puts every expression on its own line, indented by 4 spaces.
-# if (c) a else b is used for If.
-
 indent(s) := _strcat("    ", join("\n    ", string.split(s, "\n")))
 
-# the texts of the arguments of t as expr, or none
 arg_texts(t) := {
     acc := []
     ok := true
@@ -642,7 +574,6 @@ arg_texts(t) := {
     if (ok) reverse(acc) else none
 }
 
-# the text of each statement, or none
 block_texts(items) := {
     acc := []
     ok := true
@@ -662,7 +593,6 @@ print_do(t) :=
         else _strcat("{\n", _strcat(join("\n", map(indent, ss)), "\n}"))
     }
 
-# an If without else inside (not in { }) takes the else of an outer If
 has_open_if(t) :=
     if (not is_mx(t) or head(t) == 'Do) false
     else if (head(t) == 'If and arity(t) == 3 and arg(t, 2) == none) true
@@ -684,16 +614,10 @@ print_if(t) :=
 custom('primary, 3, none, print_do)
 custom('primary, 3, 'arrow, print_if)
 
-# print_do is also used for the arguments of a hole of an f-string: they are parsed as expr.
-
-# === Syntax made by functions that cannot be run backwards ===
-
-# f"...{e}...": _strcat("a", _to_text(e)) and so on, in the shape that peg_interp makes
 is_call2(t, f) := is_mx(t) and head(t) == 'Apply and arity(t) == 2 and arg(t, 0) == f and is_mx(arg(t, 1)) and head(arg(t, 1)) == 'Tuple
 is_text_hole(x) := is_call2(x, '_to_text) and arity(arg(x, 1)) == 1
 is_text_literal(x) := type(x) == String and strlen(x) > 0
 
-# the pieces of an f-string as a list of S{text} and E{tree}, or none
 fstr_segs(t) :=
     if (is_call2(t, '_strcat) and arity(arg(t, 1)) == 2) {
         l := fstr_segs(arg(arg(t, 1), 0))
@@ -706,7 +630,6 @@ fstr_segs(t) :=
     else if (is_text_literal(t)) [S{t}]
     else none
 
-# the text of s in f"..." : the escapes of a string, and {{ }} for the braces
 fstr_escape(s) := {
     q := pretty.quote_string(s)
     b := strbuf.new()
@@ -737,15 +660,8 @@ print_fstr(t) := {
     }
 }
 
-# return with no value
 print_return0(t) := if (t == 'Perform{Return{none}}) "return" else none
 
-# match e { f } is Apply{f, Tuple{e}}, printed so when f has two arms or more, or a guard. The arms of f are joined by Fusion: (p, ...) -> a is a Lambda,
-# and (p, ...) if c -> a | g is what peg_guard and peg_fuse in syntax.pk make, with g the arms after it or _nomatch:
-# Apply{Lambda{Tuple{%g}, Fusion{Lambda{vs, Apply{Fusion{Lambda{ps, If{c, a, Apply{%g, vs}}}, %g}, vs}}, %g}}, Tuple{g}}
-# A return in a body of the arms of match has no handler of its own.
-
-# Guard{params, guard, body, rest} of a function with a guard, or none
 guard_parts := (Apply{Lambda{Tuple{k}, Fusion{Lambda{vs, Apply{Fusion{Lambda{ps, b}, k2}, vs2}}, k3}}, Tuple{g}}) -> {
                    b2 := strip('UnwrapReturn, b)
                    ok := type(k) == Symbol and symname(k) == "%g" and k2 == k and k3 == k and vs2 == vs
@@ -754,7 +670,6 @@ guard_parts := (Apply{Lambda{Tuple{k}, Fusion{Lambda{vs, Apply{Fusion{Lambda{ps,
                }
              | (_) -> none
 
-# the parameters of an arm: p alone, or (p, ...) for other numbers and for a tuple written as (a, b)
 params_text(ps) := {
     xs := list_pieces('pattern, ",", ps)
     s := if (xs == none) none else render(xs)
@@ -774,7 +689,6 @@ arm_text(ps, c, e) := {
 plain_arm := (Lambda{ps @ Expr, e}) -> if (head(ps) == 'Tuple and strip('UnwrapReturn, e) == e) arm_text(ps, NoGuard{}, e) else none
            | (_) -> none
 
-# the texts of the arms of f in match, or none. A function with a guard is the last of a Fusion.
 match_arms(f) := {
     gp := guard_parts(f)
     if (gp != none) {
@@ -793,7 +707,6 @@ match_arms(f) := {
 
 is_applied(t) := is_mx(t) and head(t) == 'Apply and arity(t) == 2 and is_mx(arg(t, 1)) and head(arg(t, 1)) == 'Tuple and arity(arg(t, 1)) == 1
 
-# the arms are on their own lines, and | starts the line of each arm after the first
 print_match(t) := {
     f := if (is_applied(t)) arg(t, 0) else none
     arms := if (f != none and (guard_parts(f) != none or (is_mx(f) and head(f) == 'Fusion))) match_arms(f) else none
@@ -805,7 +718,6 @@ print_match(t) := {
     }
 }
 
-# p if c -> a | g outside of match
 print_guard(t) := {
     gp := guard_parts(t)
     if (gp == none) none
@@ -818,11 +730,8 @@ print_guard(t) := {
     }
 }
 
-# t[f]: when a function in f has a guard, the parser puts (_ -> '%skip) last (_peg_rewrite in syntax.pk).
-# f without it is printed as the functions of match are.
 skip_fun := mexpr('Lambda, Tuple{'Tuple{_}, mexpr('Quote, Tuple{peg_skip})})
 
-# f with the last (_ -> '%skip) taken off, or none when f does not end with it
 unskip(f) :=
     if (guard_parts(f) != none) {
         g := arg(arg(f, 1), 0)
@@ -843,12 +752,10 @@ print_index(f) :=
         if (g == none) none else pp('expr, g)
     }
 
-# an integer literal that is too long for the integer of the reader is _bigint("digits"); it is written as the digits
 print_bigint(t) :=
     if (is_mx(t) and head(t) == 'Apply and arity(t) == 2 and arg(t, 0) == '_bigint and type(arg(t, 1)) == Expr and arity(arg(t, 1)) == 1 and type(arg(arg(t, 1), 0)) == String) arg(arg(t, 1), 0)
     else none
 
-# x = e as an argument is the argument named x, so the assignment is written in parentheses
 print_call_set(t) :=
     if (is_mx(t) and head(t) == 'Set and arity(t) == 2 and type(arg(t, 0)) == Symbol) {
         r := pp('expr, t)

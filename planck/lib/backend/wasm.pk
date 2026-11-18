@@ -1,21 +1,4 @@
-# wasm: the wasm32 target of the code generator: the functions of ir.pk to one module of WebAssembly
 # Copyright (C) 2026 nineties
-#
-# The word is 4 bytes. An address is a 32-bit value and an offset in the linear memory, which is laid out as
-#   0 to stack_top      the stack of the frames, which grows down from stack_top (a frame below stack_limit stops the program)
-#   data_base and up    the data of the objects (.rodata, .data, then .bss), and then the area that the service grow gives
-# Every virtual register of a function is a local of the type i32 (32 bits) or i64 (64 bits).
-# The calling convention: every function has the type [] -> []. The caller writes the words of the arguments (4 bytes for a 32-bit register and 8 for
-# a 64-bit one, in order) at the bottom of its frame, which is the value of the global sp during the call; getarg of the callee reads them there.
-# The results are in the globals r0 and r1 (i64), and the callee gives sp back as it was. A frame holds the area of the arguments of the calls
-# the function makes and then the stack slots.
-# The address of a function, which la gives and call takes in a register, is its index in the table of the module (from 1, so that 0 is no function).
-# The control of a function: the code is cut at every label into pieces numbered from 0, and the pieces are put in this order in a loop of
-# nested blocks, each piece after the end of its block. A jump forward leaves the blocks up to the piece; a jump back sets the number of the
-# piece in a local and goes to the start of the loop, where br_table goes to it.
-# The services of the system (backend/os.pk) are functions that the module imports from the module "os" (write, read, open, create, close, exit, args and abort),
-# except grow, which the module does with memory.grow. The module exports its memory as "memory", _start, and sbrk(n), which gives n bytes of the
-# area of grow to the host (for the arguments of the program).
 
 use("base")
 use("list")
@@ -27,33 +10,28 @@ use("backend/wasmenc")
 
 module wasm {
 
-# === The memory ===
 export stack_top := 2097152
 stack_limit := 65536
 data_base := 2097152
 page := 65536
 max_pages := 32768
 
-# the globals
 g_sp := 0
 g_r0 := 1
 g_r1 := 2
 g_brk := 3
 
-# the types of functions: [] -> [], [i32] -> [i32], [i32 i32 i32] -> [i32], [] -> [i32] and [i32] -> []
 ty_void := 0
 ty_i := 1
 ty_iii := 2
 ty_to_i := 3
 ty_i_void := 4
 
-# the services that the module imports, in the order of their indices
 services := [Tuple{"write", ty_iii}, Tuple{"read", ty_iii}, Tuple{"open", ty_i}, Tuple{"create", ty_i}, Tuple{"close", ty_i},
     Tuple{"exit", ty_i_void}, Tuple{"args", ty_to_i}, Tuple{"abort", ty_void}]
 nservices := 8
 service_index(name) := list.index_of(name, map(s -> arg(s, 0), services))
 
-# the functions that the module defines before those of the code: grow and sbrk
 f_grow := nservices
 f_sbrk := nservices + 1
 nown := 2
@@ -61,18 +39,14 @@ nown := 2
 wasm_align(n, a) := (n + a - 1) / a * a
 
 
-# 0xFFFFFFFF, the low half of a 64-bit integer
 low_mask(b) := {
     wasmenc.op(b, "i64_const")
     wasmenc.sleb64(b, 0, 0, 65535, 65535)
 }
 
-# === Functions ===
 
-# the area of the arguments of a call: the bytes of the registers rs
 arg_bytes(f, rs) := foldl((n, r) -> n + ir.width(f, r) / 8, 0, rs)
 
-# the pieces of the code: a list of lists of instructions, cut before every label, and a table from the labels to the numbers of the pieces
 pieces(code) := {
     out := vector.new()
     cur := []
@@ -88,7 +62,6 @@ pieces(code) := {
     Tuple{vector.to_list(out), labels}
 }
 
-# the conditions of cmp and br, and of fcmp
 int_cc := [Tuple{'eq, "eq"}, Tuple{'ne, "ne"}, Tuple{'lt, "lt_s"}, Tuple{'le, "le_s"}, Tuple{'gt, "gt_s"}, Tuple{'ge, "ge_s"},
     Tuple{'ltu, "lt_u"}, Tuple{'leu, "le_u"}, Tuple{'gtu, "gt_u"}, Tuple{'geu, "ge_u"}]
 float_cc := [Tuple{'eq, "eq"}, Tuple{'ne, "ne"}, Tuple{'lt, "lt"}, Tuple{'le, "le"}, Tuple{'gt, "gt"}, Tuple{'ge, "ge"}]
@@ -98,12 +71,10 @@ cc_name(ccs, c) := {
     arg(e, 1)
 }
 
-# the operations of two operands
 binops := [Tuple{'add, "add"}, Tuple{'sub, "sub"}, Tuple{'mul, "mul"}, Tuple{'band, "and"}, Tuple{'bor, "or"}, Tuple{'bxor, "xor"},
     Tuple{'shl, "shl"}, Tuple{'shr, "shr_u"}, Tuple{'sar, "shr_s"}, Tuple{'divs, "div_s"}, Tuple{'divu, "div_u"}, Tuple{'rems, "rem_s"}, Tuple{'remu, "rem_u"}]
 fops := [Tuple{'fadd, "add"}, Tuple{'fsub, "sub"}, Tuple{'fmul, "mul"}, Tuple{'fdiv, "div"}]
 
-# the loads into a register of 32 and of 64 bits
 loads32 := [Tuple{'u8, "i32_load8_u"}, Tuple{'s8, "i32_load8_s"}, Tuple{'u16, "i32_load16_u"}, Tuple{'s16, "i32_load16_s"}, Tuple{'w32, "i32_load"}]
 loads64 := [Tuple{'u8, "i64_load8_u"}, Tuple{'s8, "i64_load8_s"}, Tuple{'u16, "i64_load16_u"}, Tuple{'s16, "i64_load16_s"}, Tuple{'w32, "i64_load32_u"}, Tuple{'w64, "i64_load"}]
 
@@ -112,12 +83,6 @@ wasm_lookup(xs, k) := {
     if (e == none) none else arg(e, 1)
 }
 
-# The state of the translation of a function is Fn{f, buf, env, slots, labels, n, frame, base, cur}: the function, the buffer of the body,
-# the environment Env{functions, table, data} (the tables from the names to the indices of the functions, to their indices in the table and to the
-# addresses of the data), a table from the stack slots to their offsets in the frame, a table from the labels to the numbers of the pieces,
-# the number of the pieces, the size of the frame, the first local after the registers, and an array that holds the number of the piece being written.
-# The locals after the registers are the number of the piece to go to, the address of the arguments, the bottom of the frame, a 32-bit temporary and
-# nt64 64-bit temporaries.
 nt64 := 5
 
 fn_f(Fn{f, _, _, _, _, _, _, _, _}) := f
@@ -177,7 +142,6 @@ wasm_open_block(c, kind) := {
     bytes.u8(fn_buf(c), wasmenc.block_void)
 }
 
-# a value of the width have on the stack as the width want: a 32-bit value is zero extended
 wasm_conv(c, have, want) := if (have == 32 and want == 64) wasm_op(c, "i64_extend_i32_u") else if (have == 64 and want == 32) wasm_op(c, "i32_wrap_i64")
 wasm_get(c, r, w) := {
     wasm_lget(c, wasm_local(c, r))
@@ -191,7 +155,6 @@ wasm_operand(c, U{r}, w) := wasm_get(c, r, w)
 wasm_operand(c, K{v}, w) := wasm_const(c, w, v)
 wasm_operand(c, x, w) := panic(f"wasm: an operand {ir.show_op(x)} in {ir.name(fn_f(c))}")
 
-# wasm_address(c, m) puts the address of the memory operand m on the stack; the result is the offset of the load or the store
 wasm_address(c, M{U{base}, d}) := {
     wasm_get(c, base, 32)
     if (d >= 0) d else {
@@ -217,7 +180,6 @@ wasm_mem(c, name, offset) := {
     wasmenc.memarg(fn_buf(c), 0, offset)
 }
 
-# a jump to the piece p; inner is the number of the blocks entered in the piece
 wasm_goto(c, p, inner) := {
     cur := fn_cur(c)
     if (p > cur) {
@@ -241,13 +203,11 @@ wasm_epilogue(c) := if (fn_frame(c) > 0) {
     wasm_gset(c, g_sp)
 }
 
-# a float operation works on the bits of the numbers in registers of the width w
 wasm_fl(w) := if (w == 64) "f64" else "f32"
 wasm_from_bits(c, w) := wasm_op(c, f"{wasm_fl(w)}_reinterpret_i{w}")
 wasm_to_bits(c, w) := wasm_op(c, f"i{w}_reinterpret_{wasm_fl(w)}")
 wasm_fw(z) := if (z == 'w64) 64 else 32
 
-# the low or the high half of the 64-bit local l
 wasm_half(c, l, high) := {
     wasm_lget(c, l)
     if (high) {
@@ -259,7 +219,6 @@ wasm_half(c, l, high) := {
     }
 }
 
-# d = the high 64 bits of the unsigned product of x and y, from the products of the 32-bit halves
 wasm_mulhu(c, d, x, y) := {
     ta := l_t64(c, 0)
     tb := l_t64(c, 1)
@@ -270,7 +229,6 @@ wasm_mulhu(c, d, x, y) := {
     wasm_lset(c, ta)
     wasm_operand(c, y, 64)
     wasm_lset(c, tb)
-    # t01 = low(a) high(b) and t10 = high(a) low(b)
     wasm_half(c, ta, false)
     wasm_half(c, tb, true)
     wasm_op(c, "i64_mul")
@@ -279,7 +237,6 @@ wasm_mulhu(c, d, x, y) := {
     wasm_half(c, tb, false)
     wasm_op(c, "i64_mul")
     wasm_lset(c, t10)
-    # the middle: high(low(a) low(b)) + low(t01) + low(t10), whose high half is the carry
     wasm_half(c, ta, false)
     wasm_half(c, tb, false)
     wasm_op(c, "i64_mul")
@@ -302,7 +259,6 @@ wasm_mulhu(c, d, x, y) := {
     wasm_put(c, d, 64)
 }
 
-# the bound of the conversion of a float of the width w to a 64-bit integer: x >= -2^63, or x < 2^63
 wasm_cvt_bound(c, w, tl, negative) := {
     wasm_lget(c, tl)
     wasm_from_bits(c, w)
@@ -317,7 +273,6 @@ wasm_cvt_bound(c, w, tl, negative) := {
     wasm_op(c, if (negative) f"{wasm_fl(w)}_ge" else f"{wasm_fl(w)}_lt")
 }
 
-# d = x toward zero; a NaN and a number out of the range give the least 64-bit integer, as x86 does
 wasm_cvtf2i(c, z, d, x) := {
     w := wasm_fw(z)
     tl := if (w == 64) l_t64(c, 0) else l_t32(c)
@@ -435,7 +390,6 @@ wasm_branch(c, cc, x, y, yes, no) := {
     wasm_goto(c, fn_piece(c, no), 0)
 }
 
-# the instruction of ir.pk
 wasm_one(c, I{'mov, [D{d}, s]}) := {
     wasm_operand(c, s, wasm_width(c, d))
     wasm_put(c, d, wasm_width(c, d))
@@ -581,7 +535,6 @@ wasm_one(c, I{'br, [Cc{cc}, U{x}, y, L{yes}, L{no}]}) := wasm_branch(c, cc, x, y
 wasm_one(c, I{'trap, []}) := wasm_stop(c)
 wasm_one(c, i) := panic(f"wasm: cannot translate {ir.show(i)} in {ir.name(fn_f(c))}")
 
-# the offsets of the stack slots of f in a frame whose area of arguments has the size outgoing: Tuple{table, size of the frame}
 frame_of(f, outgoing) := {
     slot_at := table.new()
     off := outgoing
@@ -595,7 +548,6 @@ frame_of(f, outgoing) := {
     Tuple{slot_at, wasm_align(off, 16)}
 }
 
-# the locals of f after the registers, as runs of the same type for the code section
 write_locals(b, f) := {
     types := vector.new()
     r := 32
@@ -617,7 +569,6 @@ write_locals(b, f) := {
     })
 }
 
-# the start of the function: the address of the arguments, and the frame, which stops the program when it is below stack_limit
 wasm_prologue(c) := {
     wasm_gget(c, g_sp)
     wasm_lset(c, l_ap(c))
@@ -637,7 +588,6 @@ wasm_prologue(c) := {
     }
 }
 
-# fun_body(f, env) is the body of the function f (ir.fun) for the code section
 fun_body(f, env) := {
     code := ir.code(f)
     outgoing := wasm_align(foldl((n, i) -> match i {
@@ -654,7 +604,6 @@ fun_body(f, env) := {
     c := Fn{f, b, env, arg(fr, 0), arg(cut, 1), n, arg(fr, 1), ir.nregs(f) - 32, cur}
     write_locals(b, f)
     wasm_prologue(c)
-    # the loop, the blocks and the jump to the piece
     wasm_open_block(c, "loop")
     each(_ -> wasm_open_block(c, "block"), range(0, n))
     wasm_lget(c, l_piece(c))
@@ -672,9 +621,7 @@ fun_body(f, env) := {
     b
 }
 
-# === The functions that the module defines itself ===
 
-# grow(a): the service grow of backend/os.pk; the memory grows by pages up to a
 grow_body() := {
     b := bytes.new()
     wasmenc.vec(b, [], (b, x) -> none)
@@ -692,7 +639,6 @@ grow_body() := {
         wasmenc.sleb(b, 16)
         wasmenc.op(b, "i32_shl")
     }
-    # grow(0) is the end as it is
     arg0()
     wasmenc.op(b, "i32_eqz")
     wasmenc.op(b, "if")
@@ -732,7 +678,6 @@ grow_body() := {
     b
 }
 
-# sbrk(n): the old end of the area of grow, which grows by n bytes
 sbrk_body() := {
     b := bytes.new()
     wasmenc.vec(b, [], (b, x) -> none)
@@ -750,14 +695,11 @@ sbrk_body() := {
     b
 }
 
-# === The module ===
 
 export lower(f, helpers) := f
 
-# compile(name, funs, datas) keeps the functions and the data; they are joined by executable
 export compile(name, funs, datas) := WasmObject{funs, datas}
 
-# the bytes of the data and the addresses: Tuple{buffer from data_base, the end of the data, table from the names to the addresses}
 layout(datas) := {
     b := bytes.new()
     addrs := table.new()
@@ -777,7 +719,6 @@ layout(datas) := {
     Tuple{b, wasm_align(cur, 16), addrs}
 }
 
-# executable(objects) is the module of the functions and the data of the objects as a buffer of bytes
 export executable(objects) := {
     funs := concat_map(o -> arg(o, 0), objects)
     datas := concat_map(o -> arg(o, 1), objects)

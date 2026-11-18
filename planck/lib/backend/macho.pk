@@ -1,10 +1,4 @@
-# macho: writes a 64-bit Mach-O executable (macho.image) from loadable segments
 # Copyright (C) 2026 nineties
-#
-# The segments are those of elf.pk: Seg{vaddr, off, data, memsz, flags}, with the first at the file offset 0 holding the headers, which the writer fills in
-# (macho.header_size(machine, n) bytes). The file offset and the address of every other segment are multiples of the page size of the machine (macho.page_size).
-# The dynamic linker of the system starts the program, which asks the system for its services by system calls and so has no imports and no fixups. The machine
-# arm64 needs the file to be signed, so the writer adds a code signature that holds the hash of every page of the file (the ad hoc signature, with sha256.pk).
 
 use("base")
 use("list")
@@ -13,7 +7,6 @@ use("backend/sha256")
 
 module macho {
 
-# the machines: the number of the cpu and of the subtype
 machines := [Tuple{'x86_64, 16777223, 3}, Tuple{'arm64, 16777228, 0}]
 
 magic := -17958193
@@ -29,8 +22,6 @@ machine_info(machine) := {
 export page_size('x86_64) := 4096
 export page_size('arm64) := 16384
 
-# A program of arm64 has no address that fits in 32 bits: the first 4 GB of the address space are not mapped, and the image comes after them. The linker places such a program
-# at the address 0 (its code refers to its data by the distance), and the writer moves it to slide_hi * 2^32. A program of x86_64 is placed by the linker at the address it is loaded.
 slide_hi('x86_64) := 0
 slide_hi('arm64) := 1
 
@@ -38,16 +29,13 @@ signed(machine) := machine == 'arm64
 
 align(n, a) := (n + a - 1) / a * a
 
-# the commands for the dynamic linker
 dylinker := "/usr/lib/dyld"
 libsystem := "/usr/lib/libSystem.B.dylib"
 cmd_pad(n) := (n + 7) / 8 * 8
 dyld_commands_size := 48 + 24 + 80 + cmd_pad(12 + strlen(dylinker) + 1) + 24 + 24 + cmd_pad(24 + strlen(libsystem) + 1)
 
-# the size of the commands: the segments (page zero, the n loadable ones, and the linkedit), the commands of the dynamic linker and the signature
 export header_size(machine, nsegs) := 32 + 72 * (2 + nsegs) + dyld_commands_size + (if (signed(machine)) 16 else 0)
 
-# the protection of a segment as Mach-O gives it from flags of elf.pk: 4 read, 2 write and 1 execute become 1, 2 and 4
 prot(flags) := (if (bit_and(flags, 4) != 0) 1 else 0) + (if (bit_and(flags, 2) != 0) 2 else 0) + (if (bit_and(flags, 1) != 0) 4 else 0)
 
 name16(b, s) := {
@@ -55,13 +43,11 @@ name16(b, s) := {
     bytes.zeros(b, 16 - strlen(s))
 }
 
-# the 64-bit unsigned integer that is the 32-bit values hi and lo
 u64(b, hi, lo) := {
     bytes.u32(b, lo)
     bytes.u32(b, hi)
 }
 
-# a segment command without sections; the address is slide_hi * 2^32 + vmaddr and the size is size_hi * 2^32 + vmsize
 segment(b, name, slide_hi, vmaddr, size_hi, vmsize, fileoff, filesize, prot) := {
     bytes.u32(b, lc_segment_64)
     bytes.u32(b, 72)
@@ -76,7 +62,6 @@ segment(b, name, slide_hi, vmaddr, size_hi, vmsize, fileoff, filesize, prot) := 
     bytes.u32(b, 0)
 }
 
-# the big-endian 32-bit value
 be32(b, n) := {
     bytes.u8(b, bit_sar(n, 24))
     bytes.u8(b, bit_sar(n, 16))
@@ -84,24 +69,20 @@ be32(b, n) := {
     bytes.u8(b, n)
 }
 
-# the code signature of the first n bytes of the file b: a super blob with a code directory that has the sha256 hash of each page of 4096 bytes
 signature(b, n, ident, exec_base, exec_limit) := {
     npages := (n + 4095) / 4096
     ident_off := 88
     hash_off := ident_off + strlen(ident) + 1
     cd_len := hash_off + 32 * npages
     out := bytes.new()
-    # the super blob: the magic, the length, the number of blobs, and the blob of the code directory at 20
     be32(out, -86111040)
     be32(out, 20 + cd_len)
     be32(out, 1)
     be32(out, 0)
     be32(out, 20)
-    # the code directory (version 0x20400)
     be32(out, -86111230)
     be32(out, cd_len)
     be32(out, 132096)
-    # the flags: ad hoc and made by the linker
     be32(out, 131074)
     be32(out, hash_off)
     be32(out, ident_off)
@@ -116,7 +97,6 @@ signature(b, n, ident, exec_base, exec_limit) := {
     be32(out, 0)
     be32(out, 0)
     be32(out, 0)
-    # the code limit of 64 bits, the segment of the code: its base, its limit and its flags (the main binary)
     be32(out, 0)
     be32(out, 0)
     be32(out, 0)
@@ -136,16 +116,11 @@ signature(b, n, ident, exec_base, exec_limit) := {
     out
 }
 
-# the commands of a program that the dynamic linker starts. It has no fixups, no symbols and no imports: it asks the system for its services by
-# system calls. entryoff is the offset of the entry from the start of the file, and the string table of linkedit_off is the empty table.
 dyld_commands(b, entryoff, linkedit_off) := {
-    # no rebase, bind or export information
-    # the commands that the dynamic linker must understand have the top bit set: 0x80000022 and 0x80000028 (an integer of planck0 has 31 bits)
     bytes.u16(b, 34)
     bytes.u16(b, 32768)
     bytes.u32(b, 48)
     bytes.zeros(b, 40)
-    # the symbol table has no symbols; the string table is 8 bytes
     bytes.u32(b, 2)
     bytes.u32(b, 24)
     bytes.u32(b, linkedit_off)
@@ -160,7 +135,6 @@ dyld_commands(b, entryoff, linkedit_off) := {
     bytes.u32(b, 12)
     bytes.string(b, dylinker)
     bytes.zeros(b, cmd_pad(12 + strlen(dylinker) + 1) - 12 - strlen(dylinker))
-    # the platform macOS (1), the least system 11.0 and the SDK 11.0, and no tools
     bytes.u32(b, 50)
     bytes.u32(b, 24)
     bytes.u32(b, 1)
@@ -182,8 +156,6 @@ dyld_commands(b, entryoff, linkedit_off) := {
     bytes.zeros(b, cmd_pad(24 + strlen(libsystem) + 1) - 24 - strlen(libsystem))
 }
 
-# image(machine, entry, segs) is the file as a buffer of bytes. The dynamic linker calls the program at entry as a function of the C convention: the number of the
-# arguments is in the first register of the arguments and their addresses in the second
 export image(machine, entry, segs) := {
     n := length(segs)
     header := header_size(machine, n)
@@ -197,7 +169,6 @@ export image(machine, entry, segs) := {
     data_end := arg(last, 1) + align(bytes.len(arg(last, 2)), page)
     mem_end := align(arg(last, 0) + arg(last, 3), page)
     linkedit_off := align(data_end, page)
-    # the string table of 8 bytes comes first in linkedit; the signature is aligned to 16 bytes after it
     strtab := 16
     sig_off := linkedit_off + strtab
     b := bytes.new()
@@ -209,10 +180,8 @@ export image(machine, entry, segs) := {
     bytes.u32(b, 2)
     bytes.u32(b, ncmds)
     bytes.u32(b, sizeofcmds)
-    # no undefined symbols (1), made for the dynamic linker (4) and with two level names (128); a program of arm64 can be loaded anywhere (2097152)
     bytes.u32(b, 133 + (if (machine == 'arm64) 2097152 else 0))
     bytes.u32(b, 0)
-    # the first segment holds the headers and is called __TEXT; the next is __DATA
     segment(b, "__PAGEZERO", 0, 0, if (machine == 'arm64) 1 else 0, if (machine == 'arm64) 0 else base, 0, 0, 0)
     k := 0
     each((Seg{vaddr, off, data, memsz, flags}) -> {
@@ -223,7 +192,6 @@ export image(machine, entry, segs) := {
     sig_size := 0
     ident := "planckvm"
     if (signed(machine)) {
-        # the size of the signature is known before it is computed: the length of its pages
         npages := (sig_off + 4095) / 4096
         sig_size = 20 + 88 + strlen(ident) + 1 + 32 * npages
     }
@@ -236,7 +204,6 @@ export image(machine, entry, segs) := {
         bytes.u32(b, sig_size)
     }
     if (bytes.len(b) != header) panic("macho.image: the size of the headers is wrong")
-    # the segments
     each((Seg{_, off, data, _, _}) -> {
         if (off > 0 and bytes.len(b) > off) panic("macho.image: segments overlap in the file")
         bytes.zeros(b, off - bytes.len(b))
@@ -248,7 +215,6 @@ export image(machine, entry, segs) := {
     }, segs)
     bytes.zeros(b, sig_off - bytes.len(b))
     if (signed(machine)) {
-        # the code of the first segment is signed as the main binary: its base is 0 and its limit its file size
         s := signature(b, sig_off, ident, 0, align(bytes.len(arg(s0, 2)), page))
         if (bytes.len(s) != sig_size) panic("macho.image: the size of the signature is wrong")
         bytes.append(b, s)

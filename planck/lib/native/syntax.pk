@@ -1,21 +1,10 @@
-# native/syntax: the syntax of native, the systems language of planck
 # Copyright (C) 2026 nineties
-#
-# native{| import u ... struct ... fun ... |} reads the imports, the structs and the functions of the language and is
-# PModule{[PImport{at, u}, ..., Struct{...}, PFun{...}, ...]}.
-# The types, the structs and the parameters are those of vasm (vasm/check). The bodies are written with nested expressions,
-# let, for, compound assignments, the short-circuit and / or, integer literals of any size and floating point literals (1.5, -0.25, 1.0e-3).
-# native_compile.compile (native/compile) turns the tree into the Module of vasm.
 
 use("list")
 use("vasm/check")
 
 native_kw ::= (vasm_kw | 'import | 'let | 'for | 'in | 'and | 'or | 'not)
 native_name ::= !native_kw x:ident { x }
-
-# === Expressions ===
-# precedence, loosest first: or, and, == != < <= > >=, |, ^, &, << >>, + -, * / %, as, unary - not * &, postfix [] . ()
-# A binary * is on the same line as its left operand, so that a statement *p = v on the next line is not a multiplication.
 
 native_expr ::= native_or
 
@@ -56,7 +45,6 @@ native_post ::= e:native_post at:vasm_here "[" i:native_expr "]" { EIndex{at, e,
 native_more_arg ::= "," a:native_expr { a }
 native_args ::= a:native_expr r:native_more_arg* { a :: vasm_tlist(r) }
 
-# a struct value S{f: e, ...} has a field first, so that S { starts the block of if, while or for in the other cases
 native_init ::= at:vasm_here f:native_name ":" e:native_expr { PInit{at, f, e} }
 native_more_init ::= vasm_fsep i:native_init { i }
 native_inits ::= i:native_init r:native_more_init* { i :: vasm_tlist(r) }
@@ -71,8 +59,6 @@ native_primary ::= at:vasm_here 'true { EBool{at, true} }
     | at:vasm_here s:native_name "{" &(native_name ":") is:native_inits ","? "}" { EMake{at, s, is} }
     | at:vasm_here x:native_name { EVar{at, x} }
     | "(" e:native_expr ")" { e }
-
-# === Statements ===
 
 native_asgop ::= "<<=" { 'shl } | ">>=" { 'shr } | "+=" { 'add } | "-=" { 'sub } | "*=" { 'mul } | "/=" { 'div } | "%=" { 'rem }
     | "&=" { 'bit_and } | "|=" { 'bit_or } | "^=" { 'bit_xor } | "=" !"=" { none }
@@ -97,11 +83,8 @@ native_more_stmt ::= vasm_sep s:native_stmt { s }
 native_stmts ::= s:native_stmt r:native_more_stmt* { s :: vasm_tlist(r) }
 native_block ::= "{" ss:native_stmts? ";"? "}" { vasm_option_list(ss) }
 
-# === Items ===
-
 native_fun ::= at:vasm_here 'fun f:native_name rs:vasm_rparams? "(" ps:vasm_params? ")" return_type:vasm_ret? body:native_block { PFun{at, f, vasm_option_list(rs), vasm_option_list(ps), if (arity(return_type) == 0) Unit{} else arg(return_type, 0), body} }
 
-# import u names the unit u, whose structs and functions the file uses. The imports come first in the file.
 native_import ::= at:vasm_here 'import u:native_name { PImport{at, u} }
 
 native_item ::= vasm_struct | native_fun

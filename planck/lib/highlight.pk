@@ -1,19 +1,4 @@
-# highlight: planck source text to HTML with the tokens in spans
 # Copyright (C) 2026 nineties
-#
-# highlight.html(src) parses src with the current grammar (planck/peg.pk, planck/syntax.pk)
-# and returns src with HTML escapes where each token is in <span class="token-...">.
-# The grammar has no marks for colors. The classes come from what the parser matches:
-#   kw    a text in a rule that is a word (Key{"if"}, "in"), and a 'word of a grammar
-#   op    a text in a rule that is not a word ("(", ":=", "|>")
-#   name  ident
-#   num   integer and float
-#   string   string and the parts of a string with values
-#   com   a comment (the blanks and comments that the parser skips)
-# A rule declaration (name ::= ...) in src is defined while src is read, so that the
-# syntax it adds colors the rest of src. Its actions are left out, because they may use
-# what src defines later. The rules are restored when highlight.html returns.
-# Where src does not parse, the line of the failure is left and reading goes on from the next line.
 
 use("base")
 use("list")
@@ -34,9 +19,6 @@ table.set(classes, 'istr_text, "str")
 table.set(classes, 'istr_close, "str")
 table.set(classes, 'istr_hole, "op")
 
-# the marks of the text being read: the end and the class of the token which starts at each position.
-# The longest token wins. For the same text, a word of the syntax wins over a name,
-# which the rules tried before it also match.
 hl_text := ""
 ends := none
 classes_at := none
@@ -54,7 +36,6 @@ note(p, q, cls) := {
     }
 }
 
-# the parser's functions, called through these while reading
 orig_literal := peg_literal
 orig_key := peg_px_key
 orig_call := peg_call_rule
@@ -103,7 +84,6 @@ escape(s) := {
 
 span(cls, s) := _strcat(_strcat(_strcat("<span class=\"tok-", cls), "\">"), _strcat(escape(s), "</span>"))
 
-# s[a:z] is outside the tokens: blanks and comments
 gap(b, s, a, z) := {
     i := a
     start := a
@@ -144,20 +124,17 @@ render(s) := {
 
 is_syntax_error(t) := type(t) == Expr and head(t) == 'SyntaxError
 
-# the name of a rule declaration Apply{_define_rule, Tuple{Quote{name}, Quote{e}}}, or none
 rule_name(t) :=
     if (type(t) == Expr and head(t) == 'Apply and arity(t) == 2 and arg(t, 0) == '_define_rule)
         arg(arg(arg(t, 1), 0), 0)
     else none
 
-# the parsing expression e without the actions
 strip(e) :=
     if (type(e) != Expr) e
     else if (head(e) == 'Act and arg(e, 0) == "...") Prev{}
     else if (head(e) == 'Act) strip(arg(e, 0))
     else peg_map_args(strip, e)
 
-# the position after the line which holds p
 next_line(s, p) := {
     n := strlen(s)
     q := p

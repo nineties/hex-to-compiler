@@ -1,15 +1,4 @@
-# ir: instructions of a register machine, shared by the stages of a code generator
 # Copyright (C) 2026 nineties
-#
-# An instruction is I{op, ops}. op is a symbol and ops are operands:
-#   D{r} defines the register r, U{r} uses it, DU{r} uses it and defines it again (a two-address instruction),
-#   ID{r} and IU{r} define and use the physical register r without naming it in the instruction text,
-#   Ds{[r, ...]} and Us{[r, ...]} define and use several registers,
-#   K{n} an integer, S{name, off} the address of a symbol, L{l} a label, Cc{cc} a condition, W{w} a width, N{name} the name of a service of the system (os.pk),
-#   M{base, disp}, MX{base, index, scale, disp}, MG{name, disp} and MF{kind, n, disp} memory operands.
-#   base and index are U{r} or none. MF is a stack slot ('slot, n) or an incoming argument ('arg, n).
-# Registers are integers. 0 to 31 are the physical registers of a target, and 32 and above are virtual registers.
-# A function is IRFun{name, code, meta}: code is a vector of instructions and meta a table.
 
 use("base")
 use("list")
@@ -23,7 +12,6 @@ vbase := 32
 
 export is_vreg(r) := r >= vbase
 
-# === Functions ===
 export fn(name) := {
     meta := table.new()
     table.set(meta, 'nv, vbase)
@@ -41,7 +29,6 @@ export emit(IRFun{_, c, _}, i) := vector.push(c, i)
 export code(IRFun{_, c, _}) := vector.to_list(c)
 export set_code(IRFun{n, _, m}, xs) := IRFun{n, vector.from_list(xs), m}
 
-# vreg(f, w) is a new virtual register that holds a w-bit value
 export vreg(f, w) := {
     m := meta(f)
     r := table.get(m, 'nv, 0)
@@ -53,7 +40,6 @@ export vreg(f, w) := {
 export nregs(f) := table.get(meta(f), 'nv, 0)
 export width(f, r) := table.get(table.get(meta(f), 'width, none), r, 32)
 
-# the class of a register limits the physical registers it may take; a register without a class takes any
 export set_class(f, r, c) := table.set(table.get(meta(f), 'class, none), r, c)
 export class(f, r) := table.get(table.get(meta(f), 'class, none), r, 'any)
 
@@ -64,14 +50,12 @@ export label(f) := {
     l
 }
 
-# slot(f, size, align) is the number of a new stack slot
 export slot(f, size, align) := {
     v := table.get(meta(f), 'slots, none)
     vector.push(v, Tuple{size, align})
     vector.len(v) - 1
 }
 
-# === Instructions ===
 op_regs(D{r}, role) := if (role == 'define) [r] else []
 op_regs(ID{r}, role) := if (role == 'define) [r] else []
 op_regs(U{r}, role) := if (role == 'use) [r] else []
@@ -86,7 +70,6 @@ op_regs(_, role) := []
 export defs(I{_, ops}) := concat_map(o -> op_regs(o, 'define), ops)
 export uses(I{_, ops}) := concat_map(o -> op_regs(o, 'use), ops)
 
-# map_op(f, o) renames every register of the operand o with f
 map_op(f, D{r}) := D{f(r)}
 map_op(f, U{r}) := U{f(r)}
 map_op(f, DU{r}) := DU{f(r)}
@@ -100,30 +83,25 @@ map_op(f, o) := o
 
 export map_regs(f, I{op, ops}) := I{op, map(o -> map_op(f, o), ops)}
 
-# the operands the instruction names, without the implicit registers
 export explicit(I{_, ops}) := filter(o -> head(o) != 'ID and head(o) != 'IU, ops)
 
 export op(I{op, _}) := op
 export ops(I{_, ops}) := ops
 
-# the instructions that end a basic block
 terminators := ['jmp, 'jcc, 'br, 'ret, 'trap, 'ud2]
 export is_term(i) := member(op(i), terminators)
 
-# the labels an instruction jumps to
 export targets(I{op, ops}) := concat_map(o -> match o {
     L{l} -> [l]
   | _ -> []
 }, if (op == 'label) [] else ops)
 
-# a conditional jump falls through to the next instruction
 export falls(i) := not member(op(i), ['jmp, 'br, 'ret, 'trap, 'ud2])
 
 export move_pair(I{'mov, [D{a}, U{b}]}) := Tuple{a, b}
 move_pair(I{'mov, [W{_}, D{a}, U{b}]}) := Tuple{a, b}
 move_pair(_) := none
 
-# === Text ===
 show_regs(rs) := join(" ", map(r -> string.int_to_string(r), rs))
 
 show_op(D{r}) := f"d{r}"
@@ -152,7 +130,6 @@ export show(I{op, ops}) := if (op == 'label) f"{show_op(ops[0])}:" else f"  {sym
 
 show_fun(f) := _strcat(_strcat(name(f), ":\n"), join("\n", map(show, code(f))))
 
-# the number of the label that a label instruction defines
 export label_id(I{'label, [L{l}]}) := l
 
 }

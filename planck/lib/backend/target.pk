@@ -1,15 +1,4 @@
-# target: the machines that the code generator makes executables for
 # Copyright (C) 2026 nineties
-#
-# A target is Target{name, word, lower, compile, executable}. The stages up to the form of ir.pk know the machine by its word only;
-# everything else that depends on one is reached through a target:
-#   word                      the number of bytes of an address and of a word of memory that the layout of the code of vasm/ir.pk and vasm/runtime.pk is made for
-#   lower(f, helpers)         the function f (ir.fun) rewritten for the registers of the machine; helpers is a table of the functions that
-#                             the rewriting calls (runtime.helpers of vasm/runtime.pk)
-#   compile(name, funs, datas) the object of the functions of lower and the data (see x64.pk)
-#   executable(objects)          the file as a buffer of bytes (see bytes.pk) that joins the objects: the format of the file, the address
-#                             where it is loaded and the entry are the machine's
-# target.get(name) is the target with the name name. The targets are linux_x86_64 (an ELF file for Linux), macos_x86_64 (a Mach-O file for macOS), windows_x86_64 (a PE file for Windows), linux_arm64, macos_arm64 and wasm32 (a module of WebAssembly, backend/wasm.pk). A machine is added by writing its functions and one line of all.
 
 use("base")
 use("list")
@@ -25,10 +14,8 @@ use("backend/wasm")
 
 module target {
 
-# === x86-64 (Linux) ===
 x64_base := 4194304
 
-# the registers are 64-bit: the functions need no rewriting
 x64_lower(f, helpers) := f
 
 x64_executable(objects) := {
@@ -36,22 +23,16 @@ x64_executable(objects) := {
     elf.image('x86_64, arg(image, 0), arg(image, 1))
 }
 
-# === x86-64 (macOS) ===
-# the file is loaded after a page zero of the same size, and the segments are at pages of 4096 bytes
 macos_x64_executable(objects) := {
     image := linker.link_paged(objects, "_start", x64_base, macho.header_size('x86_64, 2), macho.page_size('x86_64))
     macho.image('x86_64, arg(image, 0), arg(image, 1))
 }
 
-# === x86-64 (Windows) ===
-# the file is loaded at the same address as the other formats of x86-64, and each segment is at a page of 4096 bytes; the table of the imports and the variables of the services are an object that joins the program
 windows_x64_executable(objects) := {
     image := linker.link_paged(append(objects, [pe.runtime(os.windows_imports, os.windows_vars)]), "_start", x64_base, pe.header_size, 4096)
     pe.image(arg(image, 0), arg(image, 1), arg(image, 2), os.windows_imports)
 }
 
-# === arm64 (Linux) ===
-# the registers are 64-bit: the functions need no rewriting
 arm64_lower(f, helpers) := f
 
 linux_arm64_executable(objects) := {
@@ -59,14 +40,11 @@ linux_arm64_executable(objects) := {
     elf.image('aarch64, arg(image, 0), arg(image, 1))
 }
 
-# === arm64 (macOS) ===
-# the code refers to its data by the distance, so the linker places the program at the address 0 and the writer moves it behind the first 4 GB of the address space (macho.pk)
 macos_arm64_executable(objects) := {
     image := linker.link_paged(objects, "_start", 0, macho.header_size('arm64, 2), macho.page_size('arm64))
     macho.image('arm64, arg(image, 0), arg(image, 1))
 }
 
-# === All targets ===
 all := [Target{'linux_x86_64, 8, x64_lower, (name, funs, datas) -> x64.compile(os.select_linux_x64, name, funs, datas), x64_executable},
     Target{'macos_x86_64, 8, x64_lower, (name, funs, datas) -> x64.compile(os.select_macos_x64, name, funs, datas), macos_x64_executable},
     Target{'windows_x86_64, 8, x64_lower, (name, funs, datas) -> x64.compile(os.select_windows_x64, name, funs, datas), windows_x64_executable},
