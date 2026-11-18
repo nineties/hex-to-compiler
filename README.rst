@@ -86,9 +86,9 @@ Stage3 starts with ``planck0``, an implementation of the Planck language written
 The language is defined in the `reference <https://nineties.github.io/hex-to-compiler/en/reference/index.html>`_.
 `planck/examples <https://github.com/nineties/hex-to-compiler/tree/main/planck/examples>`_ has sample programs.
 
-``planck/vasmc.pk`` runs on ``planck0`` and compiles vasm, and native, its higher-level notation, to Linux executables, with no assembler or linker of another system (see `vasmc <https://nineties.github.io/hex-to-compiler/en/library/vasmc.html>`_). Its libraries are in ``planck/lib/backend``, ``planck/lib/vasm`` and ``planck/lib/native``.
+``planck/vasmc.pk`` runs on ``planck0`` and compiles vasm, and native, its higher-level notation, to executables for Linux, macOS and Windows on x86-64, Linux and macOS on arm64, and to WebAssembly, with no assembler or linker of another system (see `vasmc <https://nineties.github.io/hex-to-compiler/en/library/vasmc.html>`_). Its libraries are in ``planck/lib/backend``, ``planck/lib/vasm`` and ``planck/lib/native``.
 
-Hot to Run
+How to Run
 ----------
 
 For x86 Linux
@@ -101,6 +101,7 @@ For x86 Linux
    $ make
    $ make test-planck0   # planck/tests/core.pk, syntax.pk, macro.pk, define.pk, module.pk, builtins.pk and the examples in planck/tests/errors
    $ make test-all       # test-planck0 and then the libraries, the tools, the vasm, native and backend tests, and the examples
+   $ make dist           # the PlanckVM as a program for each of Linux, macOS and Windows on x86-64 and Linux and macOS on arm64, in dist/
 
 For Other Environments
 ~~~~~~~~~~~~~~~~~~~~~~
