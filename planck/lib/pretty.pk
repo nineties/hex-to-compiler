@@ -4,6 +4,9 @@
 use("list")
 use("string")
 
+# the primitive that writes a string as its characters
+write_text := put
+
 module pretty {
     export quote_string(s) := {
         b := strbuf.new()
@@ -55,6 +58,20 @@ module pretty {
     }
     export show := show
 
+    # repr_show(x) is x as one line that reads back as the same value: a symbol is 'name
+    fun repr_show
+    repr_show(x) = {
+        t := type(x)
+        if (t == Symbol) _strcat("'", symname(x))
+        else if (t == Expr) {
+            if (x == []) "[]"
+            else if (head(x) == 'Cons and is_list(x)) _strcat(_strcat("[", join(", ", map(repr_show, list_elems(x)))), "]")
+            else _strcat(_strcat(_strcat(symname(head(x)), "{"), join(", ", map(repr_show, args_of(x)))), "}")
+        }
+        else show(x)
+    }
+    export repr_show := repr_show
+
     pp(x, indent, width) := {
         flat := show(x)
         if (indent + strlen(flat) <= width or type(x) != Expr or x == []) flat
@@ -71,8 +88,22 @@ module pretty {
     # and the others put every element on its own line, indented by 2 spaces.
     export text(x, width) := pp(x, 0, width)
 
-    export print(x) := {
-        put(text(x, 60))
-        put("\n")
+    # print(x, pretty = true, end = "\n") writes a string as its characters, and any other value as text(x, 60), or as one line with pretty = false, and then end. A value of any other type is written by the primitive
+    export print(x, pretty = true, end = "\n") := {
+        t := type(x)
+        if (t == String) write_text(x)
+        else if (t == Int or t == Symbol or t == Expr) write_text(if (pretty) text(x, 60) else show(x))
+        else _print_value(x)
+        write_text(end)
     }
 }
+# repr(x) is x as a string that reads back as the same value
+repr = (x) -> pretty.repr_show(x)
+
+# _print_repr(x) writes repr(x) and a new line, which the REPL does for a value. A value of a type that repr cannot show is written by print
+_print_repr(x) := {
+    t := type(x)
+    if (t == Int or t == String or t == Symbol or t == Expr) print(repr(x)) else print(x)
+}
+
+print = pretty.print

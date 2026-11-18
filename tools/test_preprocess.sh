@@ -7,7 +7,7 @@ T=$(mktemp -d)
 trap 'rm -rf "$T"' EXIT
 mkdir -p "$T/planck/lib"
 for f in init peg syntax; do ln -s "$ROOT/planck/$f.pk" "$T/planck/$f.pk"; done
-ln -s "$ROOT/planck/lib/use.pk" "$T/planck/lib/use.pk"
+for f in use base list table vector bytes string pretty; do ln -s "$ROOT/planck/lib/$f.pk" "$T/planck/lib/$f.pk"; done
 
 fail() { echo "test_preprocess: $1"; exit 1; }
 run() { (cd "$T" && "$ROOT/planck0" "$@"); }
@@ -22,13 +22,13 @@ v := 5 * 2
 EOT
 cat > "$T/p1.pk" <<'EOT'
 use("glib")
-println(v)
+print(v)
 EOT
 # a program which changes the grammar before it uses the library
 cat > "$T/p2.pk" <<'EOT'
 mul_expr ::= a:mul_expr "*" b:unary { `(!a - !b) } | ...
 use("glib")
-println(v)
+print(v)
 EOT
 
 expect "without a preprocessed file" 10 p1.pk
@@ -67,7 +67,7 @@ w := v * 3
 EOT
 cat > "$T/p3.pk" <<'EOT'
 use("glib2")
-println(w)
+print(w)
 EOT
 expect "libraries which use each other" 30 p3.pk
 run "$ROOT/tools/preprocess.pk" glib2

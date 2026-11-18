@@ -69,7 +69,7 @@ test: pforth bootstrap/plisp.fs $(shell find bootstrap/plisp -name "*.lisp")
 
 # parse the libraries that planck/vasmc.pk uses in advance (planck/lib/*/*.pkm)
 preprocess: planck0
-	./planck0 tools/preprocess.pk vasm/build native/compile pvm/image
+	./planck0 tools/preprocess.pk pretty vasm/build native/compile pvm/image
 
 # run the core tests of planck0: tests of the language and the examples in tests/errors
 test-planck0: planck0

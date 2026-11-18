@@ -936,10 +936,7 @@ Def{
                 If{
                     Apply{_eq, Tuple{e, none}},
                     Do{
-                        Apply{put, Tuple{"no field "}},
-                        Apply{put, Tuple{Apply{symname, Tuple{name}}}},
-                        Apply{put, Tuple{" in "}},
-                        Apply{println, Tuple{Quote{Module{}}}},
+                        Apply{print, Tuple{Apply{_strcat, Tuple{"no field ", Apply{_strcat, Tuple{Apply{symname, Tuple{name}}, " in Module{}"}}}}}},
                         Apply{exit, Tuple{1}}
                     },
                     none
@@ -955,9 +952,10 @@ Def{
                     Apply{_eq, Tuple{i, none}},
                     Do{
                         Apply{put, Tuple{"no field "}},
-                        Apply{put, Tuple{Apply{symname, Tuple{name}}}},
+                        Apply{_put_value, Tuple{Apply{symname, Tuple{name}}}},
                         Apply{put, Tuple{" in "}},
-                        Apply{println, Tuple{t}},
+                        Apply{_put_value, Tuple{t}},
+                        Apply{put, Tuple{"\n"}},
                         Apply{exit, Tuple{1}}
                     },
                     none
@@ -1063,9 +1061,10 @@ Def{
         Tuple{a, i},
         Do{
             Apply{put, Tuple{"index out of range: "}},
-            Apply{print, Tuple{i}},
+            Apply{_put_value, Tuple{i}},
             Apply{put, Tuple{" in "}},
-            Apply{println, Tuple{a}},
+            Apply{_put_value, Tuple{a}},
+            Apply{put, Tuple{"\n"}},
             Apply{exit, Tuple{1}}
         }
     }}
@@ -1201,9 +1200,10 @@ Def{
                                         Tuple{a, i},
                                         Do{
                                             Apply{put, Tuple{"no index for "}},
-                                            Apply{print, Tuple{a}},
+                                            Apply{_put_value, Tuple{a}},
                                             Apply{put, Tuple{" and "}},
-                                            Apply{println, Tuple{i}},
+                                            Apply{_put_value, Tuple{i}},
+                                            Apply{put, Tuple{"\n"}},
                                             Apply{exit, Tuple{1}}
                                         }
                                     }
@@ -1233,11 +1233,12 @@ Def{
         Tuple{kind, a, i},
         Do{
             Apply{put, Tuple{"cannot assign to an element of "}},
-            Apply{put, Tuple{kind}},
+            Apply{_put_value, Tuple{kind}},
             Apply{put, Tuple{", which is immutable: "}},
-            Apply{print, Tuple{a}},
+            Apply{_put_value, Tuple{a}},
             Apply{put, Tuple{" at "}},
-            Apply{println, Tuple{i}},
+            Apply{_put_value, Tuple{i}},
+            Apply{put, Tuple{"\n"}},
             Apply{exit, Tuple{1}}
         }
     }}
@@ -1283,9 +1284,10 @@ Def{
                                 Tuple{a, i, v},
                                 Do{
                                     Apply{put, Tuple{"no index assignment for "}},
-                                    Apply{print, Tuple{a}},
+                                    Apply{_put_value, Tuple{a}},
                                     Apply{put, Tuple{" and "}},
-                                    Apply{println, Tuple{i}},
+                                    Apply{_put_value, Tuple{i}},
+                                    Apply{put, Tuple{"\n"}},
                                     Apply{exit, Tuple{1}}
                                 }
                             }
@@ -1526,7 +1528,114 @@ unary ::= postfix
 type_ref ::= m:type_ref nospace(".") f:ident { `Apply{_record_get, Tuple{!m, Quote{!f}}} }
            | ident
 
-postfix ::= l:here f:postfix nospace("(") args:delimited(expr, ",") ")" { peg_at(l, `Apply{!f, !args}) }
+" f(x, a = d1, b = d2) := e is f(x, _kwrest...) := { _kwcheck(_kwrest, Tuple{a, b}); a := _kwarg(_kwrest, 0, 'a, () -> d1); b := ...; e }. "
+" peg_defaults(ps, e) is Tuple{parameters, body}. The parameters without a default are not changed. "
+Def{
+    peg_is_default,
+    Lambda{
+        Tuple{x},
+        If{Apply{_eq, Tuple{Apply{type, Tuple{x}}, Expr}}, Apply{_eq, Tuple{Apply{head, Tuple{x}}, Quote{_Default}}}, false}}}
+
+Def{
+    peg_defaults,
+    Lambda{
+        Tuple{ps, e},
+        Do{
+            Def{n, Apply{arity, Tuple{ps}}},
+            Def{k, 0},
+            While{
+                If{Apply{_lt, Tuple{k, n}}, Apply{_not, Tuple{Apply{peg_is_default, Tuple{Apply{arg, Tuple{ps, k}}}}}}, false},
+                Set{k, Apply{_add, Tuple{k, 1}}}},
+            If{
+                Apply{_eq, Tuple{k, n}},
+                Tuple{ps, e},
+                Do{
+                    Def{plain, Tuple{}},
+                    Def{i, 0},
+                    While{
+                        Apply{_lt, Tuple{i, k}},
+                        Do{
+                            Set{plain, Apply{push, Tuple{plain, Apply{arg, Tuple{ps, i}}}}},
+                            Set{i, Apply{_add, Tuple{i, 1}}}}},
+                    Def{names, Tuple{}},
+                    Def{items, Tuple{}},
+                    While{
+                        Apply{_lt, Tuple{i, n}},
+                        Do{
+                            Def{d, Apply{arg, Tuple{ps, i}}},
+                            Def{name, Apply{arg, Tuple{d, 0}}},
+                            Def{idx, Apply{_sub, Tuple{i, k}}},
+                            Set{names, Apply{push, Tuple{names, name}}},
+                            Set{items, Apply{push, Tuple{items, QuasiQuote{Def{UnQuote{name}, Apply{_kwarg, Tuple{_kwrest, UnQuote{idx}, Quote{UnQuote{name}}, Lambda{Tuple{}, UnQuote{Apply{arg, Tuple{d, 1}}}}}}}}}}},
+                            Set{i, Apply{_add, Tuple{i, 1}}}}},
+                    Def{all, Apply{push, Tuple{Tuple{}, QuasiQuote{Apply{_kwcheck, Tuple{_kwrest, Quote{UnQuote{names}}}}}}}},
+                    Set{i, 0},
+                    While{
+                        Apply{_lt, Tuple{i, Apply{arity, Tuple{items}}}},
+                        Do{
+                            Set{all, Apply{push, Tuple{all, Apply{arg, Tuple{items, i}}}}},
+                            Set{i, Apply{_add, Tuple{i, 1}}}}},
+                    Set{all, Apply{push, Tuple{all, e}}},
+                    Tuple{Apply{push, Tuple{plain, Quote{_Rest{_kwrest}}}}, Apply{mexpr, Tuple{Quote{Do}, all}}}}}}}}
+
+" a lambda with the parameters of a definition, which may have defaults "
+Def{
+    peg_lambda_defaults,
+    Lambda{
+        Tuple{ps, e},
+        Do{
+            Def{r, Apply{peg_defaults, Tuple{ps, e}}},
+            Apply{peg_lambda, Tuple{Apply{arg, Tuple{r, 0}}, Apply{arg, Tuple{r, 1}}}}}}}
+
+" peg_items(x, xs) is the Tuple of x and the second elements of the elements of xs "
+Def{
+    peg_items,
+    Lambda{
+        Tuple{x, xs},
+        Do{
+            Def{r, Apply{push, Tuple{Tuple{}, x}}},
+            Def{i, 0},
+            While{
+                Apply{_lt, Tuple{i, Apply{arity, Tuple{xs}}}},
+                Do{
+                    Set{r, Apply{push, Tuple{r, Apply{arg, Tuple{Apply{arg, Tuple{xs, i}}, 1}}}}},
+                    Set{i, Apply{_add, Tuple{i, 1}}}
+                }
+            },
+            r
+        }}}
+
+" peg_tuple_cat(a, b) is the Tuple of the elements of a and then those of b "
+Def{
+    peg_tuple_cat,
+    Lambda{
+        Tuple{a, b},
+        Do{
+            Def{r, a},
+            Def{i, 0},
+            While{
+                Apply{_lt, Tuple{i, Apply{arity, Tuple{b}}}},
+                Do{
+                    Set{r, Apply{push, Tuple{r, Apply{arg, Tuple{b, i}}}}},
+                    Set{i, Apply{_add, Tuple{i, 1}}}
+                }
+            },
+            r
+        }}}
+
+" An argument is an expression or name = expression (_Kw{'name, e}). The ones with names come after the ones without. "
+" An expression of an argument is not an assignment: x = e at the start of an argument is the name x. "
+call_kw ::= n:ident "=" !nospace("=") e:expr { `_Kw{Quote{!n}, !e} }
+call_pos ::= !(ident "=" !nospace("=")) e:expr { e }
+call_list ::= x:call_pos xs:("," call_pos)* { peg_items(x, xs) }
+kw_list ::= x:call_kw xs:("," call_kw)* { peg_items(x, xs) }
+" the arguments as they are written: the check of the order is the lookahead of call_args in postfix "
+call_arg ::= call_kw | call_pos
+call_args ::= a:call_list "," k:kw_list { peg_tuple_cat(a, k) }
+            | kw_list
+            | delimited(call_pos, ",")
+
+postfix ::= l:here f:postfix nospace("(") &(call_args ")") args:delimited(call_arg, ",") ")" { peg_at(l, `Apply{!f, !args}) }
           | x:postfix "@" t:type_ref { `_TypeOf{!x, !t} }
           | t:postfix nospace(".") f:ident { `Apply{_record_get, Tuple{!t, Quote{!f}}} }
           | a:postfix nospace("[") i:index "]" !assign_op { `Apply{_index_get, Tuple{!a, !i}} }
@@ -1653,10 +1762,20 @@ destruct_names ::= "(" a:ident "," bs:delimited1(ident, ",") ")" { Tuple{a, bs} 
 target ::= ident
          | "!" x:ident { mexpr('UnQuote, Tuple{x}) }
 
+" The parameters of a definition: the ones with a pattern, and then the ones with a default value name = expression (_Default{name, e}). "
+def_default ::= n:ident "=" !nospace("=") e:expr { `_Default{!n, !e} }
+def_plain ::= !(ident "=" !nospace("=")) p:pattern { p }
+def_plain_list ::= x:def_plain xs:("," def_plain)* { peg_items(x, xs) }
+def_default_list ::= x:def_default xs:("," def_default)* { peg_items(x, xs) }
+def_param ::= def_default | pattern
+def_params ::= a:def_plain_list "," d:def_default_list { peg_tuple_cat(a, d) }
+             | def_default_list
+             | delimited(pattern, ",")
+
 " a branch of if: an expression without | outside of brackets, "
 " so that a | after if (c) a else b goes on with the functions around the if "
-branch ::= &(postfix ":=") f:ident nospace("(") ps:delimited(pattern, ",") ")" ":=" e:branch {
-               `Do{Declare{!f}, Set{!f, Fusion{!f, !peg_lambda(ps, e)}}}
+branch ::= &(postfix ":=") f:ident nospace("(") &(def_params ")") ps:delimited(def_param, ",") ")" ":=" e:branch {
+               `Do{Declare{!f}, Set{!f, Fusion{!f, !peg_lambda_defaults(ps, e)}}}
            }
          | ns:destruct_names ":=" e:branch { peg_destruct('Def, ns, e) }
          | ns:destruct_names "=" !nospace("=") e:branch { peg_destruct('Set, ns, e) }
@@ -1706,8 +1825,8 @@ primary ::= if_expr
 idents ::= delimited(ident, ",")
 
 " module m { ... }: export marks the definitions that stand directly in the body, which are the fields (peg_module) "
-module_def ::= &(postfix ":=") f:ident nospace("(") ps:delimited(pattern, ",") ")" ":=" e:expr {
-                   `Do{Declare{!f}, Set{!f, Fusion{!f, !peg_lambda(ps, e)}}}
+module_def ::= &(postfix ":=") f:ident nospace("(") &(def_params ")") ps:delimited(def_param, ",") ")" ":=" e:expr {
+                   `Do{Declare{!f}, Set{!f, Fusion{!f, !peg_lambda_defaults(ps, e)}}}
                }
              | x:ident ":=" e:expr { `Def{!x, !e} }
              | 'macro p:pattern ":=" e:expr { peg_macro(p, e) }
@@ -1737,8 +1856,8 @@ import_expr ::= 'import p:delimited1(ident, "::") a:(same 'as ident)? o:import_o
 " f(p, ...) := e adds to f when f is already a variable of the place (Declare) "
 expr ::= syntax_decl
        | def_run
-       | &(postfix ":=") f:ident nospace("(") ps:delimited(pattern, ",") ")" ":=" e:expr {
-             `Do{Declare{!f}, Set{!f, Fusion{!f, !peg_lambda(ps, e)}}}
+       | &(postfix ":=") f:ident nospace("(") &(def_params ")") ps:delimited(def_param, ",") ")" ":=" e:expr {
+             `Do{Declare{!f}, Set{!f, Fusion{!f, !peg_lambda_defaults(ps, e)}}}
          }
        | ns:destruct_names ":=" e:expr { peg_destruct('Def, ns, e) }
        | ns:destruct_names "=" !nospace("=") e:expr { peg_destruct('Set, ns, e) }
@@ -1953,7 +2072,8 @@ _record_with_error(t, name) := {
     put("no field ")
     put(symname(name))
     put(" in ")
-    println(t)
+    _put_value(t)
+    put("\n")
     exit(1)
 }
 
@@ -2021,11 +2141,7 @@ peg_destruct(kind, ns, e) := {
 " the element i of t, which must be a tuple of n elements "
 _destructure(t, i, n) := {
     if (type(t) != Expr or head(t) != 'Tuple or arity(t) != n) {
-        put("cannot assign ")
-        print(t)
-        put(" to ")
-        put(peg_itoa(n))
-        put(" names\n")
+        print(f"cannot assign {t} to {peg_itoa(n)} names")
         exit(1)
     }
     arg(t, i)
@@ -2125,9 +2241,7 @@ peg_pat_literals(p) := {
 }
 
 peg_pat_error(msg) := {
-    put("error: ")
-    put(msg)
-    put("\n")
+    print(f"error: {msg}")
     exit(1)
 }
 
@@ -2273,10 +2387,66 @@ peg_guard = (ps, c, e) -> {
 
 " f(p, ...) := e and f(p, ...) if c := e. Tuple{f, special, function} where special is true when "
 " the function has a guard or an or, which go on to the arms after it. "
-peg_def_arm(f, ps, g, e) := {
+peg_def_arm(f, ps0, g, e0) := {
+    r := peg_defaults(ps0, e0)
+    ps := arg(r, 0)
+    e := arg(r, 1)
     sp := peg_pat_has_or(ps) or peg_pat_dup(peg_pat_names(ps, Tuple{})) != none or arity(g) > 0
     lambda := if (arity(g) > 0) peg_guard(ps, arg(arg(g, 0), 1), e) else peg_lambda(ps, e)
     Tuple{f, sp, lambda}
+}
+
+" The arguments of a call with names: the rest of the parameters is a Tuple of the arguments without names, and then _Kw{'name, value}. "
+_kwis(x) := type(x) == Expr and head(x) == '_Kw
+
+" the number of the arguments without names "
+_kwpos(rest) := {
+    n := 0
+    while (n < arity(rest) and not _kwis(arg(rest, n))) n = n + 1
+    n
+}
+
+" the index in rest, from i on, of the argument named name, or -1 "
+_kwfind(rest, name, i) := {
+    while (i < arity(rest)) {
+        if (_kwis(arg(rest, i)) and arg(arg(rest, i), 0) == name) return i
+        i = i + 1
+    }
+    -1
+}
+
+_kwindex(names, name) := {
+    i := 0
+    while (i < arity(names)) {
+        if (arg(names, i) == name) return i
+        i = i + 1
+    }
+    -1
+}
+
+_kwfail(msg) := {
+    print(f"error: {msg}")
+    exit(1)
+}
+
+" _kwcheck(rest, names) stops the program for an argument that no parameter has, for too many arguments and for a parameter given twice "
+_kwcheck(rest, names) := {
+    n := _kwpos(rest)
+    if (n > arity(names)) _kwfail("too many arguments")
+    i := n
+    while (i < arity(rest)) {
+        name := arg(arg(rest, i), 0)
+        j := _kwindex(names, name)
+        if (j < 0) _kwfail(_strcat("unknown argument ", symname(name)))
+        if (j < n or _kwfind(rest, name, i + 1) >= 0) _kwfail(_strcat(symname(name), " is given twice"))
+        i = i + 1
+    }
+}
+
+" _kwarg(rest, i, name, thunk) is the argument named name, or the i-th one without a name, or thunk() "
+_kwarg(rest, i, name, thunk) := {
+    j := _kwfind(rest, name, 0)
+    if (j >= 0) arg(arg(rest, j), 1) else if (i < _kwpos(rest)) arg(rest, i) else thunk()
 }
 
 " a definition of a special arm matches def_run with the definitions that follow it "
@@ -2320,7 +2490,7 @@ peg_def_run(a, rest) := {
     if (arity(stmts) == 1) arg(stmts, 0) else mexpr('Do, stmts)
 }
 
-def_arm ::= &(postfix (":=" | 'if)) f:ident nospace("(") ps:delimited(pattern, ",") ")" g:('if or_expr)? ":=" e:expr { peg_def_arm(f, ps, g, e) }
+def_arm ::= &(postfix (":=" | 'if)) f:ident nospace("(") &(def_params ")") ps:delimited(def_param, ",") ")" g:('if or_expr)? ":=" e:expr { peg_def_arm(f, ps, g, e) }
 
 def_run ::= a:special_arm rest:(";"? def_arm)* { peg_def_run(a, rest) }
 

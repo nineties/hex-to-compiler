@@ -24,8 +24,13 @@ fun code_of[r](h: &r [u8], lam: i64) -> i64 {
 # A code is a data of the type Code (the word 16 of the heap): the word index code is the header, and the words after the identity and the type are the fields,
 # all values: 3 nregs and 4 arity (integers), 5 the u32 plain array of the instructions, 6 the array of the constants, 7 params (an integer, -1 if none),
 # 8 the u32 plain array of the position table, 9 the index in the constants of the string of the file name (an integer, -1 if none).
+# The field arity is the number of the parameters, and 256 more when the last parameter takes the rest of the arguments as a Tuple (the Tuple counts as one parameter).
 fun code_arity[r](h: &r [u8], code: i64) -> i64 {
-    hg(h, code + 4) >> 1
+    (hg(h, code + 4) >> 1) & 255
+}
+
+fun code_rest[r](h: &r [u8], code: i64) -> bool {
+    ((hg(h, code + 4) >> 9) & 1) == 1
 }
 
 fun code_nregs[r](h: &r [u8], code: i64) -> i64 {
@@ -65,7 +70,11 @@ fun alt_at[r](h: &r [u8], f: i64, i: i64) -> i64 {
 # whether the alternative (a Lambda, a builtin or a continuation) takes c arguments
 fun alt_takes[r](h: &r [u8], f: i64, c: i64) -> bool {
     let k = kind_of(h, f)
-    if k == 8 { return code_arity(h, code_of(h, f)) == c }
+    if k == 8 {
+        let code = code_of(h, f)
+        if code_rest(h, code) { return c >= code_arity(h, code) - 1 }
+        return code_arity(h, code) == c
+    }
     if k == 10 { return (hg(h, (f >> 3) + 3) >> 1) == c }
     if k == 11 { return c == 1 }
     false
@@ -165,6 +174,15 @@ fun enter[r](h: &mutable r [u8], st: &mutable r [i64], rs: &mutable r [i64], fs:
     let code = code_of(h, alt)
     if nb + code_nregs(h, code) > len(rs) { die("stack overflow") }
     if fp + 7 > len(fs) { die("stack overflow") }
+    if code_rest(h, code) {
+        # the arguments from the last parameter on are the Tuple in the register of the last parameter
+        let m = code_arity(h, code) - 1
+        let t = new_mexpr(h, st, hg(h, 4), c - m)
+        for i in 0 as i64..(c - m) {
+            set_arg(h, t, i, g(rs, nb + m + i))
+        }
+        p(rs, nb + m, fin_mexpr(h, st, t))
+    }
     p(fs, fp, alt)
     p(fs, fp + 1, hg(h, (alt >> 3) + 3))
     if keep == 1 {
@@ -351,12 +369,28 @@ fun fail_boundary[r](h: &mutable r [u8], st: &mutable r [i64], rs: &mutable r [i
     q
 }
 
+# frame_argc is the number of the arguments of the call that made the frame cur. A code that takes the rest has the Tuple in the register of its last parameter,
+# and the elements of the Tuple are put back in the registers from there, so that the next alternative takes the arguments as they were called.
+fun frame_argc[r](h: &r [u8], rs: &mutable r [i64], fs: &r [i64], cur: i64) -> i64 {
+    let code = code_of(h, g(fs, cur))
+    let n = code_arity(h, code)
+    if not code_rest(h, code) { return n }
+    let nb = g(fs, cur + 4)
+    let t = g(rs, nb + n - 1)
+    let k = mexpr_arity(h, t)
+    if nb + n - 1 + k > len(rs) { die("stack overflow") }
+    for i in 0 as i64..k {
+        p(rs, nb + n - 1 + i, mexpr_arg(h, t, i))
+    }
+    n - 1 + k
+}
+
 # match_failed: the frame cur ran out of alternatives. f is the function that was called. The call returns to the frame below cur with the value of the resumption.
 fun match_failed[r](h: &mutable r [u8], st: &mutable r [i64], rs: &mutable r [i64], fs: &mutable r [i64], cur: i64, f: i64) -> i64 {
     let rt = g(fs, cur + 6)
     if cur < 7 { die("matching failed") }
     if (rt >> 18) != 0 { die("matching failed") }
-    let c = code_arity(h, code_of(h, g(fs, cur)))
+    let c = frame_argc(h, rs, fs, cur)
     let v = mf_value(h, st, rs, f, g(fs, cur + 4), c, frame_loc(h, st, fs, cur - 7))
     fail_boundary(h, st, rs, fs, cur - 7, rt & 262143, v)
 }
@@ -388,7 +422,7 @@ fun next_alt[r](h: &mutable r [u8], st: &mutable r [i64], rs: &mutable r [i64], 
         } else {
             var c: i64
             c = 2
-            if (rt >> 18) != 2 { c = code_arity(h, code_of(h, g(fs, cur))) }
+            if (rt >> 18) != 2 { c = frame_argc(h, rs, fs, cur) }
             let nb = g(fs, cur + 4)
             status = enter(h, st, rs, fs, cur, alts, c, nb, rt, nb - 1, g(fs, cur + 3))
             if status == 2 {
