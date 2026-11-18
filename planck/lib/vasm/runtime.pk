@@ -1,15 +1,4 @@
-# vasm/runtime: the runtime that programs of vasm/ir.pk need: the start of the program, the allocator, the ports to the arguments and the files,
-# and 64-bit arithmetic that is a call
 # Copyright (C) 2026 nineties
-#
-# The runtime is made for a word w: the number of bytes of an address, 4 or 8 (the word of a target, backend/target.pk). An address is a register
-# of the width of the word and takes a word in memory; a count or a kind is 32 bits.
-# _start calls main and ends the program with its result as the exit status.
-# __alloc(n) is the address of a block of n bytes (8-aligned) and __free(p) gives a block back. Blocks come from the program break
-# (brk), each with a header of 8 bytes that holds the size, and a freed block of up to 4080 bytes goes to the list of its size and is used again.
-# A larger block is not used again.
-# The 64-bit operations that 32-bit registers cannot do with a few instructions (a shift by a count in a register, division and remainder)
-# are functions of vasm that the lower of a target (backend/target.pk) may call; runtime.helpers names them and runtime.runtime holds them.
 
 use("base")
 use("list")
@@ -20,11 +9,9 @@ use("backend/ir")
 use("vasm/check")
 
 module runtime {
-    # the width of a load or a store of an address, and the shift that multiplies by the word
     runtime_pw(w) := if (w == 8) 'w64 else 'w32
     shift(w) := if (w == 8) 3 else 2
 
-    # the number of words that the arguments of a function take for a 64-bit value
     w64words(w) := 8 / w
 
     heap_data(w) := IRData{"__heap", ".bss", w, {
@@ -44,15 +31,6 @@ module runtime {
         b
     }, true}
 
-    # A value of value is the address of a block: the number of its holders (negative for a block that is never released), the kind, and then
-    #   integer: the 64-bit value
-    #   string, symbol: the number of bytes, 0 and the bytes, which is the layout of an array of u8
-    #   constructed value: the head (a symbol), the number of arguments n and n values
-    #   array: the number of elements n, 0 and n values
-    #   function: the address of the code, the number of values kept in it n, the number of the other arguments and n values
-    # The holders and the kind are 4 bytes each, a count is 4 bytes, and the head, the address of the code and the values are a word each. The offsets of the fields
-    # are rc, kind, int_at, array_n, array_elems, con_head, con_n(w), con_elems(w), fun_code, fun_n(w), fun_rest(w) and fun_elems(w) of the module,
-    # and the kinds are kind_int, kind_string, kind_symbol, kind_con, kind_array and kind_fun. The module shows the ones that vasm/ir.pk uses.
     kind_int := 2
     export kind_string := 3
     export kind_symbol := 4
@@ -73,7 +51,6 @@ module runtime {
     export fun_rest(w) := 12 + w
     export fun_elems(w) := 16 + w
 
-    # the bytes of the block of the symbol with the name s
     export symbol_bytes(s) := {
         b := bytes.new()
         bytes.u32(b, -1)
@@ -84,14 +61,11 @@ module runtime {
         b
     }
 
-    # the symbols that the functions on values give
     names := [Tuple{"__sym_true", "true"}, Tuple{"__sym_false", "false"}, Tuple{"__sym_int", "int"}, Tuple{"__sym_string", "string"},
         Tuple{"__sym_symbol", "symbol"}, Tuple{"__sym_mexpr", "mexpr"}, Tuple{"__sym_array", "array"}, Tuple{"__sym_function", "function"}]
 
     export data(w) := append([heap_data(w), freelists_data(w), args_data(w)], map((Tuple{n, s}) -> IRData{n, ".rodata", 4, symbol_bytes(s), false}, names))
 
-    # fun(name, w, ptrs, wides, specs) is a function from a list of instructions whose registers and labels are named by symbols.
-    # The registers named in ptrs have the width of an address, those in wides are 64-bit, and the others are 32-bit.
     fn(name, w, ptrs, wides, specs) := {
         f := ir.fn(name)
         regs := table.new()
@@ -119,8 +93,6 @@ module runtime {
         f
     }
 
-    # zx(w, d, s) is Tuple{instructions, register}: the value of the 32-bit register s in a register of the width of an address, which is d
-    # (for a word of 4 bytes it is s itself and there is no instruction); tr is the low 32 bits of the register s of the width of an address
     zx(w, d, s) := if (w == 4) Tuple{[], s} else Tuple{[I{'zext64, [D{d}, U{s}]}], d}
     tr(w, d, s) := if (w == 4) Tuple{[], s} else Tuple{[I{'trunc, [D{d}, U{s}]}], d}
 
@@ -198,8 +170,6 @@ module runtime {
             I{'ret, [Us{[]}]}]]))
     }
 
-    # __argv(i) is the address of a new array (the layout of vasm/ir.pk) that holds the bytes of the i-th argument of the program; it is not freed.
-    # An i that is not less than the number of arguments is trap.
     argv_fun(w) := {
         pw := runtime_pw(w)
         iz := zx(w, 'ip, 'i)
@@ -244,8 +214,6 @@ module runtime {
             I{'ret, [Us{['a]}]}]]))
     }
 
-    # __open(a) opens for reading the file whose name is the bytes of the array a (the layout of vasm/ir.pk) and gives the file, or a negative number,
-    # and __create(a) opens it for writing
     open_fun(w, name, service) := {
         nz := zx(w, 'np, 'n)
         fn(name, w, ['a, 'buf, 'np, 'k, 's, 'd, 'e], [], list.concat([[
@@ -271,14 +239,10 @@ module runtime {
             I{'ret, [Us{['fd]}]}]]))
     }
 
-    # the functions of the ports that the calls to the names called need
     export ports(w, called) := list.concat([if (member("__argv", called)) [argv_fun(w)] else [],
         if (member("__open", called)) [open_fun(w, "__open", 'open)] else [],
         if (member("__create", called)) [open_fun(w, "__create", 'create)] else []])
 
-    # === Values of value ===
-
-    # a jump to l unless the kind of the block p is the kind k
     need(p, k, t) := [I{'ld, [W{'w32}, D{'kind}, M{U{p}, kind}]}, I{'br, [Cc{'eq}, U{'kind}, K{k}, L{t}, L{'bad}]}, I{'label, [L{t}]}]
     runtime_bad := [I{'label, [L{'bad}]}, I{'trap, []}]
 
@@ -294,7 +258,6 @@ module runtime {
         I{'label, [L{'out}]},
         I{'ret, [Us{[]}]}])
 
-    # The last of the values in a block is released without a new call, so a long list does not use the stack.
     value_drop_fun(w) := {
         pw := runtime_pw(w)
         i4z := zx(w, 'i4p, 'i4)
@@ -360,7 +323,6 @@ module runtime {
             I{'ret, [Us{[]}]}]]))
     }
 
-    # __val_int(v) is a new integer
     value_int_fun(w) := fn("__val_int", w, ['p], ['v], [
         I{'getarg, [D{'v}, K{0}]},
         I{'li, [D{'sz}, K{int_at + 8}]},
@@ -370,12 +332,10 @@ module runtime {
         I{'st, [W{'w64}, M{U{'p}, int_at}, U{'v}]},
         I{'ret, [Us{['p]}]}])
 
-    # __val_unint(v) gives the 64-bit value of the integer v
     value_unint_fun(w) := fn("__val_unint", w, ['p], ['v], append(append([I{'getarg, [D{'p}, K{0}]}], need('p, kind_int, 'ok)), append([
         I{'ld, [W{'w64}, D{'v}, M{U{'p}, int_at}]},
         I{'ret, [Us{['v]}]}], runtime_bad)))
 
-    # __val_bool(b) is the symbol true or false
     value_bool_fun(w) := fn("__val_bool", w, ['r], [], [
         I{'getarg, [D{'b}, K{0}]},
         I{'br, [Cc{'ne}, U{'b}, K{0}, L{'t}, L{'f}]},
@@ -386,7 +346,6 @@ module runtime {
         I{'la, [D{'r}, S{"__sym_false", 0}]},
         I{'ret, [Us{['r]}]}])
 
-    # __val_unbool(v) is 1 for the symbol true, 0 for the symbol false
     value_unbool_fun(w) := fn("__val_unbool", w, ['v, 't, 'f], [], append([
         I{'getarg, [D{'v}, K{0}]},
         I{'la, [D{'t}, S{"__sym_true", 0}]},
@@ -403,7 +362,6 @@ module runtime {
         I{'li, [D{'z}, K{0}]},
         I{'ret, [Us{['z]}]}], runtime_bad))
 
-    # copy n bytes from the address s to the address d; the registers d, s and n have the width of an address
     runtime_copy(d, s, n) := [
         I{'li, [D{'k}, K{0}]},
         I{'label, [L{'copy}]},
@@ -417,7 +375,6 @@ module runtime {
         I{'jmp, [L{'copy}]},
         I{'label, [L{'copied}]}]
 
-    # __val_str(a, kind) is a new string or symbol with the bytes of the array a
     value_string_fun(w) := {
         nz := zx(w, 'np, 'n)
         fn("__val_str", w, ['a, 'p, 'np, 'src, 'dst, 'k, 'sa, 'da], [], list.concat([[
@@ -435,7 +392,6 @@ module runtime {
             I{'ret, [Us{['p]}]}]]))
     }
 
-    # __val_bytes(v) is a new array of the bytes of the string v
     value_bytes_fun(w) := {
         nz := zx(w, 'np, 'n)
         fn("__val_bytes", w, ['v, 'a, 'np, 'src, 'dst, 'k, 'sa, 'da], [], list.concat([[I{'getarg, [D{'v}, K{0}]}], need('v, kind_string, 'ok), [
@@ -449,7 +405,6 @@ module runtime {
             I{'ret, [Us{['a]}]}], runtime_bad]))
     }
 
-    # __val_retag(v, kind) is a new string or symbol with the bytes of the string or symbol v
     value_retag_fun(w) := fn("__val_retag", w, ['v, 'a, 'r], [], append([
         I{'getarg, [D{'v}, K{0}]},
         I{'getarg, [D{'kd}, K{1}]},
@@ -462,8 +417,6 @@ module runtime {
         I{'call, [S{"__val_str", 0}, Us{['a, 'kd]}, Ds{['r]}]},
         I{'ret, [Us{['r]}]}], runtime_bad))
 
-    # __val_eq(a, b) is 1 when a == b of planck holds: the same kind and the same contents, and the same block for an array or a function.
-    # The last argument of a constructed value is compared without a new call.
     value_eq_fun(w) := {
         pw := runtime_pw(w)
         iz := zx(w, 'ip, 'i)
@@ -549,7 +502,6 @@ module runtime {
             I{'ret, [Us{['z]}]}]]))
     }
 
-    # __val_is(v, h, n) is 1 when v is a constructed value with the head h and n arguments
     value_is_fun(w) := {
         pw := runtime_pw(w)
         fn("__val_is", w, ['v, 'h, 'x], [], [
@@ -570,7 +522,6 @@ module runtime {
             I{'ret, [Us{['z]}]}])
     }
 
-    # the number of elements n and the address of the first element of the constructed value or the array v, in the registers 'n and 'base
     elems(w, v) := [
         I{'ld, [W{'w32}, D{'k}, M{U{v}, kind}]},
         I{'br, [Cc{'eq}, U{'k}, K{kind_con}, L{'ec}, L{'e2}]},
@@ -586,7 +537,6 @@ module runtime {
         I{'jmp, [L{'ed}]},
         I{'label, [L{'ed}]}]
 
-    # the check that the 64-bit index index is less than the 32-bit count n, and the 32-bit i4 that is the offset of the element in bytes
     index(w, v) := [
         I{'zext64, [D{'nw}, U{'n}]},
         I{'br, [Cc{'ltu}, U{'index}, U{'nw}, L{'inrange}, L{'bad}]},
@@ -594,7 +544,6 @@ module runtime {
         I{'trunc, [D{'i32}, U{'index}]},
         I{'shl, [D{'i4}, U{'i32}, K{shift(w)}]}]
 
-    # __val_get(v, index) is the element of the constructed value or the array v at the index, with a new holder
     value_get_fun(w) := {
         pw := runtime_pw(w)
         i4z := zx(w, 'i4p, 'i4)
@@ -607,7 +556,6 @@ module runtime {
             I{'ret, [Us{['x]}]}], runtime_bad]))
     }
 
-    # __val_set(v, index, x) puts x in the array v at the index; the place holds x and what it held before has one holder less
     value_set_fun(w) := {
         pw := runtime_pw(w)
         i4z := zx(w, 'i4p, 'i4)
@@ -643,7 +591,6 @@ module runtime {
         I{'call, [S{"__val_inc", 0}, Us{['h]}, Ds{[]}]},
         I{'ret, [Us{['h]}]}]), runtime_bad))
 
-    # one case of __val_typeof
     typeof_case(k, name, next) := [
         I{'br, [Cc{'eq}, U{'k}, K{k}, L{intern(name)}, L{next}]},
         I{'label, [L{intern(name)}]},
@@ -662,7 +609,6 @@ module runtime {
         [I{'la, [D{'r}, S{"__sym_function", 0}]},
          I{'ret, [Us{['r]}]}]]))
 
-    # __val_array(index, x) is a new array of that many elements x
     value_array_fun(w) := {
         pw := runtime_pw(w)
         i4z := zx(w, 'i4p, 'i4)
@@ -693,7 +639,6 @@ module runtime {
             I{'ret, [Us{['p]}]}], runtime_bad]))
     }
 
-    # __val_mexpr(h, a) is a new constructed value with the head h and the elements of the array a
     value_mexpr_fun(w) := {
         pw := runtime_pw(w)
         i4z := zx(w, 'i4p, 'i4)
@@ -725,7 +670,6 @@ module runtime {
             I{'ret, [Us{['p]}]}], runtime_bad]))
     }
 
-    # __val_code(f, n) is the address of the code of the function value f, which takes n arguments
     value_code_fun(w) := fn("__val_code", w, ['f, 'c], [], append(append(append([
         I{'getarg, [D{'f}, K{0}]},
         I{'getarg, [D{'n}, K{1}]}], need('f, kind_fun, 'isfun)), [
@@ -735,7 +679,6 @@ module runtime {
         I{'ld, [W{runtime_pw(w)}, D{'c}, M{U{'f}, fun_code}]},
         I{'ret, [Us{['c]}]}]), runtime_bad))
 
-    # the functions on values of value that the code calls, with the functions that these call; each is a function of the word
     value_makers := [Tuple{"__val_inc", value_inc_fun}, Tuple{"__val_drop", value_drop_fun}, Tuple{"__val_int", value_int_fun}, Tuple{"__val_unint", value_unint_fun},
         Tuple{"__val_bool", value_bool_fun}, Tuple{"__val_unbool", value_unbool_fun}, Tuple{"__val_str", value_string_fun}, Tuple{"__val_bytes", value_bytes_fun},
         Tuple{"__val_retag", value_retag_fun}, Tuple{"__val_eq", value_eq_fun}, Tuple{"__val_is", value_is_fun}, Tuple{"__val_get", value_get_fun}, Tuple{"__val_set", value_set_fun},
@@ -765,8 +708,6 @@ module runtime {
         reverse(out)
     }
 
-    # start_fun(w, ret) is _start for a main that returns the type ret: its value (0 for no value) is the exit status.
-    # It keeps the arguments of the program (the service args) in __args first.
     export start_fun(w, ret) := {
         f := ir.fn("_start")
         e := i -> ir.emit(f, i)
@@ -800,7 +741,6 @@ module runtime {
         t
     }
 
-    # the functions of vasm that the 64-bit operations call
     export runtime := vasm{|
         fun __shl64(x: u64, c: u64) -> u64 {
             var n: u64

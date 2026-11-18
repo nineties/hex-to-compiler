@@ -1,22 +1,4 @@
-# a64enc: encodes instructions of ir.pk as arm64 (A64) machine code
 # Copyright (C) 2026 nineties
-#
-# The registers 0 to 30 are x0 to x30 and 31 is the stack pointer where an instruction takes it (the base of a memory operand, the arithmetic with an integer) and the zero
-# register otherwise. x16 and x17 are the registers that the encoder uses for itself: an integer that does not fit in the field of an instruction, an address that is far, the
-# quotient of a division. The floating point registers v16 and v17 are used the same way and no instruction of the code names them.
-# An instruction of an operand width starts with W{'w32} or W{'w64}. The operations are:
-#   mov add sub mul band bor bxor shl shr sar divs divu rems remu mulhu   [W, D d, U a, U or K b]
-#   neg not                                                              [W, D, U]
-#   movl sx8 sx16 zx8 zx16 sext64                                         [D, U]
-#   movabs                                                               [D, K p3, K p2, K p1, K p0]
-#   lea                                                                  [W, D, memory]: the address, which is the sum of the base and the displacement or of a symbol
-#   cset                                                                 [Cc, W, D, U a, U or K b]: d is 1 when a cc b, otherwise 0
-#   jcc jmp label                                                        [Cc, L, W, U a, U or K b], [L], [L]: a jump to a label
-#   ldr str                                                              [W{u8 u16 w32 w64 sb32 sb64 sh32 sh64}, D, memory], [W{w8 w16 w32 w64}, memory, U or K]
-#   bl blr ret svc cnegcs brk ud2                                         [S name], [U], [], [K], [D], [K], []
-#   spadj stpfp ldpfp setfp                                               [K n]: the stack pointer plus n; x29 and x30 stored at and loaded from the stack pointer; x29 set to the stack pointer
-#   fadd fsub fmul fdiv fsqrt fcmp cvti2f cvtf2i cvtf2f                    as in ir.pk, on v16 and v17
-# A memory operand is M{U base, disp} or MG{name, disp}. The emitter is Em{object, section, buf, labels, fixups}.
 
 use("base")
 use("list")
@@ -30,7 +12,6 @@ module a64enc {
 
 fun movi
 
-# === Emitter ===
 export new(o, secname) := {
     s := object.section(o, secname, 'code, 16)
     Em{o, secname, object.buf(s), table.new(), vector.new()}
@@ -40,8 +21,6 @@ export pos(Em{_, _, b, _, _}) := bytes.len(b)
 
 pow2(n) := bit_shl(1, n)
 
-# word(em, hi, lo, fields) writes the instruction whose upper and lower halves are hi and lo with the fields added: a field is Tuple{shift, value}
-# and the fields do not overlap the bits of hi and lo. An integer of planck0 has 31 bits, so a word is kept as its two halves.
 word(em, hi, lo, fields) := {
     h := hi
     l := lo
@@ -63,10 +42,8 @@ word(em, hi, lo, fields) := {
 
 export label(Em{_, _, b, labels, _}, l) := table.set(labels, l, bytes.len(b))
 
-# a branch to the label l: kind 'b26 (the field of 26 bits of b) or 'c19 (the field of 19 bits at the bit 5 of b.cond)
 branch_fixup(Em{_, _, b, _, fixups}, kind, l) := vector.push(fixups, Tuple{bytes.len(b), l, kind})
 
-# finish(em) fills in the distances to the labels of the function that was written
 export finish(Em{_, _, b, labels, fixups}) := {
     each((Tuple{at, l, kind}) -> {
         t := table.get(labels, l, -1)
@@ -90,10 +67,8 @@ export finish(Em{_, _, b, labels, fixups}) := {
     }, vector.to_list(fixups))
 }
 
-# a relocation of the instruction that is written next
 reloc(Em{o, section, b, _, _}, kind, name, off) := object.reloc(o, section, bytes.len(b), kind, name, off)
 
-# === Operands ===
 reg_of(D{r}) := r
 reg_of(U{r}) := r
 reg_of(DU{r}) := r
@@ -101,7 +76,6 @@ reg_of(_) := panic("a64: a register is expected")
 
 sf(z) := if (z == 'w64) 32768 else 0
 
-# the condition codes
 cc := [Tuple{'eq, 0}, Tuple{'ne, 1}, Tuple{'geu, 2}, Tuple{'ltu, 3}, Tuple{'gtu, 8}, Tuple{'leu, 9}, Tuple{'ge, 10}, Tuple{'lt, 11}, Tuple{'gt, 12}, Tuple{'le, 13}]
 cc_code(c) := {
     e := find(e -> arg(e, 0) == c, cc)
@@ -109,7 +83,6 @@ cc_code(c) := {
     e[1]
 }
 
-# the conditions after a comparison of floating point numbers: a NaN makes every one of them false except ne
 fcc := [Tuple{'eq, 0}, Tuple{'ne, 1}, Tuple{'gt, 12}, Tuple{'ge, 10}, Tuple{'lt, 4}, Tuple{'le, 9}]
 fcc_code(c) := {
     e := find(e -> arg(e, 0) == c, fcc)
@@ -117,33 +90,25 @@ fcc_code(c) := {
     e[1]
 }
 
-# === Instructions ===
-# add and subtract with an integer of 12 bits (the integer is shifted by 12 bits when sh is 1)
 addsub_imm(em, z, sub, setf, d, n, imm, sh) := word(em, 4352 + (if (sub) 16384 else 0) + (if (setf) 8192 else 0) + sf(z) + (if (sh) 64 else 0), 0, [Tuple{10, imm}, Tuple{5, n}, Tuple{0, d}])
 
 addsub_reg(em, z, sub, setf, d, n, m) := word(em, 2816 + (if (sub) 16384 else 0) + (if (setf) 8192 else 0) + sf(z), 0, [Tuple{16, m}, Tuple{5, n}, Tuple{0, d}])
 
-# the logical operations: band 0x0A00, bor 0x2A00, bxor 0x4A00 and orn 0x2A20 (the upper half)
 logic_hi(op) := if (op == 'band) 2560 else if (op == 'bor) 10752 else if (op == 'bxor) 18944 else 10784
 logic_reg(em, z, op, d, n, m) := word(em, logic_hi(op) + sf(z), 0, [Tuple{16, m}, Tuple{5, n}, Tuple{0, d}])
 
-# mov d, s
 mov_reg(em, z, d, s) := logic_reg(em, z, 'bor, d, 31, s)
 
-# the bitfield moves: ubfm (sign false) and sbfm (sign true)
 bfm(em, z, sign, d, n, immr, imms) := word(em, (if (z == 'w64) (if (sign) 37696 else 54080) else (if (sign) 4864 else 21248)), 0, [Tuple{16, immr}, Tuple{10, imms}, Tuple{5, n}, Tuple{0, d}])
 
-# movz, movn and movk of the part hw of 16 bits
 movw(em, kind, z, d, imm, hw) := word(em, (if (kind == 'movn) 4736 else if (kind == 'movz) 21120 else 29312) + sf(z), 0, [Tuple{21, hw}, Tuple{5, imm}, Tuple{0, d}])
 
-# movi(em, z, d, n) loads the integer n (31 bits, sign extended to the register) into d
 movi(em, z, d, n) = {
     if (n >= 0) {
         movw(em, 'movz, z, d, n % 65536, 0)
         if (n >= 65536) movw(em, 'movk, z, d, n / 65536, 1)
     } else if (n >= -65536) movw(em, 'movn, z, d, 0 - n - 1, 0)
     else if (z == 'w64) {
-        # movn sets every bit but the low 16, and the upper half of the low 32 bits is set by movk; the bits above stay 1 for a negative integer
         movw(em, 'movn, z, d, bit_and(0 - n - 1, 65535), 0)
         movw(em, 'movk, z, d, bit_and(bit_sar(n, 16), 65535), 1)
     } else {
@@ -152,14 +117,12 @@ movi(em, z, d, n) = {
     }
 }
 
-# the register that holds b: the register itself, or x16 loaded with the integer
 val(em, U{r}) := r
 val(em, K{n}) := {
     movi(em, 'w64, 16, n)
     16
 }
 
-# add, sub and cmp (subs to the zero register) with a register or an integer
 addsub(em, z, sub, setf, d, n, b) := match b {
     K{k} -> if (k >= 0 and k < 4096) addsub_imm(em, z, sub, setf, d, n, k, false)
         else if (k < 0 and k > -4096 and not setf) addsub_imm(em, z, not sub, false, d, n, 0 - k, false)
@@ -170,7 +133,6 @@ addsub(em, z, sub, setf, d, n, b) := match b {
   | U{r} -> addsub_reg(em, z, sub, setf, d, n, r)
 }
 
-# the size of a memory access: log2 of the bytes, and the opcode (store 0, load 1, load with the sign to a 64-bit register 2, to a 32-bit register 3)
 access_size(k) := match k {
     'w8 -> 0
   | 'u8 -> 0
@@ -192,8 +154,6 @@ access_opc(k) := match k {
 }
 is_store(k) := member(k, ['w8, 'w16, 'w32, 'w64])
 
-# a load or a store of the kind k of the register t at the memory operand m. The kind of a load and a store differ: a store is the width and a load is the width and the extension.
-# loadstore_kind distinguishes by the instruction, so the opcode of a store is 0 and that of a load is read from the kind.
 access(em, store, k, t, m) := {
     size := access_size(k)
     opc := if (store) 0 else access_opc(k)
@@ -218,7 +178,6 @@ access(em, store, k, t, m) := {
     }
 }
 
-# the address of the memory operand m in d
 lea(em, d, M{U{b}, disp}) := {
     if (disp >= 0 and disp < 4096) addsub_imm(em, 'w64, false, false, d, b, disp, false)
     else if (disp < 0 and disp > -4096) addsub_imm(em, 'w64, true, false, d, b, 0 - disp, false)
@@ -236,7 +195,6 @@ lea(em, d, MG{name, off}) := {
 }
 lea(em, d, _) := panic("a64: the address of a memory operand is expected")
 
-# the stack pointer plus n
 spadj(em, n) := {
     sub := n < 0
     m := if (sub) 0 - n else n
@@ -244,18 +202,15 @@ spadj(em, n) := {
     if (m % 4096 != 0) addsub_imm(em, 'w64, sub, false, 31, 31, m % 4096, false)
 }
 
-# a move of the floating point register 16 or 17 from or to a register: the bits of a double (w64) or of a single (w32)
 fmov_in(em, z, v, r) := word(em, if (z == 'w64) 40551 else 7719, 0, [Tuple{5, r}, Tuple{0, v}])
 fmov_out(em, z, r, v) := word(em, if (z == 'w64) 40550 else 7718, 0, [Tuple{5, v}, Tuple{0, r}])
 
-# a scalar operation of floating point of the lower half lo on v16 and v17 (a double with the upper half 0x1E60, a single with 0x1E20)
 fop(em, z, lo, d, n, m) := word(em, if (z == 'w64) 7776 else 7712, lo, [Tuple{16, m}, Tuple{5, n}, Tuple{0, d}])
 
 fop_lo(op) := if (op == 'fadd) 10240 else if (op == 'fsub) 14336 else if (op == 'fmul) 2048 else 6144
 
 cset(em, z, c, d) := word(em, 6784 + sf(z), 1024, [Tuple{16, 31}, Tuple{12, bit_xor(c, 1)}, Tuple{5, 31}, Tuple{0, d}])
 
-# emit(em, i) writes the instruction i. A jump to the label that follows is left out by emit_code.
 emit(em, i) := match I{ir.op(i), ir.explicit(i)} {
     I{'label, [L{l}]} -> label(em, l)
   | I{'mov, [W{z}, D{d}, U{s}]} -> mov_reg(em, z, d, s)
@@ -373,7 +328,6 @@ emit(em, i) := match I{ir.op(i), ir.explicit(i)} {
   | I{'cvtf2i, [W{z}, D{d}, U{a}]} -> {
         fmov_in(em, z, 16, a)
         word(em, if (z == 'w64) 40568 else 40504, 0, [Tuple{5, 16}, Tuple{0, 16}])
-        # x86 gives the least integer for a NaN and for a number too great: the saturated greatest one is made the least (the carry of one more), and a NaN is made the least
         movw(em, 'movn, 'w64, 17, 32768, 3)
         addsub_reg(em, 'w64, true, true, 31, 16, 17)
         word(em, 39552 + 0, 1024, [Tuple{16, 16}, Tuple{12, 1}, Tuple{5, 16}, Tuple{0, 16}])
@@ -390,7 +344,6 @@ emit(em, i) := match I{ir.op(i), ir.explicit(i)} {
   | _ -> panic(f"a64: cannot encode {ir.show(i)}")
 }
 
-# emit_code(em, code) writes the instructions of a function; a jump to the label that follows is left out
 export emit_code(em, code) := {
     xs := code
     while (xs != []) {
@@ -418,7 +371,6 @@ test {
     }
     w32 := W{'w32}
     w64 := W{'w64}
-    # the words are written little endian: add x0, x1, x2 is 0x8B020020
     assert(code([I{'add, [w64, D{0}, U{1}, U{2}]}]) == [32, 0, 2, 139], "add x0, x1, x2")
     assert(code([I{'sub, [w32, D{3}, U{4}, K{5}]}]) == [131, 20, 0, 81], "sub w3, w4, #5")
     assert(code([I{'mov, [w64, D{0}, K{1}]}]) == [32, 0, 128, 210], "movz x0, #1")

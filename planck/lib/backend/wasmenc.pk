@@ -1,11 +1,4 @@
-# wasmenc: writes the binary format of WebAssembly: LEB128 integers, names, sections and the opcodes of the instructions
 # Copyright (C) 2026 nineties
-#
-# A buffer is one of bytes.pk. Integers of planck0 have 31 bits, so a 64-bit integer is given as four parts of 16 bits, the greatest first
-# (the operands of li64 of ir.pk), and a 32-bit value as the integer that has the same low 32 bits as a signed value.
-# op(b, name) writes the opcode of the instruction name, a string that is the name of the text format with _ for .: "i32_add", "i64_load8_u",
-# "i32_wrap_i64", "i64_trunc_sat_f64_s". The immediates that follow are written by the caller (uleb for an index, sleb for i32.const,
-# memarg for a load or a store).
 
 use("base")
 use("list")
@@ -15,7 +8,6 @@ use("bytes")
 
 module wasmenc {
 
-# the types of values and the kinds of the module
 export t_i32 := 127
 export t_i64 := 126
 export t_f32 := 125
@@ -24,7 +16,6 @@ export t_funcref := 112
 export t_func := 96
 export block_void := 64
 
-# the ids of the sections
 export sec_type := 1
 export sec_import := 2
 export sec_function := 3
@@ -36,13 +27,11 @@ export sec_element := 9
 export sec_code := 10
 export sec_data := 11
 
-# the kinds of imports and exports
 export kind_func := 0
 export kind_table := 1
 export kind_memory := 2
 export kind_global := 3
 
-# uleb(b, n) writes the integer n >= 0 as unsigned LEB128
 export uleb(b, n) := {
     go := true
     while (go) {
@@ -53,7 +42,6 @@ export uleb(b, n) := {
     }
 }
 
-# sleb(b, n) writes the integer n as signed LEB128; it is the same for an i32 and an i64 of the value n
 export sleb(b, n) := {
     go := true
     while (go) {
@@ -65,7 +53,6 @@ export sleb(b, n) := {
     }
 }
 
-# sleb64(b, p3, p2, p1, p0) writes the 64-bit integer p3 * 2^48 + p2 * 2^32 + p1 * 2^16 + p0 (each part from 0 to 65535) as signed LEB128
 export sleb64(b, p3, p2, p1, p0) := {
     bits := array(64)
     k := 0
@@ -101,46 +88,39 @@ export sleb64(b, p3, p2, p1, p0) := {
     }
 }
 
-# name(b, s) writes the string s as a name: its length and its bytes
 export name(b, s) := {
     uleb(b, strlen(s))
     bytes.string(b, s)
 }
 
-# section(out, id, content) writes the section id that holds the bytes of the buffer content
 export section(out, id, content) := {
     bytes.u8(out, id)
     uleb(out, bytes.len(content))
     bytes.append(out, content)
 }
 
-# vec(b, xs, f) writes the number of the elements of the list xs and then each element by f(b, x)
 export vec(b, xs, f) := {
     uleb(b, length(xs))
     each(x -> f(b, x), xs)
 }
 
-# the magic number and the version of the format
 export header(b) := {
     bytes.u8(b, 0)
     bytes.string(b, "asm")
     bytes.u32(b, 1)
 }
 
-# a function type: the types of the parameters and of the results
 export func_type(b, params, results) := {
     bytes.u8(b, t_func)
     vec(b, params, bytes.u8)
     vec(b, results, bytes.u8)
 }
 
-# the immediate of a load or a store: the alignment as a power of 2 and the offset
 export memarg(b, align, offset) := {
     uleb(b, align)
     uleb(b, offset)
 }
 
-# the IEEE 754 bits of a double, given as four parts of 16 bits, the greatest first
 export f64_bits(b, p3, p2, p1, p0) := {
     bytes.u16(b, p0)
     bytes.u16(b, p1)
@@ -148,7 +128,6 @@ export f64_bits(b, p3, p2, p1, p0) := {
     bytes.u16(b, p3)
 }
 
-# the opcodes, in groups (a list of the program has at most 64 elements)
 opcodes := list.concat([[
     Tuple{"unreachable", [0]}, Tuple{"nop", [1]}, Tuple{"block", [2]}, Tuple{"loop", [3]}, Tuple{"if", [4]}, Tuple{"else", [5]}, Tuple{"end", [11]}, Tuple{"br", [12]},
     Tuple{"br_if", [13]}, Tuple{"br_table", [14]}, Tuple{"return", [15]}, Tuple{"call", [16]}, Tuple{"call_indirect", [17]}, Tuple{"drop", [26]}, Tuple{"select", [27]}, Tuple{"local_get", [32]},
@@ -174,7 +153,6 @@ codes := {
     t
 }
 
-# op(b, name) writes the opcode of the instruction name
 export op(b, name) := {
     c := table.get(codes, name, none)
     if (c == none) panic(f"wasmenc.op: unknown instruction {name}")

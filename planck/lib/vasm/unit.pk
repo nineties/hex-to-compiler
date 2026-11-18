@@ -1,17 +1,4 @@
-# vasm/unit: compiles vasm modules one by one to the form of ir.pk, saves them, and joins them before the stages of a target
 # Copyright (C) 2026 nineties
-#
-# vasm_unit.unit(name, m, imports, word) checks the module m, which may call the functions and use the structs of imports (a list of the
-# interfaces of other units), and lowers it with vasm_ir.lower (vasm/ir.pk). The result is a unit:
-#   Unit{name, word, iface, funs, gens, strings, symbols}
-# iface is the structs and the functions of m with the bodies left out (vasm_unit.iface), which other units take as imports.
-# funs are the lowered functions of m and gens the functions made for dropping values and for functions as values. word is the
-# number of bytes of an address that the code is laid out for. strings are the string literals and symbols the names of the symbols that
-# the code names. A unit does not depend on the machine except by its word, and it needs no function main.
-# vasm_unit.units_merge(units, word) joins units in the order given: the functions of the units, then the functions of gens (each once, in the order
-# they are first made), and the data of the strings and the symbols (each once, in the order they are first named). The result is the one that the whole of the units as a
-# module gives. The merged form has main and its type, which the start of the program needs.
-# A unit is saved as the text of one M-expression (vasm_unit.text), whose lists are written List{...} (Cat{...} of the groups for more than 64 elements) and whose symbols are written by their names.
 
 use("base")
 use("list")
@@ -29,19 +16,16 @@ module vasm_unit {
     fun list_text
     fun vu_text
 
-    # the structs and the functions of m, without the bodies
     export iface(Module{items}) := map(d -> match d {
         Fun{at, f, rs, ps, ret, _} -> Fun{at, f, rs, ps, ret, []}
       | _ -> d
     }, items)
 
-    # the names of the functions and the structs of the items, with the kind
     names(items) := map(d -> match d {
         Fun{_, f, _, _, _, _} -> Tuple{'fn, f}
       | Struct{_, s, _} -> Tuple{'struct, s}
     }, items)
 
-    # unit(name, m, imports, word) is the unit of the module m, which the code of the width word is made of
     export unit(name, m, imports, word) := {
         errors := vasm_check.check_with(m, imports)
         if (errors != []) panic(f"vasm_unit: {name} has an error: {arg(errors[0], 2)}")
@@ -56,8 +40,6 @@ module vasm_unit {
     export word(Unit{_, w, _, _, _, _, _}) := w
     export ifaces(Unit{_, _, i, _, _, _, _}) := i
 
-    # === Joining ===
-    # the type of main of the interfaces, which stops the program when it is not there once, or takes arguments
     main_type(ifs) := {
         ds := filter(d -> head(d) == 'Fun and arg(d, 1) == 'main, ifs)
         if (ds == []) panic("vasm: the program has no function main")
@@ -66,7 +48,6 @@ module vasm_unit {
         arg(d, 4)
     }
 
-    # the names that two units define stop the program
     check_names(units) := {
         seen := table.new()
         each(u -> each(n -> {
@@ -76,7 +57,6 @@ module vasm_unit {
         }, names(ifaces(u))), units)
     }
 
-    # the functions of gens once each, in the order they are first made; a function of the same name in two units must be the same
     vu_gens(units) := {
         seen := table.new()
         out := []
@@ -100,7 +80,6 @@ module vasm_unit {
         reverse(out)
     }
 
-    # units_merge(units, w) is Merged{funs, strings, symbols, main}: the functions, the string literals, the names of the symbols and the type of main
     export units_merge(units, w) := {
         each(u -> if (word(u) != w) panic(f"vasm: {name(u)} is made for the word of {word(u)} bytes, not {w}"), units)
         check_names(units)
@@ -110,8 +89,6 @@ module vasm_unit {
         Merged{funs, unique(concat_map(u -> arg(u, 5), units)), unique(concat_map(u -> arg(u, 6), units)), ret}
     }
 
-    # === Saving ===
-    # The text of a value: integers, strings, symbols and M-expressions of them. A list is List{...}.
     string_text(s) := {
         out := strbuf.new()
         strbuf.add(out, "\"")
@@ -133,7 +110,6 @@ module vasm_unit {
         strbuf.string(out)
     }
 
-    # a list of more than 64 elements is Cat{...} of the groups that are written the same way, as an M-expression has at most 64 arguments
     list_text(out, xs) = {
         n := length(xs)
         if (n <= 64) {
@@ -183,7 +159,6 @@ module vasm_unit {
         } else panic("vasm_unit.text: a value that is not saved")
     }
 
-    # the function f (ir.fun) as an M-expression: IRFun does not hold tables and vectors there
     fun_value(IRFun{file_name, code, meta}) := {
         items := t -> list.sort((a, b) -> arg(a, 0) < arg(b, 0), table.items(t))
         FunV{file_name, vector.to_list(code), table.get(meta, 'nv, 0), table.get(meta, 'nl, 0), vector.to_list(table.get(meta, 'slots, none)),
@@ -205,10 +180,8 @@ module vasm_unit {
         IRFun{file_name, vector.from_list(code), meta}
     }
 
-    # the stages of a target rewrite the functions in place, so the merged functions are copies and a unit can be joined again or saved after
     copy(f) = fun_of(fun_value(f))
 
-    # text(u) is the text of the unit u
     export text(Unit{uname, uword, uiface, funs, gens, strings, symbols}) := {
         out := strbuf.new()
         vu_text(out, VasmUnit{format, uname, uword, uiface, map(fun_value, funs), map(fun_value, gens), strings, symbols})
@@ -216,7 +189,6 @@ module vasm_unit {
         strbuf.string(out)
     }
 
-    # the value of the M-expression e read from a text: List{...} is a list
     value(e) := {
         t := type(e)
         if (t == Expr) {
@@ -233,7 +205,6 @@ module vasm_unit {
         } else e
     }
 
-    # parse(src) is the unit that text gave the text src; it stops the program for a text of another form
     export parse(src) := {
         r := parse_mexpr(src)
         e := arg(r, 0)

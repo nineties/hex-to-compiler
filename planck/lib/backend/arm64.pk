@@ -1,16 +1,4 @@
-# arm64: the arm64 target of the code generator: instruction selection, the model of the scheduler,
-# the register file, the frame of a function, and compile of a whole module to an object
 # Copyright (C) 2026 nineties
-#
-# The input is a function of the machine independent form (see x64.pk for the list of the instructions), with registers of 32 and 64 bits. The instructions that come out
-# are those of a64enc.pk: three operands, an integer wherever the machine takes it and otherwise a register that the encoder loads.
-# The registers 0 to 30 are x0 to x30. A 32-bit value lives in a 64-bit register with its upper half 0, which every instruction that gives a 32-bit value keeps.
-# The calling convention: 8 bytes for each argument, the arguments are stored from the last to the first on the stack that the caller makes room for (a multiple of 16 bytes),
-# the results are in x0 and x1, x0 to x15 are changed by a call and x19 to x28 are kept by the callee (and x29, the frame pointer, and x30, the link register).
-# x16 and x17 are the registers of the encoder, x18 is the register of the platform and x29 and x30 hold the frame; none of them is given out.
-# The frame of a function: the stack pointer is moved down by the size of the frame, x29 and x30 are stored at the bottom, x29 is set to the stack pointer, and then come the registers
-# that the function keeps and its stack slots; the arguments of the function are above the frame.
-# The services of the system and trap are selected by sys(emit, label, name, args, d), which is a function of os.pk for the system of the target.
 
 use("base")
 use("list")
@@ -29,7 +17,6 @@ module arm64 {
 
 fun select_one
 
-# select(sys, f, code) is the instructions for arm64 of the machine independent instructions code, with the system sys
 select(sys, f, code) := {
     out := []
     emit := i -> { out = i :: out }
@@ -37,23 +24,19 @@ select(sys, f, code) := {
     reverse(out)
 }
 
-# the width of a register: 'w64 for a physical register and a virtual register of 64 bits
 a64_wd(f, r) := if (ir.is_vreg(r) and ir.width(f, r) == 32) 'w32 else 'w64
 
-# the stack pointer, which the arguments of a call are stored at
 sp := 31
 
 select_one(sys, f, emit, i) = {
     nv := w -> ir.vreg(f, if (w == 'w64) 64 else 32)
     wd := r -> a64_wd(f, r)
-    # d = s for registers: a 32-bit value that comes from a physical register is made whole by a 32-bit move
     mov := (d, s) -> {
         if (ir.is_vreg(d)) {
             if (wd(d) == 'w32 and not ir.is_vreg(s)) emit(I{'movl, [D{d}, U{s}]})
             else emit(I{'mov, [W{wd(d)}, D{d}, U{s}]})
         } else emit(I{'mov, [W{wd(s)}, D{d}, U{s}]})
     }
-    # the instructions that os.pk gives, with the widths
     os_emit := j -> match j {
         I{'mov, [D{d}, U{s}]} -> mov(d, s)
       | I{'mov, [D{d}, K{n}]} -> emit(I{'mov, [W{if (ir.is_vreg(d)) wd(d) else if (n >= 0) 'w32 else 'w64}, D{d}, K{n}]})
@@ -64,7 +47,6 @@ select_one(sys, f, emit, i) = {
       | I{'mov, [D{d}, U{s}]} -> mov(d, s)
       | I{'li, [D{d}, K{n}]} -> emit(I{'mov, [W{wd(d)}, D{d}, K{n}]})
       | I{'li64, [D{d}, K{p3}, K{p2}, K{p1}, K{p0}]} -> {
-            # up to 30 bits it is a 32-bit move, which clears the upper half
             if (p3 == 0 and p2 == 0 and p1 < 16384) emit(I{'mov, [W{'w32}, D{d}, K{p1 * 65536 + p0}]})
             else emit(I{'movabs, [D{d}, K{p3}, K{p2}, K{p1}, K{p0}]})
         }
@@ -125,10 +107,8 @@ select_one(sys, f, emit, i) = {
     }
 }
 
-# === Scheduling ===
 is_memf(o) := member(head(o), ['M, 'MX, 'MG, 'MF])
 
-# the memory the instruction touches: 'load, 'store, 'barrier or 'none
 effect(I{'ldr, _}) := 'load
 effect(I{'str, _}) := 'store
 effect(I{'bl, _}) := 'barrier
@@ -149,20 +129,16 @@ latency(i) := match ir.op(i) {
 
 sched_model := SchedModel{latency, effect}
 
-# === Registers ===
-# the registers that a call may change are given first; x19 to x28 are kept by the callee
 callee_saved := range(19, 29)
 ra := RATarget{append(range(0, 16), callee_saved), table.new(),
     (r, slot) -> I{'ldr, [W{'w64}, D{r}, MF{'slot, slot, 0}]}, (r, slot) -> I{'str, [W{'w64}, MF{'slot, slot, 0}, U{r}]}, 8}
 
-# === Frames ===
 align(n, a) := (n + a - 1) / a * a
 
 resolve(total, offs, MF{'arg, n, d}) := M{U{29}, total + 8 * n + d}
 resolve(total, offs, MF{'slot, n, d}) := M{U{29}, table.get(offs, n, 0) + d}
 resolve(total, offs, o) := o
 
-# frame(f, code) adds the prologue and the epilogue to the allocated code and gives an address to each stack slot
 frame(f, code) := {
     defined := table.new()
     each(i -> each(r -> table.set(defined, r, true), ir.defs(i)), code)
@@ -186,7 +162,6 @@ frame(f, code) := {
     append(prologue, body)
 }
 
-# === Functions and modules ===
 compile_fun(sys, f, em) := {
     code := select(sys, f, ir.code(f))
     code = sched.code(code, sched_model)
@@ -197,7 +172,6 @@ compile_fun(sys, f, em) := {
     a64enc.emit_code(em, code)
 }
 
-# compile(sys, name, funs, datas) is an object of the functions (ir.fun) and the data (see object.add_data of object.pk), for the system sys
 export compile(sys, name, funs, datas) := {
     o := object.new(name)
     each(f -> compile_fun(sys, f, a64enc.new(o, ".text")), funs)
@@ -205,7 +179,6 @@ export compile(sys, name, funs, datas) := {
     o
 }
 
-# the selection of instructions
 test {
     f := ir.fn("t")
     a := ir.vreg(f, 32)

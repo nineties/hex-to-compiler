@@ -1,12 +1,4 @@
-# link: joins relocatable objects (object.pk) into the segments of an executable (elf.pk)
 # Copyright (C) 2026 nineties
-#
-# Sections of the same name are joined in the order of the objects. The sections .text and .rodata make the first segment,
-# which is read and executed and holds the headers of the file in front, and .data and .bss make the second, which is read and written.
-# link(objects, entry, base, header) is Image{entry, segs, symbols}: the address of the symbol entry, the segments of elf.pk, and a table from
-# the global symbols to their addresses. base is the address where the file is loaded and header the size of the headers of the file for
-# two segments (elf.header_size(2)). The second segment follows the first in the file at a multiple of 16 bytes and in the memory one page after that place, as elf.pk
-# takes it; link_paged puts the second segment at the page of the file after the first, and at the same place in the memory. A symbol that is used and not defined, or defined twice as global, stops the program.
 
 use("base")
 use("list")
@@ -23,8 +15,6 @@ align(n, a) := (n + a - 1) / a * a
 first := [".text", ".rodata"]
 second := [".data", ".bss"]
 
-# the position of each piece: a table from Tuple{object index, section name} to its offset in the joined section,
-# and the joined sections: a table from the name to Tuple{buffer, alignment}
 link_join(objects, names, joined, pieces) := each(name -> {
     out := bytes.new()
     al := 1
@@ -43,7 +33,6 @@ link_join(objects, names, joined, pieces) := each(name -> {
     table.set(joined, name, Tuple{out, al})
 }, names)
 
-# add_bits(b, at, lo, hi) adds the halves lo and hi of 16 bits to the word of 4 bytes at at: the fields of an instruction that a relocation fills are 0 before
 add_bits(b, at, lo, hi) := {
     bytes.set(b, at, bytes.get(b, at) + lo % 256)
     bytes.set(b, at + 1, bytes.get(b, at + 1) + lo / 256)
@@ -56,7 +45,6 @@ link_with(objects, entry, base, header, file_align, gap) := {
     joined := table.new()
     pieces := table.new()
     link_join(objects, append(first, second), joined, pieces)
-    # addresses of the joined sections
     addr := table.new()
     cur := base + header
     each(n -> {
@@ -66,7 +54,6 @@ link_with(objects, entry, base, header, file_align, gap) := {
         cur = cur + bytes.len(arg(j, 0))
     }, first)
     end0 := cur
-    # the second segment starts in the file where the first ends, and in memory one page after that
     off1 := align(end0 - base, file_align)
     cur = base + off1 + gap
     each(n -> {
@@ -76,7 +63,6 @@ link_with(objects, entry, base, header, file_align, gap) := {
         cur = cur + bytes.len(arg(j, 0))
     }, second)
     end1 := cur
-    # symbols
     globals := table.new()
     locals := array(length(objects))
     k := 0
@@ -93,7 +79,6 @@ link_with(objects, entry, base, header, file_align, gap) := {
         }, object.symbols(o))
         k = k + 1
     }, objects)
-    # relocations
     k = 0
     each(o -> {
         each((Rel{section, off, kind, symbol, addend}) -> {
@@ -106,14 +91,12 @@ link_with(objects, entry, base, header, file_align, gap) := {
                 'Abs32 -> bytes.set_u32(buf, at, s + addend)
               | 'Pc32 -> bytes.set_u32(buf, at, s + addend - place)
               | 'Page21 -> {
-                    # adrp: the distance in pages of 4096 bytes in the fields immlo (bits 29 and 30) and immhi (bits 5 to 23)
                     pages := bit_sar(s + addend, 12) - bit_sar(place, 12)
                     if (pages >= 1048576 or pages < -1048576) panic(f"link: {symbol} is too far for adrp")
                     hi := bit_and(bit_sar(pages, 2), 524287)
                     add_bits(buf, at, hi * 32 % 65536, hi * 32 / 65536 + bit_and(pages, 3) * 8192)
                 }
               | 'Lo12 -> {
-                    # add with an integer: the low 12 bits of the address in the bits 10 to 21
                     x := bit_and(s + addend, 4095) * 1024
                     add_bits(buf, at, x % 65536, x / 65536)
                 }
@@ -130,7 +113,6 @@ link_with(objects, entry, base, header, file_align, gap) := {
     }, objects)
     e := table.get(globals, entry, none)
     if (e == none) panic(f"link: the entry {entry} is not defined")
-    # segments
     seg0 := bytes.new()
     bytes.zeros(seg0, header)
     each(n -> {
@@ -154,7 +136,6 @@ link_with(objects, entry, base, header, file_align, gap) := {
 
 export link(objects, entry, base, header) := link_with(objects, entry, base, header, 16, 4096)
 
-# link_paged(objects, entry, base, header, page) is the same for a format that puts each segment at a multiple of the page size, in the file and in the memory
 export link_paged(objects, entry, base, header, page) := link_with(objects, entry, base, header, page, 0)
 
 }
