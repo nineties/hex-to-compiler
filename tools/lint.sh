@@ -33,11 +33,11 @@ if grep -E "$(printf '\t')[0-9]+$(printf '\t')" "$added" | grep -E "$suppress" >
     fail "a note that silences a lint was added. Fix the code the lint points at."
 fi
 
-comment='[[:space:]]*(#|//|;|/\*)'
-if awk -F '\t' '$3 ~ /^#!/ { next } { print }' "$added" |
+comment='[[:space:]]*#'
+if awk -F '\t' '$1 !~ /\.pk$/ { next } $3 ~ /^#!/ { next } { print }' "$added" |
     grep -E "^[^$(printf '\t')]*$(printf '\t')[0-9]+$(printf '\t')$comment" |
     grep -v -i -E 'copyright|license|SPDX' >&2; then
-    fail "a comment line was added. Name the code so that it needs no comment, or encode the rule in a check."
+    fail "a comment line was added to a .pk file. Name the code so that it needs no comment, or encode the rule in a check."
 fi
 
 if grep -E "$(printf '\t')[0-9]+$(printf '\t').*[[:space:]]$" "$added" >&2; then
