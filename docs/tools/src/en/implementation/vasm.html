@@ -13,7 +13,7 @@
 <h2>Types and the state of the checker</h2>
 <p>Types are also M-expressions: integers are <code>I8{}</code> to <code>U64{}</code>, a box is <code>Own{u}</code>, a borrow is <code>Ref{'shr or 'mutable, region, u}</code>, an array is <code>Array{u}</code> and a struct is <code>Named{s}</code>. <code>static</code> is a region that outlives every region.</p>
 <!--file planck/lib/vasm/check.pk sigs := table.new() .. fun owning_in-->
-<p>For each function the checker keeps the state of each variable (initialized, uninitialized, moved, freed and so on) and its list of borrows in <code>Vs{status, loans}</code>.</p>
+<p>The checker keeps a state for each function. <code>vasm_info</code> maps each variable in scope to <code>Info{type, regions}</code>: its type and the regions open at its declaration. A state maps each variable to <code>Vs{status, loans}</code>, and its key <code>".dead"</code> becomes true after <code>return</code>. <code>status</code> is <code>'init</code>, <code>'uninit</code>, <code>Moved{at}</code>, <code>Freed{at}</code>, <code>Taken{at}</code> (an <code>own</code> value whose contents were moved out by <code>x = *p</code>) or <code>Parts{fields}</code> (a struct value whose <code>own</code> fields were moved out by <code>x = s.f</code>). <code>loans</code> is a list of <code>Loan{region, kind}</code>. <code>regions</code> holds the regions in scope, the innermost first, ending with the regions of the function.</p>
 <p>The type decides between move and copy. An <code>own</code>, and a struct that has <code>own</code>, is <em>linear</em> and is moved on use. Integers, <code>bool</code> and shared borrows are copied.</p>
 
 <h2>Ownership</h2>
@@ -27,7 +27,7 @@
 <!--ex vasm_borrow-->
 <p>A borrowed variable gets a <code>Loan{region, kind}</code>. While it is borrowed, a move, a release or an assignment is an error from <code>no_loans</code>. Any number of shared borrows can coexist, but only one <code>&amp;mutable</code>, and reads and writes during it are also errors. At the end of <code>region r { ... }</code> the loans of <code>r</code> disappear.</p>
 <!--ex vasm_escape-->
-<p><code>outlives(q, r)</code> decides which region is outside. <code>q</code> outlives <code>r</code> when it is the same as <code>r</code> or <code>static</code>, or when <code>r</code> is a region opened in the function and <code>q</code> was opened before it. A borrow of an outer region can be used as a borrow of an inner one, but not the reverse.</p>
+<p><code>outlives(q, r)</code> decides which region is outside. <code>q</code> outlives <code>r</code> when it is the same as <code>r</code> or <code>static</code>, the region of the string literals, which lasts to the end of the program, or when <code>r</code> is a region opened in the function and <code>q</code> was opened before it. The regions of the function itself are not ordered among themselves. A borrow of an outer region can be used as a borrow of an inner one, but not the reverse.</p>
 <!--file planck/lib/vasm/check.pk outlives(q, r)-->
 
 <h2>Branches and loops</h2>
