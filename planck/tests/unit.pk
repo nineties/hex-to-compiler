@@ -1,4 +1,3 @@
-# tests for vasm/unit.pk: modules compiled one by one, saved and joined give the executable of the whole program
 # Copyright (C) 2026 nineties
 
 passed := 0
@@ -14,7 +13,6 @@ check(actual, expected) := if (actual == expected) {
 use("vasm/build")
 use("list")
 
-# a library: it has no main
 lib := vasm{|
     struct Buf { data: own [u8], size: i64 }
 
@@ -52,7 +50,6 @@ lib := vasm{|
     }
 |}
 
-# a program that uses it
 app := vasm{|
     fun main() -> i64 {
         var b: Buf
@@ -65,7 +62,6 @@ app := vasm{|
     }
 |}
 
-# the same program in one module
 whole := Module{append(arg(lib, 0), arg(app, 0))}
 
 word := target.word(target.get(target.default))
@@ -79,24 +75,19 @@ split_bytes := vasm_build.units_executable([lib_unit, app_unit])
 check(bytes.len(split_bytes) > 0, true)
 check(vector.to_list(split_bytes) == vector.to_list(whole_bytes), true)
 
-# joining does not change the units
 check(vasm_unit.text(lib_unit) == text_before, true)
 
-# a unit that is saved and read again
 saved := vasm_unit.parse(vasm_unit.text(lib_unit))
 check(vasm_unit.text(saved) == vasm_unit.text(lib_unit), true)
 check(vector.to_list(vasm_build.units_executable([saved, vasm_unit.parse(vasm_unit.text(app_unit))])) == vector.to_list(whole_bytes), true)
 
-# the name and the interface of a unit
 check(vasm_unit.name(lib_unit), "lib")
 check(vasm_unit.ifaces(app_unit), vasm_unit.iface(app))
 
-# the same with the target named
 t64 := target.get('linux_x86_64)
 check(vector.to_list(vasm_build.units_executable_for(t64, [lib_unit, app_unit])) == vector.to_list(vasm_build.executable_for(t64, whole)), true)
 
 
-# a function of more than 64 instructions is saved and read again
 big := vasm{|
     fun big(x: i64) -> i64 {
         var y: i64

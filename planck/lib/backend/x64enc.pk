@@ -1,16 +1,4 @@
-# x64enc: encodes instructions of ir.pk as x86-64 machine code
 # Copyright (C) 2026 nineties
-#
-# The registers 0 to 15 are rax, rcx, rdx, rbx, rsp, rbp, rsi, rdi and r8 to r15, and 16 stands for the flags, which are not encoded.
-# An instruction of an operand width starts with W{'w32} or W{'w64}. The operations are:
-#   mov ALU(add bor band sub bxor cmp adc sbb) test imul neg not mul div idiv cqo shl shr sar lea movzxb movsxb movzxw movsxw
-# and movl (a 32-bit move that clears the upper half and is never taken out), movsxd, movb and movw (stores of the low 8 and 16 bits), push pop call ret jmp jcc
-# setcc syscall ud2, call of a register or of the address that is held at a symbol (the table of imports of a program for Windows), and a label instruction I{'label, [L{l}]}. A shift by cl is I{op, [W, DU{d}]}.
-# The instructions of SSE2 work on xmm0 and xmm1, which the instruction does not name: xin and xout move a value of a 32-bit or 64-bit register to and from
-# xmm0 or xmm1, sse is a scalar operation of the opcode K on xmm0 and xmm1, ucomi compares them, cvtsi2f, cvttf2si and cvtf2f convert xmm0, and movabs
-# loads a 64-bit integer given as four parts of 16 bits, the greatest first. W{'w64} selects the double (sd) and W{'w32} the single (ss). A memory operand is M, MX or MG (relative to the
-# next instruction); the stack slots (MF) are replaced by M with rbp before. An integer operand is a 32-bit field that is sign extended in a 64-bit
-# operation. The emitter is that of x86enc.pk.
 
 use("base")
 use("list")
@@ -46,10 +34,8 @@ x64_reg(_) := panic("x64: a register is expected")
 
 is_memory(o) := member(head(o), ['M, 'MX, 'MG])
 
-# the register or the memory operand rm of an instruction
 x64_rm(o) := if (is_memory(o)) o else x64_reg(o)
 
-# the registers that rm needs a bit of the prefix for: Tuple{index, base}
 rm_regs(r @ Int) := Tuple{0, r}
 rm_regs(M{U{b}, _}) := Tuple{0, b}
 rm_regs(MX{U{b}, U{x}, _, _}) := Tuple{x, b}
@@ -57,8 +43,6 @@ rm_regs(MX{'none, U{x}, _, _}) := Tuple{x, 0}
 rm_regs(MG{_, _}) := Tuple{0, 0}
 rm_regs(_) := panic("x64: a register or a memory operand is expected")
 
-# rex(em, w, r, x, b, force) writes the prefix REX when a bit of it is needed: w is true for a 64-bit operand,
-# r extends the register of the reg field, x the index and b the base or the register of the rm field
 rex(em, w, r, x, b, force) := {
     v := 64 + (if (w) 8 else 0) + (if (r >= 8) 4 else 0) + (if (x >= 8) 2 else 0) + (if (b >= 8) 1 else 0)
     if (v != 64 or force) x86enc.u8(em, v)
@@ -66,8 +50,6 @@ rex(em, w, r, x, b, force) := {
 
 scale(s) := if (s == 1) 0 else if (s == 2) 1 else if (s == 4) 2 else if (s == 8) 3 else panic("x64: the scale of an index is 1, 2, 4 or 8")
 
-# modrm(em, reg, rm, trail) writes the ModRM byte, the SIB byte and the displacement. reg is the number in the reg field; rm is a register number
-# or a memory operand. trail is the number of bytes of integers that follow, which a displacement relative to the next instruction counts.
 modrm(em, reg, r @ Int, trail) := x86enc.u8(em, 192 + (reg % 8) * 8 + r % 8)
 modrm(em, reg, M{U{b}, d}, trail) := modrm_base(em, reg, b, none, 0, d)
 modrm(em, reg, MX{U{b}, U{x}, s, d}, trail) := modrm_base(em, reg, b, x, s, d)
@@ -95,8 +77,6 @@ modrm_base(em, reg, b, x, s, d) = {
     if (mod == 1) x86enc.u8(em, d) else if (mod == 2) x86enc.u32(em, d)
 }
 
-# x64_op(em, pre, w, ops, reg, rm, trail, force) writes an instruction with a ModRM byte: the prefix pre (0 for none), REX, the bytes ops of the opcode
-# and the operands. force is true when REX is needed to name the byte registers 4 to 7.
 x64_op(em, pre, w, ops, reg, rm, trail, force) := {
     xb := rm_regs(rm)
     if (pre != 0) x86enc.u8(em, pre)
@@ -105,13 +85,10 @@ x64_op(em, pre, w, ops, reg, rm, trail, force) := {
     modrm(em, reg, rm, trail)
 }
 
-# a byte register 4 to 7 (spl, bpl, sil, dil) is named with a REX prefix
 byte(r) := r >= 4 and r < 8
 
-# the operand s of a byte instruction is one of those registers
 byte_rm(s) := if (is_memory(s)) false else byte(x64_reg(s))
 
-# the opcodes of the ALU operations: the opcode of op r/m, r and the digit of the immediate forms
 alu := [Tuple{'add, 1, 0}, Tuple{'bor, 9, 1}, Tuple{'adc, 17, 2}, Tuple{'sbb, 25, 3}, Tuple{'band, 33, 4},
             Tuple{'sub, 41, 5}, Tuple{'bxor, 49, 6}, Tuple{'cmp, 57, 7}]
 
@@ -119,10 +96,8 @@ alu_entry(op) := find(e -> arg(e, 0) == op, alu)
 
 shift_digit(op) := if (op == 'shl) 4 else if (op == 'shr) 5 else 7
 
-# the prefix of the scalar instructions of SSE2 for a double (F2) and for a single (F3)
 sse_prefix(z) := if (z == 'w64) 242 else 243
 
-# emit(em, i) writes the instruction i. A jump to the label that follows is left out by emit_code.
 emit(em, i) := match I{ir.op(i), ir.explicit(i)} {
     I{'label, [L{l}]} -> x86enc.label(em, l)
   | I{'mov, [W{z}, D{d}, U{s}]} -> x64_op(em, 0, z == 'w64, [137], s, d, 0, false)
@@ -221,7 +196,6 @@ emit(em, i) := match I{ir.op(i), ir.explicit(i)} {
   | _ -> panic(f"x64: cannot encode {ir.show(i)}")
 }
 
-# op d, s where s is a register or an integer
 alu_op(em, z, op, d, s) = {
     e := alu_entry(op)
     match s {
@@ -239,7 +213,6 @@ alu_op(em, z, op, d, s) = {
 
 f7(em, z, digit, r) = x64_op(em, 0, z == 'w64, [247], digit, r, 0, false)
 
-# emit_code(em, code) writes the instructions of a function; a jump to the label that follows is left out
 export emit_code(em, code) := {
     xs := code
     while (xs != []) {
@@ -267,25 +240,21 @@ test {
     }
     w32 := W{'w32}
     w64 := W{'w64}
-    # push rbp; mov rbp, rsp; sub rsp, 16; pop rbp; ret
     assert(code([I{'push, [U{5}]}]) == [85], "push rbp")
     assert(code([I{'mov, [w64, D{5}, U{4}]}]) == [72, 137, 229], "mov rbp, rsp")
     assert(code([I{'sub, [w64, DU{4}, K{16}]}]) == [72, 131, 236, 16], "sub rsp, 16")
     assert(code([I{'pop, [D{5}]}, I{'ret, []}]) == [93, 195], "pop rbp; ret")
-    # registers 8 to 15 need the bits of REX
     assert(code([I{'push, [U{12}]}]) == [65, 84], "push r12")
     assert(code([I{'mov, [w64, D{8}, U{9}]}]) == [77, 137, 200], "mov r8, r9")
     assert(code([I{'mov, [w32, D{10}, K{1}]}]) == [65, 186, 1, 0, 0, 0], "mov r10d, 1")
     assert(code([I{'mov, [w32, D{0}, K{60}]}]) == [184, 60, 0, 0, 0], "mov eax, 60")
     assert(code([I{'mov, [w64, D{0}, K{-1}]}]) == [72, 199, 192, 255, 255, 255, 255], "mov rax, -1")
-    # memory operands: a displacement, rsp and r12 as the base (SIB), rbp and r13 as the base (a displacement even for 0)
     assert(code([I{'mov, [w64, D{0}, M{U{5}, -8}]}]) == [72, 139, 69, 248], "rbp base")
     assert(code([I{'mov, [w64, M{U{5}, -8}, U{12}]}]) == [76, 137, 101, 248], "store with rbp base")
     assert(code([I{'mov, [w64, D{0}, M{U{4}, 8}]}]) == [72, 139, 68, 36, 8], "rsp base")
     assert(code([I{'mov, [w64, D{0}, M{U{12}, 0}]}]) == [73, 139, 4, 36], "r12 base")
     assert(code([I{'mov, [w32, D{0}, M{U{13}, 0}]}]) == [65, 139, 69, 0], "r13 base")
     assert(code([I{'mov, [w64, D{0}, MX{U{1}, U{2}, 8, 16}]}]) == [72, 139, 68, 209, 16], "index")
-    # arithmetic
     assert(code([I{'add, [w64, DU{0}, U{1}]}]) == [72, 1, 200], "add")
     assert(code([I{'add, [w32, DU{0}, K{5}]}]) == [131, 192, 5], "add with an integer")
     assert(code([I{'sub, [w64, DU{0}, K{1000}]}]) == [72, 129, 232, 232, 3, 0, 0], "sub with a 32-bit integer")
@@ -294,7 +263,6 @@ test {
     assert(code([I{'cqo, []}, I{'idiv, [w64, U{1}]}]) == [72, 153, 72, 247, 249], "cqo; idiv")
     assert(code([I{'shl, [w64, DU{0}, K{3}]}]) == [72, 193, 224, 3], "shl with an integer")
     assert(code([I{'shr, [w32, DU{0}]}]) == [211, 232], "shr by cl")
-    # widths of the moves
     assert(code([I{'movzxb, [w32, D{0}, U{1}]}]) == [15, 182, 193], "movzxb")
     assert(code([I{'movzxb, [w32, D{0}, U{6}]}]) == [64, 15, 182, 198], "movzxb of sil")
     assert(code([I{'movsxd, [D{0}, U{1}]}]) == [72, 99, 193], "movsxd")
@@ -303,7 +271,6 @@ test {
     assert(code([I{'setcc, [Cc{'eq}, D{0}]}]) == [15, 148, 192], "setcc")
     assert(code([I{'call, [U{0}]}]) == [255, 208], "call a register")
     assert(code([I{'syscall, []}, I{'ud2, []}]) == [15, 5, 15, 11], "syscall; ud2")
-    # SSE2 on xmm0 and xmm1
     assert(code([I{'xin, [w64, K{0}, U{1}]}]) == [102, 72, 15, 110, 193], "movq xmm0, rcx")
     assert(code([I{'xin, [w64, K{1}, U{9}]}]) == [102, 73, 15, 110, 201], "movq xmm1, r9")
     assert(code([I{'xin, [w32, K{0}, U{2}]}]) == [102, 15, 110, 194], "movd xmm0, edx")
@@ -322,10 +289,8 @@ test {
     assert(code([I{'cvtf2f, [w32]}]) == [243, 15, 90, 192], "cvtss2sd xmm0, xmm0")
     assert(code([I{'setcc, [Cc{'p}, D{1}]}]) == [15, 154, 193], "setp cl")
     assert(code([I{'setcc, [Cc{'np}, D{1}]}]) == [15, 155, 193], "setnp cl")
-    # a 64-bit integer: the bytes of the value, and a negative one as the two's complement
     assert(code([I{'movabs, [D{0}, K{16368}, K{0}, K{0}, K{0}]}]) == [72, 184, 0, 0, 0, 0, 0, 0, 240, 63], "movabs rax, 1.0")
     assert(code([I{'movabs, [D{9}, K{49152}, K{4660}, K{22136}, K{43981}]}]) == [73, 185, 205, 171, 120, 86, 52, 18, 0, 192], "movabs r9, four parts")
-    # the address of a symbol is relative to the next instruction
     o2 := object.new("r")
     e2 := x86enc.new(o2, ".text")
     emit(e2, I{'lea, [w64, D{7}, MG{"s", 0}]})

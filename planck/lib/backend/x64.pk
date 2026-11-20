@@ -1,35 +1,4 @@
-# x64: the x86-64 target of the code generator: instruction selection, the model of the scheduler,
-# the register file, the frame of a function, and compile of a whole module to an object
 # Copyright (C) 2026 nineties
-#
-# The input is a function of the machine independent form (see ir.pk), with registers of 32 and 64 bits:
-#   mov li la slota          [D, U] [D, K] [D, S] [D, K slot]
-#   add sub mul band bor bxor shl shr sar divs divu rems remu mulhu   [D d, U a, U or K b]
-#   neg not sx8 sx16 zx8 zx16                                         [D, U]
-#   cmp                      [Cc, D, U a, U or K b]: d is 1 when a cc b, otherwise 0
-#   ld                       [W{u8 s8 u16 s16 w32 w64}, D, memory]
-#   st                       [W{w8 w16 w32 w64}, memory, U or K]
-#   call                     [S name or U, Us args, Ds results]     (up to two results: rax and rdx)
-#   os                       [N service, Us args, D result]: a service of the system (os.pk)
-#   getarg                   [D, K i]: the i-th word of the arguments
-#   ret [Us values], jmp [L], br [Cc, U a, U or K b, L yes, L no], trap, label [L]
-#   zext64 sext64            [D 64-bit, U 32-bit]
-#   trunc                    [D 32-bit, U 64-bit]
-#   fadd fsub fmul fdiv      [W, D d, U a, U b]: a floating point number is kept in a register as its bits, 64 bits for the width w64 (a double)
-#                            and 32 bits for w32 (a single); the operation works on xmm0 and xmm1, which no register of the code names
-#   fsqrt                    [W, D, U]
-#   fcmp                     [Cc{eq ne lt le gt ge}, W, D, U a, U b]: d is 1 when a cc b, otherwise 0; a comparison with a NaN is 0 except for ne
-#   cvti2f                   [W of the result, D, U 64-bit signed integer]
-#   cvtf2i                   [W of the operand, D 64-bit, U]: toward zero; the value that x86 gives (the least 64-bit integer) for a NaN or out of range
-#   cvtf2f                   [W of the operand, D, U]: a double to a single, or a single to a double
-#   li64                     [D 64-bit, K p3, K p2, K p1, K p0]: the integer p3 * 2^48 + p2 * 2^32 + p1 * 2^16 + p0, each part from 0 to 65535 (an integer of planck0 has 31 bits)
-# ld and st with the width w64 take the memory operand of the register that holds the value.
-# Memory operands are M{U base, disp}, MG{name, disp} and MF{'slot, n, disp}.
-# A 32-bit value lives in a 64-bit register with its upper half 0, which every instruction that gives a 32-bit value keeps: a move of the 32-bit value from a physical
-# register is movl, which is never taken out as a move between equal registers. An address is a 64-bit value.
-# The calling convention: 8 bytes for each argument, the arguments are pushed from the last to the first and removed by the caller,
-# the results are in rax and rdx, rbx and r12 to r15 are kept by the callee (and rbp, the frame pointer).
-# The services of the system and trap are selected by sys(emit, label, name, args, d), which is a function of os.pk for the system of the target.
 
 use("base")
 use("list")
@@ -51,7 +20,6 @@ commutative := ['add, 'mul, 'band, 'bor, 'bxor]
 
 fun select_one
 
-# select(sys, f, code) is the instructions for x86-64 of the machine independent instructions code, with the system sys
 select(sys, f, code) := {
     out := []
     emit := i -> { out = i :: out }
@@ -61,27 +29,22 @@ select(sys, f, code) := {
 
 flags_def := ID{16}
 
-# xmm0 and xmm1 are the registers 17 and 18 of the code; they are not given out, and only the sequences of one operation use them
 xmm_def(n) := ID{17 + n}
 xmm_use(n) := IU{17 + n}
 
-# the opcodes of the scalar operations of SSE2
 sse_ops := [Tuple{'fadd, 88}, Tuple{'fmul, 89}, Tuple{'fsub, 92}, Tuple{'fdiv, 94}]
 
-# the width of a register: 'w64 for a physical register and a virtual register of 64 bits
 x64_wd(f, r) := if (ir.is_vreg(r) and ir.width(f, r) == 32) 'w32 else 'w64
 
 select_one(sys, f, emit, i) = {
     nv := w -> ir.vreg(f, if (w == 'w64) 64 else 32)
     wd := r -> x64_wd(f, r)
-    # d = s for registers: a 32-bit value that comes from a physical register is made whole by a 32-bit move
     mov := (d, s) -> {
         if (ir.is_vreg(d)) {
             if (wd(d) == 'w32 and not ir.is_vreg(s)) emit(I{'movl, [D{d}, U{s}]})
             else emit(I{'mov, [W{wd(d)}, D{d}, U{s}]})
         } else emit(I{'mov, [W{wd(s)}, D{d}, U{s}]})
     }
-    # d = a op b in the two-address form
     two := (op, d, a, b) -> {
         z := wd(d)
         if (a != d) mov(d, a)
@@ -114,7 +77,6 @@ select_one(sys, f, emit, i) = {
             t
         }
     }
-    # the instructions that os.pk gives, with the widths
     os_emit := j -> match j {
         I{'mov, [D{d}, U{s}]} -> mov(d, s)
       | I{'mov, [D{d}, K{n}]} -> emit(I{'mov, [W{if (ir.is_vreg(d)) wd(d) else if (n >= 0) 'w32 else 'w64}, D{d}, K{n}]})
@@ -126,7 +88,6 @@ select_one(sys, f, emit, i) = {
       | I{'mov, [D{d}, U{s}]} -> mov(d, s)
       | I{'li, [D{d}, K{n}]} -> emit(I{'mov, [W{wd(d)}, D{d}, K{n}]})
       | I{'li64, [D{d}, K{p3}, K{p2}, K{p1}, K{p0}]} -> {
-            # up to 30 bits it is a 32-bit move, which clears the upper half
             if (p3 == 0 and p2 == 0 and p1 < 16384) emit(I{'mov, [W{'w32}, D{d}, K{p1 * 65536 + p0}]})
             else emit(I{'movabs, [D{d}, K{p3}, K{p2}, K{p1}, K{p0}]})
         }
@@ -196,8 +157,6 @@ select_one(sys, f, emit, i) = {
             emit(I{'xout, [W{z}, D{d}, K{0}, xmm_use(0)]})
         }
       | I{'fcmp, [Cc{c}, W{z}, D{d}, U{a}, U{b}]} -> {
-            # ucomis sets the flags of an unsigned comparison; with a NaN it sets zero, parity and carry. The above and above-or-equal
-            # conditions are false with a NaN, so a < b is b > a with the operands exchanged.
             swap := c == 'lt or c == 'le
             emit(I{'xin, [W{z}, K{0}, U{if (swap) b else a}, xmm_def(0)]})
             emit(I{'xin, [W{z}, K{1}, U{if (swap) a else b}, xmm_def(1)]})
@@ -205,7 +164,6 @@ select_one(sys, f, emit, i) = {
             t := nv('w32)
             emit(I{'setcc, [Cc{if (c == 'gt or c == 'lt) 'gtu else if (c == 'ge or c == 'le) 'geu else c}, D{t}, IU{16}]})
             if (c == 'eq or c == 'ne) {
-                # equal and ordered, or unequal or unordered
                 p := nv('w32)
                 emit(I{'setcc, [Cc{if (c == 'eq) 'np else 'p}, D{p}, IU{16}]})
                 t1 := nv('w32)
@@ -230,7 +188,6 @@ select_one(sys, f, emit, i) = {
         }
       | I{'getarg, [D{d}, K{n}]} -> emit(I{'mov, [W{wd(d)}, D{d}, MF{'arg, n, 0}]})
       | I{'call, [callee, Us{args}, Ds{rets}]} -> {
-            # the callee uses xmm0 and xmm1, so a result of a floating point operation must be moved out of them before the call
             each(a -> emit(I{'push, [U{a}, ID{4}, IU{4}]}), reverse(args))
             emit(I{'call, [callee, ID{0}, ID{1}, ID{2}, ID{6}, ID{7}, ID{8}, ID{9}, ID{10}, ID{11}, flags_def, ID{4}, IU{4}, xmm_def(0), xmm_def(1)]})
             if (args != []) emit(I{'add, [W{'w64}, DU{4}, K{8 * length(args)}, flags_def]})
@@ -254,10 +211,8 @@ select_one(sys, f, emit, i) = {
     }
 }
 
-# === Scheduling ===
 is_memf(o) := member(head(o), ['M, 'MX, 'MG, 'MF])
 
-# the memory the instruction touches: 'load, 'store, 'barrier or 'none
 effect(I{'mov, [W{_}, D{_}, m]}) := if (is_memf(m)) 'load else 'none
 effect(I{'mov, [W{_}, m, _]}) := if (is_memf(m)) 'store else 'none
 effect(I{op, [W{_}, D{_}, m]}) if member(op, ['movzxb, 'movsxb, 'movzxw, 'movsxw]) := if (is_memf(m)) 'load else 'none
@@ -279,20 +234,16 @@ latency(i) := match ir.op(i) {
 
 sched_model := SchedModel{latency, effect}
 
-# === Registers ===
-# the registers that a call may change are given first; rbx and r12 to r15 are kept by the callee
 callee_saved := [3, 12, 13, 14, 15]
 ra := RATarget{[0, 1, 2, 6, 7, 8, 9, 10, 11, 3, 12, 13, 14, 15], table.new(),
     (r, slot) -> I{'mov, [W{'w64}, D{r}, MF{'slot, slot, 0}]}, (r, slot) -> I{'mov, [W{'w64}, MF{'slot, slot, 0}, U{r}]}, 8}
 
-# === Frames ===
 align(n, a) := (n + a - 1) / a * a
 
 resolve(offs, MF{'arg, n, d}) := M{U{5}, 16 + 8 * n + d}
 resolve(offs, MF{'slot, n, d}) := M{U{5}, d - table.get(offs, n, 0)}
 resolve(offs, o) := o
 
-# frame(f, code) adds the prologue and the epilogue to the allocated code and gives an address to each stack slot
 frame(f, code) := {
     defined := table.new()
     each(i -> each(r -> table.set(defined, r, true), ir.defs(i)), code)
@@ -316,7 +267,6 @@ frame(f, code) := {
     append(prologue, body)
 }
 
-# === Functions and modules ===
 compile_fun(sys, f, em) := {
     code := select(sys, f, ir.code(f))
     code = sched.code(code, sched_model)
@@ -327,7 +277,6 @@ compile_fun(sys, f, em) := {
     x64enc.emit_code(em, code)
 }
 
-# compile(sys, name, funs, datas) is an object of the functions (ir.fun) and the data (see object.add_data of object.pk), for the system sys
 export compile(sys, name, funs, datas) := {
     o := object.new(name)
     each(f -> compile_fun(sys, f, x86enc.new(o, ".text")), funs)
@@ -335,7 +284,6 @@ export compile(sys, name, funs, datas) := {
     o
 }
 
-# the selection of instructions
 test {
     w32 := W{'w32}
     w64 := W{'w64}
@@ -343,21 +291,17 @@ test {
     a := ir.vreg(f, 32)
     b := ir.vreg(f, 64)
     sel(is) := select(os.select_linux_x64, f, is)
-    # a 32-bit move and a 64-bit one; the extensions are moves that stay
     assert(sel([I{'mov, [D{a}, U{a + 0}]}]) == [I{'mov, [w32, D{a}, U{a}]}], "a 32-bit move")
     assert(sel([I{'zext64, [D{b}, U{a}]}]) == [I{'movl, [D{b}, U{a}]}], "zext64")
     assert(sel([I{'sext64, [D{b}, U{a}]}]) == [I{'movsxd, [D{b}, U{a}]}], "sext64")
     assert(sel([I{'trunc, [D{a}, U{b}]}]) == [I{'movl, [D{a}, U{b}]}], "trunc")
-    # a 32-bit value that comes from a physical register is made whole
     assert(sel([I{'mov, [D{a}, U{0}]}]) == [I{'movl, [D{a}, U{0}]}], "a 32-bit value from a physical register")
     assert(sel([I{'li, [D{b}, K{5}]}]) == [I{'mov, [w64, D{b}, K{5}]}], "li")
     assert(sel([I{'ld, [W{'w32}, D{a}, M{U{b}, 4}]}]) == [I{'mov, [w32, D{a}, M{U{b}, 4}]}], "a 32-bit load")
     assert(sel([I{'ld, [W{'w64}, D{b}, M{U{b}, 8}]}]) == [I{'mov, [w64, D{b}, M{U{b}, 8}]}], "a 64-bit load")
     assert(sel([I{'getarg, [D{b}, K{2}]}]) == [I{'mov, [w64, D{b}, MF{'arg, 2, 0}]}], "getarg")
-    # an integer of 64 bits in four parts: a move of 32 bits when it is small, and movabs otherwise
     assert(sel([I{'li64, [D{b}, K{16368}, K{0}, K{0}, K{0}]}]) == [I{'movabs, [D{b}, K{16368}, K{0}, K{0}, K{0}]}], "li64")
     assert(sel([I{'li64, [D{b}, K{0}, K{0}, K{5}, K{7}]}]) == [I{'mov, [w32, D{b}, K{327687}]}], "li64 of a small integer")
-    # a floating point operation moves the operands to xmm0 and xmm1, which the instructions do not name, and the result back
     c := ir.vreg(f, 64)
     assert(sel([I{'fadd, [w64, D{c}, U{b}, U{b + 0}]}]) == [I{'xin, [w64, K{0}, U{b}, ID{17}]}, I{'xin, [w64, K{1}, U{b}, ID{18}]},
         I{'sse, [w64, K{88}, ID{17}, IU{17}, IU{18}]}, I{'xout, [w64, D{c}, K{0}, IU{17}]}], "fadd")
@@ -365,23 +309,19 @@ test {
     assert(list.any(i -> ir.op(i) == 'ucomi, sel([I{'fcmp, [Cc{'eq}, w64, D{a}, U{b}, U{b + 0}]}])), "fcmp")
 }
 
-# the loads start first so that the additions do not wait
 test {
     ld1 := I{'mov, [W{'w64}, D{40}, M{U{33}, 0}]}
     ad1 := I{'add, [W{'w64}, DU{40}, K{1}, flags_def]}
     ld2 := I{'mov, [W{'w64}, D{41}, M{U{34}, 0}]}
     ad2 := I{'add, [W{'w64}, DU{41}, K{1}, flags_def]}
     assert(sched.code([ld1, ad1, ld2, ad2], sched_model) == [ld1, ld2, ad1, ad2], "the loads come first")
-    # a store stays between the loads that it separates
     st1 := I{'mov, [W{'w64}, M{U{35}, 0}, U{40}]}
     ld3 := I{'mov, [W{'w64}, D{42}, M{U{36}, 0}]}
     assert(sched.code([ld1, st1, ld3], sched_model) == [ld1, st1, ld3], "a store stays between loads")
-    # the label and the terminator stay at the ends of a block
     block := [I{'label, [L{3}]}, ld1, ad1, ld2, ad2, I{'ret, [IU{0}]}]
     assert(sched.code(block, sched_model) == [I{'label, [L{3}]}, ld1, ld2, ad1, ad2, I{'ret, [IU{0}]}], "the label and the terminator stay")
 }
 
-# a straight line code is run to see that the allocation keeps the result: values on the stack are in memory
 test {
     run(code) := {
         regs := table.new()
@@ -412,7 +352,6 @@ test {
     allocated := regalloc.allocate(f, ra)
     assert(not list.any(i -> list.any(r -> ir.is_vreg(r), append(ir.uses(i), ir.defs(i))), allocated), "no virtual register is left")
     assert(run(allocated) == 136, "the allocation keeps the result")
-    # seventeen values do not fit in fourteen registers, so some are kept in stack slots
     assert(list.any(i -> list.any(o -> head(o) == 'MF, ir.explicit(i)), allocated), "some values are in stack slots")
     assert(length(vector.to_list(table.get(ir.meta(f), 'slots, none))) > 0, "the function has stack slots")
 }

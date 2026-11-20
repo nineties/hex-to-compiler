@@ -1,21 +1,4 @@
-# native/compile: turns a module of native into the Module of vasm
 # Copyright (C) 2026 nineties
-#
-# native_compile.compile(m) is the Module{[...]} of vasm for the module m = PModule{[...]} that native{| ... |} reads.
-# native_compile.compile_all(m) is Tuple{module, errors} with the errors [VasmError{kind, Pos{d}, msg}, ...], the first of each function.
-# native_compile.compile_with(m, imports) and native_compile.compile_all_with(m, imports) compile a module whose functions may call the functions
-# and use the structs of imports, the interfaces of other units (vasm_unit.ifaces of vasm/unit.pk): a list of Fun and Struct items, whose bodies
-# are not read. An import item (PImport{at, u}) of m names a unit; the caller picks the interfaces of the units named (native_compile.import_items(m))
-# and the expansion does not use the item.
-# The expansion makes the form that vasm_check.check checks; it does not check ownership, borrows or regions.
-#
-# - A nested expression becomes one statement for each operation, with a temporary variable of the type of the operation.
-# - let x = e declares x with the type of e, or the type written after x.
-# - for i in a..b, compound assignments and the short-circuit and / or become while and if.
-# - An integer literal beyond -32768 to 32767 is made with << and | from parts of 15 bits, in the integer type that the context gives.
-# - A floating point literal has the type f64 when nothing else gives it a type. -e of a floating point number is e * -1.0.
-# - An index of an integer type other than i64 is converted with as i64.
-# - The last expression of a function that gives a value is its result.
 
 use("base")
 use("list")
@@ -26,12 +9,6 @@ use("native/syntax")
 
 module native_compile {
 fail(at, kind, msg) := perform NativeFail{at, kind, msg}
-
-# === State of the function being expanded ===
-# sigs: function -> Sig{regions, parameter types, result}; structs: struct -> Struct{...}
-# env: the name in the source -> Tuple{name in vasm, type}; live: the names in vasm that are declared
-# scope: Scope{source name or none, the binding it hides, name in vasm}, the innermost first
-# px_out: the statements of the block being made, the last first
 
 sigs := table.new()
 structs := table.new()
@@ -52,7 +29,6 @@ emit(s) := {
     px_out = s :: px_out
 }
 
-# a name that the function does not use and is not declared
 fresh(prefix) := {
     name := none
     while (name == none) {
@@ -63,7 +39,6 @@ fresh(prefix) := {
     name
 }
 
-# the statements of a block are made in a scope that ends with the block
 begin() := {
     token := Tuple{px_out, length(scope)}
     px_out = []
@@ -88,8 +63,6 @@ block(ss) := {
     end(token)
 }
 
-# declares a variable of type t and gives its name in vasm. The name in the source is src, or none for a temporary.
-# bind is false for a variable that the source name is bound to by the caller.
 declare(at, src, t, bind) := {
     name := if (src != none and table.get(live, src, none) == none) src
         else fresh(if (src == none) "t" else f"{symname(src)}_")
@@ -101,23 +74,18 @@ declare(at, src, t, bind) := {
     name
 }
 
-# === Types ===
-
 pos(e) := arg(e, 0)
 
 known(t) := not (head(t) == 'Literal or head(t) == 'FLiteral or head(t) == 'Unknown)
 
-# the types that give a literal its type: the integer types and the floating point types
 numt(t) := vasm_check.int(t) or vasm_check.flt(t)
 
-# the type of a value that is kept in a variable. A literal has the type that the context gives.
 keep(at, Literal{_}, want) := if (vasm_check.int(want)) want else fail(at, 'type, "the type of this value is not known; write the type, as in let x: i32 = ... or e as i32")
 keep(at, FLiteral{}, want) := if (vasm_check.flt(want)) want else F64{}
 keep(at, Unknown{msg}, want) := fail(at, 'type, msg)
 keep(at, Unit{}, want) := fail(at, 'type, "this call gives no value")
 keep(at, t, want) := t
 
-# the type to give a literal beside a value of type t
 px_hint(t, want) := if (vasm_check.int(t)) t else want
 
 elem(at, Value{}) := Value{}
@@ -142,9 +110,6 @@ field(at, s, f) := {
     arg(fd, 2)
 }
 
-# === Integer literals beyond the range of vasm ===
-
-# the digits of the text s of an integer literal: Tuple{negative, parts of 15 bits, the least first}
 px_parts(s) := {
     n := strlen(s)
     i := 0
@@ -187,13 +152,10 @@ bits_of(n) := {
     k
 }
 
-# the number of bits of the value whose parts are ps, the least first
 bits(ps) := if (ps == []) 0 else 15 * (length(ps) - 1) + bits_of(list.last(ps))
 
-# a power of two: the value has one bit, at the position w - 1
 is_pow(ps, w) := bits(ps) == w and (list.last(ps) == bit_shl(1, (w - 1) % 15)) and list.all(p -> p == 0, list.take(ps, length(ps) - 1))
 
-# The literal s of the integer type t, made in a temporary: the parts of 15 bits from the greatest, each after a shift
 big(at, s, t) := {
     pr := px_parts(s)
     neg := arg(pr, 0)
@@ -214,11 +176,6 @@ big(at, s, t) := {
     if (neg) emit(Assign{at, x, Bin{'sub, Imm{at, 0}, Reg{at, x}}})
     Tuple{Reg{at, x}, t}
 }
-
-# === Expressions ===
-# ex(e, want) gives Tuple{operand, type}: the statements that compute e are made before. want is the integer type that the
-# context asks for, or none; it gives the type of a literal that is beyond the range of vasm.
-# px_rhs(e, want) gives Tuple{right-hand side, type}, to put the value in a variable without a temporary.
 
 litlike(e) := head(e) == 'ELiteral or (head(e) == 'ENeg and head(arg(e, 1)) == 'ELiteral)
 
@@ -256,7 +213,6 @@ ex(e, want) := if (simple(e)) simple_ex(e, want) else {
 
 exs(es, want) := map(e -> ex(e, want), es)
 
-# the two operands of an operation. A literal is pure, so it is read after the other operand, which gives its type.
 px_two(a, b, hint) := if (litlike(a) and not litlike(b)) {
     vb := ex(b, hint)
     va := ex(a, px_hint(arg(vb, 1), hint))
@@ -269,7 +225,6 @@ px_two(a, b, hint) := if (litlike(a) and not litlike(b)) {
 
 cmp(op) := member(op, ['lt, 'le, 'gt, 'ge, 'eq, 'ne])
 
-# the index operand: i64
 index(i) := {
     v := ex(i, I64{})
     t := arg(v, 1)
@@ -281,11 +236,9 @@ index(i) := {
     } else arg(v, 0)
 }
 
-# the array or struct that an index or a field is taken from is a variable
 px_base(e) := if (head(e) == 'EVar) var(pos(e), arg(e, 1))
     else fail(pos(e), 'type, "an element or a field is taken from a variable; bind the value to a variable with let")
 
-# a place of swap: *p, p[i] or p.f
 place(EDeref{at, p}) := {
     b := var(at, p)
     Tuple{Load{at, arg(arg(b, 0), 1)}, pointee(at, arg(b, 1))}
@@ -301,7 +254,6 @@ place(EGet{at, a, f}) := {
 }
 place(e) := fail(pos(e), 'type, "this argument is a place: *p, p[i] or p.f")
 
-# the result type of a call with the types ts of the arguments
 result(at, f, sig, ts, tsub) := {
     rs := arg(sig, 0)
     ret := arg(sig, 2)
@@ -375,7 +327,6 @@ px_rhs(e, want) = if (simple(e)) {
   | ENeg{at, a} -> {
         v := ex(a, want)
         t := arg(v, 1)
-        # -e of a floating point number is e * -1.0, which also gives the sign of a zero
         if (vasm_check.flt(t) or t == FLiteral{}) Tuple{Bin{'mul, arg(v, 0), FImm{at, "-1.0"}}, t}
         else Tuple{Bin{'sub, Imm{at, 0}, arg(v, 0)}, if (head(t) == 'Literal) Literal{none} else t}
     }
@@ -387,7 +338,6 @@ px_rhs(e, want) = if (simple(e)) {
   | EOr{at, a, b} -> short(at, a, b, false)
   | ECast{at, a, t} -> {
         v := ex(a, if (vasm_check.int(t)) t else none)
-        # a literal has the type at once
         if (litlike(a) and vasm_check.int(t)) Tuple{Mov{arg(v, 0)}, t} else Tuple{Conv{at, arg(v, 0), t}, t}
     }
   | EDeref{at, p} -> {
@@ -421,7 +371,6 @@ px_rhs(e, want) = if (simple(e)) {
   | EClosure{at, f, args} -> Tuple{Closure{at, f, map(v -> arg(v, 0), exs(args, none))}, Value{}}
 }
 
-# a and b (and is true) or a or b: b is computed only when a does not decide the value
 short(at, a, b, is_and) = {
     va := ex(a, Bool{})
     x := declare(at, none, Bool{}, false)
@@ -435,7 +384,6 @@ short(at, a, b, is_and) = {
     Tuple{Mov{Reg{at, x}}, Bool{}}
 }
 
-# the condition of if and while
 px_cond(e) := match e {
     EBin{at, op, a, b} -> if (cmp(op)) {
         two := px_two(a, b, none)
@@ -444,9 +392,6 @@ px_cond(e) := match e {
   | _ -> Mov{arg(ex(e, Bool{}), 0)}
 }
 
-# === Statements ===
-
-# the type of a place that is assigned
 target_type(EVar{at, x}) := arg(var(at, x), 1)
 target_type(EDeref{at, p}) := pointee(at, arg(var(at, p), 1))
 target_type(EIndex{at, a, _}) := elem(at, arg(px_base(a), 1))
@@ -471,7 +416,6 @@ px_set(at, tg, op, e) := {
       | _ -> {
             v := ex(e, want)
             value := arg(v, 0)
-            # the place and the value that is there now
             kind := head(tg)
             pn := arg(arg(var(pos(tg), if (kind == 'EDeref) arg(tg, 1) else arg(arg(tg, 1), 1)), 0), 1)
             idx := if (kind == 'EIndex) index(arg(tg, 2)) else none
@@ -497,7 +441,6 @@ px_while(at, c, body) := {
         b := block(body)
         emit(WhileS{at, cond, b})
     } else {
-        # the condition is computed before the loop and at the end of each round
         px_out = append(pre, px_out)
         flag := declare(at, none, Bool{}, false)
         emit(Assign{at, flag, cond})
@@ -513,7 +456,6 @@ px_for(at, i, lo, hi, body) := {
     th := arg(vh, 1)
     ty := if (known(tl) and head(tl) != 'Literal) tl else if (known(th) and head(th) != 'Literal) th
         else fail(at, 'type, "the type of the loop variable is not known; write one bound with its type, as in 0 as i64..n")
-    # the end is read once, before the loop
     h := if (head(hi) == 'EVar) {
         x := declare(at, none, ty, false)
         emit(Assign{at, x, Mov{arg(vh, 0)}})
@@ -565,9 +507,6 @@ stmt(SRecheck{at, flag, c}) = {
 }
 stmt(SRaw{st}) = emit(st)
 
-# === Functions and modules ===
-
-# the names that the statements declare
 collect(ss) := each(s -> match s {
     SLet{_, x, _, _} -> table.set(used, x, true)
   | SVar{_, x, _} -> table.set(used, x, true)
@@ -584,7 +523,6 @@ collect(ss) := each(s -> match s {
   | _ -> none
 }, ss)
 
-# the last expression of a function that gives a value is the result
 tail(ret, body) := if (ret != Unit{} and body != [] and head(list.last(body)) == 'SExpr) {
     s := list.last(body)
     append(list.take(body, length(body) - 1), [SRet{arg(s, 0), arg(s, 1)}])
@@ -636,7 +574,6 @@ export compile_all_with(m, imports) := {
 
 export compile_all(m) := compile_all_with(m, [])
 
-# the import items of m: [PImport{at, u}, ...]
 export import_items(m) := filter(d -> head(d) == 'PImport, arg(m, 0))
 
 export compile_with(m, imports) := {
@@ -647,7 +584,6 @@ export compile_with(m, imports) := {
 
 export compile(m) := compile_with(m, [])
 
-# the errors of compile_all with the positions in the file: [VasmError{kind, Loc{file, line, column}, msg}, ...]
 export errors(file, errors) := {
     src := read_file(file)
     n := strlen(src)

@@ -1,8 +1,4 @@
-# x86enc: what the encoders of the x86 family share: the emitter and the condition codes
 # Copyright (C) 2026 nineties
-#
-# An emitter writes the code of functions to a section of an object (object.pk): Em{object, section, buf, labels, fixups}.
-# x64enc.pk encodes the instructions of ir.pk with it.
 
 use("base")
 use("list")
@@ -13,7 +9,6 @@ use("backend/object")
 
 module x86enc {
 
-# new(o, secname) writes to the section secname of the object o, which is made if it is not there
 export new(o, secname) := {
     s := object.section(o, secname, 'code, 16)
     Em{o, secname, object.buf(s), table.new(), vector.new()}
@@ -27,13 +22,11 @@ export u8s(em, xs) := each(x -> u8(em, x), xs)
 
 export label(Em{_, _, b, labels, _}, l) := table.set(labels, l, bytes.len(b))
 
-# a 32-bit field that holds the displacement to the label l from the end of the field
 export rel32(Em{_, _, b, _, fixups}, l) := {
     vector.push(fixups, Tuple{bytes.len(b), l})
     bytes.u32(b, 0)
 }
 
-# finish(em) fills in the displacements to the labels of the function that was written
 export finish(Em{_, _, b, labels, fixups}) := {
     each((Tuple{at, l}) -> {
         t := table.get(labels, l, -1)
@@ -42,7 +35,6 @@ export finish(Em{_, _, b, labels, fixups}) := {
     }, vector.to_list(fixups))
 }
 
-# a 32-bit field that is the address of the symbol plus off (kind 'Abs32), or the displacement to it (kind 'Pc32)
 export symbol(Em{o, section, b, _, _}, kind, name, off) := {
     object.reloc(o, section, bytes.len(b), kind, name, if (kind == 'Pc32) off - 4 else off)
     bytes.u32(b, 0)
@@ -50,7 +42,6 @@ export symbol(Em{o, section, b, _, _}, kind, name, off) := {
 
 export fits8(n) := n >= -128 and n <= 127
 
-# the condition codes
 cc := [Tuple{'eq, 4}, Tuple{'ne, 5}, Tuple{'lt, 12}, Tuple{'ge, 13}, Tuple{'le, 14}, Tuple{'gt, 15},
            Tuple{'ltu, 2}, Tuple{'geu, 3}, Tuple{'leu, 6}, Tuple{'gtu, 7}, Tuple{'p, 10}, Tuple{'np, 11}]
 

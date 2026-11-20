@@ -1,12 +1,4 @@
-# pe: writes a 64-bit PE executable for Windows (pe.image) from loadable segments, with the imports of one dynamic library
 # Copyright (C) 2026 nineties
-#
-# The segments are those of elf.pk: Seg{vaddr, off, data, memsz, flags}. The first starts at the file offset 0 and its first header_size bytes are the headers, which the writer
-# fills in; the code and the read-only data come after them. Each segment is at a multiple of 4096 in the file and in the memory (linker.link_paged with the page 4096).
-# The program asks the system for its services by calling the functions of KERNEL32.DLL through a table of addresses, the import address table: runtime(imports) is an object
-# that holds the table (8 bytes for each import, the global symbol __imp_<name> for the first) and the variables of the services (see os.pk), and the loader fills the table in.
-# The names of the imports, the directory of the imports and the name of the library are in a section of its own after the segments. The file is loaded at the address of its first segment
-# and is never moved: the headers do not ask for a random address.
 
 use("base")
 use("list")
@@ -18,15 +10,12 @@ module pe {
 
 page := 4096
 
-# the headers: the DOS header, the PE header and the table of the sections each take less than this
 export header_size := 4096
 
 align(n, a) := (n + a - 1) / a * a
 
-# the library and the names of the imports are in the section idata
 dll_name := "KERNEL32.dll"
 
-# runtime(imports, vars) is the object with the import address table (the section .data, with the symbols __imp_<name>) and the variables vars, a list of Tuple{name, size}, in .bss
 export runtime(imports, vars) := {
     o := object.new("pe")
     iat := bytes.new()
@@ -44,7 +33,6 @@ export runtime(imports, vars) := {
     o
 }
 
-# the section table entry: the name, the size in memory, the address, the size in the file, the place in the file, and the flags as two halves of 16 bits
 section(b, name, vsize, rva, rawsize, rawptr, flags_hi, flags_lo) := {
     bytes.string(b, name)
     bytes.zeros(b, 8 - strlen(name))
@@ -57,14 +45,11 @@ section(b, name, vsize, rva, rawsize, rawptr, flags_hi, flags_lo) := {
     bytes.u16(b, flags_hi)
 }
 
-# the section of the imports: the directory (two entries, the second all 0), the table of names that the loader reads (the lookup table), the names and the name of the library.
-# rva is the address of the section and iat the address of the import address table
 idata(imports, rva, iat) := {
     n := length(imports)
     dir_size := 40
     ilt := rva + dir_size
     names := ilt + 8 * (n + 1)
-    # the offsets of the entries of the names: 2 bytes of the hint, the name, and 0 to make the size even
     offs := []
     cur := names
     each(name -> {
@@ -73,7 +58,6 @@ idata(imports, rva, iat) := {
     }, imports)
     dll := cur
     b := bytes.new()
-    # the directory entry: the lookup table, the time stamp, the chain of forwarders, the name of the library and the import address table
     bytes.u32(b, ilt)
     bytes.u32(b, 0)
     bytes.u32(b, 0)
@@ -96,9 +80,7 @@ idata(imports, rva, iat) := {
     b
 }
 
-# the DOS header, the PE header and the file header (x86-64, three sections, the optional header of 240 bytes, an executable that has no relocations and can have addresses above 2 GB)
 file_header(b) := {
-    # the DOS header: the signature, and the place of the PE header at 0x40
     bytes.u8(b, 77)
     bytes.u8(b, 90)
     bytes.zeros(b, 58)
@@ -113,8 +95,6 @@ file_header(b) := {
     bytes.u16(b, 35)
 }
 
-# the optional header: the magic of PE32+, the version of the linker, the sizes, the entry, the base of the code, the base of the image, the alignment of the sections and of the file,
-# the versions of the system and of the image and of the subsystem (6.0), the size of the image and of the headers, the check sum 0
 optional_header(b, code_size, data_size, entry_rva, base, image_size) := {
     bytes.u16(b, 523)
     bytes.u16(b, 0)
@@ -138,8 +118,6 @@ optional_header(b, code_size, data_size, entry_rva, base, image_size) := {
     bytes.u32(b, 0)
 }
 
-# the subsystem of a console program (3), no flags of the dll, the stacks (16 MB reserved and 64 KB committed) and the heap, no loader flags, 16 entries of the directories,
-# of which 1 is the imports and 12 is the import address table
 directories(b, idata_rva, iat_rva, iat_size) := {
     bytes.u16(b, 3)
     bytes.u16(b, 0)
@@ -162,7 +140,6 @@ directories(b, idata_rva, iat_rva, iat_size) := {
     }
 }
 
-# the contents of the sections after the headers: the code and the read-only data, the data, and the imports, each at its place in the file
 contents(b, s0, s1, text_raw, idata_off, idata_bytes) := {
     i := header_size
     while (i < bytes.len(arg(s0, 2))) {
@@ -180,7 +157,6 @@ contents(b, s0, s1, text_raw, idata_off, idata_bytes) := {
     bytes.zeros(b, align(bytes.len(idata_bytes), page) - bytes.len(idata_bytes))
 }
 
-# image(entry, segs, symbols, imports) is the file as a buffer of bytes. symbols is the table of the global symbols (the Image of link.pk), which has __imp_<first import>
 export image(entry, segs, symbols, imports) := {
     if (length(segs) != 2) panic("pe.image: two segments are expected")
     s0 := segs[0]
@@ -202,7 +178,6 @@ export image(entry, segs, symbols, imports) := {
     file_header(b)
     optional_header(b, text_raw, data_raw + idata_size, entry - base, base, align(idata_rva + idata_size, page))
     directories(b, idata_rva, iat - base, 8 * length(imports))
-    # the sections: the code and the read-only data (code, executable, readable: 0x60000020), the data (initialized, readable, writable: 0xC0000040) and the imports (0x40000040)
     section(b, ".text", text_len, header_size, text_raw, header_size, 24576, 32)
     section(b, ".data", data_vsize, data_rva, data_raw, if (data_raw == 0) 0 else arg(s1, 1), 49152, 64)
     section(b, ".idata", idata_size, idata_rva, align(idata_size, page), idata_off, 16384, 64)
