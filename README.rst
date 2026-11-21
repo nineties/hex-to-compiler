@@ -85,6 +85,12 @@ Arguments after the file name go to the program::
    Hello, Ann!!
    Hello, Ann!!
 
+Information about the processor is in the global variables planck_target
+("i386-linux"), planck_version (a string) and planck_features (an array
+of strings, empty in planck0). ./planck0 --version prints planck0 and the version,
+and ./planck0 --info prints target:, version: and features:; both
+exit without reading a program.
+
 Test
 ----
 

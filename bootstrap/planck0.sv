@@ -3450,6 +3450,33 @@
     (return a)
     )
 
+(fun planck_version_text () (return "dev"))
+
+(fun init_sysinfo ()
+    (var features (allocate 4))
+    (set features 0 (make_header ArrayT 1 0))
+    (set (define_global (sym "planck_target")) 0 (str "i386-linux"))
+    (set (define_global (sym "planck_version")) 0 (str (planck_version_text)))
+    (set (define_global (sym "planck_features")) 0 features)
+    )
+
+(fun print_version ()
+    (puts "planck0 ")
+    (puts (planck_version_text))
+    (puts "
+")
+    )
+
+(fun print_info ()
+    (puts "target: i386-linux
+")
+    (puts "version: ")
+    (puts (planck_version_text))
+    (puts "
+features:
+")
+    )
+
 (fun p_parse (s) (return (parse s)))
 
 ; _set_file(path) makes path the file being loaded and returns the previous one
@@ -3567,6 +3594,7 @@
     (defprim "exit"    1 p_exit    PRIM_NATIVE)
     (defprim "_set_file" 1 p_set_file PRIM_NATIVE)
     (defprim "eval"    1 0         PRIM_EVAL)
+    (init_sysinfo)
     )
 
 ; === Interpreter
@@ -3778,6 +3806,10 @@
 
 ; The frame stack and the heap are each a fixed 1GB area obtained by mmap2.
 (fun main (argc argv)
+    (if (> argc 1) (do
+        (if (streq (get argv 1) "--version") (do (print_version) (exit 0)))
+        (if (streq (get argv 1) "--info") (do (print_info) (exit 0)))
+        ))
     (= stack_hi argv)
     (init_frame_stack)
     (init_heap)
