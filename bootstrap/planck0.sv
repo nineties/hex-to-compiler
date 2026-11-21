@@ -58,6 +58,9 @@
 (long gc_since)      ; bytes allocated since the last collection
 (long gc_limit)      ; a collection starts when gc_since reaches this
 (long gc_live)       ; bytes of the objects marked by the collection
+(long gc_runs)
+(long alloc_hi)
+(long alloc_lo)
 
 (fun map_zero (bytes)
     (var addr (mmap2 0 bytes
@@ -3492,6 +3495,29 @@ features:
     (exit (fixnum_to_int n))
     )
 
+(def SYS_CLOCK_GETTIME 265)
+(def CLOCK_MONOTONIC 1)
+(char[] 8 clock_ts)
+
+(fun p_time_ns ()
+    (if (< (syscall SYS_CLOCK_GETTIME CLOCK_MONOTONIC clock_ts) 0)
+        (runtime_error "time_ns failed" noneS))
+    (var sec (fixnum (get clock_ts 0)))
+    (var nsec (fixnum (get clock_ts 1)))
+    (var micro (p_mul sec (fixnum 1000000)))
+    (var whole (p_mul micro (fixnum 1000)))
+    (return (p_add whole nsec))
+    )
+
+(fun p_heap_allocated ()
+    (var t (+ alloc_lo gc_since))
+    (return (p_add (p_mul (fixnum (+ alloc_hi (>> t 20))) (fixnum 1048576)) (fixnum (& t 1048575))))
+    )
+
+(fun p_gc_count ()
+    (return (fixnum gc_runs))
+    )
+
 ; _float(s) is the floating-point number written s; there are none
 (fun p_float (s)
     (expect StringT s)
@@ -3592,6 +3618,9 @@ features:
     (defprim "bit_sar" 2 p_bit_sar PRIM_NATIVE)
     (defprim "argv" 0 p_argv PRIM_NATIVE)
     (defprim "exit"    1 p_exit    PRIM_NATIVE)
+    (defprim "time_ns" 0 p_time_ns PRIM_NATIVE)
+    (defprim "heap_allocated" 0 p_heap_allocated PRIM_NATIVE)
+    (defprim "gc_count" 0 p_gc_count PRIM_NATIVE)
     (defprim "_set_file" 1 p_set_file PRIM_NATIVE)
     (defprim "eval"    1 0         PRIM_EVAL)
     (init_sysinfo)
@@ -3777,6 +3806,7 @@ features:
 
 (fun gc_collect ()
     (var p 0)
+    (var t 0)
     (char[] 4 here)
     (= gc_live 0)
     (= gc_sp gc_stack)
@@ -3799,6 +3829,10 @@ features:
     (gc_scan here stack_hi)
     (gc_drain)
     (gc_sweep)
+    (= t (+ alloc_lo gc_since))
+    (+= alloc_hi (>> t 20))
+    (= alloc_lo (& t 1048575))
+    (+= gc_runs 1)
     (= gc_since 0)
     (= gc_limit gc_live)
     (if (u< gc_limit GC_MIN_BYTES) (= gc_limit GC_MIN_BYTES))
