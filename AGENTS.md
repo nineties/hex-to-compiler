@@ -6,6 +6,5 @@ Fix a repeated mistake at the highest level that works: the structure of the cod
 
 | Rule | Enforced by |
 |---|---|
-| Do not change `bootstrap/planck0.sv` or its documentation page without koichi's permission | review of the pull request |
 | Do not add a comment line to a .pk file. Name the code so it needs none. Keep only copyright and license lines | review of the pull request |
 | Run the whole tests in GitHub Actions only | `runtests` in `.github/workflows/runtests.yaml` |
