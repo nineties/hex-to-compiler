@@ -1,0 +1,28 @@
+name: release
+
+on:
+    push:
+        tags: ["v*"]
+permissions:
+    contents: write
+jobs:
+    release:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - name: build planck0
+              run: make planck0
+            - name: test planck0
+              run: make test-planck0
+            - name: pack
+              run: |
+                  name=planck0-${GITHUB_REF_NAME}-linux-x86_64
+                  mkdir -p "$name/planck"
+                  cp planck0 README.rst LICENSE "$name/"
+                  cp -r planck/init.pk planck/peg.pk planck/syntax.pk planck/lib planck/examples "$name/planck/"
+                  tar czf "$name.tar.gz" "$name"
+                  sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
+            - name: publish
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: gh release create "$GITHUB_REF_NAME" planck0-*.tar.gz planck0-*.tar.gz.sha256 --title "$GITHUB_REF_NAME" --generate-notes
