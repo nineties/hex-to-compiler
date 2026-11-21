@@ -24,7 +24,7 @@ How it is built
 4. ``plisp2``: ``plisp`` rewritten in ``sasm``
    (`bootstrap/plisp2.sv <bootstrap/plisp2.sv>`_). It is much faster than ``plisp``.
 5. ``planck0``: the Planck language processor written in ``sasm``
-   (`bootstrap/planck0.sv <bootstrap/planck0.sv>`_). It is a static 32-bit x86_64 ELF
+   (`bootstrap/planck0.sv <bootstrap/planck0.sv>`_). It is a static 32-bit i386 ELF
    of about 79KB.
 
 Build
