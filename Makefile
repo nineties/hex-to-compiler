@@ -141,19 +141,11 @@ $(VMF_BUILD)/trans.unit: planck/vm/trans.native $(VMF_BUILD)/flt.unit $(VM_BUILD
 tmp-vmf: $(VMF_UNIT_FILES) planck0
 	./planck0 planck/vasmc.pk link $@ linux_x86_64 $(VMF_UNIT_FILES)
 
-# the planckvm with floating point as a program for each platform: dist/planckvm-<target> (the units are the same for every target of the word 8)
-DIST_TARGETS := linux_x86_64 macos_x86_64 linux_arm64 macos_arm64
-DIST_FILES := $(addprefix dist/planckvm-,$(DIST_TARGETS)) dist/planckvm-windows_x86_64.exe
 .PHONY: dist
-dist: $(DIST_FILES)
-dist/planckvm-%: $(VMF_UNIT_FILES) $(VASMC_SOURCES) planck0
+dist: dist/planckvm-linux_x86_64
+dist/planckvm-linux_x86_64: $(VMF_UNIT_FILES) $(VASMC_SOURCES) planck0
 	mkdir -p dist
-	./planck0 planck/vasmc.pk link $@ $* $(VMF_UNIT_FILES)
-
-# the file of Windows has the extension .exe
-dist/planckvm-windows_x86_64.exe: $(VMF_UNIT_FILES) $(VASMC_SOURCES) planck0
-	mkdir -p dist
-	./planck0 planck/vasmc.pk link $@ windows_x86_64 $(VMF_UNIT_FILES)
+	./planck0 planck/vasmc.pk link $@ linux_x86_64 $(VMF_UNIT_FILES)
 
 test-vm: tmp-vmf
 	@for f in $(VM_ALL_EXAMPLES); do \
@@ -200,10 +192,6 @@ test-udiv: planck0
 # run everything: test-planck0 and then the libraries, the tools, the vasm, native and backend tests, and the examples
 test-all: test-planck0
 	./planck0 planck/tests/lib.pk
-	./planck0 planck/tests/unparse.pk
-	./planck0 planck/tests/unparse_pattern.pk
-	./planck0 planck/tests/unparse_file.pk
-	./planck0 planck/tests/highlight.pk
 	$(MAKE) preprocess
 	tools/test_preprocess.sh
 	./planck0 planck/tests/vasm.pk
@@ -222,7 +210,7 @@ test-all: test-planck0
 	./planck0 planck/tests/x64.pk
 	./planck0 planck/tests/target.pk
 	./planck0 planck/tests/unit.pk
-	./planck0 tools/test.pk backend/cfg backend/x64enc backend/x64 backend/a64enc backend/arm64 backend/target
+	./planck0 tools/test.pk backend/cfg backend/x64enc backend/x64 backend/target
 	@for f in $(BACKEND_EXAMPLES); do \
 		./planck0 $$f tmp-backend || exit 1; \
 		./tmp-backend > tmp-backend.out || exit 1; \

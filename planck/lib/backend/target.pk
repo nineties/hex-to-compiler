@@ -4,13 +4,9 @@ use("base")
 use("list")
 use("backend/ir")
 use("backend/x64")
-use("backend/arm64")
-use("backend/pe")
 use("backend/link")
 use("backend/elf")
-use("backend/macho")
 use("backend/os")
-use("backend/wasm")
 
 module target {
 
@@ -23,34 +19,7 @@ x64_executable(objects) := {
     elf.image('x86_64, arg(image, 0), arg(image, 1))
 }
 
-macos_x64_executable(objects) := {
-    image := linker.link_paged(objects, "_start", x64_base, macho.header_size('x86_64, 2), macho.page_size('x86_64))
-    macho.image('x86_64, arg(image, 0), arg(image, 1))
-}
-
-windows_x64_executable(objects) := {
-    image := linker.link_paged(append(objects, [pe.runtime(os.windows_imports, os.windows_vars)]), "_start", x64_base, pe.header_size, 4096)
-    pe.image(arg(image, 0), arg(image, 1), arg(image, 2), os.windows_imports)
-}
-
-arm64_lower(f, helpers) := f
-
-linux_arm64_executable(objects) := {
-    image := linker.link(objects, "_start", x64_base, elf.header_size(2))
-    elf.image('aarch64, arg(image, 0), arg(image, 1))
-}
-
-macos_arm64_executable(objects) := {
-    image := linker.link_paged(objects, "_start", 0, macho.header_size('arm64, 2), macho.page_size('arm64))
-    macho.image('arm64, arg(image, 0), arg(image, 1))
-}
-
-all := [Target{'linux_x86_64, 8, x64_lower, (name, funs, datas) -> x64.compile(os.select_linux_x64, name, funs, datas), x64_executable},
-    Target{'macos_x86_64, 8, x64_lower, (name, funs, datas) -> x64.compile(os.select_macos_x64, name, funs, datas), macos_x64_executable},
-    Target{'windows_x86_64, 8, x64_lower, (name, funs, datas) -> x64.compile(os.select_windows_x64, name, funs, datas), windows_x64_executable},
-    Target{'linux_arm64, 8, arm64_lower, (name, funs, datas) -> arm64.compile(os.select_linux_arm64, name, funs, datas), linux_arm64_executable},
-    Target{'macos_arm64, 8, arm64_lower, (name, funs, datas) -> arm64.compile(os.select_macos_arm64, name, funs, datas), macos_arm64_executable},
-    Target{'wasm32, 4, wasm.lower, wasm.compile, wasm.executable}]
+all := [Target{'linux_x86_64, 8, x64_lower, (name, funs, datas) -> x64.compile(os.select_linux_x64, name, funs, datas), x64_executable}]
 
 export default := 'linux_x86_64
 
@@ -66,7 +35,7 @@ export compile(Target{_, _, _, compile, _}, name, funs, datas) := compile(name, 
 export executable(Target{_, _, _, _, executable}, objects) := executable(objects)
 
 test {
-    assert(map(t -> arg(t, 0), all) == ['linux_x86_64, 'macos_x86_64, 'windows_x86_64, 'linux_arm64, 'macos_arm64, 'wasm32], "the targets are linux_x86_64, macos_x86_64, windows_x86_64, linux_arm64, macos_arm64 and wasm32")
+    assert(map(t -> arg(t, 0), all) == ['linux_x86_64], "the target is linux_x86_64")
 }
 
 }

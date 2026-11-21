@@ -5,8 +5,6 @@ hex-to-compiler
    :target: https://github.com/nineties/hex-to-compiler/actions/workflows/runtests.yaml
    :alt: run tests
 
-Documentation: https://nineties.github.io/hex-to-compiler/ (`English <https://nineties.github.io/hex-to-compiler/en/>`_ / `日本語 <https://nineties.github.io/hex-to-compiler/ja/>`_)
-
 Overview
 --------
 
@@ -83,10 +81,9 @@ Stage3 starts with ``planck0``, an implementation of the Planck language written
 `planck0.sv <https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/planck0.sv>`_
 
 ``planck0`` treats a string as a sequence of bytes, so it handles ASCII characters only.
-The language is defined in the `reference <https://nineties.github.io/hex-to-compiler/en/reference/index.html>`_.
 `planck/examples <https://github.com/nineties/hex-to-compiler/tree/main/planck/examples>`_ has sample programs.
 
-``planck/vasmc.pk`` runs on ``planck0`` and compiles vasm, and native, its higher-level notation, to executables for Linux, macOS and Windows on x86-64, Linux and macOS on arm64, and to WebAssembly, with no assembler or linker of another system (see `vasmc <https://nineties.github.io/hex-to-compiler/en/library/vasmc.html>`_). Its libraries are in ``planck/lib/backend``, ``planck/lib/vasm`` and ``planck/lib/native``.
+``planck/vasmc.pk`` runs on ``planck0`` and compiles vasm, and native, its higher-level notation, to executables for Linux on x86-64, with no assembler or linker of another system. Its libraries are in ``planck/lib/backend``, ``planck/lib/vasm`` and ``planck/lib/native``.
 
 How to Run
 ----------
@@ -101,7 +98,7 @@ For x86 Linux
    $ make
    $ make test-planck0   # planck/tests/core.pk, syntax.pk, macro.pk, define.pk, module.pk, builtins.pk and the examples in planck/tests/errors
    $ make test-all       # test-planck0 and then the libraries, the tools, the vasm, native and backend tests, and the examples
-   $ make dist           # the PlanckVM as a program for each of Linux, macOS and Windows on x86-64 and Linux and macOS on arm64, in dist/
+   $ make dist           # the PlanckVM as a program for Linux on x86-64, in dist/
 
 For Other Environments
 ~~~~~~~~~~~~~~~~~~~~~~
