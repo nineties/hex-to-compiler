@@ -93,7 +93,7 @@ Test
    $ make test-planck0   # the language and the programs in planck/tests/errors
    $ make test-all       # also the libraries, the tools and the examples
 
-The same tests run in GitHub Actions on every push.
+GitHub Actions runs ``make test`` and ``make test-planck0`` on every push.
 
 Development Blog
 ----------------
