@@ -3867,7 +3867,7 @@ features:
     (defprim "array_get" 2 p_array_get PRIM_NATIVE)
     (defprim "array_set" 3 p_array_set PRIM_NATIVE)
     (defprim "array_len" 1 p_array_len PRIM_NATIVE)
-    (defprim "str_hash"    1 p_hash    PRIM_NATIVE)
+    (defprim "expr_hash"    1 p_hash    PRIM_NATIVE)
     (defprim "os_read_file" 1 p_read_file PRIM_NATIVE)
     (defprim "os_try_read_file" 1 p_try_read_file PRIM_NATIVE)
     (defprim "os_write_file" 2 p_write_file PRIM_NATIVE)
