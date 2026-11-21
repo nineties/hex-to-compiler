@@ -5,108 +5,95 @@ hex-to-compiler
    :target: https://github.com/nineties/hex-to-compiler/actions/workflows/runtests.yaml
    :alt: run tests
 
-Documentation: https://nineties.github.io/hex-to-compiler/ (`English <https://nineties.github.io/hex-to-compiler/en/>`_ / `日本語 <https://nineties.github.io/hex-to-compiler/ja/>`_)
+A programming language, Planck, bootstrapped from hand-written machine code.
+Each stage is built only with the tools made in the earlier stages: no external
+assembler, compiler or runtime is used.
 
-Overview
---------
+This repository extends `planckforth <https://github.com/nineties/planckforth>`_.
 
-This repository is an extension of `planckforth <https://github.com/nineties/planckforth>`_.
+How it is built
+---------------
 
-It is a personal project for experimenting with compiler bootstrapping, starting
-from hand-written machine code and gradually building more capable language
-processing tools. The repository primarily serves as a working log and collection
-of experiments rather than a polished implementation.
+1. ``pforth``: a Forth interpreter written in machine code
+   (`bootstrap/pforth.xxd <bootstrap/pforth.xxd>`_).
+2. ``plisp``: a Lisp interpreter written in Forth
+   (`bootstrap/plisp.fs <bootstrap/plisp.fs>`_), run by ``pforth``.
+3. ``asm`` and ``sasm``: an assembler (`bootstrap/asm.lisp <bootstrap/asm.lisp>`_)
+   and a C-like structured assembly (`bootstrap/sasm.lisp <bootstrap/sasm.lisp>`_),
+   both written in Lisp.
+4. ``plisp2``: ``plisp`` rewritten in ``sasm``
+   (`bootstrap/plisp2.sv <bootstrap/plisp2.sv>`_). It is much faster than ``plisp``.
+5. ``planck0``: the Planck language processor written in ``sasm``
+   (`bootstrap/planck0.sv <bootstrap/planck0.sv>`_). It is a static 32-bit i386 ELF
+   of about 79KB.
 
-Notes
+Build
 -----
 
-The project proceeds in small, incremental steps. Each stage depends only on the
-artifacts produced in earlier stages, deliberately avoiding the use of external
-assemblers, compilers, runtimes, and code generators.
-
-Many parts are exploratory, incomplete, or subject to change. Documentation and
-structure may lag behind the actual experiments.
-
-Bootstrapping Process
----------------------
-
-The system is built in explicit stages, each providing the minimum functionality
-required for the next stage.
-
-Stage1: Hex -> Forth -> Lisp
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Stage1 begins with a minimal Forth interpreter written by hand in machine code.
-`planck.xxd <https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/pforth.xxd>`_
-
-Using Forth’s self-extensibility, this interpreter is grown into a more capable
-language environment, eventually producing a simple Lisp interpreter.
-`plisp.fs <https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/plisp.fs>`_
-
-Starting from hand-written machine code imposes strong constraints, but these can
-be addressed by leveraging core features of Forth.
-
-Lisp is selected as the target of Stage1 because subsequent stages involve building
-tools such as assemblers. Lisp is well suited for this role, as it allows
-easy construction of internal DSLs and direct manipulation of syntax trees.
-
-Stage2: Building Tools
-~~~~~~~~~~~~~~~~~~~~~~
-
-In Stage 2, we develop a suite of intermediate tools to move away from hand-written machine code.
-These tools are "disposable" utilities designed to bridge the gap toward a more complete system,
-prioritizing ease of implementation over performance and safety.
-
-First, we implement `asm.lisp <https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/asm.lisp>`_, a basic assembler. It makes significant architectural compromises to keep the implementation simple:
-
-* **Target:** x86 32-bit mode only.
-* **Direct Output:** It generates standalone executables directly, bypassing separate compilation.
-* **Monolithic ELF:** All headers and code/data are packed into a single ``PT_LOAD (RWX)`` segment to avoid complex page alignment logic.
-
-Example: `hello.s <https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/asm/examples/hello.s>`_
-
-Second, we implement `sasm.lisp <https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/sasm.lisp>`_ (Structured Assembly).
-This is a C-like untyped language implemented as an internal DSL within plisp.
-To simplify development, it generates code for a stack-machine model using frequent push/pop instructions instead of complex register allocation.
-
-Example: `hello.sv <https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/sasm/examples/hello.sv>`_
-
-Finally, I re-implemented ``plisp`` using ``sasm`` to create ``plisp2``. 
-`plisp2.sv <https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/plisp2.sv>`_
-
-The performance of the initial plisp (built from hand-written machine code via Forth) was insufficient for complex tasks. While memory usage remains significant, ``plisp2`` provides the minimum efficiency required to proceed with the implementation of a full-scale language environment.
-
-Stage3: Implementing Full-Scale Language Processor
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Stage3 starts with ``planck0``, an implementation of the Planck language written in ``sasm``.
-`planck0.sv <https://github.com/nineties/hex-to-compiler/blob/main/bootstrap/planck0.sv>`_
-
-``planck0`` treats a string as a sequence of bytes, so it handles ASCII characters only.
-The language is defined in the `reference <https://nineties.github.io/hex-to-compiler/en/reference/index.html>`_.
-`planck/examples <https://github.com/nineties/hex-to-compiler/tree/main/planck/examples>`_ has sample programs.
-
-``planck/vasmc.pk`` runs on ``planck0`` and compiles vasm, and native, its higher-level notation, to executables for Linux, macOS and Windows on x86-64, Linux and macOS on arm64, and to WebAssembly, with no assembler or linker of another system (see `vasmc <https://nineties.github.io/hex-to-compiler/en/library/vasmc.html>`_). Its libraries are in ``planck/lib/backend``, ``planck/lib/vasm`` and ``planck/lib/native``.
-
-How to Run
-----------
-
-For x86 Linux
-~~~~~~~~~~~~~
-
-::
+On x86_64 Linux::
 
    $ git clone https://github.com/nineties/hex-to-compiler.git
    $ cd hex-to-compiler
    $ make
-   $ make test-planck0   # planck/tests/core.pk, syntax.pk, macro.pk, define.pk, module.pk, builtins.pk and the examples in planck/tests/errors
-   $ make test-all       # test-planck0 and then the libraries, the tools, the vasm, native and backend tests, and the examples
-   $ make dist           # the PlanckVM as a program for each of Linux, macOS and Windows on x86-64 and Linux and macOS on arm64, in dist/
 
-For Other Environments
-~~~~~~~~~~~~~~~~~~~~~~
+``make`` builds ``pforth``, ``plisp2`` and ``planck0`` in the top directory.
 
-TBD
+Other targets:
+
+* ``make example``: build the examples under ``bootstrap/``
+* ``make test``: test ``plisp``
+* ``make test-planck0``: test the Planck language
+* ``make test-all``: ``test-planck0``, then the libraries, the tools and the examples
+* ``make preprocess``: preprocess ``pretty``, ``list`` and ``string`` of ``planck/lib``
+* ``make clean``: remove the built files
+
+Use a release binary
+--------------------
+
+Download ``planck0`` and ``planck0.sha256`` from the
+`Releases <https://github.com/nineties/hex-to-compiler/releases>`_ page::
+
+   $ sha256sum -c planck0.sha256
+   $ chmod +x planck0
+
+``planck0`` reads ``planck/init.pk``, ``planck/peg.pk``, ``planck/syntax.pk`` and
+``planck/lib`` from the current directory, so run it in a directory that has the
+``planck`` folder of this repository.
+
+The Planck language
+-------------------
+
+Run a program with ``planck0``::
+
+   $ ./planck0 planck/examples/fib.pk
+   fib(0) = 0
+   fib(1) = 1
+   fib(2) = 1
+   ...
+
+Integers are 31 bits and become arbitrary-precision integers on overflow.
+There is no floating point. Strings are sequences of bytes (ASCII).
+
+* ``planck/init.pk``, ``planck/peg.pk``, ``planck/syntax.pk``: the language
+* ``planck/lib``: the libraries, loaded with ``use("list")``
+* `planck/examples <planck/examples>`_: sample programs; ``NAME.out`` is the expected output
+* ``planck/tests``: tests
+
+Arguments after the file name go to the program::
+
+   $ ./planck0 planck/examples/greet.pk -sn 2 Ann
+   Hello, Ann!!
+   Hello, Ann!!
+
+Test
+----
+
+::
+
+   $ make test-planck0   # the language and the programs in planck/tests/errors
+   $ make test-all       # also the libraries, the tools and the examples
+
+GitHub Actions runs ``make test`` and ``make test-planck0`` on every push.
 
 Development Blog
 ----------------
@@ -116,11 +103,6 @@ Development Blog
 * `機械語手書きから言語処理系をブートストラップする <https://qiita.com/9_ties/items/349b2ed65b7cd8a7d580>`_
 * `機械語手書きから言語処理系をブートストラップする(2) <https://qiita.com/9_ties/items/d70390d2a7f18b45b4d3>`_
 * `機械語手書きから言語処理系をブートストラップする(3) <https://qiita.com/9_ties/items/689071cf51f1a8c15507>`_
-
-Status
-------
-
-Ongoing personal work. No guarantees of completeness, correctness, or stability.
 
 License
 -------

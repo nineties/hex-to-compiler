@@ -46,30 +46,20 @@ planck0: bootstrap/planck0.sv plisp2 $(SASM_LIBS)
 	-chmod +x $@
 
 
-VASM_EXAMPLES := $(wildcard planck/examples/vasm/*.vasm)
-NATIVE_EXAMPLES := $(wildcard planck/examples/native/*.native)
-VASM_TARGETS := linux_x86_64
-VM_ALL_EXAMPLES := $(wildcard planck/examples/vm/*.pk)
-# the programs that use a float are left out of the examples of VM0, the planckvm without floating point
-VM0_EXAMPLES := $(filter-out planck/examples/vm/float.pk planck/examples/vm/plain_float.pk planck/examples/vm/trans.pk planck/examples/vm/bits.pk planck/examples/vm/equality.pk planck/examples/vm/plain_int.pk,$(wildcard planck/examples/vm/*.pk))
-BACKEND_EXAMPLES := $(wildcard planck/examples/backend/*.pk)
-
-.PHONY: clean test test-planck0 test-all test-vm0 test-vm test-vm-invalid test-udiv test-fm preprocess
+.PHONY: clean test test-planck0 test-all preprocess
 clean:
 	rm -f planck/lib/*.pkm planck/lib/*/*.pkm
 	rm -f pforth
 	rm -f plisp2
 	rm -f planck0
-	rm -rf tmp-vm tmp-vm-build tmp-vmf tmp-vmf-build dist
 	rm -f $(ASM_EXAMPLE_TARGETS)
 	rm -f $(SASM_EXAMPLE_TARGETS)
 
 test: pforth bootstrap/plisp.fs $(shell find bootstrap/plisp -name "*.lisp")
 	./pforth < bootstrap/plisp.fs bootstrap/plisp/test.lisp
 
-# parse the libraries that planck/vasmc.pk uses in advance (planck/lib/*/*.pkm)
 preprocess: planck0
-	./planck0 tools/preprocess.pk pretty vasm/build native/compile pvm/image
+	./planck0 tools/preprocess.pk pretty list string
 
 # run the core tests of planck0: tests of the language and the examples in tests/errors
 test-planck0: planck0
@@ -80,6 +70,7 @@ test-planck0: planck0
 	./planck0 planck/tests/module.pk
 	./planck0 planck/tests/import.pk
 	./planck0 planck/tests/builtins.pk one "two words"
+	./planck0 planck/tests/bigint.pk
 	@for f in planck/tests/errors/*.pk; do \
 		./planck0 $$f > tmp-error.out 2> tmp-error.err && { echo "$$f: should stop"; exit 1; }; \
 		diff -u $${f%.pk}.out tmp-error.out || exit 1; \
@@ -87,166 +78,12 @@ test-planck0: planck0
 		echo "$$f: stops"; \
 	done; rm -f tmp-error.out tmp-error.err
 
-# planck/vm is built as units. tmp-vm is VM0, the planckvm without floating point: its flt, dec and trans are those of planck/vm0, which stop on a float.
-# tmp-vmf is the planckvm with floating point: it has the flt, dec and trans of planck/vm, and fm with the coefficients that VM0 made (fmk).
-# The other units are the same in both, so they are compiled once. The standard input of an example is the file of the same name with .in, or empty.
-VM_UNITS := mem gc udiv big flt dec num obj bit trans nb arr eq verify builtin hsh ctl ops vm
-VM_BUILD := tmp-vm-build
-VM_UNIT_FILES := $(addprefix $(VM_BUILD)/,$(addsuffix .unit,$(VM_UNITS)))
-# everything that a unit depends on besides its source: the compiler, which is planck/vasmc.pk and the libraries that it uses
-VASMC_SOURCES := planck/vasmc.pk planck/init.pk planck/peg.pk planck/syntax.pk $(shell find planck/lib -name "*.pk")
-# the unit files of the units that planck/vm/$(1).native imports
-vm_src = $(if $(filter flt dec trans,$(1)),planck/vm0,planck/vm)/$(1).native
-vm_imports = $(addprefix $(VM_BUILD)/,$(addsuffix .unit,$(shell sed -n 's/^import \([A-Za-z0-9_]*\).*/\1/p' $(call vm_src,$(1)))))
-# a unit is compiled once the units that it imports are, so make -j compiles the units that do not depend on each other at the same time
-define VM_UNIT_RULE
-$(VM_BUILD)/$(1).unit: $(call vm_src,$(1)) $(call vm_imports,$(1)) $(VASMC_SOURCES) planck0 | $(VM_BUILD)
-	./planck0 planck/vasmc.pk unit $$< $$@ linux_x86_64 $(call vm_imports,$(1))
-endef
-$(foreach u,$(VM_UNITS),$(eval $(call VM_UNIT_RULE,$(u))))
-$(VM_BUILD):
-	mkdir -p $@
-tmp-vm: $(VM_UNIT_FILES) planck0
-	./planck0 planck/vasmc.pk link $@ linux_x86_64 $(VM_UNIT_FILES)
-
-# the coefficients and the constants of the floating point of planck/vm are written by tools/gen_fm_vm0.pk, which runs on tmp-vm (the planckvm without floating point)
-$(VM_BUILD)/fmk.img: tools/gen_fm_vm0.pk planck/lib/pvm/cas.pk planck/lib/pvm/compile.pk planck0 | $(VM_BUILD)
-	./planck0 tools/gen_fm_vm0.pk $@
-$(VM_BUILD)/fmk.native: $(VM_BUILD)/fmk.img tmp-vm
-	./tmp-vm $< > $@
-$(VM_BUILD)/fmk.unit: $(VM_BUILD)/fmk.native $(VASMC_SOURCES) planck0
-	./planck0 planck/vasmc.pk unit $< $@ linux_x86_64
-
-# check exp, log, pow, sin, cos and atan2 of planck/vm/fm.native; the status of the program is the number of results more than 1 ulp apart
-test-fm: $(VM_BUILD)/fmk.unit planck0
-	./planck0 planck/vasmc.pk unit planck/vm/fm.native $(VM_BUILD)/fm.unit linux_x86_64 $(VM_BUILD)/fmk.unit
-	./planck0 planck/vasmc.pk unit planck/tests/fm/main.native $(VM_BUILD)/fmtest.unit linux_x86_64 $(VM_BUILD)/fm.unit
-	./planck0 planck/vasmc.pk link $(VM_BUILD)/fmtest linux_x86_64 $(VM_BUILD)/fmk.unit $(VM_BUILD)/fm.unit $(VM_BUILD)/fmtest.unit
-	$(VM_BUILD)/fmtest
-
-# the units of tmp-vmf: flt, dec and trans of planck/vm, and fm, which needs the units that VM0 made
-VMF_BUILD := tmp-vmf-build
-VMF_REAL := flt dec trans
-VMF_UNIT_FILES := $(filter-out $(addprefix $(VM_BUILD)/,$(addsuffix .unit,$(VMF_REAL))),$(VM_UNIT_FILES)) $(VM_BUILD)/fmk.unit $(VM_BUILD)/fm.unit $(addprefix $(VMF_BUILD)/,$(addsuffix .unit,$(VMF_REAL)))
-$(VM_BUILD)/fm.unit: planck/vm/fm.native $(VM_BUILD)/fmk.unit $(VASMC_SOURCES) planck0
-	./planck0 planck/vasmc.pk unit $< $@ linux_x86_64 $(VM_BUILD)/fmk.unit
-$(VMF_BUILD):
-	mkdir -p $@
-$(VMF_BUILD)/flt.unit: planck/vm/flt.native $(VM_BUILD)/fm.unit $(VM_BUILD)/mem.unit $(VM_BUILD)/big.unit $(VASMC_SOURCES) planck0 | $(VMF_BUILD)
-	./planck0 planck/vasmc.pk unit $< $@ linux_x86_64 $(VM_BUILD)/fm.unit $(VM_BUILD)/mem.unit $(VM_BUILD)/big.unit
-$(VMF_BUILD)/dec.unit: planck/vm/dec.native $(VMF_BUILD)/flt.unit $(VM_BUILD)/mem.unit $(VASMC_SOURCES) planck0 | $(VMF_BUILD)
-	./planck0 planck/vasmc.pk unit $< $@ linux_x86_64 $(VM_BUILD)/mem.unit $(VMF_BUILD)/flt.unit
-$(VMF_BUILD)/trans.unit: planck/vm/trans.native $(VMF_BUILD)/flt.unit $(VM_BUILD)/fm.unit $(VM_BUILD)/mem.unit $(VASMC_SOURCES) planck0 | $(VMF_BUILD)
-	./planck0 planck/vasmc.pk unit $< $@ linux_x86_64 $(VM_BUILD)/fm.unit $(VM_BUILD)/mem.unit $(VMF_BUILD)/flt.unit
-tmp-vmf: $(VMF_UNIT_FILES) planck0
-	./planck0 planck/vasmc.pk link $@ linux_x86_64 $(VMF_UNIT_FILES)
-
-# the planckvm with floating point as a program for each platform: dist/planckvm-<target> (the units are the same for every target of the word 8)
-DIST_TARGETS := linux_x86_64 macos_x86_64 linux_arm64 macos_arm64
-DIST_FILES := $(addprefix dist/planckvm-,$(DIST_TARGETS)) dist/planckvm-windows_x86_64.exe
-.PHONY: dist
-dist: $(DIST_FILES)
-dist/planckvm-%: $(VMF_UNIT_FILES) $(VASMC_SOURCES) planck0
-	mkdir -p dist
-	./planck0 planck/vasmc.pk link $@ $* $(VMF_UNIT_FILES)
-
-# the file of Windows has the extension .exe
-dist/planckvm-windows_x86_64.exe: $(VMF_UNIT_FILES) $(VASMC_SOURCES) planck0
-	mkdir -p dist
-	./planck0 planck/vasmc.pk link $@ windows_x86_64 $(VMF_UNIT_FILES)
-
-test-vm: tmp-vmf
-	@for f in $(VM_ALL_EXAMPLES); do \
-		./planck0 $$f tmp-vmf.img || exit 1; \
-		in=/dev/null; if [ -f $${f%.pk}.in ]; then in=$${f%.pk}.in; fi; \
-		./tmp-vmf tmp-vmf.img < $$in > tmp-vmf.out || exit 1; \
-		diff -u $${f%.pk}.out tmp-vmf.out || exit 1; \
-		echo "$$f: ok"; \
-	done; rm -f tmp-vmf.img tmp-vmf.out
-
-# the images that planckvm must stop on (planck/tests/vm_invalid.pk makes an image for each case and the file cases.txt of the lines name|message):
-# each stops with the status 1, the message on the standard error and nothing on the standard output
-test-vm-invalid: tmp-vmf planck0
-	rm -rf tmp-vm-invalid && mkdir tmp-vm-invalid
-	./planck0 planck/tests/vm_invalid.pk tmp-vm-invalid
-	@while IFS='|' read -r name msg; do \
-		./tmp-vmf tmp-vm-invalid/$$name.img > tmp-vm-invalid/out 2> tmp-vm-invalid/err < /dev/null; s=$$?; \
-		if [ $$s -ne 1 ]; then echo "$$name: exit status $$s, not 1"; exit 1; fi; \
-		if [ "$$(cat tmp-vm-invalid/err)" != "$$msg" ]; then echo "$$name: the message is"; cat tmp-vm-invalid/err; exit 1; fi; \
-		if [ -s tmp-vm-invalid/out ]; then echo "$$name: it wrote to the standard output"; exit 1; fi; \
-		echo "$$name: stops"; \
-	done < tmp-vm-invalid/cases.txt
-	@./tmp-vmf tmp-vm-invalid/missing.img > /dev/null 2> tmp-vm-invalid/err; s=$$?; \
-		if [ $$s -ne 1 ] || [ "$$(cat tmp-vm-invalid/err)" != "cannot open the image" ]; then echo "a missing image: exit status $$s"; exit 1; fi; \
-		echo "a missing image: stops"
-	rm -rf tmp-vm-invalid
-
-test-vm0: tmp-vm
-	@for f in $(VM0_EXAMPLES); do \
-		./planck0 $$f tmp-vm.img || exit 1; \
-		in=/dev/null; if [ -f $${f%.pk}.in ]; then in=$${f%.pk}.in; fi; \
-		./tmp-vm tmp-vm.img < $$in > tmp-vm.out || exit 1; \
-		diff -u $${f%.pk}.out tmp-vm.out || exit 1; \
-		echo "$$f: ok"; \
-	done; rm -f tmp-vm.img tmp-vm.out
-
-# check the division by the reciprocal of planck/vm/udiv.native against its definition; the status of the program is the number of wrong results
-test-udiv: planck0
-	./planck0 planck/vasmc.pk unit planck/vm/udiv.native tmp-udiv-lib.unit linux_x86_64
-	./planck0 planck/vasmc.pk unit planck/tests/udiv/main.native tmp-udiv-main.unit linux_x86_64 tmp-udiv-lib.unit
-	./planck0 planck/vasmc.pk link tmp-udiv linux_x86_64 tmp-udiv-lib.unit tmp-udiv-main.unit
-	./tmp-udiv; s=$$?; rm -f tmp-udiv tmp-udiv-*.unit; exit $$s
-
-# run everything: test-planck0 and then the libraries, the tools, the vasm, native and backend tests, and the examples
 test-all: test-planck0
 	./planck0 planck/tests/lib.pk
-	./planck0 planck/tests/unparse.pk
-	./planck0 planck/tests/unparse_pattern.pk
-	./planck0 planck/tests/unparse_file.pk
-	./planck0 planck/tests/highlight.pk
 	$(MAKE) preprocess
 	tools/test_preprocess.sh
-	./planck0 planck/tests/vasm.pk
-	./planck0 planck/tests/native.pk
-	$(MAKE) test-udiv
-	$(MAKE) test-vm0
-	$(MAKE) test-vm
-	$(MAKE) test-vm-invalid
-	$(MAKE) test-fm
 	@for f in $(PLANCK_EXAMPLES); do \
 		./planck0 $$f > tmp-example.out || exit 1; \
 		diff -u $${f%.pk}.out tmp-example.out || exit 1; \
 		echo "$$f: ok"; \
 	done; rm -f tmp-example.out
-	./planck0 planck/tests/backend.pk
-	./planck0 planck/tests/x64.pk
-	./planck0 planck/tests/target.pk
-	./planck0 planck/tests/unit.pk
-	./planck0 tools/test.pk backend/cfg backend/x64enc backend/x64 backend/a64enc backend/arm64 backend/target
-	@for f in $(BACKEND_EXAMPLES); do \
-		./planck0 $$f tmp-backend || exit 1; \
-		./tmp-backend > tmp-backend.out || exit 1; \
-		diff -u $${f%.pk}.out tmp-backend.out || exit 1; \
-		echo "$$f: ok"; \
-	done; rm -f tmp-backend tmp-backend.out
-	@for t in $(VASM_TARGETS); do for f in $(VASM_EXAMPLES) $(NATIVE_EXAMPLES); do \
-		./planck0 planck/vasmc.pk $$f tmp-vasm $$t || exit 1; \
-		./tmp-vasm > tmp-vasm.out; s=$$?; \
-		[ "$$s" = "$$(cat $${f%.*}.status)" ] || { echo "$$f ($$t): exit status $$s"; exit 1; }; \
-		if [ -f $${f%.*}.out ]; then diff -u $${f%.*}.out tmp-vasm.out || exit 1; fi; \
-		echo "$$f ($$t): ok"; \
-	done; done; rm -f tmp-vasm tmp-vasm.out
-	@for t in $(VASM_TARGETS); do \
-		./planck0 planck/vasmc.pk unit planck/examples/units/lib.native tmp-lib.unit $$t || exit 1; \
-		./planck0 planck/vasmc.pk unit planck/examples/units/main.native tmp-main.unit $$t tmp-lib.unit || exit 1; \
-		./planck0 planck/vasmc.pk link tmp-units $$t tmp-lib.unit tmp-main.unit || exit 1; \
-		./tmp-units; s=$$?; \
-		[ "$$s" = "$$(cat planck/examples/units/main.status)" ] || { echo "planck/examples/units ($$t): exit status $$s"; exit 1; }; \
-		echo "planck/examples/units ($$t): ok"; \
-	done; rm -f tmp-lib.unit tmp-main.unit tmp-units
-	@./planck0 planck/vasmc.pk unit planck/examples/units/lib.native tmp-lib.unit linux_x86_64 || exit 1
-	@for f in planck/tests/units/*.native; do \
-		./planck0 planck/vasmc.pk unit $$f tmp-unit.unit linux_x86_64 tmp-lib.unit > tmp-unit.out && { echo "$$f: should stop"; exit 1; }; \
-		diff -u $${f%.native}.out tmp-unit.out || exit 1; \
-		echo "$$f: stops"; \
-	done; rm -f tmp-lib.unit tmp-unit.unit tmp-unit.out
