@@ -38,7 +38,7 @@ expect "with a preprocessed file" 10 p1.pk
 
 # the preprocessed file is used: its expression is read instead of the text of the library
 cp "$T/planck/lib/glib.pkm" "$T/glib.good"
-sed 's/Apply{_mul, Tuple{5, 2}}/Apply{_add, Tuple{5, 2}}/' "$T/glib.good" > "$T/planck/lib/glib.pkm"
+sed 's/Apply{int_mul, Tuple{5, 2}}/Apply{int_add, Tuple{5, 2}}/' "$T/glib.good" > "$T/planck/lib/glib.pkm"
 expect "the preprocessed expressions are evaluated" 7 p1.pk
 
 # a stale file, a broken file and a grammar which differs are not used
