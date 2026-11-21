@@ -1,0 +1,69 @@
+# Copyright (C) 2026 nineties
+
+module eval_text {
+    export strip_compiler(msg) := if (strlen(msg) >= 13 and substr(msg, 0, 13) == "pvm_compile: ") substr(msg, 13, strlen(msg)) else msg
+
+    is_def(e) := type(e) == Expr and (head(e) == 'Def or head(e) == 'Set or head(e) == 'Declare or
+        (head(e) == 'Apply and arg(e, 0) == '_define_rule) or
+        (head(e) == 'Do and arity(e) > 0 and is_def(arg(e, arity(e) - 1))))
+    is_use(e) := type(e) == Expr and head(e) == 'Apply and arity(e) == 2 and arg(e, 0) == 'use
+
+    show(text) := {
+        n := strlen(text)
+        i := 0
+        while (i < n and (ord(text, i) == 10 or ord(text, i) == 32)) i = i + 1
+        while (n > i and (ord(text, n - 1) == 10 or ord(text, n - 1) == 32)) n = n - 1
+        k := i
+        first := true
+        while (k <= n) {
+            j := k
+            while (j < n and ord(text, j) != 10) j = j + 1
+            print(f"{if (first) "> " else "... "}{substr(text, k, j)}")
+            first = false
+            k = j + 1
+        }
+    }
+
+    export run(s, file, echo, values, format) := {
+        line := 1
+        col := 1
+        go := true
+        ok := true
+        while (go) {
+            r := parse_at(s, Loc{file, line, col})
+            e := arg(r, 0)
+            if (type(e) == Expr and head(e) == 'Eof) go = false
+            else if (type(e) == Expr and head(e) == 'SyntaxError) {
+                print(peg_error_text(e))
+                ok = false
+                go = false
+            } else {
+                rest := arg(r, 1)
+                n := strlen(s) - strlen(rest)
+                if (echo) show(substr(s, 0, n))
+                k := 0
+                while (k < n) {
+                    if (ord(s, k) == 10) {
+                        line = line + 1
+                        col = 1
+                    } else col = col + 1
+                    k = k + 1
+                }
+                s = rest
+                if (not is_use(e)) {
+                    failed := false
+                    v := handle eval(e) with (Error{loc, msg}, k) -> {
+                        print(format(msg))
+                        failed = true
+                        none
+                    }
+                    if (failed) {
+                        ok = false
+                        go = false
+                    } else if (values and v != none and not is_def(e)) _print_repr(v)
+                }
+            }
+        }
+        ok
+    }
+}

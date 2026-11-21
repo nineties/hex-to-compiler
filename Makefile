@@ -54,7 +54,7 @@ VM_ALL_EXAMPLES := $(wildcard planck/examples/vm/*.pk)
 VM0_EXAMPLES := $(filter-out planck/examples/vm/float.pk planck/examples/vm/plain_float.pk planck/examples/vm/trans.pk planck/examples/vm/bits.pk planck/examples/vm/equality.pk planck/examples/vm/plain_int.pk,$(wildcard planck/examples/vm/*.pk))
 BACKEND_EXAMPLES := $(wildcard planck/examples/backend/*.pk)
 
-.PHONY: clean test test-planck0 test-all test-vm0 test-vm test-vm-invalid test-udiv test-fm preprocess
+.PHONY: clean test-script test test-planck0 test-all test-vm0 test-vm test-vm-invalid test-udiv test-fm preprocess
 clean:
 	rm -f planck/lib/*.pkm planck/lib/*/*.pkm
 	rm -f pforth
@@ -154,6 +154,22 @@ dist/planckvm-%: $(VMF_UNIT_FILES) $(VASMC_SOURCES) planck0
 dist/planckvm-windows_x86_64.exe: $(VMF_UNIT_FILES) $(VASMC_SOURCES) planck0
 	mkdir -p dist
 	./planck0 planck/vasmc.pk link $@ windows_x86_64 $(VMF_UNIT_FILES)
+
+PLANCK_LIBS := planck/lib/literal.pk planck/lib/script.pk planck/lib/eval_text.pk planck/lib/repl.pk
+
+dist/planck: tmp-vmf tools/planck.pk $(PLANCK_LIBS) planck0
+	mkdir -p dist
+	./planck0 tools/planck.pk tmp-vmf $@
+
+dist/planck-linux_%: dist/planckvm-linux_% tools/planck.pk $(PLANCK_LIBS) planck0
+	./planck0 tools/planck.pk $< $@
+
+test-script: dist/planck
+	./dist/planck < planck/tests/script/repl.in | diff -u planck/tests/script/repl.out - || exit 1
+	./dist/planck planck/tests/script/hello.pk > tmp-script.out; s=$$?; \
+		if [ $$s -ne 1 ]; then echo "exit status $$s"; exit 1; fi; \
+		diff -u planck/tests/script/hello.out tmp-script.out || exit 1; \
+		echo "planck/tests/script/hello.pk: ok"; rm -f tmp-script.out
 
 test-vm: tmp-vmf
 	@for f in $(VM_ALL_EXAMPLES); do \

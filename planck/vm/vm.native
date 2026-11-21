@@ -44,6 +44,83 @@ fun load[r](h: &mutable r [u8], path: &static [u8]) -> i64 {
     pos / 8
 }
 
+fun embedded_trailer() -> i64 {
+    let fd = open("/proc/self/exe")
+    if fd < 0 { return -1 }
+    let chunk = allocate(4096, 0 as u8)
+    let ring = allocate(16, 0 as u8)
+    let magic = "PLANCKIM"
+    var total: i64
+    var more: i64
+    var found: i64
+    total = 0
+    more = 1
+    found = -1
+    region q {
+    var cb: &mutable q [u8]
+    cb = &mutable q chunk
+    var rg: &mutable q [u8]
+    rg = &mutable q ring
+    while more != 0 {
+        let n = read(fd, cb)
+        if n <= 0 {
+            more = 0
+        } else {
+            for i in 0 as i64..n {
+                rg[(total + i) % 16] = cb[i]
+            }
+            total += n
+        }
+    }
+    if total >= 16 {
+        var ok: i64
+        var size: i64
+        ok = 1
+        size = 0
+        for j in 0 as i64..8 {
+            if (rg[(total - 8 + j) % 16] as i64) != (magic[j] as i64) { ok = 0 }
+            size += (rg[(total - 16 + j) % 16] as i64) << (8 * j)
+        }
+        if ok == 1 and size > 0 and size % 8 == 0 and size <= total - 16 {
+            found = (total - 16 - size) * 4294967296 + size
+        }
+    }
+    }
+    close(fd)
+    free(chunk)
+    free(ring)
+    found
+}
+
+fun load_embedded[r](h: &mutable r [u8], start: i64, size: i64) -> i64 {
+    let fd = open("/proc/self/exe")
+    if fd < 0 { die("cannot open the image") }
+    if size > len(h) { die("the image is too big") }
+    let chunk = allocate(4096, 0 as u8)
+    var pos: i64
+    var more: i64
+    pos = 0
+    more = 1
+    region q {
+    var cb: &mutable q [u8]
+    cb = &mutable q chunk
+    while more != 0 {
+        let n = read(fd, cb)
+        if n <= 0 {
+            more = 0
+        } else {
+            for i in 0 as i64..n {
+                let o = pos + i
+                if o >= start and o < start + size { h[o - start] = cb[i] }
+            }
+            pos += n
+        }
+    }
+    }
+    close(fd)
+    free(chunk)
+    size / 8
+}
 
 # register_image puts the strings, the symbols and the m-exprs of the image (the words 17 to n) in the table of the interned objects; the image has
 # no two of them that are equal
@@ -257,14 +334,15 @@ fun err_num(n: i64) {
 # a smaller memory (the wasm32 target), and the numbers of the collections are written to stderr. The heap is 268435456 bytes unless it is given, and the
 # scratch array is the heap without the remembered set.
 fun main() -> i64 {
-    if argc() < 2 { die("usage: vm <image>") }
+    let trailer = embedded_trailer()
+    if trailer < 0 and argc() < 2 { die("usage: vm <image>") }
     var heap: own [u8]
     var machine: own [i64]
     var regs: own [i64]
     var frames: own [i64]
     var hsize: i64
     hsize = 268435456
-    if argc() >= 5 { hsize = parse_num(argv(4)) }
+    if trailer < 0 and argc() >= 5 { hsize = parse_num(argv(4)) }
     heap = allocate(hsize, 0 as u8)
     machine = allocate(st_words(), 0 as i64)
     var scratch: own [u8]
@@ -284,7 +362,11 @@ fun main() -> i64 {
         rs = &mutable r regs
         fs = &mutable r frames
         var n: i64
-        n = load(h, argv(1))
+        if trailer >= 0 {
+            n = load_embedded(h, trailer / 4294967296, trailer % 4294967296)
+        } else {
+            n = load(h, argv(1))
+        }
         verify_image(h, n)
         # the entry stub: a code of 2 instructions CALL R0 R0 0 and HALT R0 (the two u32 words in one word of the plain array), an empty array of the constants,
         # an empty u32 plain array of the positions, and its Lambda
@@ -316,7 +398,7 @@ fun main() -> i64 {
         # the old generation is the image and the stub; the nursery is the end of the heap before the remembered set
         var nsize: i64
         nsize = 4194304
-        if argc() >= 3 { nsize = parse_num(argv(2)) }
+        if trailer < 0 and argc() >= 3 { nsize = parse_num(argv(2)) }
         let ns = len(h) / 8 - 262144 - nsize
         if n + 25 > ns { die("the image is too big") }
         p(st, 0, ns)
@@ -326,7 +408,7 @@ fun main() -> i64 {
         p(st, 13, ns + nsize / 4 * 3)
         p(st, 15, nsize / 8)
         p(st, 17, nsize)
-        if argc() >= 4 { p(st, 18, parse_num(argv(3))) }
+        if trailer < 0 and argc() >= 4 { p(st, 18, parse_num(argv(3))) }
         var slack: i64
         slack = g(st, 18)
         if slack == 0 { slack = (ns - n - 25) / 2 }
@@ -339,7 +421,7 @@ fun main() -> i64 {
         }
         register_image(h, st, n)
         result = run(h, sc, st, rs, fs, (n + 21) * 8, hg(h, 0))
-        if argc() >= 3 {
+        if trailer < 0 and argc() >= 3 {
             write(2, "minor ")
             err_num(g(st, 20))
             write(2, " major ")

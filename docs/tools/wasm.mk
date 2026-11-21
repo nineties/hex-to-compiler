@@ -20,5 +20,5 @@ $(B)/fmk.unit: tmp-vm-build/fmk.native $(VASMC_SOURCES) planck0 | $(B)
 	./planck0 planck/vasmc.pk unit $< $@ wasm32
 docs/assets/vm.wasm: $(addprefix $(B)/,$(addsuffix .unit,fmk fm $(UNITS)))
 	./planck0 planck/vasmc.pk link $@ wasm32 $^
-docs/assets/planck.img: docs/tools/playground.pk docs/tools/playground_run.pk $(VASMC_SOURCES) planck/lib/pvm/boot.pk planck0
+docs/assets/planck.img: docs/tools/playground.pk docs/tools/playground_run.pk planck/lib/eval_text.pk $(VASMC_SOURCES) planck/lib/pvm/boot.pk planck0
 	./planck0 docs/tools/playground.pk $@
