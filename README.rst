@@ -83,8 +83,6 @@ Stage3 starts with ``planck0``, an implementation of the Planck language written
 ``planck0`` treats a string as a sequence of bytes, so it handles ASCII characters only.
 `planck/examples <https://github.com/nineties/hex-to-compiler/tree/main/planck/examples>`_ has sample programs.
 
-``planck/vasmc.pk`` runs on ``planck0`` and compiles vasm, and native, its higher-level notation, to executables for Linux on x86-64, with no assembler or linker of another system. Its libraries are in ``planck/lib/backend``, ``planck/lib/vasm`` and ``planck/lib/native``.
-
 How to Run
 ----------
 
@@ -96,9 +94,8 @@ For x86 Linux
    $ git clone https://github.com/nineties/hex-to-compiler.git
    $ cd hex-to-compiler
    $ make
-   $ make test-planck0   # planck/tests/core.pk, syntax.pk, macro.pk, define.pk, module.pk, builtins.pk and the examples in planck/tests/errors
-   $ make test-all       # test-planck0 and then the libraries, the tools, the vasm, native and backend tests, and the examples
-   $ make dist           # the PlanckVM as a program for Linux on x86-64, in dist/
+   $ make test-planck0   # planck/tests/core.pk, syntax.pk, macro.pk, define.pk, module.pk, import.pk, builtins.pk, bigint.pk and the examples in planck/tests/errors
+   $ make test-all       # test-planck0 and then the libraries, the tools and the examples
 
 For Other Environments
 ~~~~~~~~~~~~~~~~~~~~~~
