@@ -21,13 +21,13 @@ cat > "$T/planck/lib/glib.pk" <<'EOT'
 v := 5 * 2
 EOT
 cat > "$T/p1.pk" <<'EOT'
-use("glib")
+import_lib("glib")
 print(v)
 EOT
 # a program which changes the grammar before it uses the library
 cat > "$T/p2.pk" <<'EOT'
 mul_expr ::= a:mul_expr "*" b:unary { `(!a - !b) } | ...
-use("glib")
+import_lib("glib")
 print(v)
 EOT
 
@@ -62,11 +62,11 @@ expect "library restored" 10 p1.pk
 
 # libraries which use each other: the library which declares a rule is parsed again when the grammar differs
 cat > "$T/planck/lib/glib2.pk" <<'EOT'
-use("glib")
+import_lib("glib")
 w := v * 3
 EOT
 cat > "$T/p3.pk" <<'EOT'
-use("glib2")
+import_lib("glib2")
 print(w)
 EOT
 expect "libraries which use each other" 30 p3.pk

@@ -75,7 +75,7 @@ Integers are 31 bits and become arbitrary-precision integers on overflow.
 There is no floating point. Strings are sequences of bytes (ASCII).
 
 * ``planck/init.pk``, ``planck/peg.pk``, ``planck/syntax.pk``: the language
-* ``planck/lib``: the libraries, loaded with ``use("list")``
+* ``planck/lib``: the libraries, loaded with ``import_lib("list")``
 * `planck/examples <planck/examples>`_: sample programs; ``NAME.out`` is the expected output
 * ``planck/tests``: tests
 
