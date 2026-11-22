@@ -2384,17 +2384,6 @@
     (return q)
     )
 
-(fun p_print (e)
-    (fprint STDOUT e)
-    (return noneS)
-    )
-
-(fun p_println (e)
-    (fprint STDOUT e)
-    (puts "\n")
-    (return noneS)
-    )
-
 (fun p_put (s)
     (write STDOUT (str_text s) (str_len s))
     (return noneS)
@@ -3832,8 +3821,6 @@ features:
     (= ArrayT_    (defines_type "Array"))
     (= PlainT_    (defines_type "Plain"))
     (= TypeT_     (defines_type "Type"))
-    (defprim "os_print"   1 p_print   PRIM_NATIVE)
-    (defprim "os_println" 1 p_println PRIM_NATIVE)
     (defprim "os_put"     1 p_put     PRIM_NATIVE)
     (defprim "int_add"     2 p_add     PRIM_NATIVE)
     (defprim "int_sub"     2 p_sub     PRIM_NATIVE)
