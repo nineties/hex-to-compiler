@@ -2384,17 +2384,6 @@
     (return q)
     )
 
-(fun p_print (e)
-    (fprint STDOUT e)
-    (return noneS)
-    )
-
-(fun p_println (e)
-    (fprint STDOUT e)
-    (puts "\n")
-    (return noneS)
-    )
-
 (fun p_put (s)
     (write STDOUT (str_text s) (str_len s))
     (return noneS)
@@ -3004,6 +2993,11 @@
     )
 
 (fun p_typeof (v) (return (typeof v)))
+
+(fun p_expr_type_name (t)
+    (expect TypeT t)
+    (return (get t 1))
+    )
 
 ; _record_new(name, Tuple{field, ...}) is Tuple{type, make}. make is the function that takes the fields and gives a data of the type.
 (fun p_record_new (name fields)
@@ -3832,8 +3826,6 @@ features:
     (= ArrayT_    (defines_type "Array"))
     (= PlainT_    (defines_type "Plain"))
     (= TypeT_     (defines_type "Type"))
-    (defprim "os_print"   1 p_print   PRIM_NATIVE)
-    (defprim "os_println" 1 p_println PRIM_NATIVE)
     (defprim "os_put"     1 p_put     PRIM_NATIVE)
     (defprim "int_add"     2 p_add     PRIM_NATIVE)
     (defprim "int_sub"     2 p_sub     PRIM_NATIVE)
@@ -3854,6 +3846,7 @@ features:
     (defprim "expr_arg"     2 p_arg     PRIM_NATIVE)
     (defprim "expr_new"   2 p_mexpr   PRIM_NATIVE)
     (defprim "expr_type"    1 p_typeof  PRIM_NATIVE)
+    (defprim "expr_type_name" 1 p_expr_type_name PRIM_NATIVE)
     (defprim "expr_record" 2 p_record_new PRIM_NATIVE)
     (defprim "parse"   1 p_parse   PRIM_NATIVE)
     (defprim "str_len"  1 p_strlen  PRIM_NATIVE)
