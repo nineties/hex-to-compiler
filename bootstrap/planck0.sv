@@ -2994,7 +2994,7 @@
 
 (fun p_typeof (v) (return (typeof v)))
 
-(fun p_type_name (t)
+(fun p_expr_type_name (t)
     (expect TypeT t)
     (return (get t 1))
     )
@@ -3846,7 +3846,7 @@ features:
     (defprim "expr_arg"     2 p_arg     PRIM_NATIVE)
     (defprim "expr_new"   2 p_mexpr   PRIM_NATIVE)
     (defprim "expr_type"    1 p_typeof  PRIM_NATIVE)
-    (defprim "type_name"    1 p_type_name PRIM_NATIVE)
+    (defprim "expr_type_name" 1 p_expr_type_name PRIM_NATIVE)
     (defprim "expr_record" 2 p_record_new PRIM_NATIVE)
     (defprim "parse"   1 p_parse   PRIM_NATIVE)
     (defprim "str_len"  1 p_strlen  PRIM_NATIVE)
