@@ -2873,6 +2873,7 @@
         (= neg 1)
         (= i 1)
         ))
+    (if (== (getb s 0) (char "+")) (= i 1))
     (if (== (getb s i) (char "0")) (do
         (= c (getb s (+ i 1)))
         (if (|| (== c (char "x")) (== c (char "X"))) (= base 16))
@@ -2880,12 +2881,15 @@
         (if (|| (== c (char "b")) (== c (char "B"))) (= base 2))
         (if (!= base 10) (+= i 2))
         ))
+    (if (>= i n) (runtime_error "int_parse: invalid integer: " text))
     (= r (big_new (+ n 1) 0))
     (while (< i n) (do
         (= c (getb s i))
-        (= d (- c (char "0")))
-        (if (>= c (char "a")) (= d (- c (- (char "a") 10))))
+        (= d (- 0 1))
+        (if (&& (>= c (char "0")) (<= c (char "9"))) (= d (- c (char "0"))))
+        (if (&& (>= c (char "a")) (<= c (char "f"))) (= d (- c (- (char "a") 10))))
         (if (&& (>= c (char "A")) (<= c (char "F"))) (= d (- c (- (char "A") 10))))
+        (if (|| (< d 0) (>= d base)) (runtime_error "int_parse: invalid integer: " text))
         (= carry d)
         (= j 1)
         (while (<= j (+ n 1)) (do
