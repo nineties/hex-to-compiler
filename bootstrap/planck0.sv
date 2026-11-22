@@ -3533,11 +3533,6 @@
     (return (big_norm (mag_shl y (fixnum_to_int k)) (big_neg y)))
     )
 
-(fun not_supported_negative_shr ()
-    (eputs "bit_shr: not supported: negative integer beyond 31 bits\n")
-    (exit 1)
-    )
-
 ; logical shift: a is taken as a 31-bit unsigned integer
 (fun p_bit_shr (a k)
     (var y 0)
@@ -3549,7 +3544,7 @@
         (return (fixnum (& (>> (fixnum_to_int a) (fixnum_to_int k))
             (- (<< 1 (- 31 (fixnum_to_int k))) 1))))
         ))
-    (if (big_neg a) (not_supported_negative_shr))
+    (if (big_neg a) (return (p_bit_sar a k)))
     (return (big_norm (mag_shr a (fixnum_to_int k)) 0))
     )
 
