@@ -41,12 +41,13 @@ planck0: bootstrap/planck0.sv plisp2 $(SASM_LIBS)
 	-chmod +x $@
 
 %: %.sv pforth bootstrap/plisp.fs $(SASM_SOURCES) $(ASM_SOURCES) $(SASM_LIBS)
+	@mkdir -p $(dir tmp-$@)
 	-time $(PLISP) bootstrap/sasm.lisp $< tmp-$@
 	-mv tmp-$@ $@
 	-chmod +x $@
 
 
-.PHONY: clean test test-planck0 test-all preprocess
+.PHONY: clean test test-sasm test-planck0 test-all preprocess
 clean:
 	rm -f planck/lib/*.pkm planck/lib/*/*.pkm
 	rm -f pforth
@@ -60,6 +61,9 @@ test: pforth bootstrap/plisp.fs $(shell find bootstrap/plisp -name "*.lisp")
 
 preprocess: planck0
 	./planck0 tools/preprocess.pk pretty list string
+
+test-sasm: bootstrap/sasm/examples/switch
+	./bootstrap/sasm/examples/switch
 
 # run the core tests of planck0: tests of the language and the examples in tests/errors
 test-planck0: planck0

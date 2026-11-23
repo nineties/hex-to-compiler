@@ -18,6 +18,7 @@
         ((imul "r32" "r/m32")   ("RM" 0x0f 0xaf "/r"))
         ((int "imm8")           ("I"  0xcd "ib"))
         ((jmp "rel32")          ("D"  0xe9 "cd"))
+        ((jmp "r/m32")          ("M"  0xff "/4"))
         ((ja  "rel32")          ("D"  0x0f 0x87 "cd"))
         ((jae "rel32")          ("D"  0x0f 0x83 "cd"))
         ((jb  "rel32")          ("D"  0x0f 0x82 "cd"))
@@ -420,7 +421,7 @@
         ('asciz (do (emit_ascii (cadr insn)) (emit 0)))
         ('byte  (emit (eval (cadr insn))))
         ('short (emit_i16 (eval (cadr insn))))
-        ('long  (emit_i32 (eval (cadr insn))))
+        ('long  (for v (cdr insn) (emit_i32 (eval v))))
         ('comm  (do
             (def len (eval (cadr insn)))
             (while (> len 0) (do (emit 0) (-= len 1)))

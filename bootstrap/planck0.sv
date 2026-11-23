@@ -1232,7 +1232,6 @@
 (def OP_FUSION  15)
 (def OP_HANDLE  16)
 (def OP_PERFORM 17)
-(def NUM_OPS    18)
 
 (def PRIM_NATIVE 0)
 (def PRIM_EVAL   1)
@@ -1837,8 +1836,7 @@
 (long vm_code)      ; current code object
 (long vm_result)    ; result of the top-level code
 (long sel_env)      ; environment created by select()
-
-(char[] 128 optable) ; opcode -> function
+(char[] 128 code_data_gap)
 
 (fun vm_push (v)
     (set vm_sp v)
@@ -2174,64 +2172,6 @@
 
 ; --- instructions
 
-(fun op_const () (vm_push (fetch)))
-
-(fun op_load ()
-    (var d (fetch))
-    (var i (fetch))
-    (var s (fetch))
-    (var env vm_env)
-    (var v 0)
-    (while (> d 0) (do
-        (= env (get env 0))
-        (-= d 1)
-        ))
-    (= v (get env (+ i 1)))
-    (if (! v) (runtime_error "variable used before definition: " s))
-    (vm_push v)
-    )
-
-(fun op_store ()
-    (var d (fetch))
-    (var i (fetch))
-    (var env vm_env)
-    (while (> d 0) (do
-        (= env (get env 0))
-        (-= d 1)
-        ))
-    (set env (+ i 1) (get (- vm_sp 4)))
-    )
-
-(fun op_gload ()
-    (var cell (fetch))
-    (var v (get cell 0))
-    (if (! v) (runtime_error "undefined variable: " (get cell 1)))
-    (vm_push v)
-    )
-
-(fun op_gdef ()
-    (var cell (fetch))
-    (set cell 0 (get (- vm_sp 4)))
-    )
-
-(fun op_gset ()
-    (var cell (fetch))
-    (set cell 0 (get (- vm_sp 4)))
-    )
-
-(fun op_pop () (-= vm_sp 4))
-
-(fun jump (off)
-    (= vm_pc (+ vm_code (* 4 (+ C_CODE off))))
-    )
-
-(fun op_jmp () (jump (fetch)))
-
-(fun op_jf ()
-    (var off (fetch))
-    (if (== (vm_pop) falseS) (jump off))
-    )
-
 (fun op_call () (vm_call (fetch) 0))
 (fun op_tcall () (vm_call (fetch) 1))
 
@@ -2323,39 +2263,94 @@
     (runtime_error "unhandled effect: " v)
     )
 
-(fun init_vm ()
-    (set optable OP_CONST   op_const)
-    (set optable OP_LOAD    op_load)
-    (set optable OP_STORE   op_store)
-    (set optable OP_GLOAD   op_gload)
-    (set optable OP_GDEF    op_gdef)
-    (set optable OP_GSET    op_gset)
-    (set optable OP_POP     op_pop)
-    (set optable OP_JMP     op_jmp)
-    (set optable OP_JF      op_jf)
-    (set optable OP_CALL    op_call)
-    (set optable OP_TCALL   op_tcall)
-    (set optable OP_RET     op_ret)
-    (set optable OP_CLOSURE op_closure)
-    (set optable OP_TUPLE   op_tuple)
-    (set optable OP_MEXPR   op_mexpr)
-    (set optable OP_FUSION  op_fusion)
-    (set optable OP_HANDLE  op_handle)
-    (set optable OP_PERFORM op_perform)
-    )
-
 (fun run_toplevel (code)
     (var op 0)
-    (var h 0)
+    (var d 0)
+    (var i 0)
+    (var s 0)
+    (var env 0)
+    (var v 0)
+    (var cell 0)
     (load_regs (new_frame code (new_env code 0) 0 0))
     (while vm_frame (do
-        (= op (fetch))
-        (if (u>= op NUM_OPS) (do
-            (eputs "invalid opcode\n")
-            (exit 1)
-            ))
-        (= h (get optable op))
-        (h)
+        (= op (get vm_pc))
+        (+= vm_pc 4)
+        (switch op
+            (OP_CONST (do
+                (set vm_sp (get vm_pc))
+                (+= vm_pc 4)
+                (+= vm_sp 4)
+                ))
+            (OP_LOAD (do
+                (= d (get vm_pc 0))
+                (= i (get vm_pc 1))
+                (= s (get vm_pc 2))
+                (+= vm_pc 12)
+                (= env vm_env)
+                (while (> d 0) (do
+                    (= env (get env 0))
+                    (-= d 1)
+                    ))
+                (= v (get env (+ i 1)))
+                (if (! v) (runtime_error "variable used before definition: " s))
+                (set vm_sp v)
+                (+= vm_sp 4)
+                ))
+            (OP_STORE (do
+                (= d (get vm_pc 0))
+                (= i (get vm_pc 1))
+                (+= vm_pc 8)
+                (= env vm_env)
+                (while (> d 0) (do
+                    (= env (get env 0))
+                    (-= d 1)
+                    ))
+                (set env (+ i 1) (get (- vm_sp 4)))
+                ))
+            (OP_GLOAD (do
+                (= cell (get vm_pc))
+                (+= vm_pc 4)
+                (= v (get cell 0))
+                (if (! v) (runtime_error "undefined variable: " (get cell 1)))
+                (set vm_sp v)
+                (+= vm_sp 4)
+                ))
+            (OP_GDEF (do
+                (= cell (get vm_pc))
+                (+= vm_pc 4)
+                (set cell 0 (get (- vm_sp 4)))
+                ))
+            (OP_GSET (do
+                (= cell (get vm_pc))
+                (+= vm_pc 4)
+                (set cell 0 (get (- vm_sp 4)))
+                ))
+            (OP_POP (-= vm_sp 4))
+            (OP_JMP (do
+                (= d (get vm_pc))
+                (= vm_pc (+ vm_code (* 4 (+ C_CODE d))))
+                ))
+            (OP_JF (do
+                (= d (get vm_pc))
+                (+= vm_pc 4)
+                (-= vm_sp 4)
+                (if (== (get vm_sp) falseS)
+                    (= vm_pc (+ vm_code (* 4 (+ C_CODE d)))))
+                ))
+            (OP_CALL (op_call))
+            (OP_TCALL (op_tcall))
+            (OP_RET (op_ret))
+            (OP_CLOSURE (op_closure))
+            (OP_TUPLE (op_tuple))
+            (OP_MEXPR (op_mexpr))
+            (OP_FUSION (op_fusion))
+            (OP_HANDLE (op_handle))
+            (OP_PERFORM (op_perform))
+            (default (do
+                (eputs "invalid opcode\n")
+                (exit 1)
+                ))
+            )
         ))
     (return vm_result)
     )
@@ -4336,7 +4331,6 @@ features:
     (init_tables)
     (init_symbols)
     (init_compiler)
-    (init_vm)
     (init_prims)
 
     (interpret_file "planck/init.pk")
