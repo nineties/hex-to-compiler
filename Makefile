@@ -41,6 +41,7 @@ planck0: bootstrap/planck0.sv plisp2 $(SASM_LIBS)
 	-chmod +x $@
 
 %: %.sv pforth bootstrap/plisp.fs $(SASM_SOURCES) $(ASM_SOURCES) $(SASM_LIBS)
+	@mkdir -p $(dir tmp-$@)
 	-time $(PLISP) bootstrap/sasm.lisp $< tmp-$@
 	-mv tmp-$@ $@
 	-chmod +x $@
