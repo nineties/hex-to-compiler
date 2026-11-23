@@ -2787,7 +2787,7 @@
     (return h)
     )
 
-(fun big_print (chan b)
+(fun big_to_str (b)
     (var n (big_ulen b))
     (var t (big_new n 0))
     (var buf (allocate (+ (* n 5) 8)))
@@ -2811,11 +2811,26 @@
             ))
         ))
     (while (== (getb pos) (char "0")) (+= pos 1))
+    (if (== pos end) (do
+        (-= pos 1)
+        (setb pos (char "0"))
+        ))
     (if (big_neg b) (do
         (-= pos 1)
         (setb pos (char "-"))
         ))
-    (write chan pos (- end pos))
+    (setb end 0)
+    (return (str_n pos (- end pos)))
+    )
+
+(fun big_print (chan b)
+    (var s (big_to_str b))
+    (write chan (get s 1) (str_len s))
+    )
+
+(fun p_int_to_string (n)
+    (check_num "int_to_string" n)
+    (return (big_to_str (big_of n)))
     )
 
 (fun p_add (a b)
@@ -4013,6 +4028,7 @@ features:
     (defprim "int_sub"     2 p_sub     PRIM_NATIVE)
     (defprim "int_mul"     2 p_mul     PRIM_NATIVE)
     (defprim "int_parse"  1 p_bigint  PRIM_NATIVE)
+    (defprim "int_to_string"  1 p_int_to_string  PRIM_NATIVE)
     (defprim "int_div"     2 p_div     PRIM_NATIVE)
     (defprim "int_quo"     2 p_quo     PRIM_NATIVE)
     (defprim "int_mod"     2 p_mod     PRIM_NATIVE)
