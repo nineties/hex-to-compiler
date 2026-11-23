@@ -310,6 +310,17 @@
         (compile-ifnot `(!= ,expr 0) env label)
         )))
 
+    (define case-value (v env) (cond
+        ((int? v)   v)
+        ((sym? v)   (do
+            (def pos (assoc v env))
+            (if (&& (cons? pos) (= (car pos) 'const))
+                (cadr pos)
+                (abort "switch: case value must be a constant"))
+            ))
+        (true   (abort "switch: case value must be a constant"))
+        ))
+
     (define compile-stmt (stmt env) (switch (car stmt)
         ('do    (do
             (def env_old env)
@@ -436,6 +447,65 @@
             (set nlocal nlocal_old)
             (emit-asm `(jmp ,begin))
             (emit-asm `(label ,exit))
+            env
+            ))
+        ('switch (do
+            (def clauses (cddr stmt))
+            (def end_label (fresh-label))
+            (def tbl_label (fresh-label))
+            (def default_label end_label)
+            (def default_body ())
+            (def table ())
+            (def bodies ())
+            (def lo ())
+            (def hi ())
+            (def v 0)
+            (def l ())
+            (for c clauses (if (= (car c) 'default)
+                (do
+                    (set default_label (fresh-label))
+                    (set default_body (cdr c))
+                    )
+                (do
+                    (set v (case-value (car c) env))
+                    (when (!= (assoc v table) 'error) (abort "switch: duplicate case value"))
+                    (set l (fresh-label))
+                    (set table (acons v l table))
+                    (set bodies (cons (cons l (cdr c)) bodies))
+                    (when (nil? lo) (do (set lo v) (set hi v)))
+                    (when (< v lo) (set lo v))
+                    (when (> v hi) (set hi v))
+                    )))
+            (when (nil? bodies) (abort "switch: no case"))
+            (def range (+ 1 (- hi lo)))
+            (compile-expr (cadr stmt) env)
+            (pop '%eax)
+            (when (!= lo 0) (emit-asm `(sub %eax ,lo)))
+            (emit-asm `(mov %ecx ,range))
+            (emit-asm '(cmp %eax %ecx))
+            (emit-asm `(jae ,default_label))
+            (emit-asm '(add %eax %eax))
+            (emit-asm '(add %eax %eax))
+            (emit-asm `(add %eax ,tbl_label))
+            (emit-asm '(mov %eax (mem %eax)))
+            (emit-asm '(jmp %eax))
+            (emit-asm `(label ,tbl_label))
+            (def i 0)
+            (while (< i range) (do
+                (set l (assoc (+ lo i) table))
+                (emit-asm `(long ,(if (= l 'error) default_label l)))
+                (+= i 1)
+                ))
+            (for b (reverse bodies) (do
+                (emit-asm `(label ,(car b)))
+                (compile-stmt (cons 'do (cdr b)) env)
+                (emit-asm `(jmp ,end_label))
+                ))
+            (when (!= default_label end_label) (do
+                (emit-asm `(label ,default_label))
+                (compile-stmt (cons 'do default_body) env)
+                ))
+            (emit-asm `(label ,end_label))
             env
             ))
         ('asm   (do
