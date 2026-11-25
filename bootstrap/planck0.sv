@@ -604,7 +604,6 @@
 (long IoErrorS)
 (long SyntaxErrorS)
 (long EofS)
-(long parseS)
 (long evalS)
 (long emptyTuple)
 
@@ -662,7 +661,6 @@
     (= IoErrorS     (sym "IoError"))
     (= SyntaxErrorS (sym "SyntaxError"))
     (= EofS         (sym "Eof"))
-    (= parseS       (sym "parse"))
     (= evalS        (sym "eval"))
     (= emptyTuple   (mexpr0 TupleS))
     )
@@ -4095,7 +4093,6 @@ features:
     (defprim "type_name" 1 p_type_name PRIM_NATIVE)
     (defprim "make_type"      1 p_make_type PRIM_NATIVE)
     (defprim "mexpr_parse" 1 p_parse PRIM_NATIVE)
-    (defprim "parse"   1 p_parse   PRIM_NATIVE)
     (defprim "str_len"  1 p_strlen  PRIM_NATIVE)
     (defprim "str_ord"     2 p_ord     PRIM_NATIVE)
     (defprim "str_chr"     1 p_chr     PRIM_NATIVE)
@@ -4164,14 +4161,12 @@ features:
     (return (str_n buf file_size))
     )
 
-; The loop looks up the global variables `parse` and `eval` every time, so
-; a program can replace them (Def{parse, ...}, Def{eval, ...} or Set) and the next
-; top-level expression is parsed/evaluated by the new definitions. Apply{eval, ...}
-; in the code compiled after the replacement also calls the replaced eval; the code
-; compiled before keeps the old one unless the replacement is Set{eval, ...}.
-;   parse: String -> Tuple{m-expr, rest String}   (initially the builtin parse)
-;     When only white space is left, parse returns Tuple{Eof{}, rest} and the
-;     loop stops. A replacement parse should pass Eof{} through.
+; The loop reads each top-level expression with the builtin parser and looks up
+; the global variable eval every time, so a program can replace it (Def{eval, ...}
+; or Set) and the next top-level expression is evaluated by the new definition.
+; Apply{eval, ...} in the code compiled after the replacement also calls the
+; replaced eval; the code compiled before keeps the old one unless the
+; replacement is Set{eval, ...}.
 ;   eval: m-expr -> any value                     (initially the builtin eval)
 ; Inside the VM, the builtin eval (PRIM_EVAL) is called through the global
 ; variable like any other function.
@@ -4186,7 +4181,7 @@ features:
     (var e 0)
     (var more 1)
     (while more (do
-        (= ret (call_global parseS text))
+        (= ret (parse text))
         (if (|| (! (has_head TupleS ret))
             (|| (!= (get_header_arg ret) 2)
                 (!= (gettag (tup_get ret 1)) StringT))) (do
