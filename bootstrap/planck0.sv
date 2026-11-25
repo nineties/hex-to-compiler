@@ -28,6 +28,12 @@
     (return to)
     )
 
+(fun copy_n (from size)
+    (var to (allocate size))
+    (memcpy to from size)
+    (return to)
+    )
+
 ; === Memory Allocation
 
 (fun align (n) ; align n to 8-byte boundary
@@ -360,20 +366,29 @@
     (return (asr n 1))
     )
 
-(fun ascii_text (p n)
+(fun reject_multibyte (what p n)
     (while (> n 0) (do
-        (if (>= (getb p) 128) (return 0))
+        (if (>= (getb p) 128) (do
+            (eputs what)
+            (eputs ": not implemented for a string with multibyte characters\n")
+            (exit 1)
+            ))
         (+= p 1)
         (-= n 1)
         ))
-    (return 1)
     )
 
-(fun str (text)
+(fun str_from_c (text)
+    (var n (strlen text))
     (var data (allocate 8))
-    (set data 0 (make_header StringT (ascii_text text (strlen text)) (strlen text)))
+    (reject_multibyte "string" text n)
+    (set data 0 (make_header StringT 0 n))
     (set data 1 text)
     (return data)
+    )
+
+(fun cstr (s)
+    (return (strndup (get s 1) (str_len s)))
     )
 
 (fun str_text (str)
@@ -392,24 +407,37 @@
     (return hash)
     )
 
-(fun strhash (str)
-    (var hash 5381)
-    (while (getb str) (do
-        (= hash (+ (+ (<< hash 5) hash) (getb str)))
-        (+= str 1)
+(long sym_probe_len)
+(fun symkey_hash (key)
+    (return (strhash_n key sym_probe_len))
+    )
+
+(fun symkey_eq (stored key)
+    (var i 0)
+    (while (< i sym_probe_len) (do
+        (if (!= (getb stored i) (getb key i)) (return 0))
+        (+= i 1)
         ))
-    (return hash)
+    (if (getb stored i) (return 0))
+    (return 1)
     )
 
 (long symtable)     ; table for interning symbols
-(fun sym (text)
+(fun sym_n (text n)
+    (= sym_probe_len n)
     (var data (table_lookup symtable text))
     (if data (return data))
+    (var name (strndup text n))
     (var sym (allocate 8))
     (set sym 0 0)
-    (set sym 1 text)
-    (table_insert symtable text sym)
+    (set sym 1 name)
+    (= sym_probe_len n)
+    (table_insert symtable name sym)
     (return sym)
+    )
+
+(fun sym (text)
+    (return (sym_n text (strlen text)))
     )
 
 (fun sym_name (sym)
@@ -635,7 +663,7 @@
     )
 
 (fun init_tables ()
-    (= symtable (make_table 0x10000 strhash streq))
+    (= symtable (make_table 0x10000 symkey_hash symkey_eq))
     (= mexprtable (make_table 0x10000 mexprhash mexpreq))
     (= global_table (make_table 0x1000 symhash symeq))
     )
@@ -887,7 +915,7 @@
 
 ; === Parsing
 (fun syntax_error (msg)
-    (return (mexpr1 SyntaxErrorS (str msg)))
+    (return (mexpr1 SyntaxErrorS (str_from_c msg)))
     )
 
 (fun is_blank (c)
@@ -900,9 +928,16 @@
         )
     )
 
+(long parse_end)
+
+(fun peek (raw)
+    (if (u< raw parse_end) (return (getb raw)))
+    (return -1)
+    )
+
 (fun skip_spaces (raw)
     (var c 0)
-    (while (getb raw) (do
+    (while (u< raw parse_end) (do
         (= c (getb raw))
         (if (! (is_blank c)) (return raw))
         (+= raw 1)
@@ -917,6 +952,7 @@
 
 (fun is_symbol_leading_char (c)
     ; a-z, A-Z, _, %
+    (if (< c 0) (return 0))
     (if (== c (char "%")) (return 1))
     (if (== (getb "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxooooooooooooooooooooooooooxxxxoxooooooooooooooooooooooooooxxxxx" c) (char "o"))
         (return 1)
@@ -926,6 +962,7 @@
 
 (fun is_symbol_following_char (c)
     ; a-z, A-Z, 0-9, _
+    (if (< c 0) (return 0))
     (if (== (getb "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxooooooooooxxxxxxxooooooooooooooooooooooooooxxxxoxooooooooooooooooooooooooooxxxxx" c) (char "o"))
         (return 1)
         (return 0)
@@ -935,9 +972,8 @@
 (fun parse_symbol (ret raw)
     (var start raw)
     (+= raw 1)
-    (while (is_symbol_following_char (getb raw)) (+= raw 1))
-    (var name (strndup start (- raw start)))
-    (set ret (sym name))
+    (while (is_symbol_following_char (peek raw)) (+= raw 1))
+    (set ret (sym_n start (- raw start)))
     (return raw)
     )
 
@@ -955,10 +991,10 @@
     (var d 0)
     (var base 10)
     (var c 0)
-    (if (== (getb raw) (char "0")) (do
+    (if (== (peek raw) (char "0")) (do
         (+= raw 1)
         (= base 8)
-        (= c (getb raw))
+        (= c (peek raw))
         (if (|| (== c (char "x")) (== c (char "X"))) (do
             (+= raw 1)
             (= base 16)
@@ -973,7 +1009,7 @@
             ))))
         ))
     (while 1 (do
-        (= c (getb raw))
+        (= c (peek raw))
         (if (&& (<= (char "0") c) (<= c (char "9")))
             (= d (- c (char "0")))
         (if (&& (<= (char "a") c) (<= c (char "f")))
@@ -989,8 +1025,8 @@
             (return (+ raw 1))
             ))
         (if (> value (/ (- limit d) base)) (do
-            (while (is_hex_digit (getb raw)) (+= raw 1))
-            (set ret (parse_big (str_n (strndup start (- raw start)) (- raw start)) 0))
+            (while (is_hex_digit (peek raw)) (+= raw 1))
+            (set ret (parse_big (str_n start (- raw start)) 0))
             (return raw)
             ))
         (= value (+ (* value base) d))
@@ -1007,20 +1043,21 @@
     (if (! parse_str_buf) (= parse_str_buf (allocate PARSE_STR_MAX)))
     (= end parse_str_buf)
     (+= raw 1)  ; skip '"'
-    (while (getb raw) (do
-        (= c (getb raw))
+    (while (u< raw parse_end) (do
+        (= c (peek raw))
         (if (>= (- end parse_str_buf) (- PARSE_STR_MAX 1)) (do
             (set ret (syntax_error "string literal is too long"))
             (return raw)
             ))
         (if (== c (char "\"")) (do
             (+= raw 1)
-            (set ret (str_n (strndup parse_str_buf (- end parse_str_buf)) (- end parse_str_buf)))
+            (reject_multibyte "string literal" parse_str_buf (- end parse_str_buf))
+            (set ret (str_n (copy_n parse_str_buf (- end parse_str_buf)) (- end parse_str_buf)))
             (return raw)
             )
         (if (== c (char "\\")) (do
             (+= raw 1)
-            (= c (unescape_char (getb raw)))
+            (= c (unescape_char (peek raw)))
             (if (< c 0) (do
                 (set ret (syntax_error "invalid escaped character"))
                 (return raw)
@@ -1076,7 +1113,7 @@
     (set mexpr_buf 1 head)
 
     (= raw (skip_spaces raw))
-    (if (== (getb raw) (char "}")) (do
+    (if (== (peek raw) (char "}")) (do
         (set mexpr_buf 0 (make_header MexprT 0 arity))
         (set ret (mexpr mexpr_buf))
         (return (+ raw 1))
@@ -1090,7 +1127,7 @@
     (set mexpr_buf (+ 2 arity) (get tmp))
     (+= arity 1)
 
-    (while (== (getb raw) (char ",")) (do
+    (while (== (peek raw) (char ",")) (do
         (+= raw 1) ; skip ,
         (if (>= arity MAX_ARITY) (do
             (set ret (syntax_error "too many arguments"))
@@ -1104,7 +1141,7 @@
         (set mexpr_buf (+ 2 arity) (get tmp))
         (+= arity 1)
         ))
-    (if (== (getb raw) (char "}")) (do
+    (if (== (peek raw) (char "}")) (do
         (set mexpr_buf 0 (make_header MexprT 0 arity))
         (set ret (mexpr mexpr_buf))
         (return (+ raw 1))
@@ -1116,18 +1153,18 @@
 (fun parse_ (ret raw)
     (= raw (skip_spaces raw))
 
-    (var c (getb raw 0))
+    (var c (peek raw))
     (if (is_symbol_leading_char c) (do
         ; symbol or m-expr
         (= raw (parse_symbol ret raw))
         (= raw (skip_spaces raw))
-        (if (== (getb raw) (char "{"))
+        (if (== (peek raw) (char "{"))
             (= raw (parse_mexpr ret (get ret) raw))
             )
         )
     (if (is_digit c)
         (= raw (parse_int ret raw (- (<< 1 30) 1)))
-    (if (&& (== c (char "-")) (is_digit (getb raw 1))) (do
+    (if (&& (== c (char "-")) (is_digit (peek (+ raw 1)))) (do
         ; negative integer literal
         (= raw (parse_int ret (+ raw 1) (<< 1 30)))
         (if (== (gettag (get ret)) IntT)
@@ -1139,7 +1176,7 @@
         )
     (if (== c (char "\""))
         (= raw (parse_str ret raw))
-    (if (== c 0)
+    (if (< c 0)
         (set ret (syntax_error "unexpected end of input"))
         (do
             (set ret (syntax_error "unexpected character"))
@@ -1150,15 +1187,22 @@
     (return raw)
     )
 
+(fun rest_str (text raw)
+    (if (u> raw parse_end) (= raw parse_end))
+    (var len (- (get_header_arg text) (- raw (get text 1))))
+    (return (str_n raw len))
+    )
+
 (fun parse (text)
     (char[] 4 ret)
     (expect "parse" StringT text)
+    (= parse_end (+ (get text 1) (str_len text)))
     (var raw (skip_spaces (get text 1)))
-    (if (== (getb raw) 0)
-        (return (tup2 (mexpr0 EofS) (str raw)))
+    (if (>= raw parse_end)
+        (return (tup2 (mexpr0 EofS) (rest_str text raw)))
         )
     (= raw (parse_ ret raw))
-    (return (tup2 (get ret) (str raw)))
+    (return (tup2 (get ret) (rest_str text raw)))
     )
 
 ; === Bytecode VM
@@ -2878,7 +2922,6 @@
         (-= pos 1)
         (setb pos (char "-"))
         ))
-    (setb end 0)
     (return (str_n pos (- end pos)))
     )
 
@@ -2912,7 +2955,6 @@
         (-= pos 1)
         (setb pos (char "-"))
         ))
-    (setb end 0)
     (return (str_n pos (- end pos)))
     )
 
@@ -2976,17 +3018,22 @@
     (var j 0)
     (var carry 0)
     (var t 0)
-    (if (== (getb s 0) (char "-")) (do
-        (= neg 1)
-        (= i 1)
+    (if (> n 0) (do
+        (if (== (getb s 0) (char "-")) (do
+            (= neg 1)
+            (= i 1)
+            ))
+        (if (== (getb s 0) (char "+")) (= i 1))
         ))
-    (if (== (getb s 0) (char "+")) (= i 1))
-    (if (== (getb s i) (char "0")) (do
-        (= c (getb s (+ i 1)))
-        (if (|| (== c (char "x")) (== c (char "X"))) (= base 16))
-        (if (|| (== c (char "o")) (== c (char "O"))) (= base 8))
-        (if (|| (== c (char "b")) (== c (char "B"))) (= base 2))
-        (if (!= base 10) (+= i 2))
+    (if (< i n) (do
+        (if (== (getb s i) (char "0")) (do
+            (= c 0)
+            (if (< (+ i 1) n) (= c (getb s (+ i 1))))
+            (if (|| (== c (char "x")) (== c (char "X"))) (= base 16))
+            (if (|| (== c (char "o")) (== c (char "O"))) (= base 8))
+            (if (|| (== c (char "b")) (== c (char "B"))) (= base 2))
+            (if (!= base 10) (+= i 2))
+            ))
         ))
     (if (>= i n) (runtime_error "str_to_int: invalid integer: " text))
     (= r (big_new (+ n 1) 0))
@@ -3160,33 +3207,15 @@
 ; a string object for text of length n (text is not copied)
 (fun str_n (text n)
     (var data (allocate 8))
-    (set data 0 (make_header StringT (ascii_text text n) n))
-    (set data 1 text)
-    (return data)
-    )
-
-(fun str_n_ascii (text n)
-    (var data (allocate 8))
-    (set data 0 (make_header StringT 1 n))
+    (set data 0 (make_header StringT 0 n))
     (set data 1 text)
     (return data)
     )
 
 (fun str_len (s) (return (get_header_arg s)))
 
-(fun ascii_only (name s)
-    (if (! (& (get s 0) 16)) (do
-        (eputs name)
-        (eputs ": not implemented for a string with multibyte characters: ")
-        (eprint s)
-        (eputs "\n")
-        (exit 1)
-        ))
-    )
-
 (fun p_strlen (s)
     (expect "str_len" StringT s)
-    (ascii_only "str_len" s)
     (return (fixnum (str_len s)))
     )
 
@@ -3194,7 +3223,6 @@
 (fun p_ord (s i)
     (var n 0)
     (expect "str_ord" StringT s)
-    (ascii_only "str_ord" s)
     (= n (index_arg "str_ord" i))
     (if (|| (< n 0) (>= n (str_len s))) (named_error "str_ord" "index out of range: " i))
     (return (fixnum (getb (get s 1) n)))
@@ -3206,15 +3234,13 @@
     (var oi i)
     (var oj j)
     (expect "str_sub" StringT s)
-    (ascii_only "str_sub" s)
     (= i (index_arg "str_sub" i))
     (= j (index_arg "str_sub" j))
     (= len (str_len s))
     (if (|| (< i 0) (|| (> j len) (> i j))) (do
         (runtime_error "str_sub: index out of range: " (mexpr3 TupleS s oi oj))
         ))
-    (if (== j len) (return (str_n_ascii (+ (get s 1) i) (- j i))))
-    (return (str_n_ascii (strndup (+ (get s 1) i) (- j i)) (- j i)))
+    (return (str_n (+ (get s 1) i) (- j i)))
     )
 
 (fun p_strcat (a b)
@@ -3225,10 +3251,9 @@
     (expect "str_cat" StringT b)
     (= n (str_len a))
     (= m (str_len b))
-    (= text (allocate (+ (+ n m) 1)))
+    (= text (allocate (+ n m)))
     (memcpy text (get a 1) n)
     (memcpy (+ text n) (get b 1) m)
-    (setb text (+ n m) 0)
     (return (str_n text (+ n m)))
     )
 
@@ -3245,12 +3270,12 @@
 (fun p_intern (s)
     (expect "sym_intern" StringT s)
     (expect_no_null "sym_intern" s)
-    (return (sym (strndup (get s 1) (str_len s))))
+    (return (sym_n (get s 1) (str_len s)))
     )
 
 ; sym_name(s): the name of the symbol s as a string (the inverse of sym_intern)
 (fun p_symname (s)
-    (return (str (sym_name s)))
+    (return (str_from_c (sym_name s)))
     )
 
 (fun p_chr (c)
@@ -3258,9 +3283,8 @@
     (var text 0)
     (if (|| (< n 0) (> n 0x10ffff)) (runtime_error "str_chr: out of range: " c))
     (if (> n 127) (runtime_error "str_chr: not implemented for a multibyte character: " c))
-    (= text (allocate 2))
+    (= text (allocate 1))
     (setb text 0 n)
-    (setb text 1 0)
     (return (str_n text 1))
     )
 
@@ -3351,18 +3375,18 @@
     (var r 0)
     (expect "os_read_file" StringT path)
     (expect_no_null "os_read_file" path)
-    (= fd (open (get path 1) O_RDONLY))
+    (= fd (open (cstr path) O_RDONLY))
     (if (< fd 0) (return (io_err "open" path)))
     (= size (fsize fd))
     (if (< size 0) (do
         (close fd)
         (return (io_err "fstat" path))
         ))
-    (= buf (allocate (+ size 1))) ; +1 for \0
+    (= buf (allocate size))
     (= r (read fd buf size))
     (close fd)
     (if (< r size) (return (io_err "read" path)))
-    (setb buf size 0)
+    (reject_multibyte "os_read_file" buf size)
     (return (io_ok (str_n buf size)))
     )
 
@@ -3520,7 +3544,7 @@
 (fun write_all (path p n)
     (var fd 0)
     (var r 0)
-    (= fd (open (get path 1) (| O_WRONLY (| O_CREAT O_TRUNC))))
+    (= fd (open (cstr path) (| O_WRONLY (| O_CREAT O_TRUNC))))
     (if (< fd 0) (return (io_err "open" path)))
     (while (> n 0) (do
         (= r (write fd p n))
@@ -3559,7 +3583,7 @@
     (var m 0)
     (expect "os_read_bytes" StringT path)
     (expect_no_null "os_read_bytes" path)
-    (= fd (open (get path 1) O_RDONLY))
+    (= fd (open (cstr path) O_RDONLY))
     (if (< fd 0) (return (io_err "open" path)))
     (= size (fsize fd))
     (if (< size 0) (do
@@ -3584,7 +3608,7 @@
 (fun p_chmod (path mode)
     (expect "os_chmod" StringT path)
     (expect_no_null "os_chmod" path)
-    (if (< (syscall SYS_CHMOD (get path 1) (ranged_arg "os_chmod" mode 0xfff)) 0)
+    (if (< (syscall SYS_CHMOD (cstr path) (ranged_arg "os_chmod" mode 0xfff)) 0)
         (return (io_err "chmod" path)))
     (return (io_ok noneS))
     )
@@ -3801,9 +3825,9 @@
     )
 
 (fun spawn_text (a len)
-    (var data (allocate (+ len 1)))
+    (var data (allocate len))
     (if (> len 0) (memcpy data (parray_data a) len))
-    (setb data len 0)
+    (reject_multibyte "os_run" data len)
     (return (str_n data len))
     )
 
@@ -3831,6 +3855,7 @@
     (var st 0)
     (var res 0)
     (var rv 0)
+    (var dirc 0)
     (char[] 8 inp)
     (char[] 8 outp)
     (char[] 8 errp)
@@ -3846,11 +3871,12 @@
     (expect_no_null "os_run" dir)
     (= n (get_header_arg args))
     (= argvp (allocate (* 4 (+ n 2))))
-    (set argvp 0 (get path 1))
+    (= dirc (cstr dir))
+    (set argvp 0 (cstr path))
     (while (< i n) (do
         (expect "os_run" StringT (get args (+ i 1)))
         (expect_no_null "os_run" (get args (+ i 1)))
-        (set argvp (+ i 1) (get (get args (+ i 1)) 1))
+        (set argvp (+ i 1) (cstr (get args (+ i 1))))
         (+= i 1)
         ))
     (= envp (+ cmd_argv (* 4 (+ cmd_argc 1))))
@@ -3873,13 +3899,13 @@
         (close (get failp 0))
         (syscall SYS_SIGNAL 13 0)
         (if (> (str_len dir) 0) (do
-            (if (< (syscall SYS_CHDIR (get dir 1)) 0) (do
+            (if (< (syscall SYS_CHDIR dirc) 0) (do
                 (setb one 0 1)
                 (write (get failp 1) one 1)
                 (exit 127)
                 ))
             ))
-        (syscall SYS_EXECVE (get path 1) argvp envp)
+        (syscall SYS_EXECVE (get argvp 0) argvp envp)
         (setb one 0 1)
         (write (get failp 1) one 1)
         (exit 127)
@@ -3969,9 +3995,23 @@
     )
 
 (fun name_less (a b)
+    (var na (str_len a))
+    (var nb (str_len b))
+    (var pa (get a 1))
+    (var pb (get b 1))
     (var i 0)
-    (while (&& (!= (getb a i) 0) (== (getb a i) (getb b i))) (+= i 1))
-    (if (< (getb a i) (getb b i)) (return 1))
+    (while 1 (do
+        (if (== i na) (do
+            (if (< i nb) (return 1))
+            (return 0)
+            ))
+        (if (== i nb) (return 0))
+        (if (!= (getb pa i) (getb pb i)) (do
+            (if (< (getb pa i) (getb pb i)) (return 1))
+            (return 0)
+            ))
+        (+= i 1)
+        ))
     (return 0)
     )
 
@@ -3992,7 +4032,7 @@
     (char[] 4096 buf)
     (expect "os_list_dir" StringT path)
     (expect_no_null "os_list_dir" path)
-    (= fd (open (get path 1) (| O_RDONLY O_DIRECTORY)))
+    (= fd (open (cstr path) (| O_RDONLY O_DIRECTORY)))
     (if (< fd 0) (return (io_err "open" path)))
     (= names (name_array cap))
     (= n (syscall SYS_GETDENTS64 fd buf 4096))
@@ -4004,13 +4044,12 @@
             (while (!= (getb buf (+ off (+ 19 len))) 0) (+= len 1))
             (if (! (|| (&& (== len 1) (== (getb buf (+ off 19)) 46))
                        (&& (== len 2) (&& (== (getb buf (+ off 19)) 46) (== (getb buf (+ off 20)) 46))))) (do
-                (= data (allocate (+ len 1)))
+                (= data (allocate len))
                 (= j 0)
                 (while (< j len) (do
                     (setb data j (getb buf (+ off (+ 19 j))))
                     (+= j 1)
                     ))
-                (setb data len 0)
                 (if (== count cap) (do
                     (= bigger (name_array (* 2 cap)))
                     (= j 0)
@@ -4021,6 +4060,7 @@
                     (= names bigger)
                     (= cap (* 2 cap))
                     ))
+                (reject_multibyte "os_list_dir" data len)
                 (set names (+ count 1) (str_n data len))
                 (+= count 1)
                 ))
@@ -4034,7 +4074,7 @@
     (while (< j count) (do
         (= cur (get names (+ j 1)))
         (= off (- j 1))
-        (while (&& (>= off 0) (name_less (get cur 1) (get (get names (+ off 1)) 1))) (do
+        (while (&& (>= off 0) (name_less cur (get names (+ off 1)))) (do
             (set names (+ off 2) (get names (+ off 1)))
             (-= off 1)
             ))
@@ -4058,7 +4098,7 @@
     (= a (allocate (* 4 (+ n 1))))
     (set a 0 (make_header ArrayT 1 n))
     (while (< i n) (do
-        (set a (+ i 1) (str (get cmd_argv (+ i 1))))
+        (set a (+ i 1) (str_from_c (get cmd_argv (+ i 1))))
         (+= i 1)
         ))
     (return a)
@@ -4069,8 +4109,8 @@
 (fun init_sysinfo ()
     (var features (allocate 4))
     (set features 0 (make_header ArrayT 1 0))
-    (set (define_global (sym "planck_target")) 0 (str "i386-linux"))
-    (set (define_global (sym "planck_version")) 0 (str (planck_version_text)))
+    (set (define_global (sym "planck_target")) 0 (str_from_c "i386-linux"))
+    (set (define_global (sym "planck_version")) 0 (str_from_c (planck_version_text)))
     (set (define_global (sym "planck_features")) 0 features)
     )
 
@@ -4237,15 +4277,15 @@ features:
         (eputs "fstat failed: ") (eputs path) (eputs "\n")
         (exit 1)))
 
-    (var buf (allocate (+ file_size 1))) ; +1 for \0
+    (var buf (allocate file_size))
     (var r (read fd buf file_size))
     (if (< r file_size) (do
         (eputs "read failed: ") (eputs path) (eputs "\n")
         (exit 1)
         ))
-    (setb buf file_size 0)
 
     (close fd)
+    (reject_multibyte path buf file_size)
     (return (str_n buf file_size))
     )
 
