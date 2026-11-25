@@ -1150,15 +1150,21 @@
     (return raw)
     )
 
+(fun rest_str (text raw)
+    (var len (- (get_header_arg text) (- raw (get text 1))))
+    (if (& (get text 0) 16) (return (str_n_ascii raw len)))
+    (return (str_n raw len))
+    )
+
 (fun parse (text)
     (char[] 4 ret)
     (expect "parse" StringT text)
     (var raw (skip_spaces (get text 1)))
     (if (== (getb raw) 0)
-        (return (tup2 (mexpr0 EofS) (str raw)))
+        (return (tup2 (mexpr0 EofS) (rest_str text raw)))
         )
     (= raw (parse_ ret raw))
-    (return (tup2 (get ret) (str raw)))
+    (return (tup2 (get ret) (rest_str text raw)))
     )
 
 ; === Bytecode VM
