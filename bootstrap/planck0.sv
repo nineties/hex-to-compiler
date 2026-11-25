@@ -139,7 +139,7 @@
     )
 
 ; Memory is allocated by a first fit on the free chunks. A new object is zero-filled.
-(fun allocate (size)
+(fun try_allocate (size)
     (var n (align (+ size 4)))
     (var c 0)
     (var p 0)
@@ -150,10 +150,7 @@
     (if (! c) (do
         (gc_collect)
         (= c (take_chunk n))
-        (if (! c) (do
-            (eputs "memory allocation error\n")
-            (exit 1)
-            ))
+        (if (! c) (return 0))
         ))
     (set c n)
     (bm_set c)
@@ -166,6 +163,15 @@
     (return (+ c 4))
     )
 
+(fun allocate (size)
+    (var p (try_allocate size))
+    (if (! p) (do
+        (eputs "memory allocation error\n")
+        (exit 1)
+        ))
+    (return p)
+    )
+
 ; === data layout (planck0)
 ; Small integers: tagged with LSB=1. Value is encoded as (val << 1) | 1.
 ; Heap objects: Identified by LSB=0.
@@ -173,11 +179,12 @@
 
 ; Layout of heap objects.
 ; m: 1 if the object is mutable
+; a: 1 if all bytes of the string are ASCII (set when the string is made)
 ;
 ;         |        header        |
 ;         |  27bit | 1bit | 4bit |
 ; symbol  |      0 |    0 | 0000 | text |
-; string  | length |    0 | 0001 | text |
+; string  | length |    a | 0001 | text |
 ; mexpr   |  arity |    0 | 0010 | sym  | arg1 | .... |
 ; array   | length |    m | 0011 |
 ; lambda  |  arity |    0 | 0101 | code | env  |
@@ -267,7 +274,7 @@
 (def StringT  0x1)
 (def MexprT   0x2)
 (def ArrayT   0x3)
-(def PlainT   0x4)
+(def PArrayT   0x4)
 (def LambdaT  0x5)
 (def PrimT    0x6)
 (def ContT    0x7)
@@ -283,7 +290,7 @@
     (if (== tag StringT) (fputs chan "String")
     (if (== tag MexprT) (fputs chan "Mexpr")
     (if (== tag ArrayT) (fputs chan "Array")
-    (if (== tag PlainT) (fputs chan "Plain")
+    (if (== tag PArrayT) (fputs chan "PArray")
     (if (== tag LambdaT) (fputs chan "Lambda")
     (if (== tag PrimT) (fputs chan "Prim")
     (if (== tag ContT) (fputs chan "Cont")
@@ -299,8 +306,10 @@
     (return (& (get node 0) 0xf))
     )
 
-(fun expect (tag val)
+(fun expect (name tag val)
     (if (!= (gettag val) tag) (do
+        (eputs name)
+        (eputs ": ")
         (fprint_tag STDERR tag)
         (eputs " is expected: ")
         (eprint val)
@@ -309,10 +318,11 @@
         ))
     )
 
-(fun expect_mexpr (head val)
-    (expect MexprT val)
+(fun expect_mexpr (name head val)
+    (expect name MexprT val)
     (if (!= (get val 1) head) (do
-        (eputs "M-expr with head ")
+        (eputs name)
+        (eputs ": M-expr with head ")
         (eprint head)
         (eputs " is expected\n")
         (exit 1)
@@ -325,10 +335,6 @@
         (return 1)
         (return 0)
     ))
-
-(fun is_fixnum (n)
-    (return (& n 1))
-    )
 
 (fun is_function (obj)
     (var t (gettag obj))
@@ -354,15 +360,24 @@
     (return (asr n 1))
     )
 
+(fun ascii_text (p n)
+    (while (> n 0) (do
+        (if (>= (getb p) 128) (return 0))
+        (+= p 1)
+        (-= n 1)
+        ))
+    (return 1)
+    )
+
 (fun str (text)
     (var data (allocate 8))
-    (set data 0 (make_header StringT 0 (strlen text)))
+    (set data 0 (make_header StringT (ascii_text text (strlen text)) (strlen text)))
     (set data 1 text)
     (return data)
     )
 
 (fun str_text (str)
-    (expect StringT str)
+    (expect "str_text" StringT str)
     (return (get str 1))
     )
 
@@ -398,7 +413,7 @@
     )
 
 (fun sym_name (sym)
-    (expect SymbolT sym)
+    (expect "sym_name" SymbolT sym)
     (return (get sym 1))
     )
 
@@ -504,6 +519,31 @@
     (return (mexpr tmpobj))
     )
 
+(fun bytes_equal (pa pb n)
+    (while (> n 0) (do
+        (if (!= (getb pa) (getb pb)) (return 0))
+        (+= pa 1)
+        (+= pb 1)
+        (-= n 1)
+        ))
+    (return 1)
+    )
+
+(fun arrayhash (a)
+    (var h 5381)
+    (var n (get_header_arg a))
+    (var i 1)
+    (while (<= i n) (do
+        (= h (+ (+ (<< h 5) h) (hash (get a i))))
+        (+= i 1)
+        ))
+    (return h)
+    )
+
+(fun parrayhash (a)
+    (return (+ (* (strhash_n (parray_data a) (* (get_header_arg a) (parray_size (get a 1)))) 31) (get a 1)))
+    )
+
 (fun hash (e)
     (var t (gettag e))
     (var h 0)
@@ -516,20 +556,17 @@
     (if (== t SymbolT) (return (symhash e)))
     (if (== t StringT) (return (strhash_n (get e 1) (get_header_arg e))))
     (if (== t MexprT) (return (mexprhash e)))
+    (if (== t ArrayT) (return (arrayhash e)))
+    (if (== t PArrayT) (return (parrayhash e)))
+    (if (== t DataT) (return (+ (* (hash (get e 2)) 31) (symhash (get e 1)))))
     ; other objects are hashed by their addresses
     (return (symhash e))
     )
 
 (fun fusion (f1 f2)
     (var obj (allocate 12))
-    (if (|| (! (is_function f1)) (! (is_function f2))) (do
-        (eputs "functions are expected for Fusion expr: ")
-        (eprint f1)
-        (eputs ", ")
-        (eprint f2)
-        (eputs "\n")
-        (exit 1)
-        ))
+    (if (! (is_function f1)) (named_error "Fusion" "function is expected: " f1))
+    (if (! (is_function f2)) (named_error "Fusion" "function is expected: " f2))
     (set obj 0 (make_header FusionT 0 0))
     (set obj 1 f1)
     (set obj 2 f2)
@@ -551,7 +588,7 @@
 (long ExprT_)
 (long FunctionT_)
 (long ArrayT_)
-(long PlainT_)
+(long PArrayT_)
 (long TypeT_)
 (long DefS)
 (long DefFunS)
@@ -573,14 +610,13 @@
 (long IoErrorS)
 (long SyntaxErrorS)
 (long EofS)
-(long parseS)
 (long evalS)
 (long emptyTuple)
 
 (fun tup2 (a b) (return (mexpr2 TupleS a b)))
 
 (fun tup_get (e i)
-    (expect_mexpr TupleS e)
+    (expect_mexpr "tup_get" TupleS e)
     (var arity (get_header_arg e))
     (if (>= i arity) (not_reachable "tup_get"))
     (return (get e (+ 2 i)))
@@ -631,7 +667,6 @@
     (= IoErrorS     (sym "IoError"))
     (= SyntaxErrorS (sym "SyntaxError"))
     (= EofS         (sym "Eof"))
-    (= parseS       (sym "parse"))
     (= evalS        (sym "eval"))
     (= emptyTuple   (mexpr0 TupleS))
     )
@@ -673,6 +708,25 @@
             ))
         (return 1)
         ))
+    (if (&& (== (gettag a) ArrayT) (== (gettag b) ArrayT)) (do
+        (= n (get_header_arg a))
+        (if (!= (get_header_arg b) n) (return 0))
+        (while (< i n) (do
+            (if (! (values_equal (get a (+ i 1)) (get b (+ i 1)))) (return 0))
+            (+= i 1)
+            ))
+        (return 1)
+        ))
+    (if (&& (== (gettag a) PArrayT) (== (gettag b) PArrayT)) (do
+        (if (!= (get a 1) (get b 1)) (return 0))
+        (if (!= (get_header_arg a) (get_header_arg b)) (return 0))
+        (= n (* (get_header_arg a) (parray_size (get a 1))))
+        (return (bytes_equal (parray_data a) (parray_data b) n))
+        ))
+    (if (&& (== (gettag a) DataT) (== (gettag b) DataT)) (do
+        (if (!= (get a 1) (get b 1)) (return 0))
+        (return (values_equal (get a 2) (get b 2)))
+        ))
     (return 0)
     )
 
@@ -685,7 +739,7 @@
     (if (== t MexprT) (return ExprT_))
     (if (is_function v) (return FunctionT_))
     (if (== t ArrayT) (return ArrayT_))
-    (if (== t PlainT) (return PlainT_))
+    (if (== t PArrayT) (return PArrayT_))
     (if (== t DataT) (return (get v 1)))
     (if (== t TypeT) (return TypeT_))
     (not_reachable "typeof")
@@ -786,7 +840,7 @@
     )
 
 ; <u8[n]>, <u16[n]> or <i32[n]>
-(fun fprint_plain (chan e)
+(fun fprint_parray (chan e)
     (var kind (get e 1))
     (fputs chan "<")
     (if (== kind 0) (fputs chan "u8")
@@ -812,7 +866,7 @@
         )
     (if (== t ContT) (fputs chan "<cont>")
     (if (== t ArrayT) (fputs chan "<array>")
-    (if (== t PlainT) (fprint_plain chan e)
+    (if (== t PArrayT) (fprint_parray chan e)
     (if (== t DataT) (do
         (fputs chan "#<")
         (fprint chan (get (get e 1) 1))
@@ -1096,7 +1150,7 @@
 
 (fun parse (text)
     (char[] 4 ret)
-    (expect StringT text)
+    (expect "mexpr_parse" StringT text)
     (var raw (skip_spaces (get text 1)))
     (if (== (getb raw) 0)
         (return (tup2 (mexpr0 EofS) (str raw)))
@@ -1409,12 +1463,23 @@
     )
 
 ; allocate slots for variables in a pattern, in the order of appearance
+(long param_base)
+
+(fun check_param_unique (sym)
+    (var ent cenv)
+    (while (!= ent param_base) (do
+        (if (== (get ent 0) sym) (compile_error "not implemented: duplicate parameter name" sym))
+        (= ent (get ent 3))
+        ))
+    )
+
 (fun bind_pattern (p)
     (var t (gettag p))
     (var i 0)
     (var n 0)
     (if (== p _S) (return 0))
     (if (== t SymbolT) (do
+        (check_param_unique p)
         (cenv_add p)
         (return 0)
         ))
@@ -1462,6 +1527,7 @@
     (var n (get_header_arg pats))
     (var code 0)
     (= cctx (new_context 0))
+    (= param_base cenv)
     (while (< i n) (do
         (bind_pattern_arg (get pats (+ i 2)) (+ i 1) n)
         (+= i 1)
@@ -1700,7 +1766,7 @@
         (return 0)
         ))
     (if (== head IfS) (do
-        (if (!= arity 3) (malformed e))
+        (if (&& (!= arity 2) (!= arity 3)) (malformed e))
         (compile (get e 2) 0)
         (emit OP_JF)
         (= l1 (code_offset))
@@ -1717,7 +1783,7 @@
 
         (patch l1 (code_offset))
         (= saved (begin_block))
-        (compile (get e 4) tail)
+        (if (== arity 2) (emit_const noneS) (compile (get e 4) tail))
         (end_block saved)
         (patch l2 (code_offset))
         (return 0)
@@ -1938,6 +2004,12 @@
         ))
     (load_regs caller)
     (vm_push v)
+    )
+
+(fun named_error (name msg e)
+    (eputs name)
+    (eputs ": ")
+    (runtime_error msg e)
     )
 
 (fun runtime_error (msg e)
@@ -2213,7 +2285,7 @@
     (var handler (vm_pop))
     (var body (vm_pop))
     (var code (get body 1))
-    (if (! (is_function handler)) (runtime_error "handler is not a function: " handler))
+    (if (! (is_function handler)) (named_error "Handle" "function is expected for the handler: " handler))
     (save_regs)
     (enter code (new_env code (get body 2)) vm_frame handler)
     )
@@ -2380,6 +2452,7 @@
     )
 
 (fun p_put (s)
+    (expect "os_put" StringT s)
     (write STDOUT (str_text s) (str_len s))
     (return noneS)
     )
@@ -2415,13 +2488,19 @@
     (return 0x7fffffff)
     )
 
-(fun low32 (name v)
-    (var x 0)
-    (check_num name v)
-    (if (& v 1) (return (fixnum_to_int v)))
-    (= x (| (| (get v 1) (<< (get v 2) 15)) (<< (get v 3) 30)))
-    (if (big_neg v) (return (- 0 x)))
-    (return x)
+(fun ranged_arg (name v max)
+    (var k (index_arg name v))
+    (if (|| (< k 0) (> k max)) (named_error name "out of range: " v))
+    (return k)
+    )
+
+(fun big_try_new (n neg)
+    (var b 0)
+    (if (> n 0x3ffffff) (return 0))
+    (= b (try_allocate (* 4 (+ n 1))))
+    (if (! b) (return 0))
+    (set b 0 (make_header BigT 0 (| (<< n 1) neg)))
+    (return b)
     )
 
 (fun big_new (n neg)
@@ -2806,9 +2885,42 @@
     (write chan (get s 1) (str_len s))
     )
 
-(fun p_int_to_str (n)
+(fun big_to_str_base (b base)
+    (var n (big_ulen b))
+    (var t (big_new n 0))
+    (var buf (allocate (+ (* n 15) 8)))
+    (var end (+ buf (+ (* n 15) 4)))
+    (var pos end)
+    (var rem 0)
+    (var i 1)
+    (while (<= i n) (do
+        (set t i (get b i))
+        (+= i 1)
+        ))
+    (while (> (big_ulen t) 0) (do
+        (= rem (mag_divsmall t base t))
+        (-= pos 1)
+        (if (< rem 10) (setb pos (+ (char "0") rem)) (setb pos (+ (char "a") (- rem 10))))
+        ))
+    (if (== pos end) (do
+        (-= pos 1)
+        (setb pos (char "0"))
+        ))
+    (if (big_neg b) (do
+        (-= pos 1)
+        (setb pos (char "-"))
+        ))
+    (setb end 0)
+    (return (str_n pos (- end pos)))
+    )
+
+(fun p_int_to_str (n base)
+    (var k 0)
     (check_num "int_to_str" n)
-    (return (big_to_str (big_of n)))
+    (= k (index_arg "int_to_str" base))
+    (if (|| (< k 2) (> k 36)) (runtime_error "int_to_str: base out of range: " base))
+    (if (== k 10) (return (big_to_str (big_of n))))
+    (return (big_to_str_base (big_of n) k))
     )
 
 (fun p_add (a b)
@@ -2897,7 +3009,7 @@
     )
 
 (fun p_bigint (text)
-    (expect StringT text)
+    (expect "str_to_int" StringT text)
     (return (parse_big text 0))
     )
 
@@ -2979,47 +3091,55 @@
 
 (fun p_eq (a b) (return (bool (values_equal a b))))
 
+(fun p_identical (a b)
+    (if (== a b) (return trueS))
+    (if (&& (== (gettag a) BigT) (== (gettag b) BigT)) (do
+        (if (== (num_cmp a b) 0) (return trueS))
+        ))
+    (return falseS)
+    )
+
 (fun p_ne (a b)
     (if (values_equal a b) (return falseS))
     (return trueS)
     )
 
 (fun p_head (m)
-    (expect MexprT m)
+    (expect "mexpr_head" MexprT m)
     (return (get m 1))
     )
 
 (fun p_arity (m)
-    (expect MexprT m)
+    (expect "mexpr_arity" MexprT m)
     (return (fixnum (get_header_arg m)))
     )
 
 (fun p_arg (m i)
     (var n 0)
-    (expect MexprT m)
-    (= n (index_arg "expr_arg" i))
-    (if (|| (< n 0) (>= n (get_header_arg m))) (runtime_error "expr_arg: index out of range: " i))
+    (expect "mexpr_arg" MexprT m)
+    (= n (index_arg "mexpr_arg" i))
+    (if (|| (< n 0) (>= n (get_header_arg m))) (runtime_error "mexpr_arg: index out of range: " i))
     (return (get m (+ n 2)))
     )
 
 (fun p_mexpr (h args)
-    (expect SymbolT h)
-    (expect_mexpr TupleS args)
+    (expect "mexpr_new" SymbolT h)
+    (expect_mexpr "mexpr_new" TupleS args)
     (return (mexprn h (get_header_arg args) (+ args 8)))
     )
 
 (fun p_typeof (v) (return (typeof v)))
 
-(fun p_expr_type_name (t)
-    (expect TypeT t)
+(fun p_type_name (t)
+    (expect "type_name" TypeT t)
     (return (get t 1))
     )
 
-(fun p_make_type (name)
+(fun p_type_new (name)
     (var type 0)
     (var wrap (allocate 16))
     (var unwrap (allocate 16))
-    (expect SymbolT name)
+    (expect "type_new" SymbolT name)
     (= type (new_type name))
     (set wrap 0 (make_header PrimT 0 1))
     (set wrap 1 0)
@@ -3037,56 +3157,69 @@
 ; a string object for text of length n (text is not copied)
 (fun str_n (text n)
     (var data (allocate 8))
-    (set data 0 (make_header StringT 0 n))
+    (set data 0 (make_header StringT (ascii_text text n) n))
+    (set data 1 text)
+    (return data)
+    )
+
+(fun str_n_ascii (text n)
+    (var data (allocate 8))
+    (set data 0 (make_header StringT 1 n))
     (set data 1 text)
     (return data)
     )
 
 (fun str_len (s) (return (get_header_arg s)))
 
+(fun ascii_only (name s)
+    (if (! (& (get s 0) 16)) (do
+        (eputs name)
+        (eputs ": not implemented for a string with multibyte characters: ")
+        (eprint s)
+        (eputs "\n")
+        (exit 1)
+        ))
+    )
+
 (fun p_strlen (s)
-    (expect StringT s)
+    (expect "str_len" StringT s)
+    (ascii_only "str_len" s)
     (return (fixnum (str_len s)))
     )
 
-; ord(s, i): the byte at i, or -1 when i is out of range
+; str_ord(s, i): the byte at i
 (fun p_ord (s i)
     (var n 0)
-    (expect StringT s)
+    (expect "str_ord" StringT s)
+    (ascii_only "str_ord" s)
     (= n (index_arg "str_ord" i))
-    (if (|| (< n 0) (>= n (str_len s))) (return (fixnum -1)))
+    (if (|| (< n 0) (>= n (str_len s))) (named_error "str_ord" "index out of range: " i))
     (return (fixnum (getb (get s 1) n)))
     )
 
-; substr(s, i, j): bytes from i to j-1. The text is shared when j is the end.
+; str_sub(s, i, j): bytes from i to j-1. The text is shared when j is the end.
 (fun p_substr (s i j)
     (var len 0)
     (var oi i)
     (var oj j)
-    (expect StringT s)
+    (expect "str_sub" StringT s)
+    (ascii_only "str_sub" s)
     (= i (index_arg "str_sub" i))
     (= j (index_arg "str_sub" j))
     (= len (str_len s))
     (if (|| (< i 0) (|| (> j len) (> i j))) (do
-        (eputs "str_sub: index out of range: ")
-        (eprint s)
-        (eputs " ")
-        (eprint oi)
-        (eputs " ")
-        (eprint oj)
-        (eputs "\n")
-        (exit 1)
+        (runtime_error "str_sub: index out of range: " (mexpr3 TupleS s oi oj))
         ))
-    (if (== j len) (return (str_n (+ (get s 1) i) (- j i))))
-    (return (str_n (strndup (+ (get s 1) i) (- j i)) (- j i)))
+    (if (== j len) (return (str_n_ascii (+ (get s 1) i) (- j i))))
+    (return (str_n_ascii (strndup (+ (get s 1) i) (- j i)) (- j i)))
     )
 
 (fun p_strcat (a b)
     (var n 0)
     (var m 0)
     (var text 0)
-    (expect StringT a)
-    (expect StringT b)
+    (expect "str_cat" StringT a)
+    (expect "str_cat" StringT b)
     (= n (str_len a))
     (= m (str_len b))
     (= text (allocate (+ (+ n m) 1)))
@@ -3096,12 +3229,23 @@
     (return (str_n text (+ n m)))
     )
 
+(fun expect_no_null (name s)
+    (var p (get s 1))
+    (var n (str_len s))
+    (while (> n 0) (do
+        (if (== (getb p) 0) (named_error name "string contains NULL: " s))
+        (+= p 1)
+        (-= n 1)
+        ))
+    )
+
 (fun p_intern (s)
-    (expect StringT s)
+    (expect "sym_intern" StringT s)
+    (expect_no_null "sym_intern" s)
     (return (sym (strndup (get s 1) (str_len s))))
     )
 
-; symname(s): the name of the symbol s as a string (the inverse of intern)
+; sym_name(s): the name of the symbol s as a string (the inverse of sym_intern)
 (fun p_symname (s)
     (return (str (sym_name s)))
     )
@@ -3109,14 +3253,15 @@
 (fun p_chr (c)
     (var n (index_arg "str_chr" c))
     (var text 0)
-    (if (|| (< n 0) (> n 255)) (runtime_error "str_chr: out of range: " c))
+    (if (|| (< n 0) (> n 0x10ffff)) (runtime_error "str_chr: out of range: " c))
+    (if (> n 127) (runtime_error "str_chr: not implemented for a multibyte character: " c))
     (= text (allocate 2))
     (setb text 0 n)
     (setb text 1 0)
     (return (str_n text 1))
     )
 
-; array(n): a mutable array of n elements, all none
+; array_new(n): a mutable array of n elements, all none
 (fun p_array (n)
     (var a 0)
     (var i 0)
@@ -3133,10 +3278,10 @@
 
 (fun array_index (name a i)
     (var n 0)
-    (expect ArrayT a)
+    (expect name ArrayT a)
     (= n (index_arg name i))
     (if (|| (< n 0) (>= n (get_header_arg a)))
-        (runtime_error "array index out of range: " i))
+        (named_error name "index out of range: " i))
     (return n)
     )
 
@@ -3154,7 +3299,7 @@
     )
 
 (fun p_array_len (a)
-    (expect ArrayT a)
+    (expect "array_len" ArrayT a)
     (return (fixnum (get_header_arg a)))
     )
 
@@ -3163,8 +3308,8 @@
     (var s 0)
     (var cnt 0)
     (var i 0)
-    (expect ArrayT dst)
-    (expect ArrayT src)
+    (expect "array_copy" ArrayT dst)
+    (expect "array_copy" ArrayT src)
     (= d (index_arg "array_copy" di))
     (= s (index_arg "array_copy" si))
     (= cnt (index_arg "array_copy" n))
@@ -3187,7 +3332,7 @@
     (return noneS)
     )
 
-; hash(x): a non-negative integer that is equal for values equal by eq
+; hash(x): a non-negative integer that is equal for values equal by equal
 (fun p_hash (x)
     (return (fixnum (& (hash x) 0xfffffff)))
     )
@@ -3201,7 +3346,8 @@
     (var size 0)
     (var buf 0)
     (var r 0)
-    (expect StringT path)
+    (expect "os_read_file" StringT path)
+    (expect_no_null "os_read_file" path)
     (= fd (open (get path 1) O_RDONLY))
     (if (< fd 0) (return (io_err "open" path)))
     (= size (fsize fd))
@@ -3217,50 +3363,50 @@
     (return (io_ok (str_n buf size)))
     )
 
-; --- plain arrays: arrays of unboxed u8, u16 and i32 elements
-; layout: | header (length, mutable, PlainT) | kind | elements |
+; --- parray: arrays of unboxed u8, u16 and i32 elements
+; layout: | header (length, mutable, PArrayT) | kind | elements |
 ; kind: 0 = u8, 1 = u16, 2 = i32. The elements are zero at first.
 
-(fun plain_size (kind)
+(fun parray_size (kind)
     (if (== kind 0) (return 1))
     (if (== kind 1) (return 2))
     (return 4)
     )
 
-(fun plain_data (a) (return (+ a 8)))
+(fun parray_data (a) (return (+ a 8)))
 
-(fun plain_new (name kind n)
+(fun parray_new (name kind n)
     (var a 0)
     (var i 0)
     (= i (index_arg name n))
-    (if (|| (< i 0) (> i 0xffffff)) (runtime_error "bad plain array length: " n))
-    (= a (allocate (+ 8 (* i (plain_size kind)))))
-    (set a 0 (make_header PlainT 1 i))
+    (if (|| (< i 0) (> i 0x7ffffff)) (runtime_error "bad parray length: " n))
+    (= a (allocate (+ 8 (* i (parray_size kind)))))
+    (set a 0 (make_header PArrayT 1 i))
     (set a 1 kind)
     (return a)
     )
 
-(fun p_u8_array (n) (return (plain_new "parray_new_u8" 0 n)))
-(fun p_u16_array (n) (return (plain_new "parray_new_u16" 1 n)))
-(fun p_i32_array (n) (return (plain_new "parray_new_i32" 2 n)))
+(fun p_u8_array (n) (return (parray_new "parray_new_u8" 0 n)))
+(fun p_u16_array (n) (return (parray_new "parray_new_u16" 1 n)))
+(fun p_i32_array (n) (return (parray_new "parray_new_i32" 2 n)))
 
-(fun plain_index (name a i)
+(fun parray_index (name a i)
     (var n 0)
-    (expect PlainT a)
+    (expect name PArrayT a)
     (= n (index_arg name i))
     (if (|| (< n 0) (>= n (get_header_arg a)))
-        (runtime_error "plain array index out of range: " i))
+        (named_error name "index out of range: " i))
     (return n)
     )
 
-(fun p_plain_len (a)
-    (expect PlainT a)
+(fun p_parray_len (a)
+    (expect "parray_len" PArrayT a)
     (return (fixnum (get_header_arg a)))
     )
 
-(fun p_plain_kind (a)
+(fun p_parray_kind (a)
     (var kind 0)
-    (expect PlainT a)
+    (expect "parray_kind" PArrayT a)
     (= kind (get a 1))
     (if (== kind 0) (return (sym "u8")))
     (if (== kind 1) (return (sym "u16")))
@@ -3299,26 +3445,26 @@
     (return 0)
     )
 
-(fun p_plain_get (a i)
+(fun p_parray_get (a i)
     (var n 0)
     (var kind 0)
     (var d 0)
-    (= n (plain_index "parray_get" a i))
+    (= n (parray_index "parray_get" a i))
     (= kind (get a 1))
-    (= d (plain_data a))
+    (= d (parray_data a))
     (if (== kind 0) (return (fixnum (getb d n))))
     (if (== kind 1) (return (fixnum (| (getb d (* 2 n)) (<< (getb d (+ (* 2 n) 1)) 8)))))
     (return (num_from_i32 (get d n)))
     )
 
-(fun p_plain_set (a i v)
+(fun p_parray_set (a i v)
     (var n 0)
     (var kind 0)
     (var d 0)
     (var x 0)
-    (= n (plain_index "parray_set" a i))
+    (= n (parray_index "parray_set" a i))
     (= kind (get a 1))
-    (= d (plain_data a))
+    (= d (parray_data a))
     (if (== kind 2) (= x (i32_arg v))
         (= x (index_arg "parray_set" v)))
     (if (== kind 0) (do
@@ -3336,15 +3482,15 @@
     (return noneS)
     )
 
-; plain_copy(dst, di, src, si, n): copy n elements of src from si to dst from di
-(fun p_plain_copy (dst di src si n)
+; parray_copy(dst, di, src, si, n): copy n elements of src from si to dst from di
+(fun p_parray_copy (dst di src si n)
     (var size 0)
     (var d 0)
     (var s 0)
     (var cnt 0)
     (var tmp 0)
-    (expect PlainT dst)
-    (expect PlainT src)
+    (expect "parray_copy" PArrayT dst)
+    (expect "parray_copy" PArrayT src)
     (if (!= (get dst 1) (get src 1)) (runtime_error "parray_copy: kinds differ: " src))
     (= d (index_arg "parray_copy" di))
     (= s (index_arg "parray_copy" si))
@@ -3352,15 +3498,15 @@
     (if (|| (< cnt 0) (|| (< d 0) (|| (< s 0)
         (|| (> (+ d cnt) (get_header_arg dst)) (> (+ s cnt) (get_header_arg src))))))
         (runtime_error "parray_copy: index out of range: " n))
-    (= size (plain_size (get dst 1)))
+    (= size (parray_size (get dst 1)))
     ; an overlapping copy in one array goes through a temporary copy
     (if (== dst src) (do
         (= tmp (allocate (+ (* cnt size) 1)))
-        (memcpy tmp (+ (plain_data src) (* s size)) (* cnt size))
-        (memcpy (+ (plain_data dst) (* d size)) tmp (* cnt size))
+        (memcpy tmp (+ (parray_data src) (* s size)) (* cnt size))
+        (memcpy (+ (parray_data dst) (* d size)) tmp (* cnt size))
         (return noneS)
         ))
-    (memcpy (+ (plain_data dst) (* d size)) (+ (plain_data src) (* s size)) (* cnt size))
+    (memcpy (+ (parray_data dst) (* d size)) (+ (parray_data src) (* s size)) (* cnt size))
     (return noneS)
     )
 
@@ -3368,24 +3514,9 @@
 
 (def SYS_CHMOD 15)
 
-; write_file(path, x): write all bytes of the string or u8 array x to the file,
-; which is created or truncated. A byte 0 is written as it is.
-(fun p_write_file (path x)
-    (var p 0)
-    (var n 0)
+(fun write_all (path p n)
     (var fd 0)
     (var r 0)
-    (expect StringT path)
-    (if (== (gettag x) StringT) (do
-        (= p (get x 1))
-        (= n (str_len x))
-        )
-        (do
-            (expect PlainT x)
-            (if (!= (get x 1) 0) (runtime_error "os_write_file: u8 array is expected: " x))
-            (= p (plain_data x))
-            (= n (get_header_arg x))
-        ))
     (= fd (open (get path 1) (| O_WRONLY (| O_CREAT O_TRUNC))))
     (if (< fd 0) (return (io_err "open" path)))
     (while (> n 0) (do
@@ -3401,14 +3532,30 @@
     (return (io_ok noneS))
     )
 
-; read_bytes(path): the contents of the file as a u8 array
+(fun p_write_file (path x)
+    (expect "os_write_file" StringT path)
+    (expect_no_null "os_write_file" path)
+    (expect "os_write_file" StringT x)
+    (return (write_all path (get x 1) (str_len x)))
+    )
+
+(fun p_write_bytes (path x)
+    (expect "os_write_bytes" StringT path)
+    (expect_no_null "os_write_bytes" path)
+    (expect "os_write_bytes" PArrayT x)
+    (if (!= (get x 1) 0) (runtime_error "os_write_bytes: u8 array is expected: " x))
+    (return (write_all path (parray_data x) (get_header_arg x)))
+    )
+
+; os_read_bytes(path): the contents of the file as a u8 array
 (fun p_read_bytes (path)
     (var fd 0)
     (var size 0)
     (var a 0)
     (var r 0)
     (var m 0)
-    (expect StringT path)
+    (expect "os_read_bytes" StringT path)
+    (expect_no_null "os_read_bytes" path)
     (= fd (open (get path 1) O_RDONLY))
     (if (< fd 0) (return (io_err "open" path)))
     (= size (fsize fd))
@@ -3417,10 +3564,10 @@
         (return (io_err "fstat" path))
         ))
     (= a (allocate (+ 8 size)))
-    (set a 0 (make_header PlainT 1 size))
+    (set a 0 (make_header PArrayT 1 size))
     (set a 1 0)
     (while (< r size) (do
-        (= m (read fd (+ (plain_data a) r) (- size r)))
+        (= m (read fd (+ (parray_data a) r) (- size r)))
         (if (<= m 0) (do
             (close fd)
             (return (io_err "read" path))
@@ -3432,8 +3579,9 @@
     )
 
 (fun p_chmod (path mode)
-    (expect StringT path)
-    (if (< (syscall SYS_CHMOD (get path 1) (low32 "os_chmod" mode)) 0)
+    (expect "os_chmod" StringT path)
+    (expect_no_null "os_chmod" path)
+    (if (< (syscall SYS_CHMOD (get path 1) (ranged_arg "os_chmod" mode 0xfff)) 0)
         (return (io_err "chmod" path)))
     (return (io_ok noneS))
     )
@@ -3512,9 +3660,10 @@
     (var n (big_ulen b))
     (var s (/ k 15))
     (var r (% k 15))
-    (var out (big_new (+ (+ n s) 1) 0))
+    (var out (big_try_new (+ (+ n s) 1) 0))
     (var i 1)
     (var t 0)
+    (if (! out) (return 0))
     (while (<= i n) (do
         (= t (<< (get b i) r))
         (set out (+ i s) (| (get out (+ i s)) (& t BIG_MASK)))
@@ -3597,7 +3746,9 @@
         (if (&& (== (asr r (fixnum_to_int k)) x) (fits_fixnum r)) (return (fixnum r)))
         ))
     (= y (big_of a))
-    (return (big_norm (mag_shl y (fixnum_to_int k)) (big_neg y)))
+    (= r (mag_shl y (fixnum_to_int k)))
+    (if (! r) (named_error "bit_shl" "out of memory: " k))
+    (return (big_norm r (big_neg y)))
     )
 
 ; arithmetic shift: the sign is kept
@@ -3640,15 +3791,15 @@
     (= cap (* 2 cap))
     (if (< cap 8192) (= cap 8192))
     (= b (allocate (+ 8 cap)))
-    (set b 0 (make_header PlainT 1 cap))
+    (set b 0 (make_header PArrayT 1 cap))
     (set b 1 0)
-    (if a (memcpy (plain_data b) (plain_data a) len))
+    (if a (memcpy (parray_data b) (parray_data a) len))
     (return b)
     )
 
 (fun spawn_text (a len)
     (var data (allocate (+ len 1)))
-    (if (> len 0) (memcpy data (plain_data a) len))
+    (if (> len 0) (memcpy data (parray_data a) len))
     (setb data len 0)
     (return (str_n data len))
     )
@@ -3684,15 +3835,18 @@
     (char[] 24 pf)
     (char[] 4 status)
     (char[] 4 one)
-    (expect StringT path)
-    (expect ArrayT args)
-    (expect StringT input)
-    (expect StringT dir)
+    (expect "os_run" StringT path)
+    (expect_no_null "os_run" path)
+    (expect "os_run" ArrayT args)
+    (expect "os_run" StringT input)
+    (expect "os_run" StringT dir)
+    (expect_no_null "os_run" dir)
     (= n (get_header_arg args))
     (= argvp (allocate (* 4 (+ n 2))))
     (set argvp 0 (get path 1))
     (while (< i n) (do
-        (expect StringT (get args (+ i 1)))
+        (expect "os_run" StringT (get args (+ i 1)))
+        (expect_no_null "os_run" (get args (+ i 1)))
         (set argvp (+ i 1) (get (get args (+ i 1)) 1))
         (+= i 1)
         ))
@@ -3702,7 +3856,7 @@
     (spawn_pipe errp 0)
     (spawn_pipe failp O_CLOEXEC)
     (= pid (syscall SYS_FORK))
-    (if (< pid 0) (runtime_error "os_run: cannot start: " path))
+    (if (< pid 0) (return (io_err "fork" path)))
     (if (== pid 0) (do
         (syscall SYS_DUP2 (get inp 0) 0)
         (syscall SYS_DUP2 (get outp 1) 1)
@@ -3749,7 +3903,7 @@
         (set pf 5 1)
         (= r (syscall SYS_POLL pf 3 -1))
         (if (< r 0) (do
-            (if (!= r -4) (runtime_error "os_run: cannot wait for the program" path))
+            (if (!= r -4) (return (io_err "poll" path)))
             ))
         (if (>= r 0) (do
             (if (&& (>= fd0 0) (!= (| (getb pf 6) (getb pf 7)) 0)) (do
@@ -3764,7 +3918,7 @@
                 ))
             (if (&& (>= fd1 0) (!= (| (getb pf 14) (getb pf 15)) 0)) (do
                 (= ob (spawn_room ob olen))
-                (= r (read fd1 (+ (plain_data ob) olen) (- (get_header_arg ob) olen)))
+                (= r (read fd1 (+ (parray_data ob) olen) (- (get_header_arg ob) olen)))
                 (if (<= r 0) (do
                     (close fd1)
                     (= fd1 -1)
@@ -3773,7 +3927,7 @@
                 ))
             (if (&& (>= fd2 0) (!= (| (getb pf 22) (getb pf 23)) 0)) (do
                 (= eb (spawn_room eb elen))
-                (= r (read fd2 (+ (plain_data eb) elen) (- (get_header_arg eb) elen)))
+                (= r (read fd2 (+ (parray_data eb) elen) (- (get_header_arg eb) elen)))
                 (if (<= r 0) (do
                     (close fd2)
                     (= fd2 -1)
@@ -3785,7 +3939,7 @@
     (syscall SYS_WAIT4 pid status 0 0)
     (= r (read (get failp 0) one 1))
     (close (get failp 0))
-    (if (> r 0) (runtime_error "os_run: cannot start: " path))
+    (if (> r 0) (return (io_err "exec" path)))
     (= st (get status 0))
     (= rv -1)
     (if (== (& st 127) 0) (= rv (& (>> st 8) 255)))
@@ -3794,7 +3948,7 @@
     (set res 1 (fixnum rv))
     (set res 2 (spawn_text ob olen))
     (set res 3 (spawn_text eb elen))
-    (return res)
+    (return (io_ok res))
     )
 
 (def SYS_GETDENTS64 220)
@@ -3833,9 +3987,10 @@
     (var cur 0)
     (var res 0)
     (char[] 4096 buf)
-    (expect StringT path)
+    (expect "os_list_dir" StringT path)
+    (expect_no_null "os_list_dir" path)
     (= fd (open (get path 1) (| O_RDONLY O_DIRECTORY)))
-    (if (< fd 0) (runtime_error "os_list_dir: cannot open: " path))
+    (if (< fd 0) (return (io_err "open" path)))
     (= names (name_array cap))
     (= n (syscall SYS_GETDENTS64 fd buf 4096))
     (while (> n 0) (do
@@ -3871,7 +4026,7 @@
         (= n (syscall SYS_GETDENTS64 fd buf 4096))
         ))
     (close fd)
-    (if (< n 0) (runtime_error "os_list_dir: cannot read: " path))
+    (if (< n 0) (return (io_err "read" path)))
     (= j 1)
     (while (< j count) (do
         (= cur (get names (+ j 1)))
@@ -3889,7 +4044,7 @@
         (set res (+ j 1) (get names (+ j 1)))
         (+= j 1)
         ))
-    (return res)
+    (return (io_ok res))
     )
 
 (fun p_argv ()
@@ -3936,24 +4091,27 @@ features:
 (fun p_parse (s) (return (parse s)))
 
 (fun p_exit (n)
-    (exit (low32 "os_exit" n))
+    (exit (ranged_arg "os_exit" n 255))
     )
 
-(def SYS_CLOCK_GETTIME 265)
-(def CLOCK_MONOTONIC 1)
-(char[] 8 clock_ts)
+(def SYS_CLOCK_GETTIME64 403)
+(def CLOCK_REALTIME 0)
+(char[] 16 clock_ts)
 
 (fun p_time_ns ()
-    (if (< (syscall SYS_CLOCK_GETTIME CLOCK_MONOTONIC clock_ts) 0)
+    (if (< (syscall SYS_CLOCK_GETTIME64 CLOCK_REALTIME clock_ts) 0)
         (runtime_error "os_time_ns failed" noneS))
-    (var sec (fixnum (get clock_ts 0)))
-    (var nsec (fixnum (get clock_ts 1)))
+    (var lo (get clock_ts 0))
+    (var hi (get clock_ts 1))
+    (var nsec (fixnum (get clock_ts 2)))
+    (var upper (p_add (p_mul (fixnum hi) (fixnum 65536)) (fixnum (>> lo 16))))
+    (var sec (p_add (p_mul upper (fixnum 65536)) (fixnum (& lo 65535))))
     (var micro (p_mul sec (fixnum 1000000)))
     (var whole (p_mul micro (fixnum 1000)))
     (return (p_add whole nsec))
     )
 
-(fun p_heap_allocated ()
+(fun p_allocated_bytes ()
     (var t (+ alloc_lo gc_since))
     (return (p_add (p_mul (fixnum (+ alloc_hi (>> t 20))) (fixnum 1048576)) (fixnum (& t 1048575))))
     )
@@ -3994,14 +4152,14 @@ features:
     (= ExprT_     (defines_type "Expr"))
     (= FunctionT_ (defines_type "Function"))
     (= ArrayT_    (defines_type "Array"))
-    (= PlainT_    (defines_type "Plain"))
+    (= PArrayT_    (defines_type "PArray"))
     (= TypeT_     (defines_type "Type"))
     (defprim "os_put"     1 p_put     PRIM_NATIVE)
     (defprim "int_add"     2 p_add     PRIM_NATIVE)
     (defprim "int_sub"     2 p_sub     PRIM_NATIVE)
     (defprim "int_mul"     2 p_mul     PRIM_NATIVE)
     (defprim "str_to_int"  1 p_bigint  PRIM_NATIVE)
-    (defprim "int_to_str"  1 p_int_to_str  PRIM_NATIVE)
+    (defprim "int_to_str"  2 p_int_to_str  PRIM_NATIVE)
     (defprim "int_div"     2 p_div     PRIM_NATIVE)
     (defprim "int_quo"     2 p_quo     PRIM_NATIVE)
     (defprim "int_mod"     2 p_mod     PRIM_NATIVE)
@@ -4011,14 +4169,15 @@ features:
     (defprim "int_ge"      2 p_ge      PRIM_NATIVE)
     (defprim "equal"        2 p_eq      PRIM_NATIVE)
     (defprim "not_equal"    2 p_ne      PRIM_NATIVE)
-    (defprim "expr_head"    1 p_head    PRIM_NATIVE)
-    (defprim "expr_arity"   1 p_arity   PRIM_NATIVE)
-    (defprim "expr_arg"     2 p_arg     PRIM_NATIVE)
-    (defprim "expr_new"   2 p_mexpr   PRIM_NATIVE)
+    (defprim "identical"    2 p_identical PRIM_NATIVE)
+    (defprim "mexpr_head"    1 p_head    PRIM_NATIVE)
+    (defprim "mexpr_arity"   1 p_arity   PRIM_NATIVE)
+    (defprim "mexpr_arg"     2 p_arg     PRIM_NATIVE)
+    (defprim "mexpr_new"   2 p_mexpr   PRIM_NATIVE)
     (defprim "type"         1 p_typeof  PRIM_NATIVE)
-    (defprim "expr_type_name" 1 p_expr_type_name PRIM_NATIVE)
-    (defprim "make_type"      1 p_make_type PRIM_NATIVE)
-    (defprim "parse"   1 p_parse   PRIM_NATIVE)
+    (defprim "type_name" 1 p_type_name PRIM_NATIVE)
+    (defprim "type_new"     1 p_type_new PRIM_NATIVE)
+    (defprim "mexpr_parse" 1 p_parse PRIM_NATIVE)
     (defprim "str_len"  1 p_strlen  PRIM_NATIVE)
     (defprim "str_ord"     2 p_ord     PRIM_NATIVE)
     (defprim "str_chr"     1 p_chr     PRIM_NATIVE)
@@ -4034,16 +4193,17 @@ features:
     (defprim "hash"         1 p_hash    PRIM_NATIVE)
     (defprim "os_read_file" 1 p_read_file PRIM_NATIVE)
     (defprim "os_write_file" 2 p_write_file PRIM_NATIVE)
+    (defprim "os_write_bytes" 2 p_write_bytes PRIM_NATIVE)
     (defprim "os_read_bytes" 1 p_read_bytes PRIM_NATIVE)
     (defprim "os_chmod"   2 p_chmod   PRIM_NATIVE)
     (defprim "parray_new_u8" 1 p_u8_array PRIM_NATIVE)
     (defprim "parray_new_u16" 1 p_u16_array PRIM_NATIVE)
     (defprim "parray_new_i32" 1 p_i32_array PRIM_NATIVE)
-    (defprim "parray_len" 1 p_plain_len PRIM_NATIVE)
-    (defprim "parray_kind" 1 p_plain_kind PRIM_NATIVE)
-    (defprim "parray_get" 2 p_plain_get PRIM_NATIVE)
-    (defprim "parray_set" 3 p_plain_set PRIM_NATIVE)
-    (defprim "parray_copy" 5 p_plain_copy PRIM_NATIVE)
+    (defprim "parray_len" 1 p_parray_len PRIM_NATIVE)
+    (defprim "parray_kind" 1 p_parray_kind PRIM_NATIVE)
+    (defprim "parray_get" 2 p_parray_get PRIM_NATIVE)
+    (defprim "parray_set" 3 p_parray_set PRIM_NATIVE)
+    (defprim "parray_copy" 5 p_parray_copy PRIM_NATIVE)
     (defprim "bit_and" 2 p_bit_and PRIM_NATIVE)
     (defprim "bit_or"  2 p_bit_or  PRIM_NATIVE)
     (defprim "bit_xor" 2 p_bit_xor PRIM_NATIVE)
@@ -4053,7 +4213,7 @@ features:
     (defprim "os_argv" 0 p_argv PRIM_NATIVE)
     (defprim "os_exit"    1 p_exit    PRIM_NATIVE)
     (defprim "os_time_ns" 0 p_time_ns PRIM_NATIVE)
-    (defprim "gc_heap_allocated" 0 p_heap_allocated PRIM_NATIVE)
+    (defprim "gc_allocated_bytes" 0 p_allocated_bytes PRIM_NATIVE)
     (defprim "gc_count" 0 p_gc_count PRIM_NATIVE)
     (defprim "os_run" 4 p_run_program PRIM_NATIVE)
     (defprim "os_list_dir" 1 p_list_dir PRIM_NATIVE)
@@ -4086,14 +4246,12 @@ features:
     (return (str_n buf file_size))
     )
 
-; The loop looks up the global variables `parse` and `eval` every time, so
-; a program can replace them (Def{parse, ...}, Def{eval, ...} or Set) and the next
-; top-level expression is parsed/evaluated by the new definitions. Apply{eval, ...}
-; in the code compiled after the replacement also calls the replaced eval; the code
-; compiled before keeps the old one unless the replacement is Set{eval, ...}.
-;   parse: String -> Tuple{m-expr, rest String}   (initially the builtin parse)
-;     When only white space is left, parse returns Tuple{Eof{}, rest} and the
-;     loop stops. A replacement parse should pass Eof{} through.
+; The loop reads each top-level expression with the builtin parser and looks up
+; the global variable eval every time, so a program can replace it (Def{eval, ...}
+; or Set) and the next top-level expression is evaluated by the new definition.
+; Apply{eval, ...} in the code compiled after the replacement also calls the
+; replaced eval; the code compiled before keeps the old one unless the
+; replacement is Set{eval, ...}.
 ;   eval: m-expr -> any value                     (initially the builtin eval)
 ; Inside the VM, the builtin eval (PRIM_EVAL) is called through the global
 ; variable like any other function.
@@ -4108,7 +4266,7 @@ features:
     (var e 0)
     (var more 1)
     (while more (do
-        (= ret (call_global parseS text))
+        (= ret (parse text))
         (if (|| (! (has_head TupleS ret))
             (|| (!= (get_header_arg ret) 2)
                 (!= (gettag (tup_get ret 1)) StringT))) (do
