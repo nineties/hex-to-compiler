@@ -173,11 +173,12 @@
 
 ; Layout of heap objects.
 ; m: 1 if the object is mutable
+; a: 1 if all bytes of the string are ASCII (set when the string is made)
 ;
 ;         |        header        |
 ;         |  27bit | 1bit | 4bit |
 ; symbol  |      0 |    0 | 0000 | text |
-; string  | length |    0 | 0001 | text |
+; string  | length |    a | 0001 | text |
 ; mexpr   |  arity |    0 | 0010 | sym  | arg1 | .... |
 ; array   | length |    m | 0011 |
 ; lambda  |  arity |    0 | 0101 | code | env  |
@@ -357,9 +358,18 @@
     (return (asr n 1))
     )
 
+(fun ascii_text (p n)
+    (while (> n 0) (do
+        (if (>= (getb p) 128) (return 0))
+        (+= p 1)
+        (-= n 1)
+        ))
+    (return 1)
+    )
+
 (fun str (text)
     (var data (allocate 8))
-    (set data 0 (make_header StringT 0 (strlen text)))
+    (set data 0 (make_header StringT (ascii_text text (strlen text)) (strlen text)))
     (set data 1 text)
     (return data)
     )
@@ -3133,7 +3143,14 @@
 ; a string object for text of length n (text is not copied)
 (fun str_n (text n)
     (var data (allocate 8))
-    (set data 0 (make_header StringT 0 n))
+    (set data 0 (make_header StringT (ascii_text text n) n))
+    (set data 1 text)
+    (return data)
+    )
+
+(fun str_n_ascii (text n)
+    (var data (allocate 8))
+    (set data 0 (make_header StringT 1 n))
     (set data 1 text)
     (return data)
     )
@@ -3141,18 +3158,12 @@
 (fun str_len (s) (return (get_header_arg s)))
 
 (fun ascii_only (name s)
-    (var p (get s 1))
-    (var n (str_len s))
-    (while (> n 0) (do
-        (if (>= (getb p) 128) (do
-            (eputs name)
-            (eputs ": not implemented for a string with multibyte characters: ")
-            (eprint s)
-            (eputs "\n")
-            (exit 1)
-            ))
-        (+= p 1)
-        (-= n 1)
+    (if (! (& (get s 0) 16)) (do
+        (eputs name)
+        (eputs ": not implemented for a string with multibyte characters: ")
+        (eprint s)
+        (eputs "\n")
+        (exit 1)
         ))
     )
 
@@ -3185,8 +3196,8 @@
     (if (|| (< i 0) (|| (> j len) (> i j))) (do
         (runtime_error "str_sub: index out of range: " (mexpr3 TupleS s oi oj))
         ))
-    (if (== j len) (return (str_n (+ (get s 1) i) (- j i))))
-    (return (str_n (strndup (+ (get s 1) i) (- j i)) (- j i)))
+    (if (== j len) (return (str_n_ascii (+ (get s 1) i) (- j i))))
+    (return (str_n_ascii (strndup (+ (get s 1) i) (- j i)) (- j i)))
     )
 
 (fun p_strcat (a b)
