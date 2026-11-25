@@ -554,7 +554,7 @@
 (long PlainT_)
 (long TypeT_)
 (long DefS)
-(long DeclareS)
+(long DefFunS)
 (long SetS)
 (long ApplyS)
 (long DoS)
@@ -587,17 +587,11 @@
     )
 
 (long global_table) ; global variables (sym -> cell of the latest definition)
-(long cur_file)     ; the path of the file being loaded (0 while the builtins are made)
 
-; A cell is a global variable: | value | sym | file |. The value is 0 until the
-; definition runs. Definitions are in the order they are compiled: define_global
-; makes a new cell for the name, and the code compiled after it refers to the
-; new cell. file is the path of the file that defines it (0 for a builtin).
 (fun define_global (sym)
-    (var cell (allocate 12))
+    (var cell (allocate 8))
     (set cell 0 0)
     (set cell 1 sym)
-    (set cell 2 cur_file)
     (if (! (table_update global_table sym cell))
         (table_insert global_table sym cell))
     (return cell)
@@ -607,7 +601,6 @@
     (= symtable (make_table 0x10000 strhash streq))
     (= mexprtable (make_table 0x10000 mexprhash mexpreq))
     (= global_table (make_table 0x1000 symhash symeq))
-    (= cur_file 0)
     )
 
 (fun init_symbols ()
@@ -619,7 +612,7 @@
     (= TypeSlotS (sym "_TypeSlot"))
     (= _RestS   (sym "_Rest"))
     (= DefS         (sym "Def"))
-    (= DeclareS     (sym "Declare"))
+    (= DefFunS      (sym "DefFun"))
     (= SetS         (sym "Set"))
     (= ApplyS       (sym "Apply"))
     (= DoS          (sym "Do"))
@@ -1138,12 +1131,6 @@
 ;   keeps the old one. A name which is neither bound lexically nor defined at
 ;   the top level is an error at compile time.
 ;
-;   Declare{x} is Def{x, none} unless x is already a variable of the place
-;   where Def{x, ...} would define it: at the top level, a global variable
-;   defined by the file being loaded, and otherwise a variable of the same
-;   environment (the function, or the top-level code in a block). Then it does
-;   nothing and its value is none.
-;
 ; frame (internal, placed on the frame stack):
 ;   | caller | code | pc | env | sp | handler | size | operand stack ... |
 ;   caller:  the frame which receives the return value (0 for top-level)
@@ -1577,9 +1564,8 @@
 (fun defined_here (x)
     (var ent 0)
     (if (is_global_scope) (do
-        (= ent (table_lookup global_table x))
-        (if (|| (! ent) (|| (! (get ent 2)) (! cur_file))) (return 0))
-        (return (values_equal (get ent 2) cur_file))
+        (if (table_lookup global_table x) (return 1))
+        (return 0)
         ))
     (= ent (cenv_lookup x))
     (if (&& ent (== (get ent 1) (get cctx CX_LEVEL))) (return 1))
@@ -1668,10 +1654,15 @@
         (compile_define (get e 2))
         (return 0)
         ))
-    (if (== head DeclareS) (do
-        (if (|| (!= arity 1) (!= (gettag (get e 2)) SymbolT)) (malformed e))
-        (emit_const noneS)
-        (if (! (defined_here (get e 2))) (compile_define (get e 2)))
+    (if (== head DefFunS) (do
+        (if (|| (!= arity 2) (!= (gettag (get e 2)) SymbolT)) (malformed e))
+        (if (! (defined_here (get e 2))) (do
+            (emit_const noneS)
+            (compile_define (get e 2))
+            (emit OP_POP)
+            (stack_effect -1)
+            ))
+        (compile (mexpr2 SetS (get e 2) (mexpr2 FusionS (get e 2) (get e 3))) 0)
         (return 0)
         ))
     (if (== head SetS) (do
@@ -3944,14 +3935,6 @@ features:
 
 (fun p_parse (s) (return (parse s)))
 
-; _set_file(path) makes path the file being loaded and returns the previous one
-(fun p_set_file (path)
-    (var prev cur_file)
-    (= cur_file path)
-    (if prev (return prev))
-    (return noneS)
-    )
-
 (fun p_exit (n)
     (exit (low32 "os_exit" n))
     )
@@ -4074,7 +4057,6 @@ features:
     (defprim "gc_count" 0 p_gc_count PRIM_NATIVE)
     (defprim "os_run" 4 p_run_program PRIM_NATIVE)
     (defprim "os_list_dir" 1 p_list_dir PRIM_NATIVE)
-    (defprim "os_set_file" 1 p_set_file PRIM_NATIVE)
     (defprim "eval"    1 0         PRIM_EVAL)
     (init_sysinfo)
     )
@@ -4125,8 +4107,6 @@ features:
     (var ret 0)
     (var e 0)
     (var more 1)
-    (var saved_file cur_file)
-    (= cur_file (str path))
     (while more (do
         (= ret (call_global parseS text))
         (if (|| (! (has_head TupleS ret))
@@ -4151,7 +4131,6 @@ features:
             (= text (tup_get ret 1))
             ))
         ))
-    (= cur_file saved_file)
     )
 
 ; === Garbage Collection
@@ -4267,7 +4246,6 @@ features:
     (gc_mark mexprtable)
     (gc_mark emptyTuple)
     (gc_mark global_table)
-    (gc_mark cur_file)
     (gc_mark parse_str_buf)
     (gc_mark parse_arena)
     (gc_mark (- cbuf_end 4))
