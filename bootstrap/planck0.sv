@@ -3368,24 +3368,9 @@
 
 (def SYS_CHMOD 15)
 
-; write_file(path, x): write all bytes of the string or u8 array x to the file,
-; which is created or truncated. A byte 0 is written as it is.
-(fun p_write_file (path x)
-    (var p 0)
-    (var n 0)
+(fun write_all (path p n)
     (var fd 0)
     (var r 0)
-    (expect StringT path)
-    (if (== (gettag x) StringT) (do
-        (= p (get x 1))
-        (= n (str_len x))
-        )
-        (do
-            (expect PlainT x)
-            (if (!= (get x 1) 0) (runtime_error "os_write_file: u8 array is expected: " x))
-            (= p (plain_data x))
-            (= n (get_header_arg x))
-        ))
     (= fd (open (get path 1) (| O_WRONLY (| O_CREAT O_TRUNC))))
     (if (< fd 0) (return (io_err "open" path)))
     (while (> n 0) (do
@@ -3399,6 +3384,19 @@
         ))
     (close fd)
     (return (io_ok noneS))
+    )
+
+(fun p_write_file (path x)
+    (expect StringT path)
+    (expect StringT x)
+    (return (write_all path (get x 1) (str_len x)))
+    )
+
+(fun p_write_bytes (path x)
+    (expect StringT path)
+    (expect PlainT x)
+    (if (!= (get x 1) 0) (runtime_error "os_write_bytes: u8 array is expected: " x))
+    (return (write_all path (plain_data x) (get_header_arg x)))
     )
 
 ; read_bytes(path): the contents of the file as a u8 array
@@ -4034,6 +4032,7 @@ features:
     (defprim "hash"         1 p_hash    PRIM_NATIVE)
     (defprim "os_read_file" 1 p_read_file PRIM_NATIVE)
     (defprim "os_write_file" 2 p_write_file PRIM_NATIVE)
+    (defprim "os_write_bytes" 2 p_write_bytes PRIM_NATIVE)
     (defprim "os_read_bytes" 1 p_read_bytes PRIM_NATIVE)
     (defprim "os_chmod"   2 p_chmod   PRIM_NATIVE)
     (defprim "parray_new_u8" 1 p_u8_array PRIM_NATIVE)
