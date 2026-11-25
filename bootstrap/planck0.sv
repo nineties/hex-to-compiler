@@ -2883,7 +2883,7 @@
         (if (|| (== c (char "b")) (== c (char "B"))) (= base 2))
         (if (!= base 10) (+= i 2))
         ))
-    (if (>= i n) (runtime_error "int_parse: invalid integer: " text))
+    (if (>= i n) (runtime_error "string_to_int: invalid integer: " text))
     (= r (big_new (+ n 1) 0))
     (while (< i n) (do
         (= c (getb s i))
@@ -2891,7 +2891,7 @@
         (if (&& (>= c (char "0")) (<= c (char "9"))) (= d (- c (char "0"))))
         (if (&& (>= c (char "a")) (<= c (char "f"))) (= d (- c (- (char "a") 10))))
         (if (&& (>= c (char "A")) (<= c (char "F"))) (= d (- c (- (char "A") 10))))
-        (if (|| (< d 0) (>= d base)) (runtime_error "int_parse: invalid integer: " text))
+        (if (|| (< d 0) (>= d base)) (runtime_error "string_to_int: invalid integer: " text))
         (= carry d)
         (= j 1)
         (while (<= j (+ n 1)) (do
@@ -3978,12 +3978,6 @@ features:
     (return (fixnum gc_runs))
     )
 
-; _float(s) is the floating-point number written s; there are none
-(fun p_float (s)
-    (expect StringT s)
-    (runtime_error "not supported: floating-point number " s)
-    )
-
 (fun defprim (name arity fn kind)
     (var prim (allocate 16))
     (var s (sym name))
@@ -4022,12 +4016,11 @@ features:
     (defprim "int_add"     2 p_add     PRIM_NATIVE)
     (defprim "int_sub"     2 p_sub     PRIM_NATIVE)
     (defprim "int_mul"     2 p_mul     PRIM_NATIVE)
-    (defprim "int_parse"  1 p_bigint  PRIM_NATIVE)
+    (defprim "string_to_int"  1 p_bigint  PRIM_NATIVE)
     (defprim "int_to_string"  1 p_int_to_string  PRIM_NATIVE)
     (defprim "int_div"     2 p_div     PRIM_NATIVE)
     (defprim "int_quo"     2 p_quo     PRIM_NATIVE)
     (defprim "int_mod"     2 p_mod     PRIM_NATIVE)
-    (defprim "float_parse"   1 p_float   PRIM_NATIVE)
     (defprim "int_lt"      2 p_lt      PRIM_NATIVE)
     (defprim "int_le"      2 p_le      PRIM_NATIVE)
     (defprim "int_gt"      2 p_gt      PRIM_NATIVE)
