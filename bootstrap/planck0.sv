@@ -3181,13 +3181,13 @@
     (return (fixnum (str_len s)))
     )
 
-; str_ord(s, i): the byte at i, or -1 when i is out of range
+; str_ord(s, i): the byte at i
 (fun p_ord (s i)
     (var n 0)
     (expect "str_ord" StringT s)
     (ascii_only "str_ord" s)
     (= n (index_arg "str_ord" i))
-    (if (|| (< n 0) (>= n (str_len s))) (return (fixnum -1)))
+    (if (|| (< n 0) (>= n (str_len s))) (named_error "str_ord" "index out of range: " i))
     (return (fixnum (getb (get s 1) n)))
     )
 
