@@ -3118,7 +3118,7 @@
     (var n 0)
     (expect "mexpr_arg" MexprT m)
     (= n (index_arg "mexpr_arg" i))
-    (if (|| (< n 0) (>= n (get_header_arg m))) (runtime_error "expr_arg: index out of range: " i))
+    (if (|| (< n 0) (>= n (get_header_arg m))) (runtime_error "mexpr_arg: index out of range: " i))
     (return (get m (+ n 2)))
     )
 
