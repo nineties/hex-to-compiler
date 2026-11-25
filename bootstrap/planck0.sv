@@ -3603,11 +3603,6 @@
     (return (big_norm (mag_shl y (fixnum_to_int k)) (big_neg y)))
     )
 
-(fun p_bit_shr (a k)
-    (check_num "bit_shr" a)
-    (return (p_bit_sar a k))
-    )
-
 ; arithmetic shift: the sign is kept
 (fun p_bit_sar (a k)
     (var y 0)
@@ -4066,7 +4061,6 @@ features:
     (defprim "bit_xor" 2 p_bit_xor PRIM_NATIVE)
     (defprim "bit_not" 1 p_bit_not PRIM_NATIVE)
     (defprim "bit_shl" 2 p_bit_shl PRIM_NATIVE)
-    (defprim "bit_shr" 2 p_bit_shr PRIM_NATIVE)
     (defprim "bit_sar" 2 p_bit_sar PRIM_NATIVE)
     (defprim "os_argv" 0 p_argv PRIM_NATIVE)
     (defprim "os_exit"    1 p_exit    PRIM_NATIVE)
