@@ -10,7 +10,11 @@ cur_file := ""
 cur_src := ""
 here(p) := error.loc_at(cur_file, cur_src, p)
 
-record Token(kind, value, pos) = token
+(Token, wrap_token, unwrap_token) := make_type('Token)
+token(kind, value, pos) := wrap_token(Tuple{kind, value, pos})
+tok_kind(t) := arg(unwrap_token(t), 0)
+tok_value(t) := arg(unwrap_token(t), 1)
+tok_pos(t) := arg(unwrap_token(t), 2)
 
 lex(src) := {
     toks := vector.new()
@@ -55,27 +59,27 @@ parse_program(toks) := {
         pos = pos + 1
         t
     }
-    at(kind, v) := peek().kind == kind and peek().value == v
-    syntax_error(msg) := error.at(here(peek().pos), msg)
+    at(kind, v) := tok_kind(peek()) == kind and tok_value(peek()) == v
+    syntax_error(msg) := error.at(here(tok_pos(peek())), msg)
     expect_op(v) := if (at('op, v)) advance() else syntax_error(f"expected \"{v}\"")
 
     chain(next, ops) := {
         l := next()
-        while (peek().kind == 'op and member(peek().value, ops)) {
+        while (tok_kind(peek()) == 'op and member(tok_value(peek()), ops)) {
             t := advance()
-            l = Bin{t.value, l, next(), t.pos}
+            l = Bin{tok_value(t), l, next(), tok_pos(t)}
         }
         l
     }
     fun expr
     factor() := {
         t := peek()
-        if (t.kind == 'num) {
+        if (tok_kind(t) == 'num) {
             advance()
-            Num{t.value}
-        } else if (t.kind == 'id) {
+            Num{tok_value(t)}
+        } else if (tok_kind(t) == 'id) {
             advance()
-            Var{t.value, t.pos}
+            Var{tok_value(t), tok_pos(t)}
         } else if (at('op, "(")) {
             advance()
             e := expr()
@@ -91,18 +95,18 @@ parse_program(toks) := {
     stmt() := if (at('id, "let")) {
         advance()
         t := peek()
-        if (t.kind != 'id) syntax_error("expected a variable name")
+        if (tok_kind(t) != 'id) syntax_error("expected a variable name")
         advance()
         expect_op("=")
-        Let{t.value, expr(), t.pos}
+        Let{tok_value(t), expr(), tok_pos(t)}
     } else Expr{expr()}
-    skip_newlines() := while (peek().kind == 'nl) advance()
+    skip_newlines() := while (tok_kind(peek()) == 'nl) advance()
 
     stmts := []
     skip_newlines()
-    while (peek().kind != 'eof) {
+    while (tok_kind(peek()) != 'eof) {
         stmts = stmt() :: stmts
-        if (peek().kind != 'eof and peek().kind != 'nl) syntax_error("expected the end of the line")
+        if (tok_kind(peek()) != 'eof and tok_kind(peek()) != 'nl) syntax_error("expected the end of the line")
         skip_newlines()
     }
     reverse(stmts)

@@ -188,8 +188,6 @@
 ; type    | fields |    0 | 1011 | name | Tuple of the field names |
 ; data    | fields |    0 | 1100 | type | field1 | .... |
 ;
-; A type is made by _record_new, and a data is an instance of a type that the function made by it builds.
-;
 ;
 ; Both symbols and mexpr undergo interning,
 ; enabling O(1) equality testing via pointer comparison.
@@ -470,6 +468,16 @@
     (set tmpobj 1 h)
     (set tmpobj 2 a)
     (return (mexpr tmpobj))
+    )
+
+(fun mexpr3 (h a b c)
+    (char[] 20 tmpobj3)
+    (set tmpobj3 0 (make_header MexprT 0 3))
+    (set tmpobj3 1 h)
+    (set tmpobj3 2 a)
+    (set tmpobj3 3 b)
+    (set tmpobj3 4 c)
+    (return (mexpr tmpobj3))
     )
 
 (fun mexpr2 (h a b)
@@ -818,7 +826,11 @@
     (if (== t ContT) (fputs chan "<cont>")
     (if (== t ArrayT) (fputs chan "<array>")
     (if (== t PlainT) (fprint_plain chan e)
-    (if (== t DataT) (fprint_mexpr chan e)
+    (if (== t DataT) (do
+        (fputs chan "#<")
+        (fprint chan (get (get e 1) 1))
+        (fputs chan ">")
+        )
     (if (== t TypeT) (fprint chan (get e 1))
     (if (== t FusionT) (do
         (fprint chan (get e 1))
@@ -1236,6 +1248,7 @@
 (def PRIM_NATIVE 0)
 (def PRIM_EVAL   1)
 (def PRIM_NEW    2)
+(def PRIM_UNWRAP 3)
 
 ; === Compiler
 ;
@@ -2089,16 +2102,11 @@
     (vm_push x)
     )
 
-; a data of the type made by _record_new with the fields from args
-(fun new_data (type args nargs)
-    (var d (allocate (* 4 (+ nargs 2))))
-    (var i 0)
-    (set d 0 (make_header DataT 0 nargs))
+(fun new_data (type value)
+    (var d (allocate 12))
+    (set d 0 (make_header DataT 0 1))
     (set d 1 type)
-    (while (< i nargs) (do
-        (set d (+ i 2) (get args i))
-        (+= i 1)
-        ))
+    (set d 2 value)
     (return d)
     )
 
@@ -2119,8 +2127,15 @@
             (return 0)
             ))
         (if (== (get callee 3) PRIM_NEW) (do
-            (= v (new_data (get callee 2) args nargs))
+            (= v (new_data (get callee 2) (get args 0)))
             (deliver caller v)
+            (return 0)
+            ))
+        (if (== (get callee 3) PRIM_UNWRAP) (do
+            (= v (get args 0))
+            (if (|| (!= (gettag v) DataT) (!= (get v 1) (get callee 2)))
+                (runtime_error "unwrap: not a value of the type: " v))
+            (deliver caller (get v 2))
             (return 0)
             ))
         (= fn (get callee 1))
@@ -3006,20 +3021,14 @@
     (return (get m 1))
     )
 
-; an M-expr or a data, which have the arguments
-(fun expect_args (m)
-    (if (== (gettag m) DataT) (return 0))
-    (expect MexprT m)
-    )
-
 (fun p_arity (m)
-    (expect_args m)
+    (expect MexprT m)
     (return (fixnum (get_header_arg m)))
     )
 
 (fun p_arg (m i)
     (var n 0)
-    (expect_args m)
+    (expect MexprT m)
     (= n (index_arg "expr_arg" i))
     (if (|| (< n 0) (>= n (get_header_arg m))) (runtime_error "expr_arg: index out of range: " i))
     (return (get m (+ n 2)))
@@ -3038,25 +3047,21 @@
     (return (get t 1))
     )
 
-; _record_new(name, Tuple{field, ...}) is Tuple{type, make}. make is the function that takes the fields and gives a data of the type.
-(fun p_record_new (name fields)
+(fun p_make_type (name)
     (var type 0)
-    (var make (allocate 16))
-    (var n 0)
-    (var i 0)
+    (var wrap (allocate 16))
+    (var unwrap (allocate 16))
     (expect SymbolT name)
-    (expect_mexpr TupleS fields)
-    (= n (get_header_arg fields))
-    (while (< i n) (do
-        (expect SymbolT (get fields (+ i 2)))
-        (+= i 1)
-        ))
-    (= type (new_type name fields))
-    (set make 0 (make_header PrimT 0 n))
-    (set make 1 0)
-    (set make 2 type)
-    (set make 3 PRIM_NEW)
-    (return (tup2 type make))
+    (= type (new_type name))
+    (set wrap 0 (make_header PrimT 0 1))
+    (set wrap 1 0)
+    (set wrap 2 type)
+    (set wrap 3 PRIM_NEW)
+    (set unwrap 0 (make_header PrimT 0 1))
+    (set unwrap 1 0)
+    (set unwrap 2 type)
+    (set unwrap 3 PRIM_UNWRAP)
+    (return (mexpr3 TupleS type wrap unwrap))
     )
 
 ; --- strings, symbols, tables and files (used by planck/peg.pk)
@@ -4012,19 +4017,17 @@ features:
     (set (define_global s) 0 prim)
     )
 
-; a type named by the symbol name with the field names fields (a Tuple)
-(fun new_type (name fields)
-    (var type (allocate 12))
-    (set type 0 (make_header TypeT 0 (get_header_arg fields)))
+(fun new_type (name)
+    (var type (allocate 8))
+    (set type 0 (make_header TypeT 0 0))
     (set type 1 name)
-    (set type 2 fields)
     (return type)
     )
 
 ; the type that is bound to the global variable of the name
 (fun defines_type (name)
     (var s (sym name))
-    (var t (new_type s emptyTuple))
+    (var t (new_type s))
     (set (define_global s) 0 t)
     (return t)
     )
@@ -4060,7 +4063,7 @@ features:
     (defprim "expr_new"   2 p_mexpr   PRIM_NATIVE)
     (defprim "expr_type"    1 p_typeof  PRIM_NATIVE)
     (defprim "expr_type_name" 1 p_expr_type_name PRIM_NATIVE)
-    (defprim "expr_record" 2 p_record_new PRIM_NATIVE)
+    (defprim "expr_make_type" 1 p_make_type PRIM_NATIVE)
     (defprim "parse"   1 p_parse   PRIM_NATIVE)
     (defprim "str_len"  1 p_strlen  PRIM_NATIVE)
     (defprim "str_ord"     2 p_ord     PRIM_NATIVE)

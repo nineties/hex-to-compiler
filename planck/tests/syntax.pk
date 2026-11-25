@@ -20,7 +20,7 @@ check(tree_at("  f(x)", Loc{"f.pk", 3, 5}), at(3, 7, 'Apply{f, Tuple{x}}))
 check(tree_at("g(1,\n  f(2))", Loc{"f.pk", 7, 10}), at(7, 10, mexpr('Apply, Tuple{'g, mexpr('Tuple, Tuple{1, at(8, 3, 'Apply{f, Tuple{2}})})})))
 check(tree_at("f(x)(y)", Loc{"f.pk", 1, 1}), at(1, 1, mexpr('Apply, Tuple{at(1, 1, 'Apply{f, Tuple{x}}), 'Tuple{y}})))
 check(tree_at("a + b", Loc{"f.pk", 1, 1}), 'Apply{int_add, Tuple{a, b}})
-check(tree_at("a.b", Loc{"f.pk", 1, 1}), 'Apply{_record_get, Tuple{a, Quote{b}}})
+check(tree_at("a.b", Loc{"f.pk", 1, 1}), 'Apply{_index_get, Tuple{a, Quote{b}}})
 check(tree_at("a[1]", Loc{"f.pk", 1, 1}), 'Apply{_index_get, Tuple{a, 1}})
 check(tree_at("'f(x)", Loc{"f.pk", 1, 1}), 'Quote{Apply{f, Tuple{x}}})
 check(tree_at("`f(x, !g(y))", Loc{"f.pk", 1, 1}), mexpr('QuasiQuote, Tuple{mexpr('Apply, Tuple{'f, mexpr('Tuple, Tuple{'x, mexpr('UnQuote, Tuple{at(1, 8, 'Apply{g, Tuple{y}})})})})}))
@@ -411,72 +411,51 @@ use("pretty")
 check(f"list {[1, 2]}", "list [1, 2]")
 check(f"sym {'a} tree {F{1, "s"}}", "sym a tree F{1, \"s\"}")
 
-check(head(tree("record Tok(kind, value, pos) = tok")), 'Do)
-check(arity(tree("record Tok(kind, value, pos) = tok")), 5)
-check(head(tree("record R() = r")), 'Do)
-check(tree("t.kind"), 'Apply{_record_get, Tuple{t, Quote{kind}}})
-check(tree("t.a.b"), 'Apply{_record_get, Tuple{Apply{_record_get, Tuple{t, Quote{a}}}, Quote{b}}})
-check(tree("f(x).y"), 'Apply{_record_get, Tuple{Apply{f, Tuple{x}}, Quote{y}}})
-check(tree("t.f(1)"), 'Apply{Apply{_record_get, Tuple{t, Quote{f}}}, Tuple{1}})
-check(tree("a.b + c.d * 2"), 'Apply{int_add, Tuple{Apply{_record_get, Tuple{a, Quote{b}}}, Apply{int_mul, Tuple{Apply{_record_get, Tuple{c, Quote{d}}}, 2}}}})
-check(tree("a.b == 'x"), 'Apply{expr_eq, Tuple{Apply{_record_get, Tuple{a, Quote{b}}}, Quote{x}}})
-check(tree("x := t.v"), 'Def{x, Apply{_record_get, Tuple{t, Quote{v}}}})
-check(tree("F{a.b}"), 'F{Apply{_record_get, Tuple{a, Quote{b}}}})
+check(tree("t.kind"), 'Apply{_index_get, Tuple{t, Quote{kind}}})
+check(tree("t.a.b"), 'Apply{_index_get, Tuple{Apply{_index_get, Tuple{t, Quote{a}}}, Quote{b}}})
+check(tree("f(x).y"), 'Apply{_index_get, Tuple{Apply{f, Tuple{x}}, Quote{y}}})
+check(tree("t.f(1)"), 'Apply{Apply{_index_get, Tuple{t, Quote{f}}}, Tuple{1}})
+check(tree("a.b + c.d * 2"), 'Apply{int_add, Tuple{Apply{_index_get, Tuple{a, Quote{b}}}, Apply{int_mul, Tuple{Apply{_index_get, Tuple{c, Quote{d}}}, 2}}}})
+check(tree("a.b == 'x"), 'Apply{expr_eq, Tuple{Apply{_index_get, Tuple{a, Quote{b}}}, Quote{x}}})
+check(tree("x := t.v"), 'Def{x, Apply{_index_get, Tuple{t, Quote{v}}}})
+check(tree("F{a.b}"), 'F{Apply{_index_get, Tuple{a, Quote{b}}}})
 check(head(tree("t.")), 'SyntaxError)
 check(head(tree("t.1")), 'SyntaxError)
-check(head(tree("record Tok")), 'SyntaxError)
-check(head(tree("record Tok(1) = tok")), 'SyntaxError)
-check(head(tree("record Tok(kind)")), 'SyntaxError)
-check(head(tree("record Tok(kind) = 1")), 'SyntaxError)
-check(tree("x @ a.B"), '_TypeOf{x, Apply{_record_get, Tuple{a, Quote{B}}}})
+check(tree("x @ a.B"), '_TypeOf{x, Apply{_index_get, Tuple{a, Quote{B}}}})
 
-record Token(kind, value, pos) = token
-record Node(op, left, right) = node
-record Rev(c, b, a) = rev
-record Fwd(a, b, c) = fwd
+(Token, wrap_token, unwrap_token) := make_type('Token)
+(Node, wrap_node, unwrap_node) := make_type('Node)
+token(kind, value, pos) := wrap_token(Tuple{kind, value, pos})
+node(op, left, right) := wrap_node(Tuple{op, left, right})
+tok_kind(t @ Token) := arg(unwrap_token(t), 0)
+tok_value(t @ Token) := arg(unwrap_token(t), 1)
+tok_pos(t @ Token) := arg(unwrap_token(t), 2)
 tk := token('id, "abc", 3)
-check(tk.kind, 'id)
-check(tk.value, "abc")
-check(tk.pos + 1, 4)
+check(tok_kind(tk), 'id)
+check(tok_value(tk), "abc")
+check(tok_pos(tk) + 1, 4)
 nd := node("+", node("*", 1, 2), 3)
-check(nd.op, "+")
-check(nd.left.op, "*")
-check(nd.left.right, 2)
-check(nd.right, 3)
+check(arg(unwrap_node(nd), 0), "+")
+check(arg(unwrap_node(arg(unwrap_node(nd), 1)), 0), "*")
+check(arg(unwrap_node(nd), 2), 3)
 check(type(tk) == Token, true)
 check(type(nd) == Token, false)
-check(rev(1, 2, 3).a, 3)
-check(fwd(1, 2, 3).a, 1)
-getv(t) := t.value
+check(type(nd) == Node, true)
+getv(t) := tok_value(t)
 check(getv(tk), "abc")
 check(getv(token('num, 7, 0)), 7)
-check((match tk { t @ Token -> t.kind }), 'id)
-record Token(value, kind) = tok2
-check(tok2(1, 2).kind, 2)
-check(type(tok2(1, 2)) == Token, true)
-check(type(tk) == Token, false)
-check(_record_index(tok2(1, 2), 'kind), 1)
-check(_record_index(tok2(1, 2), 'value), 0)
-check(_record_index(tk, 'pos), 2)
-check(_record_index(tk, 'x), none)
-check(_record_index(3, 'x), none)
-check(_record_index(nd, 'op), 0)
-check(_record_index(rev(1, 2, 3), 'a), 2)
-check(_record_index(fwd(1, 2, 3), 'a), 0)
-check(tk.kind, 'id)
-check(_record_get(tk, 'pos), 3)
-record R0() = r0
-check(_record_index(r0(), 'x), none)
-check(arity(r0()), 0)
+check((match tk { t @ Token -> tok_kind(t) }), 'id)
+(Token2, wrap_token2, unwrap_token2) := make_type('Token)
+check(type(wrap_token2(1)) == Token2, true)
+check(type(tk) == Token2, false)
+check(Token == Token2, false)
+check(typename(Token), 'Token)
+check(unwrap_token2(wrap_token2(7)), 7)
+(R0, wrap_r0, unwrap_r0) := make_type('R0)
+check(unwrap_r0(wrap_r0(Tuple{})), Tuple{})
 check(tk == tk, true)
 check(token('id, "abc", 3) == tk, false)
-tk2 := tk with { kind = 'num, pos = 9 }
-check(tk2.kind, 'num)
-check(tk2.pos, 9)
-check(tk2.value, "abc")
-check(tk.pos, 3)
-check(type(tk2) == Token, false)
-check((tk with { pos = tk.pos + 1 }).pos, 4)
+check(f"{tk}", "#<Token>")
 
 rh := 'Lambda{Tuple{Return{v}, k}, v}
 bh := 'Lambda{Tuple{Break{}, k}, none}
@@ -565,9 +544,9 @@ grow := vector.new()
 vector.push(grow, 1)
 for (x in grow) if (x < 4) vector.push(grow, x + 1)
 check(vector.to_list(grow), [1, 2, 3, 4])
-record Countdown(n) = countdown
+(Countdown, countdown, unwrap_countdown) := make_type('Countdown)
 _iter = (c @ Countdown) -> {
-    i := c.n
+    i := unwrap_countdown(c)
     (end) -> if (i > 0) {
         i -= 1
         i + 1
@@ -587,7 +566,8 @@ cd_first(xs, k) := {
     none
 }
 check(cd_first(countdown(9), 3), 2)
-record Nat() = nat
+(Nat, wrap_nat, unwrap_nat) := make_type('Nat)
+nat() := wrap_nat(none)
 _iter = (_ @ Nat) -> {
     i := 0
     (end) -> {
@@ -1141,7 +1121,7 @@ check(tree("unless c { a } else { b }"), 'If{c, Do{b}, Do{a}})
 
 check(tree("a[i]"), 'Apply{_index_get, Tuple{a, i}})
 check(tree("a[i][j]"), 'Apply{_index_get, Tuple{Apply{_index_get, Tuple{a, i}}, j}})
-check(tree("f(x)[i].g"), 'Apply{_record_get, Tuple{Apply{_index_get, Tuple{Apply{f, Tuple{x}}, i}}, Quote{g}}})
+check(tree("f(x)[i].g"), 'Apply{_index_get, Tuple{Apply{_index_get, Tuple{Apply{f, Tuple{x}}, i}}, Quote{g}}})
 check(tree("a[i](x)"), 'Apply{Apply{_index_get, Tuple{a, i}}, Tuple{x}})
 check(tree("-a[i]"), 'Apply{int_sub, Tuple{0, Apply{_index_get, Tuple{a, i}}}})
 check(tree("a[i] = v"), 'Apply{_index_set, Tuple{a, i, v}})
@@ -1205,7 +1185,8 @@ index_var_test() := {
 index_var_test()
 index := 1
 check([5, 6][index], 6)
-record IP(x, y) = ip
+(IP, wrap_ip, unwrap_ip) := make_type('IP)
+ip(x, y) := wrap_ip(Tuple{x, y})
 shadow_test() := {
     add := 1
     sub := 1
@@ -1221,7 +1202,6 @@ shadow_test() := {
     not := 1
     strcat := 1
     to_text := 1
-    record_get := 1
     define_rule := 1
     index_get := 1
     check(2 + 3 * 4 - 6 / 3 + 7 % 4, 15)
@@ -1229,7 +1209,7 @@ shadow_test() := {
     check(1 < 2 and 1 <= 1 and 2 > 1 and 2 >= 2 and 1 == 1 and 1 != 2, true)
     check(not (1 == 2), true)
     check(f"a{add}b{sub + 1}", "a1b2")
-    check(ip(3, 4).x, 3)
+    check(arg(unwrap_ip(ip(3, 4)), 0), 3)
     check([7, 8][index_get], 8)
 }
 shadow_test()
@@ -1306,11 +1286,6 @@ check(match ('f(1, 2, 3)) { f(a, r...) -> r }, 'Tuple{2, 3})
 check(match 'F{1, G{2, 3, 4}} { F{a, G{b, r...}} -> r }, 'Tuple{3, 4})
 check(match 'F{1, 2, 3} { F{a, _...} -> a }, 1)
 
-check(tree("p with { x = 1 }"), 'Apply{_with, Tuple{p, Quote{x}, 1}})
-check(tree("p with { x = 1, y = a + 2 }"), 'Apply{_with, Tuple{Apply{_with, Tuple{p, Quote{x}, 1}}, Quote{y}, Apply{int_add, Tuple{a, 2}}}})
-check(tree("p with { x = 1 } with { y = 2 }"), 'Apply{_with, Tuple{Apply{_with, Tuple{p, Quote{x}, 1}}, Quote{y}, 2}})
-check(tree("f(a).b with { x = 1 }"), 'Apply{_with, Tuple{Apply{_record_get, Tuple{Apply{f, Tuple{a}}, Quote{b}}}, Quote{x}, 1}})
-check(tree("r := p with { x = 1 }"), 'Def{r, Apply{_with, Tuple{p, Quote{x}, 1}}})
 check(tree("handle p with (E{}, k) -> 1"), 'Handle{p, Lambda{Tuple{E{}, k}, 1}})
 
 check(head(tree("(a, b) := e")), 'Do)
