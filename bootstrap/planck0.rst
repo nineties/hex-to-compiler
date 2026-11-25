@@ -210,8 +210,9 @@ M-expressions
 ``mexpr_head(m)``, ``mexpr_arity(m)``, ``mexpr_arg(m, i)``
    The head, the number of arguments and the argument at ``i``.
 
-``mexpr_new(head, Tuple{...})``
-   A new m-expression with the head and the arguments of the tuple.
+``mexpr_new(head, args)``
+   A new m-expression with the head and the arguments, where ``args`` is a
+   ``Tuple{...}`` or an array. The elements of an array are the arguments.
 
 ``parse(s)``
    Parses the first m-expression in ``s`` and gives ``Tuple{expression, rest}``.

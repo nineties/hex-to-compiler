@@ -3126,6 +3126,7 @@
 
 (fun p_mexpr (h args)
     (expect "mexpr_new" SymbolT h)
+    (if (== (gettag args) ArrayT) (return (mexprn h (get_header_arg args) (+ args 4))))
     (expect_mexpr "mexpr_new" TupleS args)
     (return (mexprn h (get_header_arg args) (+ args 8)))
     )
