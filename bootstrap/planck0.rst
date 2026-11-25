@@ -188,9 +188,12 @@ Values and types
 Strings and symbols
 ~~~~~~~~~~~~~~~~~~~
 
-A string is immutable and indexed by character. ``planck0`` supports only ASCII
-characters; ``str_len``, ``str_ord`` and ``str_sub`` on a string with a
-multibyte character stop with ``not implemented``.
+A string is immutable and is a sequence of bytes. Indexes and lengths count
+bytes. ``planck0`` supports only ASCII characters: a byte of 128 or more in a
+source file, a string literal, ``os_read_file``, the output of ``os_run``, a
+name from ``os_list_dir`` or an argument stops with ``not implemented`` when
+the string is made, and so does ``str_chr`` with a code above 127. Every
+string is ASCII, so the other string functions do not check.
 
 A string has no terminating NULL character; its length is in its header.
 ``os_`` functions that pass a string to the operating system make a copy

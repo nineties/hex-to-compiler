@@ -366,19 +366,23 @@
     (return (asr n 1))
     )
 
-(fun ascii_text (p n)
+(fun reject_multibyte (what p n)
     (while (> n 0) (do
-        (if (>= (getb p) 128) (return 0))
+        (if (>= (getb p) 128) (do
+            (eputs what)
+            (eputs ": not implemented for a string with multibyte characters\n")
+            (exit 1)
+            ))
         (+= p 1)
         (-= n 1)
         ))
-    (return 1)
     )
 
 (fun str_from_c (text)
     (var n (strlen text))
     (var data (allocate 8))
-    (set data 0 (make_header StringT (ascii_text text n) n))
+    (reject_multibyte "string" text n)
+    (set data 0 (make_header StringT 0 n))
     (set data 1 text)
     (return data)
     )
@@ -1022,7 +1026,7 @@
             ))
         (if (> value (/ (- limit d) base)) (do
             (while (is_hex_digit (peek raw)) (+= raw 1))
-            (set ret (parse_big (str_n_ascii start (- raw start)) 0))
+            (set ret (parse_big (str_n start (- raw start)) 0))
             (return raw)
             ))
         (= value (+ (* value base) d))
@@ -1047,6 +1051,7 @@
             ))
         (if (== c (char "\"")) (do
             (+= raw 1)
+            (reject_multibyte "string literal" parse_str_buf (- end parse_str_buf))
             (set ret (str_n (copy_n parse_str_buf (- end parse_str_buf)) (- end parse_str_buf)))
             (return raw)
             )
@@ -1185,7 +1190,6 @@
 (fun rest_str (text raw)
     (if (u> raw parse_end) (= raw parse_end))
     (var len (- (get_header_arg text) (- raw (get text 1))))
-    (if (& (get text 0) 16) (return (str_n_ascii raw len)))
     (return (str_n raw len))
     )
 
@@ -3203,33 +3207,15 @@
 ; a string object for text of length n (text is not copied)
 (fun str_n (text n)
     (var data (allocate 8))
-    (set data 0 (make_header StringT (ascii_text text n) n))
-    (set data 1 text)
-    (return data)
-    )
-
-(fun str_n_ascii (text n)
-    (var data (allocate 8))
-    (set data 0 (make_header StringT 1 n))
+    (set data 0 (make_header StringT 0 n))
     (set data 1 text)
     (return data)
     )
 
 (fun str_len (s) (return (get_header_arg s)))
 
-(fun ascii_only (name s)
-    (if (! (& (get s 0) 16)) (do
-        (eputs name)
-        (eputs ": not implemented for a string with multibyte characters: ")
-        (eprint s)
-        (eputs "\n")
-        (exit 1)
-        ))
-    )
-
 (fun p_strlen (s)
     (expect "str_len" StringT s)
-    (ascii_only "str_len" s)
     (return (fixnum (str_len s)))
     )
 
@@ -3237,7 +3223,6 @@
 (fun p_ord (s i)
     (var n 0)
     (expect "str_ord" StringT s)
-    (ascii_only "str_ord" s)
     (= n (index_arg "str_ord" i))
     (if (|| (< n 0) (>= n (str_len s))) (named_error "str_ord" "index out of range: " i))
     (return (fixnum (getb (get s 1) n)))
@@ -3249,14 +3234,13 @@
     (var oi i)
     (var oj j)
     (expect "str_sub" StringT s)
-    (ascii_only "str_sub" s)
     (= i (index_arg "str_sub" i))
     (= j (index_arg "str_sub" j))
     (= len (str_len s))
     (if (|| (< i 0) (|| (> j len) (> i j))) (do
         (runtime_error "str_sub: index out of range: " (mexpr3 TupleS s oi oj))
         ))
-    (return (str_n_ascii (+ (get s 1) i) (- j i)))
+    (return (str_n (+ (get s 1) i) (- j i)))
     )
 
 (fun p_strcat (a b)
@@ -3402,6 +3386,7 @@
     (= r (read fd buf size))
     (close fd)
     (if (< r size) (return (io_err "read" path)))
+    (reject_multibyte "os_read_file" buf size)
     (return (io_ok (str_n buf size)))
     )
 
@@ -3840,9 +3825,9 @@
     )
 
 (fun spawn_text (a len)
-    (var data (allocate (+ len 1)))
+    (var data (allocate len))
     (if (> len 0) (memcpy data (parray_data a) len))
-    (setb data len 0)
+    (reject_multibyte "os_run" data len)
     (return (str_n data len))
     )
 
@@ -4075,6 +4060,7 @@
                     (= names bigger)
                     (= cap (* 2 cap))
                     ))
+                (reject_multibyte "os_list_dir" data len)
                 (set names (+ count 1) (str_n data len))
                 (+= count 1)
                 ))
@@ -4299,6 +4285,7 @@ features:
         ))
 
     (close fd)
+    (reject_multibyte path buf file_size)
     (return (str_n buf file_size))
     )
 
