@@ -330,12 +330,6 @@
     (return (& n 1))
     )
 
-(fun is_mutable (node)
-    (if (is_fixnum node) (return 0))
-    (var header (get node 0))
-    (return (& 0x10 header))
-    )
-
 (fun is_function (obj)
     (var t (gettag obj))
     (if (|| (== t PrimT) (|| (== t LambdaT) (|| (== t ContT) (== t FusionT))))
@@ -2377,16 +2371,6 @@
     (return falseS)
     )
 
-(fun check_int (name v)
-    (if (!= (gettag v) IntT) (do
-        (eputs name)
-        (eputs ": integer is expected: ")
-        (eprint v)
-        (eputs "\n")
-        (exit 1)
-        ))
-    )
-
 ; signed division truncated toward zero
 (fun sdiv (a b)
     (var neg 0)
@@ -2407,13 +2391,6 @@
 (fun p_put (s)
     (write STDOUT (str_text s) (str_len s))
     (return noneS)
-    )
-
-; integers have 31 bits. A result outside the range is not computed: the program stops
-(fun not_supported_int (name)
-    (eputs name)
-    (eputs ": not supported: integer beyond 31 bits\n")
-    (exit 1)
     )
 
 (fun fits_fixnum (x)
