@@ -2427,6 +2427,7 @@
     )
 
 (fun p_put (s)
+    (expect StringT s)
     (write STDOUT (str_text s) (str_len s))
     (return noneS)
     )
