@@ -3353,7 +3353,7 @@
     (var a 0)
     (var i 0)
     (= i (index_arg name n))
-    (if (|| (< i 0) (> i 0xffffff)) (runtime_error "bad parray length: " n))
+    (if (|| (< i 0) (> i 0x7ffffff)) (runtime_error "bad parray length: " n))
     (= a (allocate (+ 8 (* i (parray_size kind)))))
     (set a 0 (make_header PArrayT 1 i))
     (set a 1 kind)
