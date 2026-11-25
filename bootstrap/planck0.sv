@@ -2476,13 +2476,10 @@
     (return 0x7fffffff)
     )
 
-(fun low32 (name v)
-    (var x 0)
-    (check_num name v)
-    (if (& v 1) (return (fixnum_to_int v)))
-    (= x (| (| (get v 1) (<< (get v 2) 15)) (<< (get v 3) 30)))
-    (if (big_neg v) (return (- 0 x)))
-    (return x)
+(fun ranged_arg (name v max)
+    (var k (index_arg name v))
+    (if (|| (< k 0) (> k max)) (named_error name "out of range: " v))
+    (return k)
     )
 
 (fun big_new (n neg)
@@ -3563,7 +3560,7 @@
 (fun p_chmod (path mode)
     (expect "os_chmod" StringT path)
     (expect_no_null "os_chmod" path)
-    (if (< (syscall SYS_CHMOD (get path 1) (low32 "os_chmod" mode)) 0)
+    (if (< (syscall SYS_CHMOD (get path 1) (ranged_arg "os_chmod" mode 0xfff)) 0)
         (return (io_err "chmod" path)))
     (return (io_ok noneS))
     )
@@ -4070,7 +4067,7 @@ features:
 (fun p_parse (s) (return (parse s)))
 
 (fun p_exit (n)
-    (exit (low32 "os_exit" n))
+    (exit (ranged_arg "os_exit" n 255))
     )
 
 (def SYS_CLOCK_GETTIME 265)
