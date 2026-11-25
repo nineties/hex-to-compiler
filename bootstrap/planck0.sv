@@ -4111,7 +4111,7 @@ features:
     (return (p_add whole nsec))
     )
 
-(fun p_heap_allocated ()
+(fun p_allocated_bytes ()
     (var t (+ alloc_lo gc_since))
     (return (p_add (p_mul (fixnum (+ alloc_hi (>> t 20))) (fixnum 1048576)) (fixnum (& t 1048575))))
     )
@@ -4213,7 +4213,7 @@ features:
     (defprim "os_argv" 0 p_argv PRIM_NATIVE)
     (defprim "os_exit"    1 p_exit    PRIM_NATIVE)
     (defprim "os_time_ns" 0 p_time_ns PRIM_NATIVE)
-    (defprim "gc_heap_allocated" 0 p_heap_allocated PRIM_NATIVE)
+    (defprim "gc_allocated_bytes" 0 p_allocated_bytes PRIM_NATIVE)
     (defprim "gc_count" 0 p_gc_count PRIM_NATIVE)
     (defprim "os_run" 4 p_run_program PRIM_NATIVE)
     (defprim "os_list_dir" 1 p_list_dir PRIM_NATIVE)
