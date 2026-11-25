@@ -192,6 +192,12 @@ A string is immutable and indexed by character. ``planck0`` supports only ASCII
 characters; ``str_len``, ``str_ord`` and ``str_sub`` on a string with a
 multibyte character stop with ``not implemented``.
 
+A string has no terminating NULL character; its length is in its header.
+``os_`` functions that pass a string to the operating system make a copy
+that ends with NULL just before the call, so a string made by ``str_sub`` can
+be passed as it is. A symbol name is stored with a terminating NULL and
+``sym_intern`` copies the name only when the symbol is new.
+
 ``str_len(s)``, ``str_ord(s, i)``, ``str_chr(c)``
    The length, the character code at ``i`` and the one-character string of a
    code. ``str_ord`` and ``str_chr`` stop with an error when ``i`` is out of
@@ -199,8 +205,8 @@ multibyte character stop with ``not implemented``.
 
 ``str_sub(s, i, j)``, ``str_cat(a, b)``
    The characters from ``i`` up to ``j`` and the concatenation.
-   When ``j`` equals the length of ``s`` (taking the rest), ``str_sub`` shares
-   the original string and neither copies nor scans it. Otherwise it copies.
+   ``str_sub`` always shares the original string and neither copies nor
+   scans it.
 
 ``sym_intern(s)``, ``sym_name(sym)``
    The symbol of a string and the name of a symbol. A string with a NULL
