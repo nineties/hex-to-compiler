@@ -19,18 +19,19 @@ the program name, so its first element is ``file``.
 
 For each file the loop does the following until the end of the text.
 
-1. Parse the next m-expression with the parser, which gives
-   ``Tuple{expression, rest}``, where ``rest`` is the text after the
+1. Parse the next m-expression by calling the global variable ``parse`` with
+   ``Quote{text}``, which gives ``Tuple{expression, rest}``, where ``rest`` is
+   the text after the expression. The variable is looked up for every
    expression.
 2. Stop at ``Eof{}``. A syntax error prints the file name and the error to
    stderr and exits with status 1.
 3. Evaluate the expression by calling the global variable ``eval`` with
    ``Quote{expression}``. The variable is looked up for every expression.
 
-The initial value of ``eval`` is the built-in ``eval``. A program that
-assigns another function to ``eval`` with ``Set{eval, ...}`` or
-``Def{eval, ...}`` makes that function evaluate the following top-level
-expressions. Code compiled before a ``Def`` keeps calling the old function;
+The initial values of ``parse`` and ``eval`` are the built-in functions. A
+program that assigns another function to ``parse`` or ``eval`` with
+``Set{eval, ...}`` or ``Def{eval, ...}`` makes that function read or evaluate
+the following top-level expressions. Code compiled before a ``Def`` keeps calling the old function;
 ``Set`` replaces the function for the code compiled before it as well.
 
 An error that no program can recover from (a type error, an index out of
@@ -212,7 +213,7 @@ M-expressions
 ``mexpr_new(head, Tuple{...})``
    A new m-expression with the head and the arguments of the tuple.
 
-``mexpr_parse(s)``
+``parse(s)``
    Parses the first m-expression in ``s`` and gives ``Tuple{expression, rest}``.
    The expression is ``Eof{}`` at the end of the text and ``SyntaxError{...}``
    when the text is invalid.
