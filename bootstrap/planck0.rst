@@ -199,6 +199,8 @@ multibyte character stop with ``not implemented``.
 
 ``str_sub(s, i, j)``, ``str_cat(a, b)``
    The characters from ``i`` up to ``j`` and the concatenation.
+   When ``j`` equals the length of ``s`` (taking the rest), ``str_sub`` shares
+   the original string and neither copies nor scans it. Otherwise it copies.
 
 ``sym_intern(s)``, ``sym_name(sym)``
    The symbol of a string and the name of a symbol. A string with a NULL
