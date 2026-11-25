@@ -3758,7 +3758,7 @@
     (spawn_pipe errp 0)
     (spawn_pipe failp O_CLOEXEC)
     (= pid (syscall SYS_FORK))
-    (if (< pid 0) (runtime_error "os_run: cannot start: " path))
+    (if (< pid 0) (return (io_err "fork" path)))
     (if (== pid 0) (do
         (syscall SYS_DUP2 (get inp 0) 0)
         (syscall SYS_DUP2 (get outp 1) 1)
@@ -3805,7 +3805,7 @@
         (set pf 5 1)
         (= r (syscall SYS_POLL pf 3 -1))
         (if (< r 0) (do
-            (if (!= r -4) (runtime_error "os_run: cannot wait for the program" path))
+            (if (!= r -4) (return (io_err "poll" path)))
             ))
         (if (>= r 0) (do
             (if (&& (>= fd0 0) (!= (| (getb pf 6) (getb pf 7)) 0)) (do
@@ -3841,7 +3841,7 @@
     (syscall SYS_WAIT4 pid status 0 0)
     (= r (read (get failp 0) one 1))
     (close (get failp 0))
-    (if (> r 0) (runtime_error "os_run: cannot start: " path))
+    (if (> r 0) (return (io_err "exec" path)))
     (= st (get status 0))
     (= rv -1)
     (if (== (& st 127) 0) (= rv (& (>> st 8) 255)))
@@ -3850,7 +3850,7 @@
     (set res 1 (fixnum rv))
     (set res 2 (spawn_text ob olen))
     (set res 3 (spawn_text eb elen))
-    (return res)
+    (return (io_ok res))
     )
 
 (def SYS_GETDENTS64 220)
@@ -3891,7 +3891,7 @@
     (char[] 4096 buf)
     (expect "os_list_dir" StringT path)
     (= fd (open (get path 1) (| O_RDONLY O_DIRECTORY)))
-    (if (< fd 0) (runtime_error "os_list_dir: cannot open: " path))
+    (if (< fd 0) (return (io_err "open" path)))
     (= names (name_array cap))
     (= n (syscall SYS_GETDENTS64 fd buf 4096))
     (while (> n 0) (do
@@ -3927,7 +3927,7 @@
         (= n (syscall SYS_GETDENTS64 fd buf 4096))
         ))
     (close fd)
-    (if (< n 0) (runtime_error "os_list_dir: cannot read: " path))
+    (if (< n 0) (return (io_err "read" path)))
     (= j 1)
     (while (< j count) (do
         (= cur (get names (+ j 1)))
@@ -3945,7 +3945,7 @@
         (set res (+ j 1) (get names (+ j 1)))
         (+= j 1)
         ))
-    (return res)
+    (return (io_ok res))
     )
 
 (fun p_argv ()
