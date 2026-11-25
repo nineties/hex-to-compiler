@@ -3167,6 +3167,35 @@
     (return (fixnum (get_header_arg a)))
     )
 
+(fun p_array_copy (dst di src si n)
+    (var d 0)
+    (var s 0)
+    (var cnt 0)
+    (var i 0)
+    (expect ArrayT dst)
+    (expect ArrayT src)
+    (= d (index_arg "array_copy" di))
+    (= s (index_arg "array_copy" si))
+    (= cnt (index_arg "array_copy" n))
+    (if (|| (< cnt 0) (|| (< d 0) (|| (< s 0)
+        (|| (> d (get_header_arg dst)) (|| (> s (get_header_arg src))
+        (|| (> cnt (- (get_header_arg dst) d)) (> cnt (- (get_header_arg src) s))))))))
+        (runtime_error "array_copy: index out of range: " n))
+    (if (&& (== dst src) (> d s)) (do
+        (= i cnt)
+        (while (> i 0) (do
+            (= i (- i 1))
+            (set dst (+ (+ d i) 1) (get src (+ (+ s i) 1)))
+            ))
+        (return noneS)
+        ))
+    (while (< i cnt) (do
+        (set dst (+ (+ d i) 1) (get src (+ (+ s i) 1)))
+        (= i (+ i 1))
+        ))
+    (return noneS)
+    )
+
 ; hash(x): a non-negative integer that is equal for values equal by eq
 (fun p_hash (x)
     (return (fixnum (& (hash x) 0xfffffff)))
@@ -4018,6 +4047,7 @@ features:
     (defprim "array_get" 2 p_array_get PRIM_NATIVE)
     (defprim "array_set" 3 p_array_set PRIM_NATIVE)
     (defprim "array_len" 1 p_array_len PRIM_NATIVE)
+    (defprim "array_copy" 5 p_array_copy PRIM_NATIVE)
     (defprim "hash"         1 p_hash    PRIM_NATIVE)
     (defprim "os_read_file" 1 p_read_file PRIM_NATIVE)
     (defprim "os_write_file" 2 p_write_file PRIM_NATIVE)
