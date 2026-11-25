@@ -529,15 +529,16 @@
 ; make an m-expr from an array of n values
 ; (a local buffer of the stack must be smaller than 128 bytes, so the
 ; buffer is global. mexprn is not reentrant.)
-(def MAX_ARITY 64)
-(char[] 264 mexprn_buf) ; m-expr with 64 arity at maximum
+(long mexprn_buf)
+(long mexprn_cap)
 (fun mexprn (h n vals)
-    (var tmpobj mexprn_buf)
+    (var tmpobj 0)
     (var i 0)
-    (if (> n MAX_ARITY) (do
-        (eputs "too many arguments for M-expr\n")
-        (exit 1)
+    (if (> n mexprn_cap) (do
+        (= mexprn_buf (allocate (* 4 (+ n 2))))
+        (= mexprn_cap n)
         ))
+    (= tmpobj mexprn_buf)
     (set tmpobj 0 (make_header MexprT 0 n))
     (set tmpobj 1 h)
     (while (< i n) (do
@@ -1081,26 +1082,26 @@
     )
 
 
-; The arguments of the M-exprs being read are kept in parse_arena: a frame of
-; PARSE_FRAME bytes (a header, the head and MAX_ARITY arguments) for each nesting level.
-(def PARSE_FRAME 264)
+(def PARSE_ARENA 1081344)
 (def PARSE_DEPTH 4096)
 (long parse_arena)
 (long parse_sp)
+(long parse_depth)
 
 (fun parse_mexpr (ret head raw)
     (var buf parse_sp)
     (var r 0)
     (if (! parse_arena) (do
-        (= parse_arena (allocate (* PARSE_FRAME PARSE_DEPTH)))
+        (= parse_arena (allocate PARSE_ARENA))
         (= buf parse_arena)
         ))
-    (if (u>= (+ buf PARSE_FRAME) (+ parse_arena (* PARSE_FRAME PARSE_DEPTH))) (do
+    (if (>= parse_depth PARSE_DEPTH) (do
         (set ret (syntax_error "M-exprs are nested too deep"))
         (return (+ raw 1))
         ))
-    (= parse_sp (+ buf PARSE_FRAME))
+    (+= parse_depth 1)
     (= r (parse_mexpr_in ret head raw buf))
+    (-= parse_depth 1)
     (= parse_sp buf)
     (return r)
     )
@@ -1119,6 +1120,7 @@
         (return (+ raw 1))
         ))
 
+    (= parse_sp (+ mexpr_buf 8))
     (= raw (parse_ tmp raw))
     (if (has_head SyntaxErrorS (get tmp)) (do
         (set ret (get tmp))
@@ -1129,10 +1131,11 @@
 
     (while (== (peek raw) (char ",")) (do
         (+= raw 1) ; skip ,
-        (if (>= arity MAX_ARITY) (do
+        (if (u>= (+ mexpr_buf (* 4 (+ arity 3))) (+ parse_arena PARSE_ARENA)) (do
             (set ret (syntax_error "too many arguments"))
             (return raw)
             ))
+        (= parse_sp (+ mexpr_buf (* 4 (+ arity 2))))
         (= raw (parse_ tmp raw))
         (if (has_head SyntaxErrorS (get tmp)) (do
             (set ret (get tmp))
@@ -3178,6 +3181,21 @@
     (return (mexprn h (get_header_arg args) (+ args 8)))
     )
 
+(fun p_mexpr_args (m)
+    (var n 0)
+    (var a 0)
+    (var i 0)
+    (expect "mexpr_args" MexprT m)
+    (= n (get_header_arg m))
+    (= a (allocate (* 4 (+ n 1))))
+    (set a 0 (make_header ArrayT 1 n))
+    (while (< i n) (do
+        (set a (+ i 1) (get m (+ i 2)))
+        (+= i 1)
+        ))
+    (return a)
+    )
+
 (fun p_typeof (v) (return (typeof v)))
 
 (fun p_type_name (t)
@@ -3255,6 +3273,77 @@
     (memcpy text (get a 1) n)
     (memcpy (+ text n) (get b 1) m)
     (return (str_n text (+ n m)))
+    )
+
+(fun p_strjoin (a)
+    (var count 0)
+    (var i 0)
+    (var total 0)
+    (var item 0)
+    (var text 0)
+    (var pos 0)
+    (expect "str_join" ArrayT a)
+    (= count (get_header_arg a))
+    (while (< i count) (do
+        (= item (get a (+ i 1)))
+        (expect "str_join" StringT item)
+        (+= total (str_len item))
+        (+= i 1)
+        ))
+    (= text (allocate total))
+    (= i 0)
+    (while (< i count) (do
+        (= item (get a (+ i 1)))
+        (memcpy (+ text pos) (get item 1) (str_len item))
+        (+= pos (str_len item))
+        (+= i 1)
+        ))
+    (return (str_n text total))
+    )
+
+(fun p_strfind (s part from)
+    (var i 0)
+    (var k 0)
+    (var n 0)
+    (var m 0)
+    (var sp 0)
+    (var pp 0)
+    (expect "str_find" StringT s)
+    (expect "str_find" StringT part)
+    (= i (index_arg "str_find" from))
+    (= n (str_len s))
+    (= m (str_len part))
+    (if (|| (< i 0) (> i n)) (named_error "str_find" "index out of range: " from))
+    (= sp (get s 1))
+    (= pp (get part 1))
+    (while (<= (+ i m) n) (do
+        (= k 0)
+        (while (&& (< k m) (== (getb sp (+ i k)) (getb pp k))) (+= k 1))
+        (if (== k m) (return (fixnum i)))
+        (+= i 1)
+        ))
+    (return (fixnum -1))
+    )
+
+(fun p_strcmp (a b)
+    (var n 0)
+    (var i 0)
+    (var x 0)
+    (var y 0)
+    (expect "str_cmp" StringT a)
+    (expect "str_cmp" StringT b)
+    (= n (str_len a))
+    (if (< (str_len b) n) (= n (str_len b)))
+    (while (< i n) (do
+        (= x (getb (get a 1) i))
+        (= y (getb (get b 1) i))
+        (if (< x y) (return (fixnum -1)))
+        (if (> x y) (return (fixnum 1)))
+        (+= i 1)
+        ))
+    (if (< (str_len a) (str_len b)) (return (fixnum -1)))
+    (if (> (str_len a) (str_len b)) (return (fixnum 1)))
+    (return (fixnum 0))
     )
 
 (fun expect_no_null (name s)
@@ -4217,6 +4306,7 @@ features:
     (defprim "mexpr_arity"   1 p_arity   PRIM_NATIVE)
     (defprim "mexpr_arg"     2 p_arg     PRIM_NATIVE)
     (defprim "mexpr_new"   2 p_mexpr   PRIM_NATIVE)
+    (defprim "mexpr_args"  1 p_mexpr_args PRIM_NATIVE)
     (defprim "type"         1 p_typeof  PRIM_NATIVE)
     (defprim "type_name" 1 p_type_name PRIM_NATIVE)
     (defprim "type_new"     1 p_type_new PRIM_NATIVE)
@@ -4226,6 +4316,9 @@ features:
     (defprim "str_chr"     1 p_chr     PRIM_NATIVE)
     (defprim "str_sub"  3 p_substr  PRIM_NATIVE)
     (defprim "str_cat"  2 p_strcat  PRIM_NATIVE)
+    (defprim "str_join"  1 p_strjoin  PRIM_NATIVE)
+    (defprim "str_find"  3 p_strfind  PRIM_NATIVE)
+    (defprim "str_cmp"  2 p_strcmp  PRIM_NATIVE)
     (defprim "sym_intern"  1 p_intern  PRIM_NATIVE)
     (defprim "sym_name" 1 p_symname PRIM_NATIVE)
     (defprim "array_new"   1 p_array   PRIM_NATIVE)
@@ -4449,6 +4542,7 @@ features:
     (gc_mark global_table)
     (gc_mark parse_str_buf)
     (gc_mark parse_arena)
+    (gc_mark mexprn_buf)
     (gc_mark (- cbuf_end 4))
     (gc_mark cctx)
     (gc_mark cenv)

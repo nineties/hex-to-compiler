@@ -64,3 +64,4 @@ test-planck0: planck0
 	./planck0 bootstrap/tests/parse_rest.pk
 	./planck0 bootstrap/tests/nul_free.pk
 	./planck0 bootstrap/tests/multibyte.pk
+	./planck0 bootstrap/tests/str_join.pk
