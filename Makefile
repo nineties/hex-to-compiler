@@ -10,8 +10,6 @@ SASM_LIBS	:= $(wildcard bootstrap/sasm/lib/*.sv)
 SASM_EXAMPLE_SOURCES := $(wildcard bootstrap/sasm/examples/*.sv)
 SASM_EXAMPLE_TARGETS := $(SASM_EXAMPLE_SOURCES:%.sv=%)
 
-PLANCK_EXAMPLES := $(wildcard planck/examples/*.pk)
-
 PLISP := $(shell if [ -f ./plisp2 ]; then echo "./plisp2"; else echo "./pforth < bootstrap/plisp.fs"; fi)
 
 default:\
@@ -47,9 +45,8 @@ planck0: bootstrap/planck0.sv plisp2 $(SASM_LIBS)
 	-chmod +x $@
 
 
-.PHONY: clean test test-sasm test-planck0 test-all preprocess
+.PHONY: clean test test-sasm test-planck0
 clean:
-	rm -f planck/lib/*.pkm planck/lib/*/*.pkm
 	rm -f pforth
 	rm -f plisp2
 	rm -f planck0
@@ -59,35 +56,8 @@ clean:
 test: pforth bootstrap/plisp.fs $(shell find bootstrap/plisp -name "*.lisp")
 	./pforth < bootstrap/plisp.fs bootstrap/plisp/test.lisp
 
-preprocess: planck0
-	./planck0 tools/preprocess.pk pretty list string
-
 test-sasm: bootstrap/sasm/examples/switch
 	./bootstrap/sasm/examples/switch
 
-# run the core tests of planck0: tests of the language and the examples in tests/errors
 test-planck0: planck0
 	./planck0 planck/tests/core.pk
-	./planck0 planck/tests/syntax.pk
-	./planck0 planck/tests/macro.pk
-	./planck0 planck/tests/define.pk
-	./planck0 planck/tests/module.pk
-	./planck0 planck/tests/import.pk
-	./planck0 planck/tests/builtins.pk one "two words"
-	./planck0 planck/tests/bigint.pk
-	@for f in planck/tests/errors/*.pk; do \
-		./planck0 $$f > tmp-error.out 2> tmp-error.err && { echo "$$f: should stop"; exit 1; }; \
-		diff -u $${f%.pk}.out tmp-error.out || exit 1; \
-		diff -u $${f%.pk}.err tmp-error.err || exit 1; \
-		echo "$$f: stops"; \
-	done; rm -f tmp-error.out tmp-error.err
-
-test-all: test-planck0
-	./planck0 planck/tests/lib.pk
-	$(MAKE) preprocess
-	tools/test_preprocess.sh
-	@for f in $(PLANCK_EXAMPLES); do \
-		./planck0 $$f > tmp-example.out || exit 1; \
-		diff -u $${f%.pk}.out tmp-example.out || exit 1; \
-		echo "$$f: ok"; \
-	done; rm -f tmp-example.out

@@ -42,9 +42,7 @@ Other targets:
 
 * ``make example``: build the examples under ``bootstrap/``
 * ``make test``: test ``plisp``
-* ``make test-planck0``: test the Planck language
-* ``make test-all``: ``test-planck0``, then the libraries, the tools and the examples
-* ``make preprocess``: preprocess ``pretty``, ``list`` and ``string`` of ``planck/lib``
+* ``make test-planck0``: test ``planck0`` with ``planck/init.pk``
 * ``make clean``: remove the built files
 
 Use a release binary
@@ -56,34 +54,26 @@ Download ``planck0`` and ``planck0.sha256`` from the
    $ sha256sum -c planck0.sha256
    $ chmod +x planck0
 
-``planck0`` reads ``planck/init.pk``, ``planck/peg.pk``, ``planck/syntax.pk`` and
-``planck/lib`` from the current directory, so run it in a directory that has the
-``planck`` folder of this repository.
+``planck0`` reads ``planck/init.pk`` from the current directory, so run it in a
+directory that has the ``planck`` folder of this repository.
 
 The Planck language
 -------------------
 
-Run a program with ``planck0``::
+The definition of the Planck language (the syntax) and its libraries are in
+`nineties/planck <https://github.com/nineties/planck>`_. This repository keeps only
+what ``planck0`` needs to start: ``planck/init.pk``, and ``planck/tests/core.pk``
+that tests it.
 
-   $ ./planck0 planck/examples/fib.pk
-   fib(0) = 0
-   fib(1) = 1
-   fib(2) = 1
-   ...
+Run a file with ``planck0``::
+
+   $ ./planck0 planck/tests/core.pk
+   Tests passed 149/149
 
 Integers are 31 bits and become arbitrary-precision integers on overflow.
 There is no floating point. Strings are sequences of bytes (ASCII).
 
-* ``planck/init.pk``, ``planck/peg.pk``, ``planck/syntax.pk``: the language
-* ``planck/lib``: the libraries, loaded with ``use("list")``
-* `planck/examples <planck/examples>`_: sample programs; ``NAME.out`` is the expected output
-* ``planck/tests``: tests
-
-Arguments after the file name go to the program::
-
-   $ ./planck0 planck/examples/greet.pk -sn 2 Ann
-   Hello, Ann!!
-   Hello, Ann!!
+Arguments after the file name go to the program.
 
 Information about the processor is in the global variables planck_target
 ("i386-linux"), planck_version (a string) and planck_features (an array
@@ -96,8 +86,7 @@ Test
 
 ::
 
-   $ make test-planck0   # the language and the programs in planck/tests/errors
-   $ make test-all       # also the libraries, the tools and the examples
+   $ make test-planck0   # planck/tests/core.pk
 
 GitHub Actions runs ``make test`` and ``make test-planck0`` on every push.
 
