@@ -1463,12 +1463,23 @@
     )
 
 ; allocate slots for variables in a pattern, in the order of appearance
+(long param_base)
+
+(fun check_param_unique (sym)
+    (var ent cenv)
+    (while (!= ent param_base) (do
+        (if (== (get ent 0) sym) (compile_error "not implemented: duplicate parameter name" sym))
+        (= ent (get ent 3))
+        ))
+    )
+
 (fun bind_pattern (p)
     (var t (gettag p))
     (var i 0)
     (var n 0)
     (if (== p _S) (return 0))
     (if (== t SymbolT) (do
+        (check_param_unique p)
         (cenv_add p)
         (return 0)
         ))
@@ -1516,6 +1527,7 @@
     (var n (get_header_arg pats))
     (var code 0)
     (= cctx (new_context 0))
+    (= param_base cenv)
     (while (< i n) (do
         (bind_pattern_arg (get pats (+ i 2)) (+ i 1) n)
         (+= i 1)
