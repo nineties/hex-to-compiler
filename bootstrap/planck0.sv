@@ -504,6 +504,31 @@
     (return (mexpr tmpobj))
     )
 
+(fun bytes_equal (pa pb n)
+    (while (> n 0) (do
+        (if (!= (getb pa) (getb pb)) (return 0))
+        (+= pa 1)
+        (+= pb 1)
+        (-= n 1)
+        ))
+    (return 1)
+    )
+
+(fun arrayhash (a)
+    (var h 5381)
+    (var n (get_header_arg a))
+    (var i 1)
+    (while (<= i n) (do
+        (= h (+ (+ (<< h 5) h) (hash (get a i))))
+        (+= i 1)
+        ))
+    (return h)
+    )
+
+(fun parrayhash (a)
+    (return (+ (* (strhash_n (parray_data a) (* (get_header_arg a) (parray_size (get a 1)))) 31) (get a 1)))
+    )
+
 (fun hash (e)
     (var t (gettag e))
     (var h 0)
@@ -516,6 +541,9 @@
     (if (== t SymbolT) (return (symhash e)))
     (if (== t StringT) (return (strhash_n (get e 1) (get_header_arg e))))
     (if (== t MexprT) (return (mexprhash e)))
+    (if (== t ArrayT) (return (arrayhash e)))
+    (if (== t PArrayT) (return (parrayhash e)))
+    (if (== t DataT) (return (+ (* (hash (get e 2)) 31) (symhash (get e 1)))))
     ; other objects are hashed by their addresses
     (return (symhash e))
     )
@@ -672,6 +700,25 @@
             (+= i 1)
             ))
         (return 1)
+        ))
+    (if (&& (== (gettag a) ArrayT) (== (gettag b) ArrayT)) (do
+        (= n (get_header_arg a))
+        (if (!= (get_header_arg b) n) (return 0))
+        (while (< i n) (do
+            (if (! (values_equal (get a (+ i 1)) (get b (+ i 1)))) (return 0))
+            (+= i 1)
+            ))
+        (return 1)
+        ))
+    (if (&& (== (gettag a) PArrayT) (== (gettag b) PArrayT)) (do
+        (if (!= (get a 1) (get b 1)) (return 0))
+        (if (!= (get_header_arg a) (get_header_arg b)) (return 0))
+        (= n (* (get_header_arg a) (parray_size (get a 1))))
+        (return (bytes_equal (parray_data a) (parray_data b) n))
+        ))
+    (if (&& (== (gettag a) DataT) (== (gettag b) DataT)) (do
+        (if (!= (get a 1) (get b 1)) (return 0))
+        (return (values_equal (get a 2) (get b 2)))
         ))
     (return 0)
     )
@@ -2979,6 +3026,14 @@
 
 (fun p_eq (a b) (return (bool (values_equal a b))))
 
+(fun p_identical (a b)
+    (if (== a b) (return trueS))
+    (if (&& (== (gettag a) BigT) (== (gettag b) BigT)) (do
+        (if (== (num_cmp a b) 0) (return trueS))
+        ))
+    (return falseS)
+    )
+
 (fun p_ne (a b)
     (if (values_equal a b) (return falseS))
     (return trueS)
@@ -3187,7 +3242,7 @@
     (return noneS)
     )
 
-; hash(x): a non-negative integer that is equal for values equal by eq
+; hash(x): a non-negative integer that is equal for values equal by equal
 (fun p_hash (x)
     (return (fixnum (& (hash x) 0xfffffff)))
     )
@@ -4009,6 +4064,7 @@ features:
     (defprim "int_ge"      2 p_ge      PRIM_NATIVE)
     (defprim "equal"        2 p_eq      PRIM_NATIVE)
     (defprim "not_equal"    2 p_ne      PRIM_NATIVE)
+    (defprim "identical"    2 p_identical PRIM_NATIVE)
     (defprim "expr_head"    1 p_head    PRIM_NATIVE)
     (defprim "expr_arity"   1 p_arity   PRIM_NATIVE)
     (defprim "expr_arg"     2 p_arg     PRIM_NATIVE)
