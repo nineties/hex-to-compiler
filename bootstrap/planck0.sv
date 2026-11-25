@@ -3114,7 +3114,7 @@
     (return (fixnum (str_len s)))
     )
 
-; ord(s, i): the byte at i, or -1 when i is out of range
+; str_ord(s, i): the byte at i, or -1 when i is out of range
 (fun p_ord (s i)
     (var n 0)
     (expect "str_ord" StringT s)
@@ -3123,7 +3123,7 @@
     (return (fixnum (getb (get s 1) n)))
     )
 
-; substr(s, i, j): bytes from i to j-1. The text is shared when j is the end.
+; str_sub(s, i, j): bytes from i to j-1. The text is shared when j is the end.
 (fun p_substr (s i j)
     (var len 0)
     (var oi i)
@@ -3159,7 +3159,7 @@
     (return (sym (strndup (get s 1) (str_len s))))
     )
 
-; symname(s): the name of the symbol s as a string (the inverse of intern)
+; sym_name(s): the name of the symbol s as a string (the inverse of sym_intern)
 (fun p_symname (s)
     (return (str (sym_name s)))
     )
@@ -3174,7 +3174,7 @@
     (return (str_n text 1))
     )
 
-; array(n): a mutable array of n elements, all none
+; array_new(n): a mutable array of n elements, all none
 (fun p_array (n)
     (var a 0)
     (var i 0)
@@ -3457,7 +3457,7 @@
     (return (write_all path (parray_data x) (get_header_arg x)))
     )
 
-; read_bytes(path): the contents of the file as a u8 array
+; os_read_bytes(path): the contents of the file as a u8 array
 (fun p_read_bytes (path)
     (var fd 0)
     (var size 0)
