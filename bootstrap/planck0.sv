@@ -330,10 +330,6 @@
         (return 0)
     ))
 
-(fun is_fixnum (n)
-    (return (& n 1))
-    )
-
 (fun is_function (obj)
     (var t (gettag obj))
     (if (|| (== t PrimT) (|| (== t LambdaT) (|| (== t ContT) (== t FusionT))))
