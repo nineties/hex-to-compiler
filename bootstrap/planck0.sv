@@ -611,6 +611,7 @@
 (long SyntaxErrorS)
 (long EofS)
 (long evalS)
+(long parseS)
 (long emptyTuple)
 
 (fun tup2 (a b) (return (mexpr2 TupleS a b)))
@@ -668,6 +669,7 @@
     (= SyntaxErrorS (sym "SyntaxError"))
     (= EofS         (sym "Eof"))
     (= evalS        (sym "eval"))
+    (= parseS       (sym "parse"))
     (= emptyTuple   (mexpr0 TupleS))
     )
 
@@ -1150,7 +1152,7 @@
 
 (fun parse (text)
     (char[] 4 ret)
-    (expect "mexpr_parse" StringT text)
+    (expect "parse" StringT text)
     (var raw (skip_spaces (get text 1)))
     (if (== (getb raw) 0)
         (return (tup2 (mexpr0 EofS) (str raw)))
@@ -3124,6 +3126,7 @@
 
 (fun p_mexpr (h args)
     (expect "mexpr_new" SymbolT h)
+    (if (== (gettag args) ArrayT) (return (mexprn h (get_header_arg args) (+ args 4))))
     (expect_mexpr "mexpr_new" TupleS args)
     (return (mexprn h (get_header_arg args) (+ args 8)))
     )
@@ -4177,7 +4180,7 @@ features:
     (defprim "type"         1 p_typeof  PRIM_NATIVE)
     (defprim "type_name" 1 p_type_name PRIM_NATIVE)
     (defprim "type_new"     1 p_type_new PRIM_NATIVE)
-    (defprim "mexpr_parse" 1 p_parse PRIM_NATIVE)
+    (defprim "parse" 1 p_parse PRIM_NATIVE)
     (defprim "str_len"  1 p_strlen  PRIM_NATIVE)
     (defprim "str_ord"     2 p_ord     PRIM_NATIVE)
     (defprim "str_chr"     1 p_chr     PRIM_NATIVE)
@@ -4266,7 +4269,7 @@ features:
     (var e 0)
     (var more 1)
     (while more (do
-        (= ret (parse text))
+        (= ret (call_global parseS (mexpr1 QuoteS text)))
         (if (|| (! (has_head TupleS ret))
             (|| (!= (get_header_arg ret) 2)
                 (!= (gettag (tup_get ret 1)) StringT))) (do
