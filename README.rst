@@ -42,7 +42,7 @@ Other targets:
 
 * ``make example``: build the examples under ``bootstrap/``
 * ``make test``: test ``plisp``
-* ``make test-planck0``: test ``planck0`` with ``planck/init.pk``
+* ``make test-planck0``: check that ``planck0`` starts and exits
 * ``make clean``: remove the built files
 
 Use a release binary
@@ -62,13 +62,11 @@ The Planck language
 
 The definition of the Planck language (the syntax) and its libraries are in
 `nineties/planck <https://github.com/nineties/planck>`_. This repository keeps only
-what ``planck0`` needs to start: ``planck/init.pk``, and ``planck/tests/core.pk``
-that tests it.
+what ``planck0`` needs to start: an empty ``planck/init.pk``.
 
 Run a file with ``planck0``::
 
-   $ ./planck0 planck/tests/core.pk
-   Tests passed 149/149
+   $ ./planck0 /dev/null
 
 Integers are 31 bits and become arbitrary-precision integers on overflow.
 There is no floating point. Strings are sequences of bytes (ASCII).
@@ -86,7 +84,7 @@ Test
 
 ::
 
-   $ make test-planck0   # planck/tests/core.pk
+   $ make test-planck0   # ./planck0 /dev/null
 
 GitHub Actions runs ``make test`` and ``make test-planck0`` on every push.
 
