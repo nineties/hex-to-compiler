@@ -3109,8 +3109,25 @@
 
 (fun str_len (s) (return (get_header_arg s)))
 
+(fun ascii_only (name s)
+    (var p (get s 1))
+    (var n (str_len s))
+    (while (> n 0) (do
+        (if (>= (getb p) 128) (do
+            (eputs name)
+            (eputs ": not implemented for a string with multibyte characters: ")
+            (eprint s)
+            (eputs "\n")
+            (exit 1)
+            ))
+        (+= p 1)
+        (-= n 1)
+        ))
+    )
+
 (fun p_strlen (s)
     (expect "str_len" StringT s)
+    (ascii_only "str_len" s)
     (return (fixnum (str_len s)))
     )
 
@@ -3118,6 +3135,7 @@
 (fun p_ord (s i)
     (var n 0)
     (expect "str_ord" StringT s)
+    (ascii_only "str_ord" s)
     (= n (index_arg "str_ord" i))
     (if (|| (< n 0) (>= n (str_len s))) (return (fixnum -1)))
     (return (fixnum (getb (get s 1) n)))
@@ -3129,6 +3147,7 @@
     (var oi i)
     (var oj j)
     (expect "str_sub" StringT s)
+    (ascii_only "str_sub" s)
     (= i (index_arg "str_sub" i))
     (= j (index_arg "str_sub" j))
     (= len (str_len s))
@@ -3167,7 +3186,7 @@
 (fun p_chr (c)
     (var n (index_arg "str_chr" c))
     (var text 0)
-    (if (|| (< n 0) (> n 255)) (runtime_error "str_chr: out of range: " c))
+    (if (|| (< n 0) (> n 127)) (runtime_error "str_chr: out of range: " c))
     (= text (allocate 2))
     (setb text 0 n)
     (setb text 1 0)
