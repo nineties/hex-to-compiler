@@ -211,6 +211,20 @@ be passed as it is. A symbol name is stored with a terminating NULL and
    ``str_sub`` always shares the original string and neither copies nor
    scans it.
 
+``str_join(array)``
+   The concatenation of all the strings in ``array``, made at once. An empty
+   array gives the empty string. An element that is not a string is an error.
+
+``str_find(s, part, from)``
+   The position of the first occurrence of ``part`` in ``s`` at or after
+   ``from``, or -1 when there is none. An empty ``part`` gives ``from``. A
+   ``from`` outside 0 to ``str_len(s)`` is an error.
+
+``str_cmp(a, b)``
+   Compares the bytes of ``a`` and ``b`` in order. The result is -1 when ``a``
+   is smaller, 0 when they are the same and 1 when ``a`` is larger. A string
+   that is a prefix of another is the smaller.
+
 ``sym_intern(s)``, ``sym_name(sym)``
    The symbol of a string and the name of a symbol. A string with a NULL
    character is an error.
@@ -224,6 +238,10 @@ M-expressions
 ``mexpr_new(head, args)``
    A new m-expression with the head and the arguments, where ``args`` is a
    ``Tuple{...}`` or an array. The elements of an array are the arguments.
+
+``mexpr_args(m)``
+   The arguments of ``m`` copied to a new array, the inverse of
+   ``mexpr_new(head, array)``.
 
 ``parse(s)``
    Parses the first m-expression in ``s`` and gives ``Tuple{expression, rest}``.
