@@ -139,7 +139,7 @@
     )
 
 ; Memory is allocated by a first fit on the free chunks. A new object is zero-filled.
-(fun allocate (size)
+(fun try_allocate (size)
     (var n (align (+ size 4)))
     (var c 0)
     (var p 0)
@@ -150,10 +150,7 @@
     (if (! c) (do
         (gc_collect)
         (= c (take_chunk n))
-        (if (! c) (do
-            (eputs "memory allocation error\n")
-            (exit 1)
-            ))
+        (if (! c) (return 0))
         ))
     (set c n)
     (bm_set c)
@@ -164,6 +161,15 @@
         (+= p 4)
         ))
     (return (+ c 4))
+    )
+
+(fun allocate (size)
+    (var p (try_allocate size))
+    (if (! p) (do
+        (eputs "memory allocation error\n")
+        (exit 1)
+        ))
+    (return p)
     )
 
 ; === data layout (planck0)
@@ -2482,6 +2488,15 @@
     (return k)
     )
 
+(fun big_try_new (n neg)
+    (var b 0)
+    (if (> n 0x3ffffff) (return 0))
+    (= b (try_allocate (* 4 (+ n 1))))
+    (if (! b) (return 0))
+    (set b 0 (make_header BigT 0 (| (<< n 1) neg)))
+    (return b)
+    )
+
 (fun big_new (n neg)
     (var b (allocate (* 4 (+ n 1))))
     (set b 0 (make_header BigT 0 (| (<< n 1) neg)))
@@ -3639,9 +3654,10 @@
     (var n (big_ulen b))
     (var s (/ k 15))
     (var r (% k 15))
-    (var out (big_new (+ (+ n s) 1) 0))
+    (var out (big_try_new (+ (+ n s) 1) 0))
     (var i 1)
     (var t 0)
+    (if (! out) (return 0))
     (while (<= i n) (do
         (= t (<< (get b i) r))
         (set out (+ i s) (| (get out (+ i s)) (& t BIG_MASK)))
@@ -3724,7 +3740,9 @@
         (if (&& (== (asr r (fixnum_to_int k)) x) (fits_fixnum r)) (return (fixnum r)))
         ))
     (= y (big_of a))
-    (return (big_norm (mag_shl y (fixnum_to_int k)) (big_neg y)))
+    (= r (mag_shl y (fixnum_to_int k)))
+    (if (! r) (named_error "bit_shl" "out of memory: " k))
+    (return (big_norm r (big_neg y)))
     )
 
 ; arithmetic shift: the sign is kept
