@@ -1754,7 +1754,7 @@
         (return 0)
         ))
     (if (== head IfS) (do
-        (if (!= arity 3) (malformed e))
+        (if (&& (!= arity 2) (!= arity 3)) (malformed e))
         (compile (get e 2) 0)
         (emit OP_JF)
         (= l1 (code_offset))
@@ -1771,7 +1771,7 @@
 
         (patch l1 (code_offset))
         (= saved (begin_block))
-        (compile (get e 4) tail)
+        (if (== arity 2) (emit_const noneS) (compile (get e 4) tail))
         (end_block saved)
         (patch l2 (code_offset))
         (return 0)
