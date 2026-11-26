@@ -303,7 +303,8 @@ Operating system
    ``Ok{names}``, an array of the names in the directory in sorted order.
 
 ``os_run(path, args, input, dir)``
-   Runs the program ``path`` with the array ``args`` as the arguments after
+   Runs the program ``path`` with ``args``, an array or a ``Tuple{...}``, as
+   the arguments after
    the program name, ``input`` as standard input, and ``dir`` as the working
    directory unless it is empty. It gives ``Ok{[status, stdout, stderr]}``,
    where ``status`` is the exit status, or -1 when a signal ended the program.
