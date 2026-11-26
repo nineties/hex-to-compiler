@@ -56,7 +56,7 @@ other head makes an m-expression whose arguments are evaluated first, so
    to the previous variable of the same name, so ``Def{x, Apply{int_add,
    Tuple{x, 1}}}`` is allowed after ``Def{x, 1}``.
 
-``DefFun{f, Lambda{...}}``
+``Defun{f, Lambda{...}}``
    Defines ``f`` as ``Fusion{f, Lambda{...}}``. Repeating it adds a clause to
    the function.
 
