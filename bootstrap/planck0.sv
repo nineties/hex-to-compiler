@@ -3282,10 +3282,19 @@
     (var item 0)
     (var text 0)
     (var pos 0)
-    (expect "str_join" ArrayT a)
+    (var first 1)
+    (if (!= (gettag a) ArrayT) (do
+        (if (|| (!= (gettag a) MexprT) (!= (get a 1) TupleS)) (do
+            (eputs "str_join: Array or Tuple is expected: ")
+            (eprint a)
+            (eputs "\n")
+            (exit 1)
+            ))
+        (= first 2)
+        ))
     (= count (get_header_arg a))
     (while (< i count) (do
-        (= item (get a (+ i 1)))
+        (= item (get a (+ i first)))
         (expect "str_join" StringT item)
         (+= total (str_len item))
         (+= i 1)
@@ -3293,7 +3302,7 @@
     (= text (allocate total))
     (= i 0)
     (while (< i count) (do
-        (= item (get a (+ i 1)))
+        (= item (get a (+ i first)))
         (memcpy (+ text pos) (get item 1) (str_len item))
         (+= pos (str_len item))
         (+= i 1)

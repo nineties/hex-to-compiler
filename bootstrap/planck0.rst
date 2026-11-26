@@ -211,9 +211,10 @@ be passed as it is. A symbol name is stored with a terminating NULL and
    ``str_sub`` always shares the original string and neither copies nor
    scans it.
 
-``str_join(array)``
-   The concatenation of all the strings in ``array``, made at once. An empty
-   array gives the empty string. An element that is not a string is an error.
+``str_join(strings)``
+   The concatenation of all the strings in ``strings``, made at once, where
+   ``strings`` is an array or a ``Tuple{...}``. An empty one gives the empty
+   string. An element that is not a string is an error.
 
 ``str_find(s, part, from)``
    The position of the first occurrence of ``part`` in ``s`` at or after
