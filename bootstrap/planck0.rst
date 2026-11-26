@@ -211,9 +211,10 @@ be passed as it is. A symbol name is stored with a terminating NULL and
    ``str_sub`` always shares the original string and neither copies nor
    scans it.
 
-``str_join(array)``
-   The concatenation of all the strings in ``array``, made at once. An empty
-   array gives the empty string. An element that is not a string is an error.
+``str_join(strings)``
+   The concatenation of all the strings in ``strings``, made at once, where
+   ``strings`` is an array or a ``Tuple{...}``. An empty one gives the empty
+   string. An element that is not a string is an error.
 
 ``str_find(s, part, from)``
    The position of the first occurrence of ``part`` in ``s`` at or after
@@ -302,7 +303,8 @@ Operating system
    ``Ok{names}``, an array of the names in the directory in sorted order.
 
 ``os_run(path, args, input, dir)``
-   Runs the program ``path`` with the array ``args`` as the arguments after
+   Runs the program ``path`` with ``args``, an array or a ``Tuple{...}``, as
+   the arguments after
    the program name, ``input`` as standard input, and ``dir`` as the working
    directory unless it is empty. It gives ``Ok{[status, stdout, stderr]}``,
    where ``status`` is the exit status, or -1 when a signal ended the program.
