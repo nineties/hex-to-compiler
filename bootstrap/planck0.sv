@@ -620,7 +620,7 @@
 (long PArrayT_)
 (long TypeT_)
 (long DefS)
-(long DefFunS)
+(long DefunS)
 (long SetS)
 (long ApplyS)
 (long DoS)
@@ -678,7 +678,7 @@
     (= TypeSlotS (sym "_TypeSlot"))
     (= _RestS   (sym "_Rest"))
     (= DefS         (sym "Def"))
-    (= DefFunS      (sym "DefFun"))
+    (= DefunS      (sym "Defun"))
     (= SetS         (sym "Set"))
     (= ApplyS       (sym "Apply"))
     (= DoS          (sym "Do"))
@@ -1769,7 +1769,7 @@
         (compile_define (get e 2))
         (return 0)
         ))
-    (if (== head DefFunS) (do
+    (if (== head DefunS) (do
         (if (|| (!= arity 2) (!= (gettag (get e 2)) SymbolT)) (malformed e))
         (if (! (defined_here (get e 2))) (do
             (emit_const noneS)
