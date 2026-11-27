@@ -78,7 +78,7 @@ other head makes an m-expression whose arguments are evaluated first, so
    Makes a function. A parameter is a symbol or a pattern. A name may appear
    only once in the parameters and patterns of a ``Lambda``; a second
    occurrence stops compilation with ``not implemented: duplicate parameter
-   name``. The type of a ``_TypeOf{q, t}`` pattern is evaluated where the
+   name``. The type of a ``TypeOf{q, t}`` pattern is evaluated where the
    function is made.
 
 ``Fusion{f, g}``
