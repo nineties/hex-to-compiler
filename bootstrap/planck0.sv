@@ -608,9 +608,9 @@
 (long falseS)
 (long noneS)
 (long _S)
-(long _TypeOfS)
+(long TypeOfS)
 (long TypeSlotS)
-(long _RestS)
+(long RestS)
 (long IntT_)
 (long StringT_)
 (long SymbolT_)
@@ -674,9 +674,9 @@
     (= falseS   (sym "false"))
     (= noneS    (sym "none"))
     (= _S       (sym "_"))
-    (= _TypeOfS (sym "_TypeOf"))
-    (= TypeSlotS (sym "_TypeSlot"))
-    (= _RestS   (sym "_Rest"))
+    (= TypeOfS (sym "TypeOf"))
+    (= TypeSlotS (sym "TypeSlot"))
+    (= RestS   (sym "Rest"))
     (= DefS         (sym "Def"))
     (= DefunS      (sym "Defun"))
     (= SetS         (sym "Set"))
@@ -840,7 +840,7 @@
     (fputs chan "}")
     )
 
-;  the pattern p with each _TypeSlot{slot} replaced by the type in the slot of env, the environment where the function was made
+;  the pattern p with each TypeSlot{slot} replaced by the type in the slot of env, the environment where the function was made
 (fun restore_types (p env)
     (var i 0)
     (var n 0)
@@ -1534,12 +1534,12 @@
         ))
     (if (== t MexprT) (do
         (if (== (get p 1) QuoteS) (return 0))
-        (if (== (get p 1) _TypeOfS) (do
-            (if (!= (get_header_arg p) 2) (compile_error "malformed _TypeOf pattern" p))
+        (if (== (get p 1) TypeOfS) (do
+            (if (!= (get_header_arg p) 2) (compile_error "malformed TypeOf pattern" p))
             (bind_pattern (get p 2))
             (return 0)
             ))
-        (if (== (get p 1) _RestS) (compile_error "a rest pattern x... must be the last argument" p))
+        (if (== (get p 1) RestS) (compile_error "a rest pattern x... must be the last argument" p))
         (= n (get_header_arg p))
         (while (< i n) (do
             (bind_pattern_arg (get p (+ i 2)) (+ i 1) n)
@@ -1551,10 +1551,10 @@
     (compile_error "invalid pattern" p)
     )
 
-; true when p is a rest pattern _Rest{x}, which takes the remaining arguments
+; true when p is a rest pattern Rest{x}, which takes the remaining arguments
 (fun is_rest_pat (p)
     (if (!= (gettag p) MexprT) (return 0))
-    (if (== (get p 1) _RestS) (return 1))
+    (if (== (get p 1) RestS) (return 1))
     (return 0)
     )
 
@@ -1687,14 +1687,14 @@
     (return 0)
     )
 
-; whether the pattern p has _TypeOf{q, t}
+; whether the pattern p has TypeOf{q, t}
 (fun has_type_pattern (p)
     (var i 0)
     (var n 0)
     (if (!= (gettag p) MexprT) (return 0))
     (if (== (get p 1) QuoteS) (return 0))
     (= n (get_header_arg p))
-    (if (&& (== (get p 1) _TypeOfS) (== n 2)) (return 1))
+    (if (&& (== (get p 1) TypeOfS) (== n 2)) (return 1))
     (while (< i n) (do
         (if (has_type_pattern (get p (+ i 2))) (return 1))
         (+= i 1)
@@ -1702,8 +1702,8 @@
     (return 0)
     )
 
-; The type t of _TypeOf{q, t} in a pattern of a function is an expression, which is evaluated where the function is made. This emits the code that
-; evaluates t and stores it in a new slot of the environment, and gives p with t replaced by _TypeSlot{slot}.
+; The type t of TypeOf{q, t} in a pattern of a function is an expression, which is evaluated where the function is made. This emits the code that
+; evaluates t and stores it in a new slot of the environment, and gives p with t replaced by TypeSlot{slot}.
 (fun hoist_types (p)
     (var i 0)
     (var n 0)
@@ -1717,7 +1717,7 @@
         (set vals i (hoist_types (get p (+ i 2))))
         (+= i 1)
         ))
-    (if (&& (== (get p 1) _TypeOfS) (== n 2)) (do
+    (if (&& (== (get p 1) TypeOfS) (== n 2)) (do
         (compile (get p 3) 0)
         (= slot (get cctx CX_NSLOTS))
         (set cctx CX_NSLOTS (+ slot 1))
@@ -1885,7 +1885,7 @@
         (return 0)
         ))
     (if (== head UnQuoteS) (compile_error "UnQuote outside of QuasiQuote" e))
-    (if (== head _RestS) (compile_error "x... is allowed only as the last parameter of a function without a guard, or as the last argument of a pattern" e))
+    (if (== head RestS) (compile_error "x... is allowed only as the last parameter of a function without a guard, or as the last argument of a pattern" e))
     (if (== head HandleS) (do
         (if (!= arity 2) (malformed e))
         (emit OP_CLOSURE)
@@ -2086,7 +2086,7 @@
     (if (== t MexprT) (do
         (= h (get p 1))
         (if (== h QuoteS) (return (values_equal (get p 2) v)))
-        (if (== h _TypeOfS) (do
+        (if (== h TypeOfS) (do
             (= tp (get p 3))
             ; the type is in a slot of the environment where the function was made
             (if (&& (== (gettag tp) MexprT) (== (get tp 1) TypeSlotS))
@@ -2119,7 +2119,7 @@
     )
 
 ; pats is the Tuple of the parameter patterns of a function. When the last one
-; is a rest pattern _Rest{x}, x is matched with the Tuple of the remaining arguments.
+; is a rest pattern Rest{x}, x is matched with the Tuple of the remaining arguments.
 (fun match_args (pats args nargs env)
     (char[] 4 idx)
     (var i 0)
