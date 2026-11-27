@@ -115,7 +115,7 @@ Built-in functions
 ------------------
 
 The built-in functions are global variables. A name has a prefix for what it
-works on: ``int_``, ``str_``, ``sym_``, ``array_``, ``parray_``, ``bit_``,
+works on: ``int_``, ``str_``, ``sym_``, ``array_``, ``packedarray_``, ``bit_``,
 ``mexpr_``, ``type``, ``os_`` and ``gc_``. A failure other than the ``Ok`` and
 ``Err`` results below prints the function name and a message and exits with
 status 1. An index is a non-negative integer.
@@ -154,7 +154,7 @@ Values and types
 ~~~~~~~~~~~~~~~~
 
 ``equal(a, b)``, ``not_equal(a, b)``
-   Compare by content. Integers, strings, m-expressions, arrays, parrays and
+   Compare by content. Integers, strings, m-expressions, arrays, packed arrays and
    the values of a type made by ``type_new`` are equal when their contents
    are equal. Any other pair is equal only when identical.
 
@@ -168,7 +168,7 @@ Values and types
 
 ``type(v)``
    The type of ``v``: ``Int``, ``String``, ``Symbol``, ``Expr``, ``Function``,
-   ``Array``, ``PArray`` or a type made by ``type_new``. ``Type`` is the type
+   ``Array``, ``PackedArray`` or a type made by ``type_new``. ``Type`` is the type
    of types. These are global variables that hold the types.
 
 ``type_name(t)``
@@ -265,12 +265,12 @@ Arrays
 ``array_copy(dst, di, src, si, n)``
    Copies ``n`` elements. The ranges may overlap.
 
-A parray holds unboxed elements of one kind: ``parray_new_u8(n)``,
-``parray_new_u16(n)`` and ``parray_new_i32(n)`` make a zero-filled parray.
-``parray_len``, ``parray_get``, ``parray_set`` and ``parray_copy`` are
-``array_len``, ``array_get``, ``array_set`` and ``array_copy`` for parrays,
-with ``parray_copy`` requiring the same kind on both sides. ``parray_kind(a)``
-is the symbol ``u8``, ``u16`` or ``i32``. ``parray_set`` stops with an error
+A packed array holds unboxed elements of one kind: ``packedarray_new_u8(n)``,
+``packedarray_new_u16(n)`` and ``packedarray_new_i32(n)`` make a zero-filled packed array.
+``packedarray_len``, ``packedarray_get``, ``packedarray_set`` and ``packedarray_copy`` are
+``array_len``, ``array_get``, ``array_set`` and ``array_copy`` for packed arrays,
+with ``packedarray_copy`` requiring the same kind on both sides. ``packedarray_kind(a)``
+is the symbol ``u8``, ``u16`` or ``i32``. ``packedarray_set`` stops with an error
 for a value out of range for the kind.
 
 Operating system
@@ -290,10 +290,10 @@ Operating system
    ``time.time_ns()`` of Python gives. The value does not overflow in 2038.
 
 ``os_read_file(path)``, ``os_read_bytes(path)``
-   ``Ok{contents}`` as a string and as a u8 parray.
+   ``Ok{contents}`` as a string and as a u8 packed array.
 
 ``os_write_file(path, s)``, ``os_write_bytes(path, a)``
-   Write a string and a u8 parray to a file, which is created or truncated, and
+   Write a string and a u8 packed array to a file, which is created or truncated, and
    give ``Ok{none}``.
 
 ``os_chmod(path, mode)``
