@@ -230,8 +230,8 @@ be passed as it is. A symbol name is stored with a terminating NULL and
 
 ``str_find(s, part, from)``
    The position of the first occurrence of ``part`` in ``s`` at or after
-   ``from``, or -1 when there is none. An empty ``part`` gives ``from``. A
-   ``from`` outside 0 to ``str_len(s)`` is an error.
+   ``from``, or ``none`` when there is none. An empty ``part`` gives
+   ``from``. A ``from`` outside 0 to ``str_len(s)`` is an error.
 
 ``str_cmp(a, b)``
    Compares the bytes of ``a`` and ``b`` in order. The result is -1 when ``a``

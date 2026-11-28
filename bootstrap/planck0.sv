@@ -3384,7 +3384,7 @@
         (if (== k m) (return (fixnum i)))
         (+= i 1)
         ))
-    (return (fixnum -1))
+    (return noneS)
     )
 
 (fun p_strcmp (a b)
