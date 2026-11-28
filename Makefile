@@ -66,3 +66,4 @@ test-planck0: planck0
 	./planck0 bootstrap/tests/multibyte.pk
 	./planck0 bootstrap/tests/str_join.pk
 	./planck0 bootstrap/tests/os_run.pk
+	./planck0 bootstrap/tests/file_scope.pk
