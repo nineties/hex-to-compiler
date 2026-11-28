@@ -26,7 +26,8 @@ For each file the loop does the following until the end of the text.
 2. Stop at ``Eof{}``. A syntax error prints the file name and the error to
    stderr and exits with status 1.
 3. Evaluate the expression by calling the global variable ``eval`` with
-   ``Quote{expression}``. The variable is looked up for every expression.
+   ``Quote{expression}`` and ``env_global()``. The variable is looked up for
+   every expression.
 
 The initial values of ``parse`` and ``eval`` are the built-in functions. A
 program that assigns another function to ``parse`` or ``eval`` with
@@ -250,9 +251,20 @@ M-expressions
    The expression is ``Eof{}`` at the end of the text and ``SyntaxError{...}``
    when the text is invalid.
 
-``eval(e)``
-   Compiles and evaluates the m-expression ``e``. The main loop calls it
-   through the global variable ``eval``.
+``eval(e, env)``
+   Compiles and evaluates the m-expression ``e`` in the environment ``env``.
+   The top-level definitions of ``e`` are made in ``env``, and the variables
+   of ``e`` are looked up in ``env`` first and then in the global environment.
+   ``Set`` assigns an existing variable of either. A call with one argument
+   stops with an error. The main loop calls it through the global variable
+   ``eval``.
+
+``env_global()``
+   The global environment.
+
+``env_new()``
+   A new environment. Its definitions are not visible from outside, and the
+   global variables are visible from it.
 
 Arrays
 ~~~~~~
