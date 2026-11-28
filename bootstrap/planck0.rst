@@ -59,8 +59,18 @@ other head makes an m-expression whose arguments are evaluated first, so
 
 ``Defun{f, Lambda{...}}``
    Defines ``f`` as ``Fusion{f, Lambda{...}}``. Repeating it adds a clause to
-   the function. To rebuild a function with other clauses, write ``f := none``
+   the function. To rebuild a function with other clauses, write ``Undef{f}``
    first.
+
+``Undef{x}``
+   Removes the variable ``x`` from the environment where the expression is
+   compiled, the global one or the one given to ``eval``. Like ``Def``, it
+   takes effect when the expression is compiled. Referring to ``x`` after that
+   is an undefined variable, until ``x`` is defined again. Functions compiled
+   before keep the removed variable. A built-in can be removed in the same
+   way. Removing a variable that is not in the environment is a compile
+   error, as in Python's ``del``. ``Undef`` is allowed only at the top level.
+   The value is ``none``.
 
 ``Set{x, e}``
    Assigns the value of ``e`` to the existing variable ``x``.
