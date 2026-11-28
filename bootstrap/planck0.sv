@@ -275,6 +275,25 @@
     (return 0)
     )
 
+(fun table_remove (table key)
+    (var size (get table 0))
+    (var hash_func (get table 1))
+    (var equal_func (get table 2))
+
+    (var idx (& (hash_func key) (- size 1)))
+    (var ent (get table (+ 3 idx)))
+    (var prev 0)
+    (while ent (do
+        (if (equal_func (get ent 0) key) (do
+            (if prev (set prev 2 (get ent 2)) (set table (+ 3 idx) (get ent 2)))
+            (return 1)
+            ))
+        (= prev ent)
+        (= ent (get ent 2))
+        ))
+    (return 0)
+    )
+
 ; === Nodes
 (def SymbolT  0x0)
 (def StringT  0x1)
@@ -621,6 +640,7 @@
 (long TypeT_)
 (long DefS)
 (long DefunS)
+(long UndefS)
 (long SetS)
 (long ApplyS)
 (long DoS)
@@ -688,6 +708,7 @@
     (= RestS   (sym "Rest"))
     (= DefS         (sym "Def"))
     (= DefunS      (sym "Defun"))
+    (= UndefS      (sym "Undef"))
     (= SetS         (sym "Set"))
     (= ApplyS       (sym "Apply"))
     (= DoS          (sym "Do"))
@@ -1779,6 +1800,13 @@
         ; name. The new variable is made after it is compiled.
         (compile (get e 3) 0)
         (compile_define (get e 2))
+        (return 0)
+        ))
+    (if (== head UndefS) (do
+        (if (|| (!= arity 1) (!= (gettag (get e 2)) SymbolT)) (malformed e))
+        (if (! (is_global_scope)) (compile_error "Undef is allowed only at the top level" e))
+        (if (! (table_remove (current_table) (get e 2))) (compile_error "undefined variable" (get e 2)))
+        (emit_const noneS)
         (return 0)
         ))
     (if (== head DefunS) (do
