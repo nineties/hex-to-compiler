@@ -179,7 +179,7 @@ Values and types
    ``equal``.
 
 ``type(v)``
-   The type of ``v``: ``Int``, ``String``, ``Symbol``, ``Expr``, ``Function``,
+   The type of ``v``: ``Int``, ``String``, ``Symbol``, ``MExpr``, ``Function``,
    ``Array``, ``PackedArray`` or a type made by ``type_new``. ``Type`` is the type
    of types. These are global variables that hold the types.
 
