@@ -653,13 +653,21 @@
     )
 
 (long global_table) ; global variables (sym -> cell of the latest definition)
+(long scope_table)  ; table of the file scope being compiled (0 for the global one)
+(long ScopeT_)
+
+(fun current_table ()
+    (if scope_table (return scope_table))
+    (return global_table)
+    )
 
 (fun define_global (sym)
     (var cell (allocate 8))
+    (var table (current_table))
     (set cell 0 0)
     (set cell 1 sym)
-    (if (! (table_update global_table sym cell))
-        (table_insert global_table sym cell))
+    (if (! (table_update table sym cell))
+        (table_insert table sym cell))
     (return cell)
     )
 
@@ -1299,7 +1307,8 @@
 (def C_NSLOTS   3)
 (def C_MAXSTACK 4)
 (def C_NCODE    5)
-(def C_CODE     6)
+(def C_SCOPE    6)
+(def C_CODE     7)
 
 (def F_CALLER   0)
 (def F_CODE     1)
@@ -1333,6 +1342,7 @@
 (def PRIM_EVAL   1)
 (def PRIM_NEW    2)
 (def PRIM_UNWRAP 3)
+(def PRIM_EVAL_IN 4)
 
 ; === Compiler
 ;
@@ -1435,6 +1445,7 @@
     (set code C_NSLOTS (get cctx CX_NSLOTS))
     (set code C_MAXSTACK (get cctx CX_MAXDEPTH))
     (set code C_NCODE n)
+    (set code C_SCOPE scope_table)
     (memcpy (+ code (* 4 C_CODE)) start (* 4 n))
     (return code)
     )
@@ -1483,7 +1494,9 @@
 
 ;  the cell of the global variable sym, or stop if there is none
 (fun global_cell (sym)
-    (var cell (table_lookup global_table sym))
+    (var cell 0)
+    (if scope_table (= cell (table_lookup scope_table sym)))
+    (if (! cell) (= cell (table_lookup global_table sym)))
     (if (! cell) (do
         (eputs "undefined variable: ")
         (eprint sym)
@@ -1679,7 +1692,7 @@
 (fun defined_here (x)
     (var ent 0)
     (if (is_global_scope) (do
-        (if (table_lookup global_table x) (return 1))
+        (if (table_lookup (current_table) x) (return 1))
         (return 0)
         ))
     (= ent (cenv_lookup x))
@@ -2228,7 +2241,19 @@
         ))
     (if (== t PrimT) (do
         (if (== (get callee 3) PRIM_EVAL) (do
+            (if vm_code (= scope_table (get vm_code C_SCOPE)))
             (= code (compile_toplevel (get args 0)))
+            (= scope_table 0)
+            (enter code (new_env code 0) caller 0)
+            (return 0)
+            ))
+        (if (== (get callee 3) PRIM_EVAL_IN) (do
+            (= v (get args 0))
+            (if (|| (!= (gettag v) DataT) (!= (get v 1) ScopeT_))
+                (runtime_error "scope_eval: not a scope: " v))
+            (= scope_table (get v 2))
+            (= code (compile_toplevel (get args 1)))
+            (= scope_table 0)
             (enter code (new_env code 0) caller 0)
             (return 0)
             ))
@@ -3218,6 +3243,23 @@
     (set unwrap 2 type)
     (set unwrap 3 PRIM_UNWRAP)
     (return (mexpr3 TupleS type wrap unwrap))
+    )
+
+(fun p_scope_new ()
+    (return (new_data ScopeT_ (make_table 0x400 symhash symeq)))
+    )
+
+(fun p_scope_export (scope name)
+    (var cell 0)
+    (if (|| (!= (gettag scope) DataT) (!= (get scope 1) ScopeT_))
+        (runtime_error "scope_export: not a scope: " scope))
+    (expect "scope_export" SymbolT name)
+    (= cell (table_lookup (get scope 2) name))
+    (if (|| (! cell) (! (get cell 0)))
+        (runtime_error "scope_export: undefined variable: " name))
+    (if (! (table_update global_table name cell))
+        (table_insert global_table name cell))
+    (return noneS)
     )
 
 ; --- strings, symbols, tables and files (used by planck/peg.pk)
@@ -4296,6 +4338,7 @@ features:
     )
 
 (fun init_prims ()
+    (= ScopeT_    (new_type (sym "Scope")))
     (= IntT_      (defines_type "Int"))
     (= StringT_   (defines_type "String"))
     (= SymbolT_   (defines_type "Symbol"))
@@ -4372,6 +4415,9 @@ features:
     (defprim "os_run" 4 p_run_program PRIM_NATIVE)
     (defprim "os_list_dir" 1 p_list_dir PRIM_NATIVE)
     (defprim "eval"    1 0         PRIM_EVAL)
+    (defprim "scope_new"    0 p_scope_new    PRIM_NATIVE)
+    (defprim "scope_eval"   2 0              PRIM_EVAL_IN)
+    (defprim "scope_export" 2 p_scope_export PRIM_NATIVE)
     (init_sysinfo)
     )
 
@@ -4558,6 +4604,8 @@ features:
     (gc_mark mexprtable)
     (gc_mark emptyTuple)
     (gc_mark global_table)
+    (gc_mark scope_table)
+    (gc_mark ScopeT_)
     (gc_mark parse_str_buf)
     (gc_mark parse_arena)
     (gc_mark mexprn_buf)
