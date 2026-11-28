@@ -58,7 +58,8 @@ other head makes an m-expression whose arguments are evaluated first, so
 
 ``Defun{f, Lambda{...}}``
    Defines ``f`` as ``Fusion{f, Lambda{...}}``. Repeating it adds a clause to
-   the function.
+   the function. To rebuild a function with other clauses, write ``f := none``
+   first.
 
 ``Set{x, e}``
    Assigns the value of ``e`` to the existing variable ``x``.
@@ -252,19 +253,6 @@ M-expressions
 ``eval(e)``
    Compiles and evaluates the m-expression ``e``. The main loop calls it
    through the global variable ``eval``.
-   Called from code compiled in a scope, it works in that scope.
-
-``scope_new()``
-   A new scope: a table of names, one for a file.
-
-``scope_eval(scope, e)``
-   Like ``eval(e)``, but the top-level definitions and the variables of ``e``
-   are looked up in ``scope`` first and then in the global table. A name
-   defined by ``e`` belongs to ``scope``, and a name defined in another scope
-   or at the global level is not changed.
-
-``scope_export(scope, name)``
-   Makes the variable ``name`` of ``scope`` visible in the global table.
 
 Arrays
 ~~~~~~
