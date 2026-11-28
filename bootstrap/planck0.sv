@@ -1307,7 +1307,8 @@
 (def C_NSLOTS   3)
 (def C_MAXSTACK 4)
 (def C_NCODE    5)
-(def C_CODE     6)
+(def C_SCOPE    6)
+(def C_CODE     7)
 
 (def F_CALLER   0)
 (def F_CODE     1)
@@ -1444,6 +1445,7 @@
     (set code C_NSLOTS (get cctx CX_NSLOTS))
     (set code C_MAXSTACK (get cctx CX_MAXDEPTH))
     (set code C_NCODE n)
+    (set code C_SCOPE scope_table)
     (memcpy (+ code (* 4 C_CODE)) start (* 4 n))
     (return code)
     )
@@ -2239,7 +2241,9 @@
         ))
     (if (== t PrimT) (do
         (if (== (get callee 3) PRIM_EVAL) (do
+            (if vm_code (= scope_table (get vm_code C_SCOPE)))
             (= code (compile_toplevel (get args 0)))
+            (= scope_table 0)
             (enter code (new_env code 0) caller 0)
             (return 0)
             ))

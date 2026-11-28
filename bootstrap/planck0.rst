@@ -252,6 +252,7 @@ M-expressions
 ``eval(e)``
    Compiles and evaluates the m-expression ``e``. The main loop calls it
    through the global variable ``eval``.
+   Called from code compiled in a scope, it works in that scope.
 
 ``scope_new()``
    A new scope: a table of names, one for a file.
