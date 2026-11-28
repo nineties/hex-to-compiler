@@ -640,6 +640,7 @@
 (long SyntaxErrorS)
 (long EofS)
 (long evalS)
+(long env_globalS)
 (long parseS)
 (long emptyTuple)
 
@@ -653,8 +654,8 @@
     )
 
 (long global_table) ; global variables (sym -> cell of the latest definition)
-(long scope_table)  ; table of the file scope being compiled (0 for the global one)
-(long ScopeT_)
+(long scope_table)  ; table of the environment being compiled (0 for the global one)
+(long EnvT_)
 
 (fun current_table ()
     (if scope_table (return scope_table))
@@ -706,6 +707,7 @@
     (= SyntaxErrorS (sym "SyntaxError"))
     (= EofS         (sym "Eof"))
     (= evalS        (sym "eval"))
+    (= env_globalS  (sym "env_global"))
     (= parseS       (sym "parse"))
     (= emptyTuple   (mexpr0 TupleS))
     )
@@ -1307,8 +1309,7 @@
 (def C_NSLOTS   3)
 (def C_MAXSTACK 4)
 (def C_NCODE    5)
-(def C_SCOPE    6)
-(def C_CODE     7)
+(def C_CODE     6)
 
 (def F_CALLER   0)
 (def F_CODE     1)
@@ -1342,7 +1343,6 @@
 (def PRIM_EVAL   1)
 (def PRIM_NEW    2)
 (def PRIM_UNWRAP 3)
-(def PRIM_EVAL_IN 4)
 
 ; === Compiler
 ;
@@ -1445,7 +1445,6 @@
     (set code C_NSLOTS (get cctx CX_NSLOTS))
     (set code C_MAXSTACK (get cctx CX_MAXDEPTH))
     (set code C_NCODE n)
-    (set code C_SCOPE scope_table)
     (memcpy (+ code (* 4 C_CODE)) start (* 4 n))
     (return code)
     )
@@ -2241,18 +2240,11 @@
         ))
     (if (== t PrimT) (do
         (if (== (get callee 3) PRIM_EVAL) (do
-            (if vm_code (= scope_table (get vm_code C_SCOPE)))
+            (= v (get args 1))
+            (if (|| (!= (gettag v) DataT) (!= (get v 1) EnvT_))
+                (runtime_error "eval: not an environment: " v))
+            (if (== (get v 2) global_table) (= scope_table 0) (= scope_table (get v 2)))
             (= code (compile_toplevel (get args 0)))
-            (= scope_table 0)
-            (enter code (new_env code 0) caller 0)
-            (return 0)
-            ))
-        (if (== (get callee 3) PRIM_EVAL_IN) (do
-            (= v (get args 0))
-            (if (|| (!= (gettag v) DataT) (!= (get v 1) ScopeT_))
-                (runtime_error "scope_eval: not a scope: " v))
-            (= scope_table (get v 2))
-            (= code (compile_toplevel (get args 1)))
             (= scope_table 0)
             (enter code (new_env code 0) caller 0)
             (return 0)
@@ -3245,21 +3237,12 @@
     (return (mexpr3 TupleS type wrap unwrap))
     )
 
-(fun p_scope_new ()
-    (return (new_data ScopeT_ (make_table 0x400 symhash symeq)))
+(fun p_env_global ()
+    (return (new_data EnvT_ global_table))
     )
 
-(fun p_scope_export (scope name)
-    (var cell 0)
-    (if (|| (!= (gettag scope) DataT) (!= (get scope 1) ScopeT_))
-        (runtime_error "scope_export: not a scope: " scope))
-    (expect "scope_export" SymbolT name)
-    (= cell (table_lookup (get scope 2) name))
-    (if (|| (! cell) (! (get cell 0)))
-        (runtime_error "scope_export: undefined variable: " name))
-    (if (! (table_update global_table name cell))
-        (table_insert global_table name cell))
-    (return noneS)
+(fun p_env_new ()
+    (return (new_data EnvT_ (make_table 0x400 symhash symeq)))
     )
 
 ; --- strings, symbols, tables and files (used by planck/peg.pk)
@@ -4338,7 +4321,7 @@ features:
     )
 
 (fun init_prims ()
-    (= ScopeT_    (new_type (sym "Scope")))
+    (= EnvT_      (new_type (sym "Env")))
     (= IntT_      (defines_type "Int"))
     (= StringT_   (defines_type "String"))
     (= SymbolT_   (defines_type "Symbol"))
@@ -4414,10 +4397,9 @@ features:
     (defprim "gc_count" 0 p_gc_count PRIM_NATIVE)
     (defprim "os_run" 4 p_run_program PRIM_NATIVE)
     (defprim "os_list_dir" 1 p_list_dir PRIM_NATIVE)
-    (defprim "eval"    1 0         PRIM_EVAL)
-    (defprim "scope_new"    0 p_scope_new    PRIM_NATIVE)
-    (defprim "scope_eval"   2 0              PRIM_EVAL_IN)
-    (defprim "scope_export" 2 p_scope_export PRIM_NATIVE)
+    (defprim "eval"    2 0         PRIM_EVAL)
+    (defprim "env_global" 0 p_env_global PRIM_NATIVE)
+    (defprim "env_new"    0 p_env_new    PRIM_NATIVE)
     (init_sysinfo)
     )
 
@@ -4455,9 +4437,14 @@ features:
 ;   eval: m-expr -> any value                     (initially the builtin eval)
 ; Inside the VM, the builtin eval (PRIM_EVAL) is called through the global
 ; variable like any other function.
-(fun call_global (name arg)
+(fun call_global (name args)
     (return (run_toplevel (compile_toplevel
-        (mexpr2 ApplyS name (mexpr1 TupleS arg)))))
+        (mexpr2 ApplyS name args))))
+    )
+
+(fun eval_global (e)
+    (return (call_global evalS (mexpr2 TupleS (mexpr1 QuoteS e)
+        (mexpr2 ApplyS env_globalS emptyTuple))))
     )
 
 (fun interpret_file (path)
@@ -4466,7 +4453,7 @@ features:
     (var e 0)
     (var more 1)
     (while more (do
-        (= ret (call_global parseS (mexpr1 QuoteS text)))
+        (= ret (call_global parseS (mexpr1 TupleS (mexpr1 QuoteS text))))
         (if (|| (! (has_head TupleS ret))
             (|| (!= (get_header_arg ret) 2)
                 (!= (gettag (tup_get ret 1)) StringT))) (do
@@ -4485,7 +4472,7 @@ features:
                 (eputs "\n")
                 (exit 1)
                 ))
-            (call_global evalS (mexpr1 QuoteS e))
+            (eval_global e)
             (= text (tup_get ret 1))
             ))
         ))
@@ -4605,7 +4592,7 @@ features:
     (gc_mark emptyTuple)
     (gc_mark global_table)
     (gc_mark scope_table)
-    (gc_mark ScopeT_)
+    (gc_mark EnvT_)
     (gc_mark parse_str_buf)
     (gc_mark parse_arena)
     (gc_mark mexprn_buf)
